@@ -632,7 +632,7 @@ Validação focal sem banco:
 ```bash
 mvn -Dtest=DomainRuleParametersTest,DomainRuleChangeWorkspaceServiceTest,DomainRuleControllerTest,DomainRuleServiceTest,DomainRuleSnapshotServiceTest test
 ```
-O incremento usa Engine `0.1.0-beta.17` e prepara Config `0.1.0-rc.165`
+O incremento usa Engine `0.1.0-beta.17` e prepara Config `0.1.0-rc.166`
 como candidatos de fonte. Instale-os somente em um repositório Maven isolado para
 prova pré-release; isso não comprova consumo publicado no Maven Central. A prova
 persistente/HTTP requer Neon remoto exclusivo, papéis separados e o host Quickstart.

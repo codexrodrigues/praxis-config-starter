@@ -382,6 +382,18 @@ public class DomainRuleSnapshotService {
         });
   }
 
+  /**
+   * Highest immutable RuleSet version in the exact scope, independent of publication
+   * order and the selected head. Zero means no publication. This read does not reserve
+   * a version; publication still enforces composition approval and uniqueness atomically.
+   */
+  @Transactional(transactionManager = ConfigTransactionManagerNames.CONFIG, readOnly = true)
+  public int findMaximumRuleSetVersion(String tenantId, String environment, String ruleSetKey) {
+    Integer maximum = snapshotRepository.findMaximumRuleSetVersion(
+        requireText(tenantId, "X-Tenant-ID"), requireText(environment, "X-Env"), requireText(ruleSetKey, "ruleSetKey"));
+    return maximum == null ? 0 : maximum;
+  }
+
   @Transactional(transactionManager = ConfigTransactionManagerNames.CONFIG, readOnly = true)
   public List<DomainRuleSnapshotVersionResponse> listVersions(
       String tenantId, String environment, String ruleSetKey, int limit) {

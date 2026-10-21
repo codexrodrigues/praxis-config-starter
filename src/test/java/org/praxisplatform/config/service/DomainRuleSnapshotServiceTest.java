@@ -127,6 +127,19 @@ class DomainRuleSnapshotServiceTest {
   }
 
   @Test
+  void maximumRuleSetVersionIsScopedAndIndependentOfHeadOrPublicationOrder() {
+    when(snapshotRepository.findMaximumRuleSetVersion("tenant-a", "prod", "extraordinary-grant"))
+        .thenReturn(100);
+    assertThat(service.findMaximumRuleSetVersion("tenant-a", "prod", "extraordinary-grant"))
+        .isEqualTo(100);
+    assertThat(service.findMaximumRuleSetVersion("tenant-b", "prod", "extraordinary-grant"))
+        .isZero();
+    verify(headRepository, never()).findByTenantIdAndEnvironmentAndRuleSetKey(any(), any(), any());
+    assertThatThrownBy(() -> service.findMaximumRuleSetVersion(" ", "prod", "extraordinary-grant"))
+        .hasMessageContaining("X-Tenant-ID");
+  }
+
+  @Test
   void parameterizedPublicationChecksApprovedSourceBeforeCreatingSnapshot() throws Exception {
     UUID id = UUID.randomUUID();
     var source = approvedDefinition(id, "limit", "approver-a");

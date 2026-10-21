@@ -31,6 +31,17 @@ public interface DomainRuleSnapshotRepository extends JpaRepository<DomainRuleSn
       @Param("environment") String environment,
       @Param("ruleSetKey") String ruleSetKey);
 
+  @Query("""
+      select max(snapshot.ruleSetVersion) from DomainRuleSnapshot snapshot
+      where snapshot.tenantId = :tenantId
+        and snapshot.environment = :environment
+        and snapshot.ruleSetKey = :ruleSetKey
+      """)
+  Integer findMaximumRuleSetVersion(
+      @Param("tenantId") String tenantId,
+      @Param("environment") String environment,
+      @Param("ruleSetKey") String ruleSetKey);
+
   Optional<DomainRuleSnapshot> findTopByTenantIdAndEnvironmentAndRuleSetKeyOrderByPublicationRevisionDesc(
       String tenantId, String environment, String ruleSetKey);
 
