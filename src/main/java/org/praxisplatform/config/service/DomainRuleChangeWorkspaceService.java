@@ -158,7 +158,8 @@ public class DomainRuleChangeWorkspaceService {
     if (request == null || request.parameters() == null || !request.parameters().isObject()) {
       throw badRequest("parameters must be a JSON object");
     }
-    workspace.setDraftCondition(json(request.condition()));
+    workspace.setDraftCondition(json(DomainRuleParameters.draftCondition(objectMapper,
+        tree(base.getDefinition()), tree(base.getParameters()), request.parameters(), request.condition())));
     workspace.setDraftParameters(json(request.parameters()));
     workspace.setRationale(optionalText(request.rationale(), 4000));
     rotate(workspace, principal);

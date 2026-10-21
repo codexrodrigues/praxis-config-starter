@@ -522,6 +522,7 @@ public class DomainRuleSnapshotService {
       RuleSetDefinition ruleSet, List<DomainRuleDefinition> sources,
       String tenant, String environment, String ownerServiceKey,
       String requiredHostContractVersion, String validFromUtc, String validUntilUtc) {
+    DomainRuleParameters.composition(objectMapper, ruleSet, sources);
     var sourceEvidence = sources.stream().map(source -> new RuleSnapshotSource(
         source.getId().toString(), source.getRuleKey(), source.getVersion(),
         definitionFingerprint.sha256(source))).toList();

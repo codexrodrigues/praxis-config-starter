@@ -13,7 +13,7 @@
 
     <groupId>io.github.codexrodrigues</groupId>
     <artifactId>praxis-config-starter</artifactId>
-    <version>0.1.0-rc.164</version>
+    <version>0.1.0-rc.165-SNAPSHOT</version>
     <packaging>jar</packaging>
 
     <name>Praxis Config Starter</name>
@@ -49,7 +49,7 @@
         <openai-java.version>4.43.0</openai-java.version>
         <lombok.version>1.18.30</lombok.version>
         <praxis-config-contracts.version>0.1.0-beta.5</praxis-config-contracts.version>
-        <praxis-rules-engine.version>0.1.0-beta.16</praxis-rules-engine.version>
+        <praxis-rules-engine.version>0.1.0-beta.17</praxis-rules-engine.version>
         <swagger-annotations.version>2.2.47</swagger-annotations.version>
         <swagger-core.version>2.2.22</swagger-core.version>
     </properties>

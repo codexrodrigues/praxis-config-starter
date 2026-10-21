@@ -597,6 +597,46 @@ somente as ações autorizadas pelo principal e pelo escopo resolvidos no servid
 contrato aditivo é `CREATE_NEW_VERSION`; consumidores não devem inferir essa autorização a
 partir do status, de headers do browser ou de configuração local.
 
+### Parâmetros governados (Engine contract 1.6; candidato de desenvolvimento)
+
+`GET /api/praxis/config/domain-rules/definitions/{definitionId}/parameters` exige
+`RULE_DEFINITION_READER` no escopo resolvido pelo servidor, com os mesmos headers
+`X-Tenant-ID` e `X-Env` da definição. Projeta `praxis.domain-rule-parameter-catalog.v1`:
+identidade/versionamento da definição e template, restrições tipadas, unidade,
+default, valor declarado, valor efetivo e origem `DECLARED`/`DEFAULT`.
+Ausência de template retorna catálogo vazio. Ausência de default/valor declarado
+omite a propriedade; JSON `null` explícito permanece `null`.
+
+A fonte é `definition.parameterTemplate`, exatamente o `RuleParameterTemplate`
+do Engine; os valores ficam em `parameters.parameterValues`. Nenhum outro campo de
+`parameters` vira editável por inferência. O template publica identidade namespaced,
+versão string exata, executor JSON Logic, resultado negativo, facts obrigatórios e
+parâmetros escalares ligados a literais por JSON Pointer. Tipos, limites inclusivos,
+enum, nullable, required, readOnly e defaults são validados pelo resolver puro do
+Engine. Java executors não são parametrizáveis neste contrato.
+
+Ao criar ou salvar workspace, `condition` pode ser omitida/null para derivação no
+servidor; se fornecida, deve corresponder à expressão derivada. Em workspace com
+template, metadados estruturais de `parameters` são imutáveis. Os fingerprints,
+ETags, revisões e gates de evidência existentes incluem template/valores; salvar
+invalida evidência da revisão anterior. Não há avaliador paralelo no Config/browser.
+A materialização executável desse contrato é o RuleSet snapshot governado. Rotas
+genéricas de materialização/publicação/aplicação rejeitam fontes com template:
+adapters de form/option-source/paleta não preservam todos os outcomes e facts
+obrigatórios do Engine. Rejeitar/retirar artefatos antigos continua possível.
+Na composição, cada binding `PARAMETERIZE` exige uma fonte aprovada única com
+`bindingKey == ruleKey`, template e valores canonicamente iguais. Alterar schema
+no payload do snapshot não contorna a aprovação da fonte.
+
+Validação focal sem banco:
+```bash
+mvn -Dtest=DomainRuleParametersTest,DomainRuleChangeWorkspaceServiceTest,DomainRuleControllerTest,DomainRuleServiceTest,DomainRuleSnapshotServiceTest test
+```
+A branch usa Engine `0.1.0-beta.16-SNAPSHOT` e Config `0.1.0-rc.164-SNAPSHOT`
+como candidatos de fonte. Instale-os somente em um repositório Maven isolado para
+prova pré-release; isso não comprova consumo publicado no Maven Central. A prova
+persistente/HTTP requer Neon remoto exclusivo, papéis separados e o host Quickstart.
+
 `GET /api/praxis/config/domain-rules/definitions/{definitionId}/facts` projeta o
 vocabulário versionado de facts da definição. O catálogo contém tipo, nulabilidade,
 textos localizados, provider, evidências, sensibilidade e política de redaction;
