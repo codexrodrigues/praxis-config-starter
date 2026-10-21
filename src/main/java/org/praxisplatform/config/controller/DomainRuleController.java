@@ -179,6 +179,19 @@ public class DomainRuleController {
         return ResponseEntity.ok(domainRuleService.definitionFacts(definitionId, principal));
     }
 
+    @GetMapping("/definitions/{definitionId}/parameters")
+    @Operation(summary = "Read governed parameter constraints and effective values",
+            description = "Projects the Engine template and declared/default values in the authenticated reader scope.")
+    public ResponseEntity<org.praxisplatform.config.dto.DomainRuleParameterCatalogResponse> definitionParameters(
+            @PathVariable UUID definitionId,
+            @RequestHeader(value = "X-Tenant-ID", required = false) String tenantId,
+            @RequestHeader(value = "X-Env", required = false) String environment,
+            HttpServletRequest servletRequest) {
+        DomainRuleGovernancePrincipal principal = principalResolver.resolve(
+                servletRequest, tenantId, environment, DEFINITION_READER_ROLE);
+        return ResponseEntity.ok(domainRuleService.definitionParameters(definitionId, principal));
+    }
+
     @GetMapping("/definitions/{definitionId}/timeline")
     @Operation(summary = "Read a safe governed-rule timeline",
             description = "Returns persisted safe lifecycle evidence only when the definition belongs to the authenticated reader's server-resolved scope.")

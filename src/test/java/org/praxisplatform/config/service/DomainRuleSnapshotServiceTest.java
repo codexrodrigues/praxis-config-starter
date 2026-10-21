@@ -127,6 +127,51 @@ class DomainRuleSnapshotServiceTest {
   }
 
   @Test
+  void maximumRuleSetVersionIsScopedAndIndependentOfHeadOrPublicationOrder() {
+    when(snapshotRepository.findMaximumRuleSetVersion("tenant-a", "prod", "extraordinary-grant"))
+        .thenReturn(100);
+    assertThat(service.findMaximumRuleSetVersion("tenant-a", "prod", "extraordinary-grant"))
+        .isEqualTo(100);
+    assertThat(service.findMaximumRuleSetVersion("tenant-b", "prod", "extraordinary-grant"))
+        .isZero();
+    verify(headRepository, never()).findByTenantIdAndEnvironmentAndRuleSetKey(any(), any(), any());
+    assertThatThrownBy(() -> service.findMaximumRuleSetVersion(" ", "prod", "extraordinary-grant"))
+        .hasMessageContaining("X-Tenant-ID");
+  }
+
+  @Test
+  void parameterizedPublicationChecksApprovedSourceBeforeCreatingSnapshot() throws Exception {
+    UUID id = UUID.randomUUID();
+    var source = approvedDefinition(id, "limit", "approver-a");
+    source.setDefinition(DomainRuleParametersTest.definition(objectMapper).toString());
+    source.setParameters("{\"parameterValues\":{\"limit\":50}}");
+    source.setCondition("{\"<=\":[{\"var\":\"request.amount\"},50]}");
+    when(definitionRepository.findAllById(List.of(id))).thenReturn(List.of(source));
+    when(headRepository.findForUpdateByTenantIdAndEnvironmentAndRuleSetKey(
+        "tenant-a", "prod", "extraordinary-grant")).thenReturn(Optional.empty());
+    var template = DomainRuleParametersTest.template(objectMapper);
+    var binding = new DecisionBinding("limit", "limit", DecisionSource.CUSTOMER,
+        CompositionPolicy.PARAMETERIZE, null, List.of(), 1, true, null, null, List.of(),
+        new org.praxisplatform.rules.contract.RuleParameterization("test:grant-share", "1",
+            objectMapper.createObjectNode().put("limit", 50)));
+    var set = new RuleSetDefinition(ruleSet().ref(), List.of("request"),
+        List.of(new DecisionSlot("limit", DecisionStage.DOMAIN_DECISION, SlotCardinality.SINGLE,
+            OverridePolicy.PARAMETERIZABLE, DecisionAggregationPolicy.SINGLE_RESULT, template)),
+        List.of(binding), RuleRuntimeCompatibility.current(), RuleFailPolicy.FAIL_CLOSED);
+    var request = publicationRequest(set, List.of(id));
+    var response = service.publish(request, "tenant-a", "prod", null, "*");
+    assertThat(response.snapshot().ruleSet().bindings().getFirst().executor()).isNull();
+    assertThat(response.snapshot().ruleSet().bindings().getFirst().parameterization().values().path("limit").intValue())
+        .isEqualTo(50);
+    clearInvocations(snapshotRepository);
+    source.setParameters("{\"parameterValues\":{\"limit\":60}}");
+    source.setCondition("{\"<=\":[{\"var\":\"request.amount\"},60]}");
+    assertThatThrownBy(() -> service.publish(request, "tenant-a", "prod", null, "*"))
+        .hasMessageContaining("approved source template and values");
+    verify(snapshotRepository, never()).save(any());
+  }
+
+  @Test
   void firstPublicationCompilesGovernedSnapshotAndCreatesOpaqueHead() {
     UUID firstId = UUID.randomUUID();
     UUID secondId = UUID.randomUUID();
@@ -1436,11 +1481,11 @@ class DomainRuleSnapshotServiceTest {
         List.of("request"),
         List.of(new DecisionSlot(
             "eligibility", DecisionStage.DOMAIN_DECISION, SlotCardinality.SINGLE,
-            OverridePolicy.FORBIDDEN, DecisionAggregationPolicy.SINGLE_RESULT)),
+            OverridePolicy.FORBIDDEN, DecisionAggregationPolicy.SINGLE_RESULT, null)),
         List.of(new DecisionBinding(
             "eligibility", "eligibility", DecisionSource.PRODUCT, null,
             RuleExecutorRef.jsonLogic(expression), List.of(), 10, true,
-            RuleDecision.DENY, "NOT_ELIGIBLE", List.of("request.eligible"))),
+            RuleDecision.DENY, "NOT_ELIGIBLE", List.of("request.eligible"), null)),
         RuleRuntimeCompatibility.current(),
         RuleFailPolicy.FAIL_CLOSED);
   }
@@ -1465,21 +1510,21 @@ class DomainRuleSnapshotServiceTest {
         List.of(
             new DecisionSlot(
                 netKey, DecisionStage.DOMAIN_DECISION, SlotCardinality.SINGLE,
-                OverridePolicy.FORBIDDEN, DecisionAggregationPolicy.SINGLE_RESULT),
+                OverridePolicy.FORBIDDEN, DecisionAggregationPolicy.SINGLE_RESULT, null),
             new DecisionSlot(
                 paymentKey, DecisionStage.DOMAIN_DECISION, SlotCardinality.SINGLE,
-                OverridePolicy.FORBIDDEN, DecisionAggregationPolicy.SINGLE_RESULT)),
+                OverridePolicy.FORBIDDEN, DecisionAggregationPolicy.SINGLE_RESULT, null)),
         List.of(
             new DecisionBinding(
                 netKey, netKey, DecisionSource.PRODUCT, null,
                 RuleExecutorRef.jsonLogic(netSalary), List.of(), 10, true,
                 RuleDecision.INCONCLUSIVE, "NET_SALARY_UNAVAILABLE",
-                List.of("payroll.salarioBruto", "payroll.totalDescontos")),
+                List.of("payroll.salarioBruto", "payroll.totalDescontos"), null),
             new DecisionBinding(
                 paymentKey, paymentKey, DecisionSource.PRODUCT, null,
                 RuleExecutorRef.jsonLogic(paymentDate), List.of(netKey), 20, true,
                 RuleDecision.INCONCLUSIVE, "PAYMENT_DATE_UNAVAILABLE",
-                List.of("payroll.ano", "payroll.mes", "payroll.salarioLiquido"))),
+                List.of("payroll.ano", "payroll.mes", "payroll.salarioLiquido"), null)),
         RuleRuntimeCompatibility.current(),
         RuleFailPolicy.FAIL_CLOSED);
   }
@@ -1493,19 +1538,19 @@ class DomainRuleSnapshotServiceTest {
         List.of(
             new DecisionSlot(
                 "eligibility", DecisionStage.DOMAIN_DECISION, SlotCardinality.SINGLE,
-                OverridePolicy.FORBIDDEN, DecisionAggregationPolicy.SINGLE_RESULT),
+                OverridePolicy.FORBIDDEN, DecisionAggregationPolicy.SINGLE_RESULT, null),
             new DecisionSlot(
                 "calculation", DecisionStage.TRANSFORMATION_INTENT, SlotCardinality.SINGLE,
-                OverridePolicy.FORBIDDEN, DecisionAggregationPolicy.SINGLE_RESULT)),
+                OverridePolicy.FORBIDDEN, DecisionAggregationPolicy.SINGLE_RESULT, null)),
         List.of(
             new DecisionBinding(
                 "eligibility", "eligibility", DecisionSource.PRODUCT, null,
                 RuleExecutorRef.jsonLogic(eligibilityExpression), List.of(), 10, true,
-                RuleDecision.DENY, "NOT_ELIGIBLE", List.of("request.eligible")),
+                RuleDecision.DENY, "NOT_ELIGIBLE", List.of("request.eligible"), null),
             new DecisionBinding(
                 "calculation", "calculation", DecisionSource.PRODUCT, null,
                 RuleExecutorRef.java("benefits:amount", implementationVersion), List.of("eligibility"), 10, true,
-                null, null, List.of("request.amount"))),
+                null, null, List.of("request.amount"), null)),
         RuleRuntimeCompatibility.current(),
         RuleFailPolicy.FAIL_CLOSED);
   }
@@ -1516,12 +1561,12 @@ class DomainRuleSnapshotServiceTest {
         List.of("request"),
         List.of(new DecisionSlot(
             "customer.eligibility", DecisionStage.DOMAIN_DECISION, SlotCardinality.SINGLE,
-            OverridePolicy.REPLACEABLE, DecisionAggregationPolicy.SINGLE_RESULT)),
+            OverridePolicy.REPLACEABLE, DecisionAggregationPolicy.SINGLE_RESULT, null)),
         List.of(new DecisionBinding(
             "customer.eligibility", "customer.eligibility", DecisionSource.CUSTOMER,
             CompositionPolicy.REPLACE_EXACT,
             RuleExecutorRef.java("customer:benefit-eligibility", "1.0.0"),
-            List.of(), 10, true, null, null, List.of())),
+            List.of(), 10, true, null, null, List.of(), null)),
         RuleRuntimeCompatibility.current(),
         RuleFailPolicy.FAIL_CLOSED);
   }

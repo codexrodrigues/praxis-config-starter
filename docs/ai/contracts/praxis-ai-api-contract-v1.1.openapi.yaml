@@ -1233,6 +1233,35 @@ paths:
               schema:
                 $ref: '#/components/schemas/ProblemResponse'
 
+  /api/praxis/config/domain-rules/definitions/{definitionId}/parameters:
+    get:
+      tags: [domain-rules]
+      operationId: getDomainRuleDefinitionParameters
+      summary: Retorna restrições e valores efetivos dos parâmetros governados
+      description: Projeção read-only do template canônico Engine no escopo autenticado RULE_DEFINITION_READER. Valores ausentes e null explícito permanecem distintos.
+      parameters:
+        - $ref: '#/components/parameters/TenantIdHeader'
+        - $ref: '#/components/parameters/EnvHeader'
+        - name: definitionId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Catálogo de parâmetros encontrado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DomainRuleParameterCatalogResponse'
+        '404':
+          description: Definição não encontrada no escopo
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemResponse'
+
   /api/praxis/config/domain-rules/simulations:
     post:
       tags: [domain-rules]
@@ -4417,6 +4446,49 @@ components:
               format: date-time
               nullable: true
           additionalProperties: false
+
+    DomainRuleParameterCatalogResponse:
+      type: object
+      required: [definitionId, ruleKey, definitionVersion, schemaVersion, parameters]
+      additionalProperties: false
+      properties:
+        definitionId: {type: string, format: uuid}
+        ruleKey: {type: string}
+        definitionVersion: {type: integer}
+        schemaVersion: {type: string, enum: [praxis.domain-rule-parameter-catalog.v1]}
+        templateKey: {type: string, nullable: true}
+        templateVersion: {type: string, nullable: true}
+        parameters:
+          type: array
+          maxItems: 128
+          items: {$ref: '#/components/schemas/DomainRuleParameterDescriptor'}
+
+    DomainRuleParameterDescriptor:
+      type: object
+      additionalProperties: false
+      required: [name, type, required, nullable, readOnly, allowedValues, effectiveValue, origin]
+      properties:
+        name: {type: string}
+        type: {type: string, enum: [STRING, NUMBER, INTEGER, BOOLEAN]}
+        required: {type: boolean}
+        nullable: {type: boolean}
+        readOnly: {type: boolean}
+        unit: {type: string, nullable: true}
+        defaultValue:
+          description: Native scalar; absent means no default, explicit null is a nullable default.
+          nullable: true
+        minimum: {type: number, nullable: true}
+        maximum: {type: number, nullable: true}
+        allowedValues:
+          type: array
+          items: {nullable: true}
+        declaredValue:
+          description: Native scalar; absent when origin is DEFAULT, explicit null remains declared.
+          nullable: true
+        effectiveValue:
+          description: Native scalar resolved by the Engine; validated against type and nullable.
+          nullable: true
+        origin: {type: string, enum: [DECLARED, DEFAULT]}
 
     DomainRuleFactCatalogResponse:
       type: object

@@ -267,7 +267,8 @@ public class DomainRuleService {
         definition.setSourceChangeSet(resolveChangeSet(request.sourceChangeSetId()));
         definition.setDefinition(writeOrDefault(requestedDefinition, "{}"));
         definition.setParameters(writeOrDefault(requestedParameters, "{}"));
-        definition.setCondition(writeNullable(request.condition()));
+        definition.setCondition(writeNullable(DomainRuleParameters.condition(
+                objectMapper, requestedDefinition, requestedParameters, request.condition())));
         definition.setGovernance(writeOrDefault(requestedGovernance, "{}"));
         definition.setValidationResult(writeNullable(request.validationResult()));
         definition.setCreatedByType("authenticated");
@@ -374,6 +375,12 @@ public class DomainRuleService {
                 definition.version(),
                 catalog.path("schemaVersion").asText(FACT_CATALOG_SCHEMA_VERSION),
                 List.copyOf(facts));
+    }
+
+    @Transactional(transactionManager = ConfigTransactionManagerNames.CONFIG, readOnly = true)
+    public org.praxisplatform.config.dto.DomainRuleParameterCatalogResponse definitionParameters(
+            UUID definitionId, DomainRuleGovernancePrincipal principal) {
+        return DomainRuleParameters.catalog(objectMapper, definition(definitionId, principal));
     }
 
     @Transactional(transactionManager = ConfigTransactionManagerNames.CONFIG)
@@ -614,6 +621,8 @@ public class DomainRuleService {
         requireScope(definition.getTenantId(), tenantId, "tenantId");
         requireScope(definition.getEnvironment(), environment, "environment");
 
+        validateParameterDefinition(definition);
+        requireSnapshotMaterializationForParameters(definition);
         DomainRuleSimulationResponse simulation = simulate(
                 new DomainRuleSimulationRequest(
                         definition.getId(),
@@ -754,6 +763,8 @@ public class DomainRuleService {
                 .orElseThrow(() -> new ConfigurationIngestionException("Rule definition not found: " + request.ruleDefinitionId()));
         requireScope(definition.getTenantId(), tenantId, "tenantId");
         requireScope(definition.getEnvironment(), environment, "environment");
+        validateParameterDefinition(definition);
+        requireSnapshotMaterializationForParameters(definition);
         requireReactiveDeterminationTargetContract(
                 definition,
                 request.targetLayer(),
@@ -3424,6 +3435,7 @@ public class DomainRuleService {
         requireScope(materialization.getRuleDefinition().getEnvironment(), environment, "environment");
         requireAllowedMaterializationTransition(materialization.getStatus(), status);
         if ("applied".equals(status)) {
+            requireSnapshotMaterializationForParameters(materialization.getRuleDefinition());
             requireOperationalIntegrity(materialization);
         }
         if ("applied".equals(status) && !hasActiveDefinition(materialization)) {
@@ -4155,4 +4167,19 @@ public class DomainRuleService {
             throw new ConfigurationIngestionException("Failed to read domain rule JSON", ex);
         }
     }
+    private void validateParameterDefinition(DomainRuleDefinition definition) {
+        DomainRuleParameters.condition(objectMapper,
+                DomainRuleParameters.read(objectMapper, definition.getDefinition()),
+                DomainRuleParameters.read(objectMapper, definition.getParameters()),
+                DomainRuleParameters.read(objectMapper, definition.getCondition()));
+    }
+
+    private void requireSnapshotMaterializationForParameters(DomainRuleDefinition definition) {
+        if (DomainRuleParameters.template(objectMapper,
+                DomainRuleParameters.read(objectMapper, definition.getDefinition())) != null) {
+            throw new ConfigurationIngestionException(
+                    "Parameterized Engine definitions require governed RuleSet snapshot publication; generic materializations cannot preserve their execution contract");
+        }
+    }
+
 }

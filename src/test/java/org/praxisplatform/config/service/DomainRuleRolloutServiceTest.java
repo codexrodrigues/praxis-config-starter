@@ -516,10 +516,10 @@ class DomainRuleRolloutServiceTest {
           new RuleSetRef("benefits", "eligibility", "benefit.eligibility", "evaluate", revision),
           List.of("request"),
           List.of(new DecisionSlot("eligibility", DecisionStage.DOMAIN_DECISION, SlotCardinality.SINGLE,
-              OverridePolicy.FORBIDDEN, DecisionAggregationPolicy.SINGLE_RESULT)),
+              OverridePolicy.FORBIDDEN, DecisionAggregationPolicy.SINGLE_RESULT, null)),
           List.of(new DecisionBinding("eligibility", "eligibility", DecisionSource.PRODUCT, null,
               RuleExecutorRef.jsonLogic(JSON.createObjectNode().put("var", "request.eligible")), List.of(),
-              10, true, RuleDecision.DENY, "NOT_ELIGIBLE", List.of("request.eligible"))),
+              10, true, RuleDecision.DENY, "NOT_ELIGIBLE", List.of("request.eligible"), null)),
           RuleRuntimeCompatibility.current(), RuleFailPolicy.FAIL_CLOSED);
       return new PublishedRuleSnapshot(PublishedRuleSnapshot.SNAPSHOT_CONTRACT_VERSION, key,
           "tenant-a", "dev", "quickstart", revision, NOW.toString(), null, "quickstart/1",

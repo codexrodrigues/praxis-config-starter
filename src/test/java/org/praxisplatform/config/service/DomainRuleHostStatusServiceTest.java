@@ -152,11 +152,11 @@ class DomainRuleHostStatusServiceTest {
         List.of("request"),
         List.of(new DecisionSlot(
             "eligibility", DecisionStage.DOMAIN_DECISION, SlotCardinality.SINGLE,
-            OverridePolicy.FORBIDDEN, DecisionAggregationPolicy.SINGLE_RESULT)),
+            OverridePolicy.FORBIDDEN, DecisionAggregationPolicy.SINGLE_RESULT, null)),
         List.of(new DecisionBinding(
             "eligibility", "eligibility", DecisionSource.PRODUCT, null,
             RuleExecutorRef.jsonLogic(expression), List.of(), 10, true,
-            RuleDecision.DENY, "NOT_ELIGIBLE", List.of("request.eligible"))),
+            RuleDecision.DENY, "NOT_ELIGIBLE", List.of("request.eligible"), null)),
         COMPATIBILITY, RuleFailPolicy.FAIL_CLOSED);
     return new PublishedRuleSnapshot(
         PublishedRuleSnapshot.SNAPSHOT_CONTRACT_VERSION, "snap-2", "tenant-a", "dev",

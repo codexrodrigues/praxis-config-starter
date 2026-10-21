@@ -303,9 +303,9 @@ class DomainRuleSnapshotPublicationNeonIT {
     DomainRuleGovernancePrincipal operator() { return new DomainRuleGovernancePrincipal(tenant, "operator", "g2"); }
     RuleSetDefinition definition(int version) {
       return new RuleSetDefinition(new RuleSetRef("proof", "publication", ruleSet, "evaluate", version), List.of("request"),
-          List.of(new DecisionSlot("eligible", DecisionStage.DOMAIN_DECISION, SlotCardinality.SINGLE, OverridePolicy.FORBIDDEN, DecisionAggregationPolicy.SINGLE_RESULT)),
+          List.of(new DecisionSlot("eligible", DecisionStage.DOMAIN_DECISION, SlotCardinality.SINGLE, OverridePolicy.FORBIDDEN, DecisionAggregationPolicy.SINGLE_RESULT, null)),
           List.of(new DecisionBinding("eligible", "eligible", DecisionSource.PRODUCT, null, RuleExecutorRef.jsonLogic(JSON.createObjectNode().put("var", "request.eligible")),
-              List.of(), 10, true, RuleDecision.DENY, "NOT_ELIGIBLE", List.of("request.eligible"))), RuleRuntimeCompatibility.current(), RuleFailPolicy.FAIL_CLOSED);
+              List.of(), 10, true, RuleDecision.DENY, "NOT_ELIGIBLE", List.of("request.eligible"), null)), RuleRuntimeCompatibility.current(), RuleFailPolicy.FAIL_CLOSED);
     }
     DomainRuleCompositionManifestRequest manifestRequest(int version) {
       return new DomainRuleCompositionManifestRequest(definition(version), List.of(sourceId), "neon-g2", "neon-g2/1", "2026-01-01T00:00:00Z", null);

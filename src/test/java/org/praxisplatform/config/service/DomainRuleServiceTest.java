@@ -845,6 +845,73 @@ class DomainRuleServiceTest {
     }
 
     @Test
+    void createsParameterizedDefinitionFromDeclaredValuesWithoutCallerExpression() throws Exception {
+        var definitions = mock(DomainRuleDefinitionRepository.class);
+        var service = service(definitions, mock(DomainRuleMaterializationRepository.class));
+        when(definitions.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+        var created = service.createDefinition(new DomainRuleDefinitionRequest(
+                "limit", 1, "selection_eligibility", "draft", "benefits", "grant", "quickstart",
+                "product", "product", null, null, DomainRuleParametersTest.definition(objectMapper),
+                objectMapper.readTree("{\"parameterValues\":{\"limit\":50}}"), null,
+                objectMapper.readTree("{\"requiredApprovals\":[\"checker\"]}"), null), principal("author"));
+        assertThat(created.condition().at("/<=/1").intValue()).isEqualTo(50);
+        assertThat(created.definition().path("parameterTemplate").path("templateKey").asText())
+                .isEqualTo("test:grant-share");
+    }
+
+    @Test
+    void parameterCatalogUsesDefinitionScopeAndRejectsCrossTenant() throws Exception {
+        var definitions = mock(DomainRuleDefinitionRepository.class);
+        var materializations = mock(DomainRuleMaterializationRepository.class);
+        var service = service(definitions, materializations);
+        var definition = parameterDefinition();
+        when(definitions.findById(definition.getId())).thenReturn(Optional.of(definition));
+        var catalog = service.definitionParameters(definition.getId(), principal("reader"));
+        assertThat(catalog.templateKey()).isEqualTo("test:grant-share");
+        assertThat(catalog.parameters().getFirst().effectiveValue().intValue()).isEqualTo(50);
+        definition.setTenantId("other-tenant");
+        assertThatThrownBy(() -> service.definitionParameters(definition.getId(), principal("reader")))
+                .isInstanceOf(RuntimeException.class);
+    }
+
+    @Test
+    void parameterDefinitionsCannotBypassSnapshotWithGenericPayloadOrApplication() throws Exception {
+        var definitions = mock(DomainRuleDefinitionRepository.class);
+        var materializations = mock(DomainRuleMaterializationRepository.class);
+        var service = service(definitions, materializations);
+        var definition = parameterDefinition();
+        when(definitions.findById(definition.getId())).thenReturn(Optional.of(definition));
+        var request = new DomainRuleMaterializationRequest(definition.getId(), "forged", "form_config",
+                "praxis-dynamic-form", "form", null, null, null, "draft",
+                objectMapper.readTree("{\"condition\":true}"), null, null);
+        assertThatThrownBy(() -> service.createMaterialization(request, principal("author")))
+                .hasMessageContaining("require governed RuleSet snapshot");
+        verify(materializations, org.mockito.Mockito.never()).save(any());
+        assertThatThrownBy(() -> service.publish(new DomainRulePublicationRequest(
+                definition.getId(), List.of(), false, null), principal("publisher")))
+                .hasMessageContaining("require governed RuleSet snapshot");
+        var materialization = DomainRuleMaterialization.builder().id(UUID.randomUUID())
+                .tenantId("tenant-a").environment("dev").ruleDefinition(definition)
+                .status("pending_review").targetLayer("form_config").build();
+        when(materializations.findById(materialization.getId())).thenReturn(Optional.of(materialization));
+        assertThatThrownBy(() -> service.transitionMaterializationStatus(materialization.getId(),
+                new DomainRuleStatusTransitionRequest("applied", null), principal("operator")))
+                .hasMessageContaining("require governed RuleSet snapshot");
+        verify(materializations, org.mockito.Mockito.never()).save(any());
+    }
+
+    private DomainRuleDefinition parameterDefinition() throws Exception {
+        var definition = DomainRuleDefinition.builder().id(UUID.randomUUID())
+                .tenantId("tenant-a").environment("dev").ruleKey("limit").version(1)
+                .ruleType("selection_eligibility").status("active")
+                .definition(DomainRuleParametersTest.definition(objectMapper).toString())
+                .parameters("{\"parameterValues\":{\"limit\":50}}")
+                .condition("{\"<=\":[{\"var\":\"request.amount\"},50]}")
+                .governance("{}").build();
+        return definition;
+    }
+
+    @Test
     void exposesTypedGovernedFactCatalogFromDefinition() throws Exception {
         DomainRuleDefinitionRepository definitionRepository = mock(DomainRuleDefinitionRepository.class);
         DomainRuleMaterializationRepository materializationRepository = mock(DomainRuleMaterializationRepository.class);

@@ -240,12 +240,12 @@ class DomainRuleSnapshotHeadRepositoryConcurrencyTest {
                 List.of("payroll"),
                 List.of(new DecisionSlot(
                         "payroll.amount", DecisionStage.DOMAIN_DECISION, SlotCardinality.SINGLE,
-                        OverridePolicy.FORBIDDEN, DecisionAggregationPolicy.SINGLE_RESULT)),
+                        OverridePolicy.FORBIDDEN, DecisionAggregationPolicy.SINGLE_RESULT, null)),
                 List.of(new DecisionBinding(
                         "payroll.amount", "payroll.amount", DecisionSource.PRODUCT, null,
                         RuleExecutorRef.jsonLogic(expression), List.of(), 10, true,
                         RuleDecision.INCONCLUSIVE, "PAYROLL_AMOUNT_UNAVAILABLE",
-                        List.of("payroll.amount"))),
+                        List.of("payroll.amount"), null)),
                 RuleRuntimeCompatibility.current(),
                 RuleFailPolicy.FAIL_CLOSED);
         String evidenceHash = String.valueOf((char) ('A' + revision - 1)).repeat(64);

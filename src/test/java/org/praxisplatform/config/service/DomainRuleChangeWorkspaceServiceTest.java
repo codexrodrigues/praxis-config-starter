@@ -70,6 +70,31 @@ class DomainRuleChangeWorkspaceServiceTest {
   }
 
   @Test
+  void parameterEditDerivesConditionAndInvalidatesRevisionAndEtag() throws Exception {
+    UUID id = UUID.randomUUID();
+    DomainRuleChangeWorkspace workspace = workspace(id, "tenant-a", "dev");
+    DomainRuleDefinition base = definition("tenant-a", "dev");
+    base.setDefinition(DomainRuleParametersTest.definition(objectMapper).toString());
+    base.setParameters("{\"parameterValues\":{\"limit\":100}}");
+    workspace.setBaseDefinitionId(base.getId());
+    workspace.setBaseDefinitionHash("B".repeat(64));
+    UUID etag = workspace.getEtag();
+    long revision = workspace.getRevision();
+    when(workspaces.findByIdForUpdate(id)).thenReturn(Optional.of(workspace));
+    when(definitions.findById(base.getId())).thenReturn(Optional.of(base));
+    when(fingerprint.sha256(base)).thenReturn("B".repeat(64));
+    var updated = service.updateDraft(id, new DomainRuleChangeWorkspaceUpdateRequest(null,
+        objectMapper.readTree("{\"parameterValues\":{\"limit\":50}}"), "lower limit"),
+        "\"" + etag + "\"", PRINCIPAL);
+    assertThat(updated.revision()).isEqualTo(revision + 1);
+    assertThat(updated.etag()).isNotEqualTo(etag.toString());
+    assertThat(updated.condition().at("/<=/1").intValue()).isEqualTo(50);
+    assertThatThrownBy(() -> service.updateDraft(id, new DomainRuleChangeWorkspaceUpdateRequest(null,
+        objectMapper.readTree("{\"parameterValues\":{\"limit\":60}}"), "stale"),
+        "\"" + etag + "\"", PRINCIPAL)).hasMessageContaining("412");
+  }
+
+  @Test
   void createsWorkspaceAnchoredToCanonicalDefinitionFingerprint() throws Exception {
     DomainRuleDefinition base = definition("tenant-a", "dev");
     when(definitions.findById(base.getId())).thenReturn(Optional.of(base));
