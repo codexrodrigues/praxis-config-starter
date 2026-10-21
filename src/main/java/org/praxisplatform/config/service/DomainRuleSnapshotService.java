@@ -7,7 +7,6 @@ import com.fasterxml.jackson.databind.node.ArrayNode;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collection;
-import java.util.Comparator;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Optional;
@@ -56,8 +55,8 @@ import org.springframework.transaction.annotation.Transactional;
 /** Governed publication, activation and rollback of immutable RuleSet snapshots. */
 public class DomainRuleSnapshotService {
   private static final Set<String> PUBLISHABLE_STATUSES = Set.of("approved", "active");
-  private static final int MINIMUM_DISTINCT_APPROVERS = 2;
-  private static final String COMPOSITION_CONTRACT_VERSION = "praxis-rule-composition/2";
+  private static final int MINIMUM_DISTINCT_APPROVERS = DomainRuleSnapshotVerifier.MINIMUM_DISTINCT_APPROVERS;
+  private static final String COMPOSITION_CONTRACT_VERSION = DomainRuleSnapshotVerifier.COMPOSITION_CONTRACT_VERSION;
 
   private final DomainRuleDefinitionRepository definitionRepository;
   private final DomainRuleSnapshotRepository snapshotRepository;
@@ -67,40 +66,11 @@ public class DomainRuleSnapshotService {
   private final DomainRuleDefinitionApprovalRepository definitionApprovalRepository;
   private final DomainRuleDefinitionFingerprint definitionFingerprint;
   private final ObjectMapper objectMapper;
-  private final DomainRuleImplementationCatalog implementationCatalog;
+  private final DomainRuleSnapshotVerifier snapshotVerifier;
   private final DomainRuleSnapshotActivationGate activationGate;
+  private final DomainRuleSnapshotScopeLock scopeLock;
+  private final DomainRuleEntityRefresh entityRefresh;
   private final ObjectProvider<DomainRuleDefinitionEvidenceGateService> evidenceGate;
-
-  public DomainRuleSnapshotService(
-      DomainRuleDefinitionRepository definitionRepository,
-      DomainRuleSnapshotRepository snapshotRepository,
-      DomainRuleSnapshotHeadRepository headRepository,
-      DomainRuleSnapshotEventRepository eventRepository,
-      DomainRuleCompositionApprovalRepository compositionApprovalRepository,
-      DomainRuleDefinitionApprovalRepository definitionApprovalRepository,
-      DomainRuleDefinitionFingerprint definitionFingerprint,
-      ObjectMapper objectMapper,
-      DomainRuleImplementationCatalog implementationCatalog) {
-    this(definitionRepository, snapshotRepository, headRepository, eventRepository,
-        compositionApprovalRepository, definitionApprovalRepository, definitionFingerprint,
-        objectMapper, implementationCatalog, DomainRuleSnapshotActivationGate.allowAll(), null);
-  }
-
-  public DomainRuleSnapshotService(
-      DomainRuleDefinitionRepository definitionRepository,
-      DomainRuleSnapshotRepository snapshotRepository,
-      DomainRuleSnapshotHeadRepository headRepository,
-      DomainRuleSnapshotEventRepository eventRepository,
-      DomainRuleCompositionApprovalRepository compositionApprovalRepository,
-      DomainRuleDefinitionApprovalRepository definitionApprovalRepository,
-      DomainRuleDefinitionFingerprint definitionFingerprint,
-      ObjectMapper objectMapper,
-      DomainRuleImplementationCatalog implementationCatalog,
-      DomainRuleSnapshotActivationGate activationGate) {
-    this(definitionRepository, snapshotRepository, headRepository, eventRepository,
-        compositionApprovalRepository, definitionApprovalRepository, definitionFingerprint,
-        objectMapper, implementationCatalog, activationGate, null);
-  }
 
   public DomainRuleSnapshotService(
       DomainRuleDefinitionRepository definitionRepository,
@@ -113,7 +83,8 @@ public class DomainRuleSnapshotService {
       ObjectMapper objectMapper,
       DomainRuleImplementationCatalog implementationCatalog,
       DomainRuleSnapshotActivationGate activationGate,
-      ObjectProvider<DomainRuleDefinitionEvidenceGateService> evidenceGate) {
+      ObjectProvider<DomainRuleDefinitionEvidenceGateService> evidenceGate,
+      DomainRuleSnapshotScopeLock scopeLock, DomainRuleEntityRefresh entityRefresh) {
     this.definitionRepository = definitionRepository;
     this.snapshotRepository = snapshotRepository;
     this.headRepository = headRepository;
@@ -122,38 +93,11 @@ public class DomainRuleSnapshotService {
     this.definitionApprovalRepository = definitionApprovalRepository;
     this.definitionFingerprint = definitionFingerprint;
     this.objectMapper = objectMapper;
-    this.implementationCatalog = implementationCatalog;
-    this.activationGate = activationGate;
+    this.snapshotVerifier = new DomainRuleSnapshotVerifier(objectMapper, implementationCatalog);
+    this.activationGate = java.util.Objects.requireNonNull(activationGate, "activationGate is required");
+    this.entityRefresh = java.util.Objects.requireNonNull(entityRefresh);
+    this.scopeLock = java.util.Objects.requireNonNull(scopeLock, "scopeLock is required");
     this.evidenceGate = evidenceGate;
-  }
-
-  /**
-   * Source-compatible constructor with a fail-closed Java implementation catalog.
-   *
-   * <p>Hosts that publish Java-backed RuleSets must use auto-configuration or the complete
-   * constructor and provide an external {@link DomainRuleImplementationCatalog}.</p>
-   */
-  public DomainRuleSnapshotService(
-      DomainRuleDefinitionRepository definitionRepository,
-      DomainRuleSnapshotRepository snapshotRepository,
-      DomainRuleSnapshotHeadRepository headRepository,
-      DomainRuleSnapshotEventRepository eventRepository,
-      DomainRuleCompositionApprovalRepository compositionApprovalRepository,
-      DomainRuleDefinitionApprovalRepository definitionApprovalRepository,
-      DomainRuleDefinitionFingerprint definitionFingerprint,
-      ObjectMapper objectMapper) {
-    this(
-        definitionRepository,
-        snapshotRepository,
-        headRepository,
-        eventRepository,
-        compositionApprovalRepository,
-        definitionApprovalRepository,
-        definitionFingerprint,
-        objectMapper,
-        DomainRuleImplementationCatalog.denyAll(),
-        DomainRuleSnapshotActivationGate.allowAll(),
-        null);
   }
 
   @Transactional(transactionManager = ConfigTransactionManagerNames.CONFIG, readOnly = true)
@@ -203,7 +147,7 @@ public class DomainRuleSnapshotService {
   }
 
   @Transactional(transactionManager = ConfigTransactionManagerNames.CONFIG)
-  public DomainRuleSnapshotActivationResponse publish(
+  public DomainRuleSnapshotStoredResponse publish(
       DomainRuleSnapshotPublicationRequest request,
       String tenantId,
       String environment,
@@ -214,11 +158,14 @@ public class DomainRuleSnapshotService {
     String tenant = requireText(tenantId, "X-Tenant-ID");
     String env = requireText(environment, "X-Env");
     String ruleSetKey = request.ruleSet().ref().ruleSetKey();
+    entityRefresh.requireCleanSnapshotEntry();
+    scopeLock.lock(tenant, env, ruleSetKey);
     Optional<DomainRuleSnapshotHead> currentHead =
-        headRepository.findForUpdateByTenantIdAndEnvironmentAndRuleSetKey(tenant, env, ruleSetKey);
+        headRepository.findByTenantIdAndEnvironmentAndRuleSetKey(tenant, env, ruleSetKey);
+    currentHead.ifPresent(entityRefresh::snapshotHead);
     verifyPublicationPrecondition(currentHead, ifMatch, ifNoneMatch);
 
-    List<DomainRuleDefinition> sources = resolveSources(request.sourceDefinitionIds(), tenant, env);
+    List<DomainRuleDefinition> sources = resolveSources(request.sourceDefinitionIds(), tenant, env, true);
     List<RuleSnapshotSource> provenance = new ArrayList<>();
     List<RuleSnapshotApproval> approvals = new ArrayList<>();
     for (DomainRuleDefinition source : sources) {
@@ -253,7 +200,7 @@ public class DomainRuleSnapshotService {
         .findTopByTenantIdAndEnvironmentAndRuleSetKeyOrderByPublicationRevisionDesc(tenant, env, ruleSetKey)
         .orElse(null);
     if (previous != null) {
-      verifyStableRuleSetIdentity(readSnapshotForSupersession(previous), request.ruleSet(), ownerServiceKey);
+      verifyStableRuleSetIdentity(snapshotVerifier.readHistoricallyVerifiedSnapshot(previous), request.ruleSet(), ownerServiceKey);
     }
     Instant now = Instant.now();
     String snapshotKey = UUID.randomUUID().toString();
@@ -274,7 +221,9 @@ public class DomainRuleSnapshotService {
         request.ruleSet());
     CompiledRuleSnapshot compiled = compileCandidate(candidate, composition.implementations());
 
-    DomainRuleSnapshot persisted = snapshotRepository.save(DomainRuleSnapshot.builder()
+    DomainRuleSnapshot persisted;
+    try {
+      persisted = snapshotRepository.saveAndFlush(DomainRuleSnapshot.builder()
         .id(UUID.randomUUID())
         .tenantId(tenant)
         .environment(env)
@@ -290,26 +239,18 @@ public class DomainRuleSnapshotService {
         .publishedBy(requireText(publishedBy, "authenticated publisher"))
         .publishedAt(now)
         .build());
-
-    DomainRuleSnapshotHead head = currentHead.orElseGet(() -> DomainRuleSnapshotHead.builder()
-        .id(UUID.randomUUID())
-        .tenantId(tenant)
-        .environment(env)
-        .ruleSetKey(ruleSetKey)
-        .activationRevision(0L)
-        .build());
-    UUID fromSnapshotId = head.getActiveSnapshotId();
-    activate(head, persisted.getId(), now);
-    try {
-      headRepository.saveAndFlush(head);
-    } catch (DataIntegrityViolationException exception) {
-      throw conflict("Snapshot publication violated a persistent integrity constraint; reload scoped state before retrying");
+    } catch (DataIntegrityViolationException conflict) {
+      throw conflict("Snapshot publication collided with immutable scoped content; reload before retrying");
     }
-    appendEvent("PUBLISHED", head, fromSnapshotId, persisted.getId(), publishedBy, now);
-    return activation(compiled.snapshot(), compiled.snapshotContentHash(), head, "PUBLISHED");
+    eventRepository.save(DomainRuleSnapshotEvent.builder().id(UUID.randomUUID())
+        .tenantId(tenant).environment(env).ruleSetKey(ruleSetKey).eventType("PUBLISHED")
+        .fromSnapshotId(previous == null ? null : previous.getId()).toSnapshotId(persisted.getId())
+        .activationRevision(null).headEtag(null)
+        .actor(requireText(publishedBy, "authenticated publisher")).createdAt(now).build());
+    return new DomainRuleSnapshotStoredResponse(compiled.snapshot(), compiled.snapshotContentHash());
   }
 
-  DomainRuleSnapshotActivationResponse publish(
+  DomainRuleSnapshotStoredResponse publish(
       DomainRuleSnapshotPublicationRequest request,
       String tenantId,
       String environment,
@@ -327,12 +268,15 @@ public class DomainRuleSnapshotService {
       String ifMatch) {
     String tenant = requireText(tenantId, "X-Tenant-ID");
     String env = requireText(environment, "X-Env");
+    entityRefresh.requireCleanSnapshotEntry();
     DomainRuleSnapshot target = snapshotRepository
         .findByTenantIdAndEnvironmentAndSnapshotKey(tenant, env, requireText(snapshotKey, "snapshotKey"))
         .orElseThrow(() -> notFound("Rule snapshot was not found in the requested scope"));
+    scopeLock.lock(tenant, env, target.getRuleSetKey());
     DomainRuleSnapshotHead head = headRepository
-        .findForUpdateByTenantIdAndEnvironmentAndRuleSetKey(tenant, env, target.getRuleSetKey())
+        .findByTenantIdAndEnvironmentAndRuleSetKey(tenant, env, target.getRuleSetKey())
         .orElseThrow(() -> notFound("RuleSet head was not found"));
+    entityRefresh.snapshotHead(head);
     verifyStrongMatch(ifMatch, head.getHeadEtag().toString());
     if (target.getId().equals(head.getActiveSnapshotId())) {
       throw conflict("The requested snapshot is already active");
@@ -348,45 +292,44 @@ public class DomainRuleSnapshotService {
 
   @Transactional(transactionManager = ConfigTransactionManagerNames.CONFIG)
   public DomainRuleSnapshotActivationResponse activatePublished(
-      String snapshotKey,
-      String activatedBy,
-      String tenantId,
-      String environment,
-      String ifMatch) {
-    return activatePublished(snapshotKey, activatedBy, tenantId, environment, ifMatch, null);
-  }
-
-  @Transactional(transactionManager = ConfigTransactionManagerNames.CONFIG)
-  public DomainRuleSnapshotActivationResponse activatePublished(
-      String snapshotKey,
-      String activatedBy,
-      String tenantId,
-      String environment,
-      String ifMatch,
-      UUID rolloutId) {
+      String snapshotKey, String activatedBy, String tenantId, String environment,
+      String ifMatch, String ifNoneMatch, UUID rolloutId) {
     String tenant = requireText(tenantId, "X-Tenant-ID");
     String env = requireText(environment, "X-Env");
+    entityRefresh.requireCleanSnapshotEntry();
     DomainRuleSnapshot target = snapshotRepository
         .findByTenantIdAndEnvironmentAndSnapshotKey(tenant, env, requireText(snapshotKey, "snapshotKey"))
         .orElseThrow(() -> notFound("Rule snapshot was not found in the requested scope"));
+    scopeLock.lock(tenant, env, target.getRuleSetKey());
     DomainRuleSnapshotHead head = headRepository
-        .findForUpdateByTenantIdAndEnvironmentAndRuleSetKey(tenant, env, target.getRuleSetKey())
-        .orElseThrow(() -> notFound("RuleSet head was not found"));
-    verifyStrongMatch(ifMatch, head.getHeadEtag().toString());
-    if (target.getId().equals(head.getActiveSnapshotId())) {
-      throw conflict("The requested snapshot is already active");
+        .findByTenantIdAndEnvironmentAndRuleSetKey(tenant, env, target.getRuleSetKey()).orElse(null);
+    if (head != null) entityRefresh.snapshotHead(head);
+    verifyPublicationPrecondition(Optional.ofNullable(head), ifMatch, ifNoneMatch);
+    if (head != null) {
+      if (target.getId().equals(head.getActiveSnapshotId())) throw conflict("The requested snapshot is already active");
+      DomainRuleSnapshot active = snapshotRepository.findByIdAndTenantIdAndEnvironmentAndRuleSetKey(
+              head.getActiveSnapshotId(), tenant, env, target.getRuleSetKey())
+          .orElseThrow(() -> new IllegalStateException("Snapshot head references missing immutable content"));
+      if (target.getPublicationRevision() <= active.getPublicationRevision())
+        throw conflict("Activation requires a newer publication; use rollback for an older version");
     }
-    DomainRuleSnapshot active = snapshotRepository.findByIdAndTenantIdAndEnvironmentAndRuleSetKey(
-            head.getActiveSnapshotId(), tenant, env, target.getRuleSetKey())
-        .orElseThrow(() -> new IllegalStateException("Snapshot head references missing immutable content"));
-    if (target.getPublicationRevision() <= active.getPublicationRevision()) {
-      throw conflict("Activation requires a snapshot newer than the current active publication; use rollback for an older version");
-    }
+    // Null represents verified absence under the scope lock, never a fictitious or incomplete head.
     activationGate.requireAllowed(rolloutId, target, head, activatedBy);
-    DomainRuleSnapshotActivationResponse response =
-        selectExistingSnapshot(target, head, activatedBy, "ACTIVATED");
+    PublishedRuleSnapshot snapshot = snapshotVerifier.readVerifiedSnapshot(target);
+    requireCurrentValidity(snapshot, "ACTIVATED");
+    Instant now = Instant.now();
+    UUID fromSnapshotId = head == null ? null : head.getActiveSnapshotId();
+    if (head == null) head = DomainRuleSnapshotHead.builder().id(UUID.randomUUID())
+        .tenantId(tenant).environment(env).ruleSetKey(target.getRuleSetKey()).activationRevision(0L).build();
+    activate(head, target.getId(), now);
+    try {
+      headRepository.saveAndFlush(head);
+    } catch (DataIntegrityViolationException collision) {
+      throw conflict("RuleSet head was concurrently initialized; reload before retrying");
+    }
+    appendEvent("ACTIVATED", head, fromSnapshotId, target.getId(), activatedBy, now);
     activationGate.activationCompleted(rolloutId, target, activatedBy);
-    return response;
+    return activation(snapshot, target.getContentHash(), head, "ACTIVATED");
   }
 
   @Transactional(transactionManager = ConfigTransactionManagerNames.CONFIG, readOnly = true)
@@ -400,7 +343,7 @@ public class DomainRuleSnapshotService {
           DomainRuleSnapshot stored = snapshotRepository.findByIdAndTenantIdAndEnvironmentAndRuleSetKey(
                   head.getActiveSnapshotId(), tenant, env, head.getRuleSetKey())
               .orElseThrow(() -> new IllegalStateException("Snapshot head references missing immutable content"));
-          return activation(readVerifiedSnapshot(stored), stored.getContentHash(), head, "ACTIVE");
+          return activation(snapshotVerifier.readVerifiedSnapshot(stored), stored.getContentHash(), head, "ACTIVE");
         });
   }
 
@@ -416,21 +359,8 @@ public class DomainRuleSnapshotService {
           DomainRuleSnapshot stored = snapshotRepository.findByIdAndTenantIdAndEnvironmentAndRuleSetKey(
                   head.getActiveSnapshotId(), tenant, env, head.getRuleSetKey())
               .orElseThrow(() -> new IllegalStateException("Snapshot head references missing immutable content"));
-          String governanceState;
-          boolean executionReady;
-          if (isPreManifestSnapshot(stored)) {
-            governanceState = "REPUBLICATION_REQUIRED";
-            executionReady = false;
-          } else {
-            try {
-              readVerifiedSnapshot(stored);
-              governanceState = "READY";
-              executionReady = true;
-            } catch (RuntimeException invalid) {
-              governanceState = "INVALID";
-              executionReady = false;
-            }
-          }
+          String governanceState = snapshotVerifier.governanceState(stored);
+          boolean executionReady = "READY".equals(governanceState);
           return new DomainRuleSnapshotHeadStatusResponse(
               head.getRuleSetKey(), stored.getSnapshotKey(), stored.getRuleSetVersion(),
               stored.getPublicationRevision(), head.getActivationRevision(), head.getHeadEtag().toString(),
@@ -445,7 +375,11 @@ public class DomainRuleSnapshotService {
             requireText(tenantId, "X-Tenant-ID"),
             requireText(environment, "X-Env"),
             requireText(snapshotKey, "snapshotKey"))
-        .map(stored -> new DomainRuleSnapshotStoredResponse(readVerifiedSnapshot(stored), stored.getContentHash()));
+        .map(stored -> {
+          PublishedRuleSnapshot snapshot = snapshotVerifier.readHistoricallyVerifiedSnapshot(stored);
+          snapshotVerifier.requireCompositionManifest(stored);
+          return new DomainRuleSnapshotStoredResponse(snapshot, stored.getContentHash());
+        });
   }
 
   @Transactional(transactionManager = ConfigTransactionManagerNames.CONFIG, readOnly = true)
@@ -478,23 +412,15 @@ public class DomainRuleSnapshotService {
 
   private DomainRuleSnapshotVersionResponse versionResponse(
       DomainRuleSnapshot snapshot, UUID activeSnapshotId, Integer activePublicationRevision) {
-    String governanceState;
-    if (isPreManifestSnapshot(snapshot)) {
-      governanceState = "REPUBLICATION_REQUIRED";
-    } else {
-      try {
-        readVerifiedSnapshot(snapshot);
-        governanceState = "READY";
-      } catch (IllegalStateException invalid) {
-        governanceState = "INVALID";
-      }
-    }
+    String governanceState = snapshotVerifier.governanceState(snapshot);
     boolean active = snapshot.getId().equals(activeSnapshotId);
     String availableAction;
-    if (active) {
-      availableAction = "ACTIVE";
-    } else if (!"READY".equals(governanceState) || activePublicationRevision == null) {
+    if (!"READY".equals(governanceState)) {
       availableAction = "UNAVAILABLE";
+    } else if (activePublicationRevision == null) {
+      availableAction = "CREATE_ROLLOUT";
+    } else if (active) {
+      availableAction = "ACTIVE";
     } else if (snapshot.getPublicationRevision() < activePublicationRevision) {
       availableAction = "ROLLBACK";
     } else {
@@ -515,20 +441,22 @@ public class DomainRuleSnapshotService {
       DomainRuleSnapshotHead head,
       String activatedBy,
       String operation) {
-    PublishedRuleSnapshot snapshot = readVerifiedSnapshot(target);
+    PublishedRuleSnapshot snapshot = snapshotVerifier.readVerifiedSnapshot(target);
+    requireCurrentValidity(snapshot, operation);
     Instant now = Instant.now();
-    Instant validFrom = Instant.parse(snapshot.validFromUtc());
-    Instant validUntil = snapshot.validUntilUtc() == null
-        ? null
-        : Instant.parse(snapshot.validUntilUtc());
-    if (now.isBefore(validFrom) || (validUntil != null && !now.isBefore(validUntil))) {
-      throw conflict(operation + " target is outside its governed validity interval");
-    }
     UUID fromSnapshotId = head.getActiveSnapshotId();
     activate(head, target.getId(), now);
     headRepository.save(head);
     appendEvent(operation, head, fromSnapshotId, target.getId(), activatedBy, now);
     return activation(snapshot, target.getContentHash(), head, operation);
+  }
+
+  private void requireCurrentValidity(PublishedRuleSnapshot snapshot, String operation) {
+    Instant now = Instant.now();
+    Instant validFrom = Instant.parse(snapshot.validFromUtc());
+    Instant validUntil = snapshot.validUntilUtc() == null ? null : Instant.parse(snapshot.validUntilUtc());
+    if (now.isBefore(validFrom) || (validUntil != null && !now.isBefore(validUntil)))
+      throw conflict(operation + " target is outside its governed validity interval");
   }
 
   private void requireRequest(DomainRuleSnapshotPublicationRequest request) {
@@ -538,6 +466,10 @@ public class DomainRuleSnapshotService {
   }
 
   private List<DomainRuleDefinition> resolveSources(List<UUID> requestedIds, String tenant, String environment) {
+    return resolveSources(requestedIds, tenant, environment, false);
+  }
+
+  private List<DomainRuleDefinition> resolveSources(List<UUID> requestedIds, String tenant, String environment, boolean refreshSources) {
     if (requestedIds == null || requestedIds.isEmpty() || new LinkedHashSet<>(requestedIds).size() != requestedIds.size()) {
       throw badRequest("sourceDefinitionIds must contain distinct governed definitions");
     }
@@ -546,6 +478,7 @@ public class DomainRuleSnapshotService {
       throw badRequest("Every sourceDefinitionId must resolve to a governed definition");
     }
     for (DomainRuleDefinition source : sources) {
+      if (refreshSources) entityRefresh.definition(source);
       if (!tenant.equals(source.getTenantId()) || !environment.equals(source.getEnvironment())) {
         throw badRequest("Every source definition must belong to the snapshot tenant and environment");
       }
@@ -592,7 +525,7 @@ public class DomainRuleSnapshotService {
     var sourceEvidence = sources.stream().map(source -> new RuleSnapshotSource(
         source.getId().toString(), source.getRuleKey(), source.getVersion(),
         definitionFingerprint.sha256(source))).toList();
-    List<RuleImplementationRef> implementations = allowedImplementations(
+    List<RuleImplementationRef> implementations = snapshotVerifier.allowedImplementations(
         tenant, environment, ownerServiceKey);
     ObjectNode catalog = objectMapper.createObjectNode();
     catalog.put("tenantId", tenant);
@@ -677,20 +610,6 @@ public class DomainRuleSnapshotService {
     }
   }
 
-  private List<RuleImplementationRef> allowedImplementations(
-      String tenant, String environment, String ownerServiceKey) {
-    DomainRuleImplementationScope scope = new DomainRuleImplementationScope(
-        tenant, environment, ownerServiceKey);
-    Collection<RuleImplementationRef> allowed = implementationCatalog.allowedImplementations(scope);
-    if (allowed == null) {
-      throw new IllegalStateException("DomainRuleImplementationCatalog must not return null");
-    }
-    return allowed.stream()
-        .sorted(Comparator.comparing(RuleImplementationRef::implementationKey)
-            .thenComparing(RuleImplementationRef::implementationVersion))
-        .toList();
-  }
-
   private void verifyStableRuleSetIdentity(
       PublishedRuleSnapshot previous,
       RuleSetDefinition next,
@@ -707,13 +626,17 @@ public class DomainRuleSnapshotService {
 
   private void verifyPublicationPrecondition(
       Optional<DomainRuleSnapshotHead> currentHead, String ifMatch, String ifNoneMatch) {
+    if (normalize(ifMatch) != null && normalize(ifNoneMatch) != null)
+      throw badRequest("Use exactly one head precondition");
     if (currentHead.isEmpty()) {
+      if (normalize(ifMatch) != null) throw preconditionFailed("RuleSet head no longer exists");
       HttpEntityTagCondition createCondition = parseCondition(ifNoneMatch);
       if (!createCondition.wildcard()) {
         throw preconditionRequired("Initial publication requires If-None-Match: *");
       }
       return;
     }
+    if (normalize(ifNoneMatch) != null) throw preconditionFailed("RuleSet head already exists");
     verifyStrongMatch(ifMatch, currentHead.get().getHeadEtag().toString());
   }
 
@@ -781,14 +704,6 @@ public class DomainRuleSnapshotService {
     }
   }
 
-  private PublishedRuleSnapshot readSnapshot(DomainRuleSnapshot stored) {
-    try {
-      return objectMapper.readValue(stored.getSnapshotPayload(), PublishedRuleSnapshot.class);
-    } catch (JsonProcessingException exception) {
-      throw new IllegalStateException("Persisted RuleSet snapshot is unreadable", exception);
-    }
-  }
-
   private List<RuleSnapshotApproval> verifyCompositionApprovals(
       DomainRuleSnapshotPublicationRequest request,
       List<DomainRuleDefinition> sources,
@@ -848,95 +763,6 @@ public class DomainRuleSnapshotService {
         approval.getActorRef(),
         approval.getApprovedAt().toString(),
         approval.getCompositionDigest());
-  }
-
-  private PublishedRuleSnapshot readVerifiedSnapshot(DomainRuleSnapshot stored) {
-    PublishedRuleSnapshot snapshot = readEnvelopeAndVerifyContent(stored);
-    verifyStoredComposition(stored, snapshot);
-    return snapshot;
-  }
-
-  private PublishedRuleSnapshot readSnapshotForSupersession(DomainRuleSnapshot stored) {
-    PublishedRuleSnapshot previous = readSnapshot(stored);
-    verifyStoredEnvelope(stored, previous);
-    String canonicalHash = PraxisCanonicalJson.sha256(objectMapper.valueToTree(previous));
-    if (!stored.getContentHash().equals(canonicalHash)) {
-      throw new IllegalStateException("Persisted RuleSet snapshot content hash verification failed");
-    }
-    if (!isPreManifestSnapshot(stored)) {
-      verifyStoredComposition(stored, previous);
-    }
-    return previous;
-  }
-
-  private PublishedRuleSnapshot readEnvelopeAndVerifyContent(DomainRuleSnapshot stored) {
-    PublishedRuleSnapshot snapshot = readSnapshot(stored);
-    verifyStoredEnvelope(stored, snapshot);
-    CompiledRuleSnapshot compiled;
-    try {
-      compiled = new PraxisRuleSnapshotCompiler(RuleBindingExecutorRegistry.planning(
-          allowedImplementations(snapshot.tenantId(), snapshot.environment(), snapshot.ownerServiceKey())))
-          .compile(snapshot, snapshot.requiredHostContractVersion());
-    } catch (RulePlanException exception) {
-      throw new IllegalStateException(
-          "Persisted RuleSet snapshot is no longer admitted by the host implementation catalog", exception);
-    }
-    if (!stored.getContentHash().equals(compiled.snapshotContentHash())) {
-      throw new IllegalStateException("Persisted RuleSet snapshot content hash verification failed");
-    }
-    return compiled.snapshot();
-  }
-
-  private void verifyStoredEnvelope(DomainRuleSnapshot stored, PublishedRuleSnapshot snapshot) {
-    if (!stored.getSnapshotKey().equals(snapshot.snapshotKey())
-        || !stored.getTenantId().equals(snapshot.tenantId())
-        || !stored.getEnvironment().equals(snapshot.environment())
-        || !stored.getRuleSetKey().equals(snapshot.ruleSet().ref().ruleSetKey())
-        || !stored.getRuleSetVersion().equals(snapshot.ruleSet().ref().version())
-        || !stored.getPublicationRevision().equals(snapshot.publicationRevision())) {
-      throw new IllegalStateException("Persisted RuleSet snapshot identity does not match its immutable envelope");
-    }
-  }
-
-  private boolean isPreManifestSnapshot(DomainRuleSnapshot stored) {
-    return stored.getCompositionManifest() == null && stored.getCompositionDigest() == null;
-  }
-
-  private void verifyStoredComposition(DomainRuleSnapshot stored, PublishedRuleSnapshot snapshot) {
-    if (stored.getCompositionManifest() == null || stored.getCompositionManifest().isBlank()
-        || stored.getCompositionDigest() == null || stored.getCompositionDigest().isBlank()) {
-      throw new IllegalStateException("Persisted RuleSet composition manifest is unreadable");
-    }
-    try {
-      var manifest = objectMapper.readTree(stored.getCompositionManifest());
-      String digest = PraxisCanonicalJson.sha256(manifest);
-      long approvers = snapshot.approvals().stream()
-          .filter(approval -> "RULE_COMPOSITION_APPROVER".equals(approval.role()))
-          .filter(approval -> digest.equals(approval.evidenceHash()))
-          .map(RuleSnapshotApproval::actorRef).distinct().count();
-      if (!digest.equals(stored.getCompositionDigest()) || approvers < MINIMUM_DISTINCT_APPROVERS) {
-        throw new IllegalStateException("Persisted RuleSet composition approval verification failed");
-      }
-      if (COMPOSITION_CONTRACT_VERSION.equals(manifest.path("compositionContractVersion").asText())) {
-        var testEvidence = manifest.get("testEvidence");
-        if (testEvidence == null || !testEvidence.isArray()) {
-          throw new IllegalStateException("Persisted RuleSet test evidence manifest is unreadable");
-        }
-        for (var item : testEvidence) {
-          if (!item.path("satisfied").asBoolean(false)
-              || item.path("definitionId").asText().isBlank()
-              || item.path("stage").asText().isBlank()
-              || item.path("workspaceId").asText().isBlank()
-              || item.path("testRunId").asText().isBlank()
-              || item.path("requestHash").asText().isBlank()
-              || item.path("evidenceDigest").asText().isBlank()) {
-            throw new IllegalStateException("Persisted RuleSet test evidence manifest is invalid");
-          }
-        }
-      }
-    } catch (JsonProcessingException | NullPointerException exception) {
-      throw new IllegalStateException("Persisted RuleSet composition manifest is unreadable", exception);
-    }
   }
 
   private String writeJson(Object value, String message) {

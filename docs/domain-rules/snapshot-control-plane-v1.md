@@ -30,7 +30,7 @@ Each scoped RuleSet has three independent records:
 
 - immutable snapshot content, addressed by `snapshotKey` and canonical
   `snapshotContentHash`;
-- one mutable active head, protected by an opaque `headEtag`;
+- zero or one mutable active head, protected by an opaque `headEtag`;
 - append-only publication/activation/rollback events with monotonic
   `activationRevision`.
 
@@ -40,6 +40,15 @@ all bindings belong to one immutable snapshot and one scoped head. Publishing
 separate materialization heads for each step would permit mixed revisions inside
 one business operation and is therefore not a valid corporate runtime design.
 The colocated host must pin one verified head for the complete operation.
+
+Publication persists an approved immutable candidate and a `PUBLISHED` event only. It returns
+`DomainRuleSnapshotStoredResponse` with the content hash as HTTP ETag; it never selects a head,
+rotates its validator or completes a rollout. A published candidate is not execution authority.
+Selection is always an explicit governed activation. Head absence is a valid initial state, not
+an incomplete head row. New `PUBLISHED` events always omit activation revision/head ETag,
+even when an existing head was observed: recording those as selection evidence would falsely
+admit execution observations for an inactive candidate. Historical publication events retain
+their original identity and meaning.
 
 The content hash is deliberately not the head ETag. Every activation, including
 rollback from v2 to v1, rotates the opaque head ETag. This prevents an ABA race
@@ -56,8 +65,25 @@ an older engine compatibility baseline. The control plane verifies the prior
 envelope identity, canonical stored snapshot hash and persisted composition
 approvals without asking the current engine to compile obsolete executable
 content. The new candidate is still compiled strictly by the current engine and
-host admission catalog before activation. Runtime reads and rollback continue to
-fail closed for an old snapshot that the current engine cannot verify.
+host admission catalog before activation. Executable head reads (`findActive`/`GET .../head`), activation and rollback continue to
+fail closed for an old snapshot that the current engine cannot verify. Immutable detail
+reads use the same historical envelope/hash/composition/approval verification as
+supersession and do not compile against the current runtime or catalog. Intact
+incompatible snapshots and snapshots whose Java implementations were later revoked
+remain available to an authorized historical reader, without granting execution.
+Neither path rewrites stored payload bytes, hashes, approvals, manifests or events.
+
+This release adopts `praxis-rules-engine:0.1.0-beta.16` (engine contract `1.5`).
+Version and head-status projections verify historical integrity first. Intact
+pre-manifest snapshots are `REPUBLICATION_REQUIRED`; corrupt pre-manifest snapshots
+are `INVALID`. With a verified composition, any exact engine/dialect/corpus tuple
+mismatch is `RUNTIME_INCOMPATIBLE`. A matching tuple must also pass the current
+compiler and host admission catalog to be `READY`; a compilation or catalog
+revocation failure is `INVALID`. Pre-manifest detail remains refused, even when
+its envelope/hash are intact. All non-`READY` versions have `availableAction=UNAVAILABLE`,
+including a version whose `active=true` records the historical head selection.
+`READY` is Config planning admission, not host preload/quorum readiness or permission
+to bypass the separate activation gate.
 
 ## HTTP contract
 
@@ -67,8 +93,10 @@ fail closed for an old snapshot that the current engine cannot verify.
   - resolves the publisher from server authentication and requires
     `RULE_SNAPSHOT_PUBLISHER`; publisher identity is not a payload field;
   - rejects source, RuleSet, validity, host-contract or planning-catalog drift;
-  - initial publication requires `If-None-Match: *`;
-  - later publications require a strong `If-Match` with the current head ETag.
+  - requires `If-None-Match: *` whenever the scoped head is absent, otherwise its strong `If-Match`;
+  - returns `201` with immutable `snapshot` and `snapshotContentHash`, and the content hash as ETag;
+  - does not mutate/create a head or authorize execution; publication order and supersession follow
+    the latest publication, independently of which version is active.
 - `POST /api/praxis/config/domain-rules/snapshots/composition-manifest`
   - resolves the authenticated principal and requires `RULE_SNAPSHOT_PUBLISHER`;
   - uses tenant and environment resolved by the server; caller headers are optional routing hints
@@ -99,20 +127,26 @@ fail closed for an old snapshot that the current engine cannot verify.
   - returns a bounded, newest-first version catalog with immutable identity,
     publication metadata, active-state marker and safe governance state;
   - never returns executable snapshot content or approval evidence;
-  - classifies each entry as `READY`, `REPUBLICATION_REQUIRED` or `INVALID` and
+  - classifies each entry as `READY`, `RUNTIME_INCOMPATIBLE`, `REPUBLICATION_REQUIRED` or `INVALID` and
     publishes its relative `availableAction`: `ACTIVE`, `ACTIVATE`, `ROLLBACK`
-    or `UNAVAILABLE`;
+    `CREATE_ROLLOUT` or `UNAVAILABLE`;
   - lets policy studios expose only the server-authorized direction instead of
     inferring lifecycle semantics from revision numbers.
 - `GET /api/praxis/config/domain-rules/snapshots/head/status?ruleSetKey=...`
   - requires the same authenticated `RULE_SNAPSHOT_READER` scope;
   - returns safe head identity, immutable version/revision, readiness and the mutable head ETag;
+  - always re-evaluates readiness and returns `200` with `Cache-Control: no-store`, including
+    when `If-None-Match` matches the head ETag: the runtime/catalog can change independently
+    of the head. The body/header head ETag remains the concurrency token for governed mutations;
   - never returns unverified executable content;
   - classifies preserved pre-manifest beta content as `REPUBLICATION_REQUIRED`, allowing an
     operator to publish a new immutable RuleSet version with the returned strong `If-Match`.
 - `GET /api/praxis/config/domain-rules/snapshots/{snapshotKey}`
   - requires the same authenticated `RULE_SNAPSHOT_READER` scope;
-  - returns the immutable snapshot with its canonical content hash as ETag;
+  - verifies historical envelope identity, canonical content hash and composition approvals,
+    independently of the current compiler/catalog; intact incompatible history is readable;
+  - refuses corrupt or pre-manifest content and never establishes execution readiness;
+  - returns the immutable snapshot with its unchanged canonical content hash as ETag;
   - is private-cacheable and immutable.
 - `POST /api/praxis/config/domain-rules/snapshots/{snapshotKey}/rollback`
   - requires a strong current-head `If-Match`;
@@ -123,16 +157,18 @@ fail closed for an old snapshot that the current engine cannot verify.
     snapshot. Selecting a newer publication is a roll-forward and is rejected by
     this rollback endpoint.
 - `POST /api/praxis/config/domain-rules/snapshots/{snapshotKey}/activate`
-  - requires a strong current-head `If-Match`;
-  - resolves the actor from server authentication and requires
-    `RULE_SNAPSHOT_OPERATOR`;
+  - requires a strong current-head `If-Match` for an existing head;
+  - for bootstrap, requires `If-None-Match: *`, verified absence under the scope lock, and a
+    ready rollout bound to that absence under a maker-checker governed active REQUIRED policy
+    with a positive quorum; an absent/default OBSERVE_ONLY policy never grants bootstrap;
+  - resolves the actor from server authentication and requires `RULE_SNAPSHOT_OPERATOR`;
   - selects a newer, currently valid immutable publication, rotates the head
     ETag and appends an `ACTIVATED` audit event;
   - rejects an active or older publication. Older content must use the explicit
     rollback operation.
   - accepts optional `X-Rule-Rollout-ID`; under an active `REQUIRED` rollout policy it becomes
     mandatory and is revalidated while both head and rollout are locked. Under `OBSERVE_ONLY`,
-    omission preserves the beta activation behavior.
+    omission is allowed only for an existing head; bootstrap always requires a real ready rollout.
 
 Read operations require explicit `X-Tenant-ID` and `X-Env`. In corporate mode,
 approval, publication, activation and rollback derive tenant, environment and actor from the
@@ -141,6 +177,32 @@ scope. Publication requires approved source definitions with append-only
 approval evidence for each definition's current canonical hash and at least two
 distinct composition approvers. Source hashes and authenticated approval
 evidence become part of the immutable snapshot envelope.
+
+## Scope concurrency and bootstrap
+
+Publication, head selection, rollout creation/cancellation and rollout-policy mutations share one
+PostgreSQL transaction advisory lock for the exact tenant/environment/RuleSet. A dedicated namespace
+and length-prefixed scope parts serialize even absent heads without ambiguous delimiter matching.
+The active writable Config datasource transaction must use READ COMMITTED. External pending JPA
+changes are rejected before querying lifecycle inputs; clean preloaded heads, policies, rollouts and
+publication source definitions are refreshed after scope serialization. No global persistence-context
+clear or no-op production lock is used. Persistent uniqueness remains an additional invariant.
+Observational probe updates use a directed rollout row lock only; they do not acquire the
+scope lock or select a head. Lifecycle operations re-evaluate their evidence under the scope lock.
+
+Migration V69 permits a paired null expected head identity on rollout and nullable selection identity
+only on publication events; existing records, payloads, hashes and approval evidence are unchanged.
+Rollout response fields `expectedActiveSnapshotKey`/`expectedHeadEtag` are null together for bootstrap.
+Pending discovery compares that expectation with actual absence; it never substitutes a dummy head.
+The version catalog exposes `CREATE_ROLLOUT` for READY content without a head and never claims direct
+ACTIVATE is authorized. Final activation validates the expectation again under lock, saves the head,
+appends the selection event and completes rollout in one transaction. Concurrent first selectors
+cannot both commit. Rollback remains the established emergency operation without candidate quorum,
+while retaining current runtime/catalog, scope, validity, authorization and strong head CAS checks.
+
+Manual Java wiring must provide the existing host catalog, a real activation gate, the shared scope
+lock and Config-owned `DomainRuleEntityRefresh`. The auto-configured fallback gate is unavailable,
+never allow-all. Unit mocks do not count as an operational bootstrap or concurrency proof.
 
 ## Approval-to-composition binding
 
@@ -210,16 +272,17 @@ the application process.
 
 ## PostgreSQL concurrency and host LKG proof
 
-The scoped mutable head is serialized with a pessimistic write lock on
-`tenantId + environment + ruleSetKey`. The integration gate below starts a clean,
-ephemeral PostgreSQL 14 process, applies the canonical snapshot-control-plane
-migrations and stops the process after the tests. It proves that two concurrent writers
-cannot advance the same head simultaneously and that rollback selects existing
-immutable content while rotating the ETag, increasing `activationRevision` and
-appending one auditable event.
+The current proof uses an exclusively assigned remote Neon database, the official
+Flyway migrations and distinct migration-owner/runtime identities. Runtime mutations
+use ordinary DML privileges. The gate proves absent-head serialization, conditional
+publication and selection races, preloaded JPA refresh, required-quorum bootstrap,
+and transaction rollback after head insertion or policy supersession flush. It fails
+closed without the expected branch/host/database/role attestation and private URI files.
+See `g2-publication-activation-validation-2026-10-21.md` for the exact assignment,
+command and evidence. No local or embedded database is a substitute for this proof.
 
 ```shell
-mvn -Dtest=DomainRuleSnapshotHeadRepositoryConcurrencyTest test
+mvn -Dtest=DomainRuleSnapshotPublicationNeonIT test
 ```
 
 Last-known-good retention and readiness are deliberately host-runtime concerns,

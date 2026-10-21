@@ -40,8 +40,9 @@ class DomainRuleRolloutPolicyServiceTest {
   private DomainRuleRolloutPolicyService service;
 
   @BeforeEach void setUp() {
-    service = new DomainRuleRolloutPolicyService(policies, heads, events, snapshotHeads, rollouts,
-        Clock.fixed(NOW, ZoneOffset.UTC));
+    service = new DomainRuleRolloutPolicyService(policies,  heads,  events,  snapshotHeads,  rollouts,
+        Clock.fixed(NOW, ZoneOffset.UTC),  mock(org.praxisplatform.config.service.DomainRuleSnapshotScopeLock.class), mock(org.praxisplatform.config.service.DomainRuleEntityRefresh.class));
+    when(policies.findRuleSetKeyByIdAndTenantIdAndEnvironment(any(), any(), any())).thenReturn(Optional.of("benefit.eligibility"));
     when(policies.save(any())).thenAnswer(call -> call.getArgument(0));
     when(heads.save(any())).thenAnswer(call -> call.getArgument(0));
     when(events.save(any())).thenAnswer(call -> call.getArgument(0));
@@ -49,9 +50,9 @@ class DomainRuleRolloutPolicyServiceTest {
 
   @Test void createsTheNextImmutableDraftUnderTheScopedSnapshotLock() {
     var head = policyHead(null, 0, UUID.randomUUID());
-    when(snapshotHeads.findForUpdateByTenantIdAndEnvironmentAndRuleSetKey(
+    when(snapshotHeads.findByTenantIdAndEnvironmentAndRuleSetKey(
         "tenant-a", "dev", "benefit.eligibility")).thenReturn(Optional.of(snapshotHead()));
-    when(heads.findForUpdateByTenantIdAndEnvironmentAndRuleSetKey(
+    when(heads.findByTenantIdAndEnvironmentAndRuleSetKey(
         "tenant-a", "dev", "benefit.eligibility")).thenReturn(Optional.of(head));
     when(policies.findMaximumVersion(
         "tenant-a", "dev", "benefit.eligibility", "safe-rollout")).thenReturn(Optional.of(1));
@@ -79,7 +80,7 @@ class DomainRuleRolloutPolicyServiceTest {
 
   @Test void authorCannotApproveTheSamePolicyVersion() {
     var policy = draft(UUID.randomUUID(), "author-a");
-    when(policies.findForUpdateByIdAndTenantIdAndEnvironment(
+    when(policies.findByIdAndTenantIdAndEnvironment(
         policy.getId(), "tenant-a", "dev")).thenReturn(Optional.of(policy));
     when(heads.findByTenantIdAndEnvironmentAndRuleSetKey(
         "tenant-a", "dev", "benefit.eligibility"))
@@ -95,7 +96,7 @@ class DomainRuleRolloutPolicyServiceTest {
     var policy = draft(UUID.randomUUID(), "author-a");
     var reviewer = new DomainRuleGovernancePrincipal("tenant-a", "reviewer-b", "dev");
     var head = policyHead(null, 0, UUID.randomUUID());
-    when(policies.findForUpdateByIdAndTenantIdAndEnvironment(
+    when(policies.findByIdAndTenantIdAndEnvironment(
         policy.getId(), "tenant-a", "dev")).thenReturn(Optional.of(policy));
     when(heads.findByTenantIdAndEnvironmentAndRuleSetKey(
         "tenant-a", "dev", "benefit.eligibility")).thenReturn(Optional.of(head));
@@ -119,13 +120,13 @@ class DomainRuleRolloutPolicyServiceTest {
     var operator = new DomainRuleGovernancePrincipal("tenant-a", "operator-c", "dev");
     when(policies.findByIdAndTenantIdAndEnvironment(targetId, "tenant-a", "dev"))
         .thenReturn(Optional.of(target));
-    when(snapshotHeads.findForUpdateByTenantIdAndEnvironmentAndRuleSetKey(
+    when(snapshotHeads.findByTenantIdAndEnvironmentAndRuleSetKey(
         "tenant-a", "dev", "benefit.eligibility")).thenReturn(Optional.of(snapshotHead()));
-    when(heads.findForUpdateByTenantIdAndEnvironmentAndRuleSetKey(
+    when(heads.findByTenantIdAndEnvironmentAndRuleSetKey(
         "tenant-a", "dev", "benefit.eligibility")).thenReturn(Optional.of(head));
-    when(policies.findForUpdateByIdAndTenantIdAndEnvironment(targetId, "tenant-a", "dev"))
+    when(policies.findByIdAndTenantIdAndEnvironment(targetId, "tenant-a", "dev"))
         .thenReturn(Optional.of(target));
-    when(policies.findForUpdateByIdAndTenantIdAndEnvironment(previousId, "tenant-a", "dev"))
+    when(policies.findByIdAndTenantIdAndEnvironment(previousId, "tenant-a", "dev"))
         .thenReturn(Optional.of(previous));
     when(rollouts.findByTenantIdAndEnvironmentAndRuleSetKeyAndStatusIn(
         eq("tenant-a"), eq("dev"), eq("benefit.eligibility"), anySet()))
@@ -138,6 +139,9 @@ class DomainRuleRolloutPolicyServiceTest {
     assertThat(result.headEtag()).isNotEqualTo(etag.toString());
     assertThat(previous.getStatus()).isEqualTo("SUPERSEDED");
     assertThat(previous.getActive()).isFalse();
+    var order = inOrder(policies);
+    order.verify(policies).saveAndFlush(previous);
+    order.verify(policies).save(target);
     verify(events).save(argThat(event -> "SUPERSEDED".equals(event.getEventType())));
     verify(events).save(argThat(event -> "ACTIVATED".equals(event.getEventType())
         && event.getHeadEtag().toString().equals(result.headEtag())));
@@ -147,9 +151,9 @@ class DomainRuleRolloutPolicyServiceTest {
     var target = approved(UUID.randomUUID());
     when(policies.findByIdAndTenantIdAndEnvironment(target.getId(), "tenant-a", "dev"))
         .thenReturn(Optional.of(target));
-    when(snapshotHeads.findForUpdateByTenantIdAndEnvironmentAndRuleSetKey(
+    when(snapshotHeads.findByTenantIdAndEnvironmentAndRuleSetKey(
         "tenant-a", "dev", "benefit.eligibility")).thenReturn(Optional.of(snapshotHead()));
-    when(heads.findForUpdateByTenantIdAndEnvironmentAndRuleSetKey(
+    when(heads.findByTenantIdAndEnvironmentAndRuleSetKey(
         "tenant-a", "dev", "benefit.eligibility"))
         .thenReturn(Optional.of(policyHead(UUID.randomUUID(), 1, UUID.randomUUID())));
 
@@ -173,13 +177,13 @@ class DomainRuleRolloutPolicyServiceTest {
     var head = policyHead(currentId, 8, etag);
     when(policies.findByIdAndTenantIdAndEnvironment(targetId, "tenant-a", "dev"))
         .thenReturn(Optional.of(target));
-    when(snapshotHeads.findForUpdateByTenantIdAndEnvironmentAndRuleSetKey(any(), any(), any()))
+    when(snapshotHeads.findByTenantIdAndEnvironmentAndRuleSetKey(any(), any(), any()))
         .thenReturn(Optional.of(snapshotHead()));
-    when(heads.findForUpdateByTenantIdAndEnvironmentAndRuleSetKey(any(), any(), any()))
+    when(heads.findByTenantIdAndEnvironmentAndRuleSetKey(any(), any(), any()))
         .thenReturn(Optional.of(head));
-    when(policies.findForUpdateByIdAndTenantIdAndEnvironment(targetId, "tenant-a", "dev"))
+    when(policies.findByIdAndTenantIdAndEnvironment(targetId, "tenant-a", "dev"))
         .thenReturn(Optional.of(target));
-    when(policies.findForUpdateByIdAndTenantIdAndEnvironment(currentId, "tenant-a", "dev"))
+    when(policies.findByIdAndTenantIdAndEnvironment(currentId, "tenant-a", "dev"))
         .thenReturn(Optional.of(current));
     when(rollouts.findByTenantIdAndEnvironmentAndRuleSetKeyAndStatusIn(
         eq("tenant-a"), eq("dev"), eq("benefit.eligibility"), anySet())).thenReturn(List.of());
@@ -196,11 +200,11 @@ class DomainRuleRolloutPolicyServiceTest {
     UUID etag = UUID.randomUUID();
     when(policies.findByIdAndTenantIdAndEnvironment(target.getId(), "tenant-a", "dev"))
         .thenReturn(Optional.of(target));
-    when(snapshotHeads.findForUpdateByTenantIdAndEnvironmentAndRuleSetKey(any(), any(), any()))
+    when(snapshotHeads.findByTenantIdAndEnvironmentAndRuleSetKey(any(), any(), any()))
         .thenReturn(Optional.of(snapshotHead()));
-    when(heads.findForUpdateByTenantIdAndEnvironmentAndRuleSetKey(any(), any(), any()))
+    when(heads.findByTenantIdAndEnvironmentAndRuleSetKey(any(), any(), any()))
         .thenReturn(Optional.of(policyHead(UUID.randomUUID(), 1, etag)));
-    when(policies.findForUpdateByIdAndTenantIdAndEnvironment(target.getId(), "tenant-a", "dev"))
+    when(policies.findByIdAndTenantIdAndEnvironment(target.getId(), "tenant-a", "dev"))
         .thenReturn(Optional.of(target));
     when(rollouts.findByTenantIdAndEnvironmentAndRuleSetKeyAndStatusIn(
         eq("tenant-a"), eq("dev"), eq("benefit.eligibility"), anySet()))
@@ -219,7 +223,7 @@ class DomainRuleRolloutPolicyServiceTest {
     when(policies.findMaximumVersion(
         "tenant-a", "dev", "benefit.eligibility", "platform-observe-only"))
         .thenReturn(Optional.empty());
-    when(heads.findForUpdateByTenantIdAndEnvironmentAndRuleSetKey(
+    when(heads.findByTenantIdAndEnvironmentAndRuleSetKey(
         "tenant-a", "dev", "benefit.eligibility")).thenReturn(Optional.of(existingHead));
 
     var policy = service.requireActiveOrBootstrap("benefit.eligibility", author);
@@ -232,7 +236,7 @@ class DomainRuleRolloutPolicyServiceTest {
 
   @Test void approvalCannotCrossTheServerResolvedTenantScope() {
     UUID policyId = UUID.randomUUID();
-    when(policies.findForUpdateByIdAndTenantIdAndEnvironment(policyId, "tenant-a", "dev"))
+    when(policies.findByIdAndTenantIdAndEnvironment(policyId, "tenant-a", "dev"))
         .thenReturn(Optional.empty());
 
     assertThatThrownBy(() -> service.approve(policyId,

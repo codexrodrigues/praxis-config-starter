@@ -16,8 +16,8 @@ Implementation status:
   timeline are implemented; deployment job scheduling remains pending;
 - activation enforcement is implemented transactionally and remains backward-compatible while
   the active policy is `OBSERVE_ONLY`;
-- no existing activation behavior changes until those slices are complete and enforcement is
-  explicitly configured as `REQUIRED`.
+- first activation now requires a governed REQUIRED policy and positive ready quorum; OBSERVE_ONLY
+  remains an optional quorum mode only for later selections on an existing head.
 
 ## Problem
 
@@ -87,13 +87,28 @@ A rollout is scoped by tenant, environment and RuleSet and binds:
 
 - stable `rolloutId`;
 - candidate immutable snapshot id/key/hash/publication revision;
-- expected current active snapshot id and strong head ETag;
+- expected current active snapshot id and strong head ETag, or both null for verified absence;
 - rollout policy id/version;
 - lifecycle: `PREPARING`, `READY`, `BLOCKED`, `ACTIVATED`, `CANCELLED`, `EXPIRED`;
 - creator and timestamps resolved server-side.
 
+First-head rollout creation requires `If-None-Match: *`; existing-head creation requires strong
+`If-Match`. Bootstrap requires an active maker-checker governed REQUIRED policy and positive quorum,
+with no automatic observability-policy fallback. The response represents absence with paired null
+`expectedActiveSnapshotKey`/`expectedHeadEtag`; pending discovery and activation recheck that absence.
+
 Only one non-terminal rollout may exist per scoped RuleSet. Creating a rollout does not mutate the
-head.
+head. Creation requires a candidate admitted as `READY` by the same internal verifier used for
+snapshot runtime admission: historical envelope/hash/composition evidence, exact runtime tuple and
+current host implementation catalog. It rejects corrupt, pre-manifest and incompatible candidates
+before bootstrapping policy or writing rollout evidence. `OBSERVE_ONLY` relaxes host quorum only;
+it never relaxes candidate integrity or runtime admission.
+
+Readiness rechecks that admission for preserved rollouts on every read. An upgrade or catalog
+revocation can make an existing candidate unavailable even when its stored probes claim preload
+success. Such a rollout returns `BLOCKED`, `activationReady=false` and no `ACTIVATE_CANDIDATE`
+action; cancellation and evidence remain available. Pending discovery/probes remain observational
+and cannot grant execution. Final activation still verifies the candidate under the head lock.
 
 ### Candidate probe
 
@@ -138,7 +153,8 @@ the same Config transaction that locks the head:
 2. rollout candidate equals the requested immutable snapshot;
 3. rollout expected-head ETag equals the currently locked head;
 4. candidate remains verified and inside its validity interval;
-5. policy is `OBSERVE_ONLY`, or the server-derived aggregate is `READY`;
+5. for an existing head, policy is `OBSERVE_ONLY` or the aggregate is `READY`; for bootstrap,
+   the governed policy is REQUIRED with positive quorum and the aggregate is ready;
 6. caller still has `RULE_SNAPSHOT_OPERATOR`;
 7. supplied `If-Match` still strongly matches the head.
 

@@ -17,6 +17,10 @@ public interface DomainRuleSnapshotRolloutRepository
   Optional<DomainRuleSnapshotRollout> findByIdAndTenantIdAndEnvironment(
       UUID id, String tenantId, String environment);
 
+  @Query("select value.ruleSetKey from DomainRuleSnapshotRollout value where value.id = :id and value.tenantId = :tenantId and value.environment = :environment")
+  Optional<String> findRuleSetKeyByIdAndTenantIdAndEnvironment(
+      @Param("id") UUID id, @Param("tenantId") String tenantId, @Param("environment") String environment);
+
   @Lock(LockModeType.PESSIMISTIC_WRITE)
   @Query("""
       select rollout from DomainRuleSnapshotRollout rollout

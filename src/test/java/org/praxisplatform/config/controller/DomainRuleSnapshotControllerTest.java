@@ -34,6 +34,21 @@ class DomainRuleSnapshotControllerTest {
       new DomainRuleSnapshotController(service, principalResolver);
 
   @Test
+  void publicationReturnsImmutableContentValidatorAndDoesNotClaimActivation() {
+    MockHttpServletRequest request = new MockHttpServletRequest();
+    when(principalResolver.resolve(request, "tenant-a", "prod", "RULE_SNAPSHOT_PUBLISHER"))
+        .thenReturn(new DomainRuleGovernancePrincipal("tenant-a", "publisher", "prod"));
+    var input = new org.praxisplatform.config.dto.DomainRuleSnapshotPublicationRequest(
+        null, List.of(), "host", "host/1", "2026-01-01T00:00:00Z", null, "B".repeat(64));
+    var stored = new DomainRuleSnapshotStoredResponse(null, "A".repeat(64));
+    when(service.publish(input, "tenant-a", "prod", null, "*", "publisher")).thenReturn(stored);
+    var response = controller.publish(input, "tenant-a", "prod", null, "*", request);
+    assertThat(response.getStatusCode()).isEqualTo(HttpStatus.CREATED);
+    assertThat(response.getHeaders().getETag()).isEqualTo("\"" + stored.snapshotContentHash() + "\"");
+    assertThat(response.getBody()).isSameAs(stored);
+  }
+
+  @Test
   void unchangedHeadReturnsNotModifiedWithNoCachePolicy() {
     MockHttpServletRequest request = readerRequest("tenant-a", "prod");
     var active = new DomainRuleSnapshotActivationResponse(
@@ -96,18 +111,18 @@ class DomainRuleSnapshotControllerTest {
         null, "A".repeat(64), "head-9", 9, "ACTIVATED");
     UUID rolloutId = UUID.randomUUID();
     when(service.activatePublished(
-        "snapshot-3", "operator-a", "tenant-server", "prod", "\"head-8\"", rolloutId))
+        "snapshot-3",  "operator-a",  "tenant-server",  "prod",  "\"head-8\"",  null,  rolloutId))
         .thenReturn(activated);
 
     var response = controller.activate(
-        "snapshot-3", "tenant-caller", "test", "\"head-8\"", rolloutId, request);
+        "snapshot-3",  "tenant-caller",  "test",  "\"head-8\"",  null,  rolloutId,  request);
 
     assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
     assertThat(response.getHeaders().getETag()).isEqualTo("\"head-9\"");
     assertThat(response.getHeaders().getCacheControl()).isEqualTo("no-cache");
     assertThat(response.getBody()).isSameAs(activated);
     verify(service).activatePublished(
-        "snapshot-3", "operator-a", "tenant-server", "prod", "\"head-8\"", rolloutId);
+        "snapshot-3",  "operator-a",  "tenant-server",  "prod",  "\"head-8\"",  null,  rolloutId);
   }
 
   @Test
@@ -123,15 +138,35 @@ class DomainRuleSnapshotControllerTest {
 
     assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
     assertThat(response.getHeaders().getETag()).isEqualTo("\"head-3\"");
-    assertThat(response.getHeaders().getCacheControl()).isEqualTo("no-cache");
+    assertThat(response.getHeaders().getCacheControl()).isEqualTo("no-store");
     assertThat(response.getBody()).isSameAs(status);
     verify(service).findHeadStatus("tenant-a", "prod", "grant-rules");
 
-    var notModified = controller.headStatus(
+    var rechecked = controller.headStatus(
         "grant-rules", "tenant-a", "prod", "W/\"head-3\"", request);
-    assertThat(notModified.getStatusCode()).isEqualTo(HttpStatus.NOT_MODIFIED);
-    assertThat(notModified.getHeaders().getETag()).isEqualTo("\"head-3\"");
-    assertThat(notModified.getBody()).isNull();
+    assertThat(rechecked.getStatusCode()).isEqualTo(HttpStatus.OK);
+    assertThat(rechecked.getHeaders().getETag()).isEqualTo("\"head-3\"");
+    assertThat(rechecked.getBody()).isSameAs(status);
+  }
+
+  @Test
+  void readinessChangesWithStableHeadAlwaysReturnFreshStatusDespiteIfNoneMatch() {
+    MockHttpServletRequest request = readerRequest("tenant-a", "prod");
+    var ready = new DomainRuleSnapshotHeadStatusResponse(
+        "grant-rules", "snapshot-1", 1, 1, 3, "head-3", true, "READY");
+    var incompatible = new DomainRuleSnapshotHeadStatusResponse(
+        "grant-rules", "snapshot-1", 1, 1, 3, "head-3", false, "RUNTIME_INCOMPATIBLE");
+    when(service.findHeadStatus("tenant-a", "prod", "grant-rules"))
+        .thenReturn(Optional.of(ready), Optional.of(incompatible));
+
+    var before = controller.headStatus("grant-rules", "tenant-a", "prod", null, request);
+    var after = controller.headStatus("grant-rules", "tenant-a", "prod", before.getHeaders().getETag(), request);
+
+    assertThat(before.getBody()).isSameAs(ready);
+    assertThat(after.getStatusCode()).isEqualTo(HttpStatus.OK);
+    assertThat(after.getBody()).isSameAs(incompatible);
+    assertThat(after.getHeaders().getCacheControl()).isEqualTo("no-store");
+    assertThat(after.getHeaders().getETag()).isEqualTo(before.getHeaders().getETag());
   }
 
   @Test

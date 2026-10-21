@@ -40,7 +40,7 @@ class DomainRuleRolloutControllerTest {
     when(resolver.resolve(request, "caller", "test", "RULE_SNAPSHOT_OPERATOR")).thenReturn(operator);
     when(resolver.resolve(request, "caller", "test", "RULE_EXECUTION_OBSERVER")).thenReturn(observer);
     when(resolver.resolve(request, "caller", "test", "RULE_SNAPSHOT_READER")).thenReturn(reader);
-    when(service.create(create, operator, "\"etag\"")).thenReturn(created);
+    when(service.create(create,  operator,  "\"etag\"",  null)).thenReturn(created);
     when(service.probe(rolloutId, probe, observer))
         .thenReturn(new DomainRuleCandidateProbeResponse(true, probe.observedAtUtc()));
     when(service.readiness(rolloutId, reader)).thenReturn(readiness);
@@ -52,7 +52,7 @@ class DomainRuleRolloutControllerTest {
         rolloutId, "rules", "candidate-v2", "A".repeat(64), "PREPARING", null);
     when(service.pending("rules", observer)).thenReturn(Optional.of(pending));
 
-    assertThat(controller.create(create, "\"etag\"", "caller", "test", request).getStatusCode())
+    assertThat(controller.create(create,  "\"etag\"",  null,  "caller",  "test",  request).getStatusCode())
         .isEqualTo(HttpStatus.CREATED);
     assertThat(controller.probe(rolloutId, probe, "caller", "test", request).getStatusCode())
         .isEqualTo(HttpStatus.ACCEPTED);

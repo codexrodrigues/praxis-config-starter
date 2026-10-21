@@ -25,6 +25,9 @@ import org.praxisplatform.config.domain.DomainRuleSnapshotHead;
 import org.praxisplatform.config.domain.DomainRuleSnapshotRollout;
 import org.praxisplatform.config.dto.DomainRuleRolloutCreateRequest;
 import org.praxisplatform.config.service.DomainRuleGovernancePrincipal;
+import org.praxisplatform.config.service.DomainRuleImplementationCatalog;
+import org.praxisplatform.rules.contract.*;
+import org.praxisplatform.rules.digest.PraxisCanonicalJson;
 import org.praxisplatform.config.service.DomainRuleRolloutPolicyService;
 import org.praxisplatform.config.service.DomainRuleRolloutService;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -78,6 +81,7 @@ class DomainRuleNewEntityVersionPostgresTest {
   @Autowired DomainRuleSnapshotHeadRepository snapshotHeads;
   @Autowired PlatformTransactionManager transactionManager;
   @Autowired DataSource dataSource;
+  @Autowired org.springframework.data.jpa.repository.JpaContext jpaContext;
 
   @Test
   void firstPolicyBootstrapInsertsVersionZeroThenRejectsStaleHead() {
@@ -142,7 +146,7 @@ class DomainRuleNewEntityVersionPostgresTest {
     });
 
     var result = tx.execute(ignored -> rolloutService().create(
-        new DomainRuleRolloutCreateRequest(candidateKey, null), principal(), '"' + headEtag.toString() + '"'));
+        new DomainRuleRolloutCreateRequest(candidateKey, null),  principal(),  '"' + headEtag.toString() + '"',  null));
     assertThat(result).isNotNull();
     DomainRuleSnapshotRollout stale = rollouts.findById(result.rolloutId()).orElseThrow();
     assertThat(stale.getRowVersion()).isZero();
@@ -160,22 +164,45 @@ class DomainRuleNewEntityVersionPostgresTest {
     assertVersion("domain_rule_snapshot_rollout", stale.getId(), 1L);
   }
 
-  private DomainRuleSnapshot snapshot(String ruleSet, String key, int revision) {
-    return DomainRuleSnapshot.builder().id(UUID.randomUUID()).tenantId(TENANT)
-        .environment(ENVIRONMENT).snapshotKey(key).ruleSetKey(ruleSet)
-        .ruleSetVersion(revision).publicationRevision(revision).snapshotPayload("{}")
-        .contentHash("A".repeat(64)).publishedBy("version-proof").publishedAt(Instant.now())
-        .build();
+  private DomainRuleSnapshot snapshot(String ruleSetKey, String key, int revision) {
+    ObjectMapper json = new ObjectMapper();
+    Instant now = Instant.now();
+    try {
+      var manifest = json.createObjectNode().put("compositionContractVersion", "praxis-rule-composition/2");
+      manifest.putArray("testEvidence");
+      String digest = PraxisCanonicalJson.sha256(manifest);
+      var ruleSet = new RuleSetDefinition(
+          new RuleSetRef("proof", "version", ruleSetKey, "evaluate", revision), List.of("request"),
+          List.of(new DecisionSlot("eligibility", DecisionStage.DOMAIN_DECISION, SlotCardinality.SINGLE,
+              OverridePolicy.FORBIDDEN, DecisionAggregationPolicy.SINGLE_RESULT)),
+          List.of(new DecisionBinding("eligibility", "eligibility", DecisionSource.PRODUCT, null,
+              RuleExecutorRef.jsonLogic(json.createObjectNode().put("var", "request.eligible")),
+              List.of(), 10, true, RuleDecision.DENY, "NOT_ELIGIBLE", List.of("request.eligible"))),
+          RuleRuntimeCompatibility.current(), RuleFailPolicy.FAIL_CLOSED);
+      var snapshot = new PublishedRuleSnapshot(PublishedRuleSnapshot.SNAPSHOT_CONTRACT_VERSION,
+          key, TENANT, ENVIRONMENT, "version-proof", revision, now.toString(), null, "proof/1",
+          now.toString(), null, List.of(new RuleSnapshotSource("source-1", "eligibility", 1, "C".repeat(64))),
+          List.of(new RuleSnapshotApproval("approval-a", "RULE_COMPOSITION_APPROVER", "reviewer-a", now.toString(), digest),
+              new RuleSnapshotApproval("approval-b", "RULE_COMPOSITION_APPROVER", "reviewer-b", now.toString(), digest)), ruleSet);
+      return DomainRuleSnapshot.builder().id(UUID.randomUUID()).tenantId(TENANT)
+          .environment(ENVIRONMENT).snapshotKey(key).ruleSetKey(ruleSetKey)
+          .ruleSetVersion(revision).publicationRevision(revision).snapshotPayload(json.writeValueAsString(snapshot))
+          .contentHash(PraxisCanonicalJson.sha256(json.valueToTree(snapshot)))
+          .compositionManifest(json.writeValueAsString(manifest)).compositionDigest(digest)
+          .publishedBy("version-proof").publishedAt(now).build();
+    } catch (Exception failure) {
+      throw new AssertionError(failure);
+    }
   }
 
   private DomainRuleRolloutPolicyService policyService() {
-    return new DomainRuleRolloutPolicyService(policies, policyHeads, policyEvents,
-        snapshotHeads, rollouts, Clock.systemUTC());
+    return new DomainRuleRolloutPolicyService(policies,  policyHeads,  policyEvents,
+        snapshotHeads,  rollouts,  Clock.systemUTC(),  new org.praxisplatform.config.service.JdbcDomainRuleSnapshotScopeLock(new org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate(dataSource)), new org.praxisplatform.config.service.DomainRuleEntityRefresh(jpaContext));
   }
 
   private DomainRuleRolloutService rolloutService() {
-    return new DomainRuleRolloutService(policies, rollouts, probes, rolloutEvents, snapshots,
-        snapshotHeads, policyService(), new ObjectMapper(), Clock.systemUTC());
+    return new DomainRuleRolloutService(policies,  rollouts,  probes,  rolloutEvents,  snapshots,
+        snapshotHeads,  policyService(),  new ObjectMapper(),  Clock.systemUTC(),  DomainRuleImplementationCatalog.denyAll(),  new org.praxisplatform.config.service.JdbcDomainRuleSnapshotScopeLock(new org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate(dataSource)), new org.praxisplatform.config.service.DomainRuleEntityRefresh(jpaContext));
   }
 
   private void assertVersion(String table, UUID id, long expected) {

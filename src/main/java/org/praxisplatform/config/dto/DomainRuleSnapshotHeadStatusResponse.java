@@ -20,7 +20,7 @@ public record DomainRuleSnapshotHeadStatusResponse(
     @Schema(description = "Whether the selected snapshot passed the complete governed read verification and may be offered to runtimes.", requiredMode = Schema.RequiredMode.REQUIRED)
     boolean executionReady,
     @Schema(
-        description = "Stable operational classification: READY, REPUBLICATION_REQUIRED for a preserved pre-manifest beta snapshot, or INVALID for another integrity failure.",
-        allowableValues = {"READY", "REPUBLICATION_REQUIRED", "INVALID"},
+        description = "Stable operational classification: READY after current runtime/catalog admission; RUNTIME_INCOMPATIBLE for intact evidence with a different engine/dialect/corpus tuple; REPUBLICATION_REQUIRED for intact pre-manifest evidence; INVALID for integrity or current admission failure.",
+        allowableValues = {"READY", "RUNTIME_INCOMPATIBLE", "REPUBLICATION_REQUIRED", "INVALID"},
         requiredMode = Schema.RequiredMode.REQUIRED)
     String governanceState) {}

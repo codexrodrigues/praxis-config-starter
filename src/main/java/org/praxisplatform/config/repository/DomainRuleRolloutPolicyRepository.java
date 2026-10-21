@@ -22,6 +22,10 @@ public interface DomainRuleRolloutPolicyRepository
   Optional<DomainRuleRolloutPolicy> findByIdAndTenantIdAndEnvironment(
       UUID id, String tenantId, String environment);
 
+  @Query("select value.ruleSetKey from DomainRuleRolloutPolicy value where value.id = :id and value.tenantId = :tenantId and value.environment = :environment")
+  Optional<String> findRuleSetKeyByIdAndTenantIdAndEnvironment(
+      @Param("id") UUID id, @Param("tenantId") String tenantId, @Param("environment") String environment);
+
   @Lock(LockModeType.PESSIMISTIC_WRITE)
   @Query("""
       select policy from DomainRuleRolloutPolicy policy

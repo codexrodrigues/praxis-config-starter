@@ -37,23 +37,28 @@ public class DomainRuleRolloutPolicyService {
   private final DomainRuleSnapshotHeadRepository snapshotHeads;
   private final DomainRuleSnapshotRolloutRepository rollouts;
   private final Clock clock;
+  private final DomainRuleSnapshotScopeLock scopeLock;
+  private final DomainRuleEntityRefresh entityRefresh;
 
   public DomainRuleRolloutPolicyService(DomainRuleRolloutPolicyRepository policies,
       DomainRuleRolloutPolicyHeadRepository policyHeads,
       DomainRuleRolloutPolicyEventRepository policyEvents,
       DomainRuleSnapshotHeadRepository snapshotHeads,
-      DomainRuleSnapshotRolloutRepository rollouts, Clock clock) {
+      DomainRuleSnapshotRolloutRepository rollouts, Clock clock, DomainRuleSnapshotScopeLock scopeLock, DomainRuleEntityRefresh entityRefresh) {
     this.policies = policies;
     this.policyHeads = policyHeads;
     this.policyEvents = policyEvents;
     this.snapshotHeads = snapshotHeads;
     this.rollouts = rollouts;
     this.clock = clock;
+    this.entityRefresh = java.util.Objects.requireNonNull(entityRefresh);
+    this.scopeLock = java.util.Objects.requireNonNull(scopeLock);
   }
 
   @Transactional(transactionManager = ConfigTransactionManagerNames.CONFIG)
   public DomainRuleRolloutPolicyMutationResponse create(
       DomainRuleRolloutPolicyCreateRequest request, DomainRuleGovernancePrincipal principal) {
+    entityRefresh.requireCleanSnapshotEntry();
     ValidatedPolicy input = validate(request);
     lockSnapshotHead(principal, input.ruleSetKey());
     DomainRuleRolloutPolicyHead head = ensureHead(principal, input.ruleSetKey());
@@ -76,7 +81,12 @@ public class DomainRuleRolloutPolicyService {
   @Transactional(transactionManager = ConfigTransactionManagerNames.CONFIG)
   public DomainRuleRolloutPolicyMutationResponse approve(
       UUID policyId, DomainRuleGovernancePrincipal principal) {
+    entityRefresh.requireCleanSnapshotEntry();
+    String key = policies.findRuleSetKeyByIdAndTenantIdAndEnvironment(
+        policyId, principal.tenantId(), principal.environment()).orElseThrow(() -> missing("Rollout policy was not found"));
+    lockSnapshotHead(principal, key);
     DomainRuleRolloutPolicy policy = scopedForUpdate(policyId, principal);
+    entityRefresh.rolloutPolicy(policy);
     DomainRuleRolloutPolicyHead head = requiredHead(principal, policy.getRuleSetKey());
     if (!"DRAFT".equals(policy.getStatus())) {
       if ("APPROVED".equals(policy.getStatus())) return mutation(policy, head);
@@ -96,11 +106,14 @@ public class DomainRuleRolloutPolicyService {
   @Transactional(transactionManager = ConfigTransactionManagerNames.CONFIG)
   public DomainRuleRolloutPolicyMutationResponse activate(
       UUID policyId, String ifMatch, DomainRuleGovernancePrincipal principal) {
-    DomainRuleRolloutPolicy visible = scoped(policyId, principal);
-    lockSnapshotHead(principal, visible.getRuleSetKey());
-    DomainRuleRolloutPolicyHead head = requiredHeadForUpdate(principal, visible.getRuleSetKey());
+    entityRefresh.requireCleanSnapshotEntry();
+    String key = policies.findRuleSetKeyByIdAndTenantIdAndEnvironment(
+        policyId, principal.tenantId(), principal.environment()).orElseThrow(() -> missing("Rollout policy was not found"));
+    lockSnapshotHead(principal, key);
+    DomainRuleRolloutPolicyHead head = requiredHeadForUpdate(principal, key);
     requireStrongMatch(ifMatch, head.getHeadEtag());
     DomainRuleRolloutPolicy target = scopedForUpdate(policyId, principal);
+    entityRefresh.rolloutPolicy(target);
     if (policyId.equals(head.getActivePolicyId())) return mutation(target, head);
     if (!Set.of("APPROVED", "SUPERSEDED").contains(target.getStatus()))
       throw conflict("Only an APPROVED or SUPERSEDED rollout policy can become active");
@@ -112,12 +125,15 @@ public class DomainRuleRolloutPolicyService {
     UUID nextEtag = UUID.randomUUID();
     if (head.getActivePolicyId() != null) {
       DomainRuleRolloutPolicy previous = policies
-          .findForUpdateByIdAndTenantIdAndEnvironment(
+          .findByIdAndTenantIdAndEnvironment(
               head.getActivePolicyId(), principal.tenantId(), principal.environment())
           .orElseThrow(() -> new IllegalStateException("Policy head references a missing active policy"));
+      entityRefresh.rolloutPolicy(previous);
       previous.setActive(false);
       previous.setStatus("SUPERSEDED");
-      policies.save(previous);
+      // The unique active-policy index is immediate: retire the prior row before enabling target.
+      // Both updates and events still commit or roll back as one scope-serialized transaction.
+      policies.saveAndFlush(previous);
       append(previous, "SUPERSEDED", principal.actorRef(), nextEtag, now);
     }
     target.setActive(true);
@@ -173,10 +189,13 @@ public class DomainRuleRolloutPolicyService {
   @Transactional(transactionManager = ConfigTransactionManagerNames.CONFIG)
   public DomainRuleRolloutPolicy requireActiveOrBootstrap(
       String ruleSetKey, DomainRuleGovernancePrincipal principal) {
+    entityRefresh.requireCleanSnapshotEntry();
+    lockSnapshotHead(principal, ruleSetKey);
     Optional<DomainRuleRolloutPolicy> active = policies
         .findByTenantIdAndEnvironmentAndRuleSetKeyAndActiveTrue(
             principal.tenantId(), principal.environment(), ruleSetKey);
     if (active.isPresent()) {
+      entityRefresh.rolloutPolicy(active.orElseThrow());
       ensureHead(principal, ruleSetKey);
       return active.orElseThrow();
     }
@@ -193,8 +212,9 @@ public class DomainRuleRolloutPolicyService {
         .approvedBy("platform-default").approvedAt(now)
         .activatedBy("platform-default").activatedAt(now).build());
     DomainRuleRolloutPolicyHead head = policyHeads
-        .findForUpdateByTenantIdAndEnvironmentAndRuleSetKey(
+        .findByTenantIdAndEnvironmentAndRuleSetKey(
             principal.tenantId(), principal.environment(), ruleSetKey)
+        .map(value -> { entityRefresh.rolloutPolicyHead(value); return value; })
         .orElseGet(() -> DomainRuleRolloutPolicyHead.builder()
             .id(UUID.randomUUID()).tenantId(principal.tenantId()).environment(principal.environment())
             .ruleSetKey(ruleSetKey).activationRevision(0L).build());
@@ -210,10 +230,34 @@ public class DomainRuleRolloutPolicyService {
     return policy;
   }
 
+  @Transactional(transactionManager = ConfigTransactionManagerNames.CONFIG)
+  public DomainRuleRolloutPolicy requireBootstrapPolicy(String ruleSetKey, DomainRuleGovernancePrincipal principal) {
+    entityRefresh.requireCleanSnapshotEntry();
+    lockSnapshotHead(principal, ruleSetKey);
+    DomainRuleRolloutPolicy policy = policies.findByTenantIdAndEnvironmentAndRuleSetKeyAndActiveTrue(
+        principal.tenantId(), principal.environment(), ruleSetKey)
+        .orElseThrow(() -> conflict("Bootstrap requires an active governed REQUIRED rollout policy"));
+    entityRefresh.rolloutPolicy(policy);
+    requireBootstrapAuthority(policy);
+    return policy;
+  }
+
+  static void requireBootstrapAuthority(DomainRuleRolloutPolicy policy) {
+    if (policy == null || !Boolean.TRUE.equals(policy.getActive()) || !"ACTIVE".equals(policy.getStatus())
+        || !"REQUIRED".equals(policy.getEnforcementMode())
+        || policy.getMinimumFreshProbes() == null || policy.getMinimumFreshProbes() < 1
+        || policy.getMinimumReadyRatio() == null || policy.getMinimumReadyRatio().signum() <= 0
+        || policy.getCreatedBy() == null || policy.getApprovedBy() == null
+        || policy.getApprovedAt() == null || policy.getActivatedBy() == null || policy.getActivatedAt() == null
+        || policy.getCreatedBy().equals(policy.getApprovedBy()))
+      throw conflict("Bootstrap requires an active governed REQUIRED policy with a positive quorum");
+  }
+
   private DomainRuleRolloutPolicyHead ensureHead(
       DomainRuleGovernancePrincipal principal, String ruleSetKey) {
-    return policyHeads.findForUpdateByTenantIdAndEnvironmentAndRuleSetKey(
+    return policyHeads.findByTenantIdAndEnvironmentAndRuleSetKey(
             principal.tenantId(), principal.environment(), ruleSetKey)
+        .map(value -> { entityRefresh.rolloutPolicyHead(value); return value; })
         .orElseGet(() -> {
           Optional<DomainRuleRolloutPolicy> active = policies
               .findByTenantIdAndEnvironmentAndRuleSetKeyAndActiveTrue(
@@ -234,20 +278,22 @@ public class DomainRuleRolloutPolicyService {
       DomainRuleGovernancePrincipal principal, String ruleSetKey) {
     return policyHeads.findByTenantIdAndEnvironmentAndRuleSetKey(
             principal.tenantId(), principal.environment(), ruleSetKey)
+        .map(value -> { entityRefresh.rolloutPolicyHead(value); return value; })
         .orElseThrow(() -> new IllegalStateException("Rollout policy head is missing"));
   }
 
   private DomainRuleRolloutPolicyHead requiredHeadForUpdate(
       DomainRuleGovernancePrincipal principal, String ruleSetKey) {
-    return policyHeads.findForUpdateByTenantIdAndEnvironmentAndRuleSetKey(
+    return policyHeads.findByTenantIdAndEnvironmentAndRuleSetKey(
             principal.tenantId(), principal.environment(), ruleSetKey)
+        .map(value -> { entityRefresh.rolloutPolicyHead(value); return value; })
         .orElseThrow(() -> new IllegalStateException("Rollout policy head is missing"));
   }
 
   private void lockSnapshotHead(DomainRuleGovernancePrincipal principal, String ruleSetKey) {
-    snapshotHeads.findForUpdateByTenantIdAndEnvironmentAndRuleSetKey(
-            principal.tenantId(), principal.environment(), ruleSetKey)
-        .orElseThrow(() -> missing("RuleSet head was not found"));
+    scopeLock.lock(principal.tenantId(), principal.environment(), ruleSetKey);
+    snapshotHeads.findByTenantIdAndEnvironmentAndRuleSetKey(
+        principal.tenantId(), principal.environment(), ruleSetKey).ifPresent(entityRefresh::snapshotHead);
   }
 
   private DomainRuleRolloutPolicy scoped(UUID id, DomainRuleGovernancePrincipal principal) {
@@ -256,7 +302,7 @@ public class DomainRuleRolloutPolicyService {
   }
 
   private DomainRuleRolloutPolicy scopedForUpdate(UUID id, DomainRuleGovernancePrincipal principal) {
-    return policies.findForUpdateByIdAndTenantIdAndEnvironment(
+    return policies.findByIdAndTenantIdAndEnvironment(
             id, principal.tenantId(), principal.environment())
         .orElseThrow(() -> missing("Rollout policy was not found in the requested scope"));
   }

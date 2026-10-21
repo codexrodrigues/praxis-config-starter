@@ -42,37 +42,46 @@ public class DomainRuleRolloutService implements DomainRuleSnapshotActivationGat
   private final DomainRuleSnapshotHeadRepository heads;
   private final DomainRuleRolloutPolicyService policyService;
   private final ObjectMapper objectMapper;
+  private final DomainRuleSnapshotVerifier snapshotVerifier;
   private final Clock clock;
+  private final DomainRuleSnapshotScopeLock scopeLock;
+  private final DomainRuleEntityRefresh entityRefresh;
 
   public DomainRuleRolloutService(DomainRuleRolloutPolicyRepository policies,
       DomainRuleSnapshotRolloutRepository rollouts, DomainRuleCandidateProbeRepository probes,
       DomainRuleSnapshotRolloutEventRepository events, DomainRuleSnapshotRepository snapshots,
       DomainRuleSnapshotHeadRepository heads, DomainRuleRolloutPolicyService policyService,
-      ObjectMapper objectMapper, Clock clock) {
+      ObjectMapper objectMapper, Clock clock, DomainRuleImplementationCatalog implementationCatalog, DomainRuleSnapshotScopeLock scopeLock, DomainRuleEntityRefresh entityRefresh) {
     this.policies = policies; this.rollouts = rollouts; this.probes = probes; this.events = events;
     this.snapshots = snapshots; this.heads = heads; this.policyService = policyService;
     this.objectMapper = objectMapper; this.clock = clock;
+    this.snapshotVerifier = new DomainRuleSnapshotVerifier(objectMapper, implementationCatalog);
+    this.entityRefresh = java.util.Objects.requireNonNull(entityRefresh);
+    this.scopeLock = java.util.Objects.requireNonNull(scopeLock);
   }
 
   @Transactional(transactionManager = ConfigTransactionManagerNames.CONFIG)
   public DomainRuleRolloutResponse create(DomainRuleRolloutCreateRequest request,
-      DomainRuleGovernancePrincipal principal, String ifMatch) {
+      DomainRuleGovernancePrincipal principal, String ifMatch, String ifNoneMatch) {
     if (request == null || request.candidateSnapshotKey() == null) throw bad("candidateSnapshotKey is required");
+    entityRefresh.requireCleanSnapshotEntry();
     DomainRuleSnapshot candidate = snapshots.findByTenantIdAndEnvironmentAndSnapshotKey(
         principal.tenantId(), principal.environment(), request.candidateSnapshotKey())
         .orElseThrow(() -> missing("Candidate snapshot was not found"));
-    var head = heads.findForUpdateByTenantIdAndEnvironmentAndRuleSetKey(
-        principal.tenantId(), principal.environment(), candidate.getRuleSetKey())
-        .orElseThrow(() -> missing("RuleSet head was not found"));
-    var condition = HttpEntityTagCondition.parse(ifMatch);
-    if (condition.isEmpty()) throw new DomainRuleSnapshotControlPlaneException(HttpStatus.PRECONDITION_REQUIRED, "If-Match is required");
-    if (!condition.matchesStrong(head.getHeadEtag().toString())) throw new DomainRuleSnapshotControlPlaneException(HttpStatus.PRECONDITION_FAILED, "Head ETag is stale");
-    if (candidate.getId().equals(head.getActiveSnapshotId())) throw conflict("Candidate is already active");
+    scopeLock.lock(principal.tenantId(), principal.environment(), candidate.getRuleSetKey());
+    var head = heads.findByTenantIdAndEnvironmentAndRuleSetKey(
+        principal.tenantId(), principal.environment(), candidate.getRuleSetKey()).orElse(null);
+    if (head != null) entityRefresh.snapshotHead(head);
+    verifyHeadPrecondition(head, ifMatch, ifNoneMatch);
+    if (head != null && candidate.getId().equals(head.getActiveSnapshotId())) throw conflict("Candidate is already active");
+    String candidateState = snapshotVerifier.governanceState(candidate);
+    if (!"READY".equals(candidateState)) throw conflict("Candidate is not READY [" + candidateState + "]");
     if (!rollouts.findByTenantIdAndEnvironmentAndRuleSetKeyAndStatusIn(
         principal.tenantId(), principal.environment(), candidate.getRuleSetKey(), OPEN).isEmpty())
       throw conflict("An open rollout already exists for this RuleSet");
-    DomainRuleRolloutPolicy policy = policyService.requireActiveOrBootstrap(
-        candidate.getRuleSetKey(), principal);
+    DomainRuleRolloutPolicy policy = head == null
+        ? policyService.requireBootstrapPolicy(candidate.getRuleSetKey(), principal)
+        : policyService.requireActiveOrBootstrap(candidate.getRuleSetKey(), principal);
     Instant now = clock.instant();
     Instant expiresAt = request.expiresAtUtc();
     if (expiresAt != null && !expiresAt.isAfter(now))
@@ -86,20 +95,23 @@ public class DomainRuleRolloutService implements DomainRuleSnapshotActivationGat
     var rollout = rollouts.save(DomainRuleSnapshotRollout.builder().id(UUID.randomUUID())
         .tenantId(principal.tenantId()).environment(principal.environment())
         .ruleSetKey(candidate.getRuleSetKey()).candidateSnapshotId(candidate.getId())
-        .expectedActiveSnapshotId(head.getActiveSnapshotId()).expectedHeadEtag(head.getHeadEtag())
+        .expectedActiveSnapshotId(head == null ? null : head.getActiveSnapshotId()).expectedHeadEtag(head == null ? null : head.getHeadEtag())
         .policyId(policy.getId()).status("PREPARING").createdBy(principal.actorRef())
         .createdAt(now).updatedAt(now).expiresAt(expiresAt).build());
     append(rollout, "CREATED", principal.actorRef(), now);
-    DomainRuleSnapshot active = snapshots.findById(head.getActiveSnapshotId()).orElseThrow();
+    DomainRuleSnapshot active = head == null ? null : snapshots.findByIdAndTenantIdAndEnvironmentAndRuleSetKey(
+        head.getActiveSnapshotId(), principal.tenantId(), principal.environment(), candidate.getRuleSetKey()).orElseThrow();
     return response(rollout, candidate, active, policy);
   }
 
   @Transactional(transactionManager = ConfigTransactionManagerNames.CONFIG)
   public DomainRuleCandidateProbeResponse probe(UUID rolloutId, DomainRuleCandidateProbeRequest request,
       DomainRuleGovernancePrincipal principal) {
-    var rollout = rollouts.findForUpdateByIdAndTenantIdAndEnvironment(
+    entityRefresh.requireCleanSnapshotEntry();
+    var rollout = rollouts.findByIdAndTenantIdAndEnvironment(
             rolloutId, principal.tenantId(), principal.environment())
         .orElseThrow(() -> missing("Rollout was not found in the requested scope"));
+    entityRefresh.snapshotRollout(rollout);
     if (!OPEN.contains(rollout.getStatus())) throw conflict("Rollout no longer accepts probes");
     DomainRuleSnapshot candidate = snapshots.findById(rollout.getCandidateSnapshotId()).orElseThrow();
     if (request == null || request.observedAtUtc() == null
@@ -126,11 +138,8 @@ public class DomainRuleRolloutService implements DomainRuleSnapshotActivationGat
     return rollouts.findByTenantIdAndEnvironmentAndRuleSetKeyAndStatusInOrderByCreatedAtDesc(
             principal.tenantId(), principal.environment(), key, OPEN).stream()
         .filter(rollout -> rollout.getExpiresAt() == null || rollout.getExpiresAt().isAfter(now))
-        .filter(rollout -> heads.findByTenantIdAndEnvironmentAndRuleSetKey(
-                principal.tenantId(), principal.environment(), key)
-            .filter(head -> head.getActiveSnapshotId().equals(rollout.getExpectedActiveSnapshotId())
-                && head.getHeadEtag().equals(rollout.getExpectedHeadEtag()))
-            .isPresent())
+        .filter(rollout -> expectedHeadMatches(rollout, heads.findByTenantIdAndEnvironmentAndRuleSetKey(
+            principal.tenantId(), principal.environment(), key).orElse(null)))
         .findFirst()
         .map(rollout -> {
           DomainRuleSnapshot candidate = snapshots.findByIdAndTenantIdAndEnvironmentAndRuleSetKey(
@@ -154,16 +163,16 @@ public class DomainRuleRolloutService implements DomainRuleSnapshotActivationGat
         .map(rollout -> {
           var summary = readiness(rollout.getId(), principal);
           boolean expired = rollout.getExpiresAt() != null && !rollout.getExpiresAt().isAfter(now);
-          boolean current = head != null
-              && head.getActiveSnapshotId().equals(rollout.getExpectedActiveSnapshotId())
-              && head.getHeadEtag().equals(rollout.getExpectedHeadEtag());
+          boolean current = expectedHeadMatches(rollout, head);
           var actions = new java.util.ArrayList<String>();
           if (canOperate) actions.add("CANCEL");
           if (canOperate && !expired && current && summary.activationReady())
             actions.add("ACTIVATE_CANDIDATE");
           DomainRuleSnapshot candidate = snapshots.findById(rollout.getCandidateSnapshotId())
               .orElseThrow(() -> new IllegalStateException("Rollout references missing candidate"));
-          DomainRuleSnapshot active = snapshots.findById(rollout.getExpectedActiveSnapshotId())
+          DomainRuleSnapshot active = rollout.getExpectedActiveSnapshotId() == null ? null : snapshots
+              .findByIdAndTenantIdAndEnvironmentAndRuleSetKey(rollout.getExpectedActiveSnapshotId(),
+                  principal.tenantId(), principal.environment(), key)
               .orElseThrow(() -> new IllegalStateException("Rollout references missing active snapshot"));
           DomainRuleRolloutPolicy policy = policies.findById(rollout.getPolicyId()).orElseThrow();
           return new DomainRuleRolloutCatalogItemResponse(
@@ -190,10 +199,24 @@ public class DomainRuleRolloutService implements DomainRuleSnapshotActivationGat
         && ratio >= policy.getMinimumReadyRatio().doubleValue();
     boolean requiredReady = enough
         && (!Boolean.TRUE.equals(policy.getBlockOnIncompatible()) || incompatible == 0);
-    boolean activationReady = "OBSERVE_ONLY".equals(policy.getEnforcementMode()) || requiredReady;
-    String derivedStatus = requiredReady ? "READY" : "BLOCKED";
+    DomainRuleSnapshot candidate = snapshots.findByIdAndTenantIdAndEnvironmentAndRuleSetKey(
+            rollout.getCandidateSnapshotId(), principal.tenantId(), principal.environment(), rollout.getRuleSetKey())
+        .orElseThrow(() -> new IllegalStateException("Rollout references missing candidate"));
+    boolean candidateReady = "READY".equals(snapshotVerifier.governanceState(candidate));
+    var currentHead = heads.findByTenantIdAndEnvironmentAndRuleSetKey(
+        principal.tenantId(), principal.environment(), rollout.getRuleSetKey()).orElse(null);
+    boolean current = expectedHeadMatches(rollout, currentHead);
+    boolean bootstrap = rollout.getExpectedActiveSnapshotId() == null;
+    boolean bootstrapAuthority = true;
+    if (bootstrap) {
+      try { DomainRuleRolloutPolicyService.requireBootstrapAuthority(policy); }
+      catch (DomainRuleSnapshotControlPlaneException deniedBootstrap) { bootstrapAuthority = false; }
+    }
+    boolean activationReady = candidateReady && current && bootstrapAuthority
+        && (bootstrap ? requiredReady : ("OBSERVE_ONLY".equals(policy.getEnforcementMode()) || requiredReady));
+    String derivedStatus = candidateReady && requiredReady ? "READY" : "BLOCKED";
     return new DomainRuleRolloutReadinessResponse(rolloutId, rollout.getRuleSetKey(),
-        snapshots.findById(rollout.getCandidateSnapshotId()).orElseThrow().getSnapshotKey(),
+        candidate.getSnapshotKey(),
         derivedStatus, policy.getEnforcementMode(), policy.getMinimumFreshProbes(),
         policy.getMinimumReadyRatio().doubleValue(), all.size(), ready, incompatible, unavailable, stale,
         activationReady, staleBefore);
@@ -201,7 +224,13 @@ public class DomainRuleRolloutService implements DomainRuleSnapshotActivationGat
 
   @Transactional(transactionManager = ConfigTransactionManagerNames.CONFIG)
   public void cancel(UUID rolloutId, DomainRuleGovernancePrincipal principal) {
-    var rollout = scoped(rolloutId, principal);
+    entityRefresh.requireCleanSnapshotEntry();
+    String key = rollouts.findRuleSetKeyByIdAndTenantIdAndEnvironment(
+        rolloutId, principal.tenantId(), principal.environment()).orElseThrow(() -> missing("Rollout was not found"));
+    scopeLock.lock(principal.tenantId(), principal.environment(), key);
+    var rollout = rollouts.findByIdAndTenantIdAndEnvironment(
+        rolloutId, principal.tenantId(), principal.environment()).orElseThrow(() -> missing("Rollout was not found"));
+    entityRefresh.snapshotRollout(rollout);
     if (!OPEN.contains(rollout.getStatus())) throw conflict("Rollout is already terminal");
     rollout.setStatus("CANCELLED"); rollout.setUpdatedAt(clock.instant()); rollouts.save(rollout);
     append(rollout, "CANCELLED", principal.actorRef(), clock.instant());
@@ -214,18 +243,20 @@ public class DomainRuleRolloutService implements DomainRuleSnapshotActivationGat
         .findByTenantIdAndEnvironmentAndRuleSetKeyAndActiveTrue(
             target.getTenantId(), target.getEnvironment(), target.getRuleSetKey())
         .orElse(null);
-    boolean required = activePolicy != null
-        && "REQUIRED".equals(activePolicy.getEnforcementMode());
+    if (activePolicy != null) entityRefresh.rolloutPolicy(activePolicy);
+    boolean bootstrap = currentHead == null;
+    if (bootstrap) DomainRuleRolloutPolicyService.requireBootstrapAuthority(activePolicy);
+    boolean required = bootstrap || (activePolicy != null && "REQUIRED".equals(activePolicy.getEnforcementMode()));
     if (rolloutId == null) {
       if (required) throw conflict("A READY rollout is required by the active policy");
       return;
     }
-    var rollout = rollouts.findForUpdateByIdAndTenantIdAndEnvironment(
+    var rollout = rollouts.findByIdAndTenantIdAndEnvironment(
             rolloutId, target.getTenantId(), target.getEnvironment())
         .orElseThrow(() -> missing("Rollout was not found in the requested scope"));
+    entityRefresh.snapshotRollout(rollout);
     if (!target.getId().equals(rollout.getCandidateSnapshotId())
-        || !currentHead.getActiveSnapshotId().equals(rollout.getExpectedActiveSnapshotId())
-        || !currentHead.getHeadEtag().equals(rollout.getExpectedHeadEtag()))
+        || !expectedHeadMatches(rollout, currentHead))
       throw conflict("Rollout candidate or expected head no longer matches activation");
     if (activePolicy != null && !activePolicy.getId().equals(rollout.getPolicyId()))
       throw conflict("Rollout policy is no longer the active policy");
@@ -241,9 +272,10 @@ public class DomainRuleRolloutService implements DomainRuleSnapshotActivationGat
   @Override
   public void activationCompleted(UUID rolloutId, DomainRuleSnapshot target, String actorRef) {
     if (rolloutId == null) return;
-    var rollout = rollouts.findForUpdateByIdAndTenantIdAndEnvironment(
+    var rollout = rollouts.findByIdAndTenantIdAndEnvironment(
             rolloutId, target.getTenantId(), target.getEnvironment())
         .orElseThrow(() -> missing("Rollout was not found in the requested scope"));
+    entityRefresh.snapshotRollout(rollout);
     if (!target.getId().equals(rollout.getCandidateSnapshotId())
         || !OPEN.contains(rollout.getStatus()))
       throw conflict("Rollout cannot be completed for the activated snapshot");
@@ -280,9 +312,34 @@ public class DomainRuleRolloutService implements DomainRuleSnapshotActivationGat
   private DomainRuleRolloutResponse response(DomainRuleSnapshotRollout r, DomainRuleSnapshot c,
       DomainRuleSnapshot a, DomainRuleRolloutPolicy p) {
     return new DomainRuleRolloutResponse(r.getId(), r.getRuleSetKey(), c.getSnapshotKey(),
-        c.getContentHash(), a.getSnapshotKey(), r.getExpectedHeadEtag().toString(), p.getPolicyKey(),
+        c.getContentHash(), a == null ? null : a.getSnapshotKey(),
+        r.getExpectedHeadEtag() == null ? null : r.getExpectedHeadEtag().toString(), p.getPolicyKey(),
         p.getPolicyVersion(), p.getEnforcementMode(), r.getStatus(), r.getCreatedAt(), r.getExpiresAt());
   }
+  private static boolean expectedHeadMatches(DomainRuleSnapshotRollout rollout,
+      org.praxisplatform.config.domain.DomainRuleSnapshotHead head) {
+    if (rollout.getExpectedActiveSnapshotId() == null || rollout.getExpectedHeadEtag() == null)
+      return rollout.getExpectedActiveSnapshotId() == null && rollout.getExpectedHeadEtag() == null && head == null;
+    return head != null && rollout.getExpectedActiveSnapshotId().equals(head.getActiveSnapshotId())
+        && rollout.getExpectedHeadEtag().equals(head.getHeadEtag());
+  }
+
+  private static void verifyHeadPrecondition(org.praxisplatform.config.domain.DomainRuleSnapshotHead head,
+      String ifMatch, String ifNoneMatch) {
+    var match = HttpEntityTagCondition.parse(ifMatch);
+    var absent = HttpEntityTagCondition.parse(ifNoneMatch);
+    if (!match.isEmpty() && !absent.isEmpty()) throw bad("Use exactly one head precondition");
+    if (head == null) {
+      if (!match.isEmpty()) throw new DomainRuleSnapshotControlPlaneException(HttpStatus.PRECONDITION_FAILED, "RuleSet head is absent");
+      if (!absent.wildcard()) throw new DomainRuleSnapshotControlPlaneException(HttpStatus.PRECONDITION_REQUIRED, "Bootstrap requires If-None-Match: *");
+    } else {
+      if (!absent.isEmpty()) throw new DomainRuleSnapshotControlPlaneException(HttpStatus.PRECONDITION_FAILED, "RuleSet head already exists");
+      if (match.isEmpty()) throw new DomainRuleSnapshotControlPlaneException(HttpStatus.PRECONDITION_REQUIRED, "If-Match is required");
+      if (match.wildcard() || !match.matchesStrong(head.getHeadEtag().toString()))
+        throw new DomainRuleSnapshotControlPlaneException(HttpStatus.PRECONDITION_FAILED, "Head ETag is stale");
+    }
+  }
+
   private static DomainRuleSnapshotControlPlaneException bad(String m) { return new DomainRuleSnapshotControlPlaneException(HttpStatus.BAD_REQUEST, m); }
   private static DomainRuleSnapshotControlPlaneException missing(String m) { return new DomainRuleSnapshotControlPlaneException(HttpStatus.NOT_FOUND, m); }
   private static DomainRuleSnapshotControlPlaneException conflict(String m) { return new DomainRuleSnapshotControlPlaneException(HttpStatus.CONFLICT, m); }
