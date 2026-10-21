@@ -174,10 +174,10 @@ class DomainRuleNewEntityVersionPostgresTest {
       var ruleSet = new RuleSetDefinition(
           new RuleSetRef("proof", "version", ruleSetKey, "evaluate", revision), List.of("request"),
           List.of(new DecisionSlot("eligibility", DecisionStage.DOMAIN_DECISION, SlotCardinality.SINGLE,
-              OverridePolicy.FORBIDDEN, DecisionAggregationPolicy.SINGLE_RESULT)),
+              OverridePolicy.FORBIDDEN, DecisionAggregationPolicy.SINGLE_RESULT, null)),
           List.of(new DecisionBinding("eligibility", "eligibility", DecisionSource.PRODUCT, null,
               RuleExecutorRef.jsonLogic(json.createObjectNode().put("var", "request.eligible")),
-              List.of(), 10, true, RuleDecision.DENY, "NOT_ELIGIBLE", List.of("request.eligible"))),
+              List.of(), 10, true, RuleDecision.DENY, "NOT_ELIGIBLE", List.of("request.eligible"), null)),
           RuleRuntimeCompatibility.current(), RuleFailPolicy.FAIL_CLOSED);
       var snapshot = new PublishedRuleSnapshot(PublishedRuleSnapshot.SNAPSHOT_CONTRACT_VERSION,
           key, TENANT, ENVIRONMENT, "version-proof", revision, now.toString(), null, "proof/1",
