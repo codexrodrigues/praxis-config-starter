@@ -61,6 +61,50 @@ import org.springframework.web.server.ResponseStatusException;
 @Tag("unit")
 class AgenticAuthoringTurnStreamServiceTest {
 
+    @Test
+    void sendsEphemeralHeartbeatWithoutSseIdOrFabricatedReplayCursor() throws Exception {
+        var event = AiTurnEventEnvelope.builder()
+                .eventId(null).streamId(UUID.randomUUID()).seq(-1L).type("heartbeat")
+                .payload(objectMapper.createObjectNode().put("state", "alive")).build();
+        assertWireEventId(event, null);
+        org.assertj.core.api.Assertions.assertThat(event.getEventId()).isNull();
+        org.assertj.core.api.Assertions.assertThat(event.getSeq()).isEqualTo(-1L);
+    }
+
+    @Test
+    void preservesPersistedEventIdOnSseWire() throws Exception {
+        UUID eventId = UUID.randomUUID();
+        var event = AiTurnEventEnvelope.builder()
+                .eventId(eventId).streamId(UUID.randomUUID()).seq(7L).type("thought.step")
+                .payload(objectMapper.createObjectNode().put("phase", "intent.resolve")).build();
+        assertWireEventId(event, eventId.toString());
+        org.assertj.core.api.Assertions.assertThat(event.getSeq()).isEqualTo(7L);
+    }
+
+    private void assertWireEventId(AiTurnEventEnvelope event, String expectedId) throws Exception {
+        var emitter = org.mockito.Mockito.mock(org.springframework.web.servlet.mvc.method.annotation.SseEmitter.class);
+        var builder = org.mockito.ArgumentCaptor.forClass(
+                org.springframework.web.servlet.mvc.method.annotation.SseEmitter.SseEventBuilder.class);
+        var stream = service();
+        try {
+            ReflectionTestUtils.invokeMethod(stream, "send", emitter, event);
+            verify(emitter, never()).completeWithError(any(Throwable.class));
+            verify(emitter).send(builder.capture());
+            var wire = builder.getValue().build();
+            String text = wire.stream().map(item -> item.getData())
+                    .filter(String.class::isInstance).map(String.class::cast)
+                    .collect(java.util.stream.Collectors.joining());
+            org.assertj.core.api.Assertions.assertThat(text).contains("event:" + event.getType());
+            if (expectedId == null) org.assertj.core.api.Assertions.assertThat(text).doesNotContain("id:");
+            else org.assertj.core.api.Assertions.assertThat(text).contains("id:" + expectedId);
+            org.assertj.core.api.Assertions.assertThat(wire.stream().map(item -> item.getData()).toList())
+                    .contains(event);
+        } finally {
+            stream.shutdown();
+        }
+    }
+
+
     @Mock
     private AgenticAuthoringIntentResolverService intentResolverService;
     @Mock
