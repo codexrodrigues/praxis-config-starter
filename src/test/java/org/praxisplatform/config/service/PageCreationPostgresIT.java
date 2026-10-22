@@ -62,6 +62,42 @@ class PageCreationPostgresIT {
       new java.util.concurrent.atomic.AtomicLong();
   private static final java.util.concurrent.atomic.AtomicReference<String> sqlFault =
       new java.util.concurrent.atomic.AtomicReference<>();
+  private static volatile CreationLockBarrier creationLockBarrier;
+
+  /** Test-only rendezvous before the first page-creation lock on each underlying connection. */
+  private static final class CreationLockBarrier {
+    private final String expectedKey;
+    private final java.util.concurrent.CountDownLatch arrivals =
+        new java.util.concurrent.CountDownLatch(2);
+    private final Set<Connection> connections = Collections.newSetFromMap(new IdentityHashMap<>());
+
+    private CreationLockBarrier(List<String> scopeAndKey) {
+      expectedKey =
+          scopeAndKey.stream()
+              .map(value -> value.length() + ":" + value)
+              .collect(java.util.stream.Collectors.joining());
+    }
+
+    void beforeFirstLock(Connection underlyingConnection, Map<Integer, Object> bindings)
+        throws InterruptedException {
+      synchronized (this) {
+        if (connections.contains(underlyingConnection) || arrivals.getCount() == 0) return;
+        assertThat(bindings.get(1)).isEqualTo("praxis-page-create");
+        assertThat(bindings.get(2)).isEqualTo(expectedKey);
+        connections.add(underlyingConnection);
+        arrivals.countDown();
+      }
+      assertThat(arrivals.await(30, java.util.concurrent.TimeUnit.SECONDS))
+          .as("Both operations reach the same key before either lock executes")
+          .isTrue();
+    }
+
+    synchronized void requireConsumed() {
+      assertThat(connections).hasSize(2);
+      assertThat(arrivals.getCount()).isZero();
+    }
+  }
+
   private static final UiLayoutTarget ANCHOR =
       new UiLayoutTarget("praxis-app-shell", "99999999-9999-4999-8999-999999999999");
   private static final UiLayoutTarget SOURCE = UiLayoutPageRevisionReproductionTest.PAGE;
@@ -88,6 +124,7 @@ class PageCreationPostgresIT {
   @AfterEach
   void closeApplication() {
     commitResponseDelayMillis.set(0);
+    creationLockBarrier = null;
     if (application != null) application.close();
   }
 
@@ -258,11 +295,25 @@ class PageCreationPostgresIT {
                 if (result instanceof java.sql.PreparedStatement statement
                     && arguments != null
                     && arguments[0] instanceof String sql) {
+                  Map<Integer, Object> bindings = new HashMap<>();
                   return java.lang.reflect.Proxy.newProxyInstance(
                       java.sql.PreparedStatement.class.getClassLoader(),
                       new Class<?>[] {java.sql.PreparedStatement.class},
                       (statementProxy, statementMethod, statementArguments) -> {
                         try {
+                          if (statementMethod.getName().startsWith("set")
+                              && statementArguments != null
+                              && statementArguments.length >= 2
+                              && statementArguments[0] instanceof Integer parameter) {
+                            bindings.put(parameter, statementArguments[1]);
+                          }
+                          CreationLockBarrier barrier = creationLockBarrier;
+                          if (barrier != null
+                              && statementMethod.getName().startsWith("execute")
+                              && sql.equals(
+                                  "select pg_advisory_xact_lock(hashtext(?),hashtext(?))")) {
+                            barrier.beforeFirstLock(connection, bindings);
+                          }
                           long started = System.nanoTime();
                           Object statementResult =
                               statementMethod.invoke(statement, statementArguments);
@@ -743,6 +794,9 @@ class PageCreationPostgresIT {
   @Test
   void concurrentSameCommandHasOneDurableIdentity() throws Exception {
     var command = command();
+    creationLockBarrier =
+        new CreationLockBarrier(
+            List.of(app, tenant, environment, actor, command.creationKey().toString()));
     var pool = java.util.concurrent.Executors.newFixedThreadPool(2);
     try {
       var start = new java.util.concurrent.CountDownLatch(1);
@@ -759,15 +813,24 @@ class PageCreationPostgresIT {
                 return pages.create(principal(), version, command);
               });
       start.countDown();
-      assertThat(a.get(60, java.util.concurrent.TimeUnit.SECONDS).receipt().pageId())
-          .isEqualTo(b.get(60, java.util.concurrent.TimeUnit.SECONDS).receipt().pageId());
+      var first = a.get(60, java.util.concurrent.TimeUnit.SECONDS);
+      var second = b.get(60, java.util.concurrent.TimeUnit.SECONDS);
+      assertThat(first.receipt().pageId()).isEqualTo(second.receipt().pageId());
+      assertThat(List.of(first.created(), second.created())).containsExactlyInAnyOrder(true, false);
+      creationLockBarrier.requireConsumed();
     } finally {
       pool.shutdownNow();
       assertThat(pool.awaitTermination(60, java.util.concurrent.TimeUnit.SECONDS)).isTrue();
     }
     assertThat(count("ui_page_catalog")).isEqualTo(1);
+    assertThat(count("ui_page_creation_evidence")).isEqualTo(1);
+    assertThat(count("ui_layout_baseline_metadata_evidence")).isEqualTo(1);
     assertThat(count("ui_layout_draft")).isEqualTo(1);
     assertThat(captures.get()).isEqualTo(1);
+    System.out.println(
+        "P2 concurrent barrier: two distinct underlying connections reached the same expected"
+            + " scope/key before either lock; one creation/capture,"
+            + " concurrentSameCommandHasOneDurableIdentity");
   }
 
   @Test
@@ -823,6 +886,9 @@ class PageCreationPostgresIT {
   void concurrentDifferentCommandsHaveOneWinnerAndOneConflict() throws Exception {
     var original = command();
     var divergent = new PageCreationCommand(original.creationKey(), original.source(), "Divergent");
+    creationLockBarrier =
+        new CreationLockBarrier(
+            List.of(app, tenant, environment, actor, original.creationKey().toString()));
     var pool = java.util.concurrent.Executors.newFixedThreadPool(2);
     try {
       var start = new java.util.concurrent.CountDownLatch(1);
@@ -846,12 +912,28 @@ class PageCreationPostgresIT {
       assertThat(outcomes.stream().filter(PageCreationService.CreationOutcome.class::isInstance))
           .hasSize(1);
       assertThat(outcomes).contains(UiLayoutLifecycleException.Code.INVALID_STATE);
+      assertThat(
+              outcomes.stream()
+                  .filter(PageCreationService.CreationOutcome.class::isInstance)
+                  .map(PageCreationService.CreationOutcome.class::cast)
+                  .findFirst()
+                  .orElseThrow()
+                  .created())
+          .isTrue();
+      creationLockBarrier.requireConsumed();
     } finally {
       pool.shutdownNow();
       assertThat(pool.awaitTermination(60, java.util.concurrent.TimeUnit.SECONDS)).isTrue();
     }
     assertThat(count("ui_page_catalog")).isEqualTo(1);
+    assertThat(count("ui_page_creation_evidence")).isEqualTo(1);
+    assertThat(count("ui_layout_baseline_metadata_evidence")).isEqualTo(1);
     assertThat(count("ui_layout_draft")).isEqualTo(1);
+    assertThat(captures.get()).isEqualTo(1);
+    System.out.println(
+        "P2 concurrent barrier: two distinct underlying connections reached the same expected"
+            + " scope/key before either lock; one creation/capture,"
+            + " concurrentDifferentCommandsHaveOneWinnerAndOneConflict");
   }
 
   @Test
