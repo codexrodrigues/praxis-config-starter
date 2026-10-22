@@ -609,6 +609,25 @@ class UiLayoutLifecycleHttpRoundTripTest {
         .header(HttpHeaders.IF_MATCH,"\""+fixture.headRows.values().iterator().next().getHeadEtag()+"\"")
         .content(headBody(release,"revoked child"))).andExpect(status().isForbidden());
     assertThat(fixture.mutations).hasValue(mutations);
+    var persisted=fixture.draftRows.get(UUID.fromString(draftId));
+    String intact=persisted.getDraftDocument();
+    var originalCapture=mapper.readTree(intact).at("/targets/0/pageChildren/0/captureText").asText();
+    var wrongDraft=(com.fasterxml.jackson.databind.node.ObjectNode)mapper.readTree(originalCapture);
+    ((com.fasterxml.jackson.databind.node.ObjectNode)wrongDraft.path("binding")).put("sourceDraftRef",UUID.randomUUID().toString());
+    for (String corrupted : List.of("{private-corruption",wrongDraft.toString())) {
+      var broken=(com.fasterxml.jackson.databind.node.ObjectNode)mapper.readTree(intact);
+      ((com.fasterxml.jackson.databind.node.ObjectNode)broken.at("/targets/0/pageChildren/0")).put("captureText",corrupted);
+      persisted.setDraftDocument(broken.toString());
+      http.perform(get("/api/praxis/config/ui-layouts/drafts/{draftId}",draftId).principal(publisher)
+          .param("rootComponentType",target.componentType()).param("rootComponentId",target.componentId())
+          .header("X-Praxis-Context-Version",CONTEXT))
+          .andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("INVALID_STATE"))
+          .andExpect(header().string(HttpHeaders.CACHE_CONTROL,"no-store"));
+      org.assertj.core.api.Assertions.assertThatThrownBy(()->frozenSource.resolve(invocation,UUID.fromString(release),ignored -> {}))
+          .isInstanceOf(UiLayoutLifecycleException.class)
+          .extracting(error -> ((UiLayoutLifecycleException)error).getCode()).isEqualTo(UiLayoutLifecycleException.Code.INVALID_STATE);
+      assertThat(fixture.mutations).hasValue(mutations);
+    }
   }
 
   @Test

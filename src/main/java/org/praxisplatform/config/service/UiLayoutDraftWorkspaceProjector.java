@@ -36,7 +36,7 @@ public class UiLayoutDraftWorkspaceProjector {
     List<UiLayoutDraftWorkspaceReceipt.Target> targets = new ArrayList<>();
     for (UiLayoutDraftWorkspaceDocument.TargetState state : document.targets()) {
       structure.validateTarget(invocation, state.target(), validation);
-      children.integrity(draft.getId(), state.target(),
+      children.historicalIntegrity(draft.getId(), state.target(),
           state.baseline().document(), state.working().document(), state.pageChildren());
       selections.verify(invocation, state);
       targets.add(target(state));

@@ -103,6 +103,16 @@ final class UiLayoutPageChildCaptures {
     validation.require(invocation);
   }
 
+  /** Persisted corruption is state failure; this boundary performs no current-source admission. */
+  void historicalIntegrity(UUID draftId, UiLayoutTarget page, JsonNode baseline, JsonNode candidate,
+      List<UiLayoutPageChildEvidence> entries) {
+    try { integrity(draftId, page, baseline, candidate, entries); }
+    catch (RuntimeException exception) {
+      throw new UiLayoutLifecycleException(UiLayoutLifecycleException.Code.INVALID_STATE,
+          "Historical page child evidence is unavailable or inconsistent.");
+    }
+  }
+
   /** Historical syntax/reproduction only; current host admission is still mandatory on mutations. */
   void integrity(UUID draftId, UiLayoutTarget page, JsonNode baseline, JsonNode candidate, List<UiLayoutPageChildEvidence> entries) {
     if (!UiLayoutPageRevisionReproduction.TYPE.equals(page.componentType())) { if (!entries.isEmpty()) throw invalid(); return; }

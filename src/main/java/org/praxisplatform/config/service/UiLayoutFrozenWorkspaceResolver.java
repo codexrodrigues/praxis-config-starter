@@ -59,7 +59,7 @@ final class UiLayoutFrozenWorkspaceResolver {
       }
       List<com.fasterxml.jackson.databind.JsonNode> patches = new ArrayList<>();
       for (var state : document.targets()) {
-        children.integrity(draft.getId(), state.target(), state.baseline().document(), state.working().document(), state.pageChildren());
+        children.historicalIntegrity(draft.getId(), state.target(), state.baseline().document(), state.working().document(), state.pageChildren());
         if (state.selectedRevision() == null || state.selectedAssignment() == null) throw failure(UiLayoutLifecycleException.Code.INVALID_STATE);
         targetAdmission.accept(state.target());
       }

@@ -94,7 +94,7 @@ class UiLayoutPageChildCapturesTest {
         UiLayoutPageRevisionReproductionTest.PATCH, "fixture:page", baseline, metadata(baseline,"fixture:page"));
     assertThrows(UiLayoutLifecycleException.class, () -> captures.initial(invocation,draft,noEvidence,source,admission,validation()));
     var evidence = initial(baseline);
-    assertThrows(UiLayoutLifecycleException.class, () -> captures.integrity(UUID.randomUUID(),page,baseline,baseline,evidence));
+    assertEquals(UiLayoutLifecycleException.Code.VALIDATION_FAILED, assertThrows(UiLayoutLifecycleException.class, () -> captures.integrity(UUID.randomUUID(),page,baseline,baseline,evidence)).getCode());
     var first = evidence.getFirst(); var corrupted = (ObjectNode) UiLayoutPageRevisionReproductionTest.JSON.readTree(first.captureText()); corrupted.put("rawInputHash", "0".repeat(64));
     var changed = new ArrayList<>(evidence); changed.set(0,new UiLayoutPageChildEvidence(first.request(),first.patch(),corrupted.toString()));
     assertThrows(UiLayoutLifecycleException.class, () -> captures.integrity(draft,page,baseline,baseline,changed));
