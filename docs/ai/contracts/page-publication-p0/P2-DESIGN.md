@@ -172,3 +172,16 @@ and not evidence of rollback. The caller retains its original creationKey and re
 through lookup or an authorized identical replay; it must not allocate a new key merely
 because delivery was uncertain. The integration fixture delays only the response after
 a real delegated JDBC commit and verifies the durable identity from a fresh connection.
+
+When REQUIRED joins an existing Config transaction, a returned outcome is provisional
+until the outer owner commits. The operation attempt remains alive through beforeCommit
+and afterCommit, and closes at afterCompletion. An owned transaction also checks after
+execute returns, before closing its attempt. The afterCommit check can reject a delayed
+COMMIT response but cannot undo committed SQL. Lifetime is a per-call local state, never
+an authority registry or a different propagation mode.
+
+Spring 6.2 savepoint rollback keeps the synchronization list. The readset therefore
+clears all retained bytes in savepointRollback without renewing its connection/isolation
+proof. A DSTM unit fixture with mocked JDBC exercises actual NESTED/savepoint propagation
+and a fresh loader after rollback. This defensive invalidation does not add nested JPA
+or savepoint support to the canonical page/lifecycle contract.

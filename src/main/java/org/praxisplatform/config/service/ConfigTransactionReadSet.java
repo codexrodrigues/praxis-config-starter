@@ -73,7 +73,18 @@ final class ConfigTransactionReadSet implements TransactionSynchronization {
   }
 
   @Override
+  public void savepointRollback(Object savepoint) {
+    // A savepoint rollback retains the synchronization list, but rows loaded since the
+    // savepoint may no longer exist. Invalidate bytes without renewing transaction proof.
+    clear();
+  }
+
+  @Override
   public void afterCompletion(int status) {
+    clear();
+  }
+
+  private void clear() {
     values.clear();
     bytes = 0;
   }

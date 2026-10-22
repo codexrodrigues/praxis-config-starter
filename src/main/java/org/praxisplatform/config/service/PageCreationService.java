@@ -5,6 +5,7 @@ import java.security.Principal;
 import java.time.Instant;
 import java.util.Objects;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Supplier;
 import org.praxisplatform.config.dto.PageCreationCommand;
 import org.praxisplatform.config.dto.PageCreationReceipt;
@@ -98,9 +99,14 @@ public final class PageCreationService {
     PageCreationContext currentContext = bridge.resolve(principal, contextVersion);
     UiLayoutValidationContext validation =
         begin(currentContext, UiLayoutLifecycleOperation.CREATE_DRAFT);
-    try (var attempt = validation.attempt()) {
+    var attempt = validation.attempt();
+    AtomicBoolean retainedUntilCompletion = new AtomicBoolean();
+    try {
       CreationOutcome outcome =
           transaction(
+              currentContext,
+              validation,
+              retainedUntilCompletion,
               () -> {
                 revalidate(principal, contextVersion, currentContext, validation);
                 authorizeCreate(currentContext, command, validation);
@@ -177,6 +183,8 @@ public final class PageCreationService {
               });
       validation.require(currentContext.invocation());
       return outcome;
+    } finally {
+      if (!retainedUntilCompletion.get()) attempt.close();
     }
   }
 
@@ -188,9 +196,14 @@ public final class PageCreationService {
     PageCreationContext currentContext = bridge.resolve(principal, contextVersion);
     UiLayoutValidationContext validation =
         begin(currentContext, UiLayoutLifecycleOperation.READ_DRAFT);
-    try (var attempt = validation.attempt()) {
+    var attempt = validation.attempt();
+    AtomicBoolean retainedUntilCompletion = new AtomicBoolean();
+    try {
       PageCreationReceipt result =
           transaction(
+              currentContext,
+              validation,
+              retainedUntilCompletion,
               () -> {
                 Runnable authorize =
                     () -> {
@@ -223,6 +236,8 @@ public final class PageCreationService {
               });
       validation.require(currentContext.invocation());
       return result;
+    } finally {
+      if (!retainedUntilCompletion.get()) attempt.close();
     }
   }
 
@@ -325,12 +340,33 @@ public final class PageCreationService {
     }
   }
 
-  private <T> T transaction(Supplier<T> work) {
+  private <T> T transaction(
+      PageCreationContext context,
+      UiLayoutValidationContext validation,
+      AtomicBoolean retainedUntilCompletion,
+      Supplier<T> work) {
     try {
       return transactions.execute(
           status -> {
             try {
               store.requireTransaction();
+              boolean participating = !status.isNewTransaction();
+              TransactionSynchronizationManager.registerSynchronization(
+                  new TransactionSynchronization() {
+                    @Override
+                    public void afterCommit() {
+                      // COMMIT already succeeded. An expired response is uncertain delivery,
+                      // never evidence that SQL rolled back; reconcile with the same key.
+                      validation.require(context.invocation());
+                    }
+
+                    @Override
+                    public void afterCompletion(int completionStatus) {
+                      if (participating) validation.attempt().close();
+                    }
+                  });
+              retainedUntilCompletion.set(participating);
+              // A participating call returns provisionally; the outer owner still commits.
               T result = work.get();
               store.requireTransaction();
               if (status.isRollbackOnly()) {

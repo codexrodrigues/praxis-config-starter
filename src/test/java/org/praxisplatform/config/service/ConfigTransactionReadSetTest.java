@@ -98,6 +98,35 @@ class ConfigTransactionReadSetTest {
   }
 
   @Test
+  void nestedSavepointRollbackDiscardsPositiveBytesWithoutRenewingTransactionAdmission()
+      throws Exception {
+    Connection actual = connection();
+    var metadata = mock(java.sql.DatabaseMetaData.class);
+    when(metadata.supportsSavepoints()).thenReturn(true);
+    when(actual.getMetaData()).thenReturn(metadata);
+    when(actual.setSavepoint(anyString())).thenReturn(mock(java.sql.Savepoint.class));
+    when(source.getConnection()).thenReturn(actual);
+    TransactionTemplate nested = new TransactionTemplate(transaction.getTransactionManager());
+    nested.setPropagationBehavior(TransactionDefinition.PROPAGATION_NESTED);
+    transaction.executeWithoutResult(
+        status -> {
+          assertThat(read("before")).contains("value-1");
+          nested.executeWithoutResult(
+              inner -> {
+                assertThat(inner.hasSavepoint()).isTrue();
+                assertThat(read("inside")).contains("value-2");
+                assertThat(read("inside")).contains("value-2");
+                inner.setRollbackOnly();
+              });
+          assertThat(read("inside")).contains("value-3");
+          assertThat(read("before")).contains("value-4");
+        });
+    verify(actual).rollback(any(java.sql.Savepoint.class));
+    verify(actual, times(1)).prepareStatement("SELECT current_setting('transaction_isolation')");
+    verify(actual, never()).getTransactionIsolation();
+  }
+
+  @Test
   void rejectsChangedConnectionAndRollbackOnlyEvenOnAHit() throws Exception {
     transaction.executeWithoutResult(
         status -> {

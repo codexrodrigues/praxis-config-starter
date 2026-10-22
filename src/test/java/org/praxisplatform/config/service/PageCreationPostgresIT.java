@@ -1344,6 +1344,51 @@ class PageCreationPostgresIT {
   }
 
   @Test
+  void participatingCreationAndLookupKeepValidationUntilTheOuterTransactionCompletes() {
+    var request = command();
+    var committed =
+        transactions.execute(
+            status -> {
+              var provisional = pages.create(principal(), version, request).receipt();
+              assertThat(pages.byCreationKey(principal(), version, request.creationKey()))
+                  .isEqualTo(provisional);
+              return provisional;
+            });
+    assertThat(count("ui_page_catalog")).isEqualTo(1);
+    assertThat(pages.byCreationKey(principal(), version, request.creationKey()))
+        .isEqualTo(committed);
+    assertThat(captures.get()).isEqualTo(1);
+
+    validationBudget = Duration.ofSeconds(15);
+    long delayedBefore = delayedCommitResponses.get();
+    commitResponseDelayMillis.set(15_050);
+    assertThatThrownBy(
+            () ->
+                transactions.execute(
+                    status -> {
+                      var provisional = pages.create(principal(), version, request);
+                      assertThat(provisional.created()).isFalse();
+                      assertThat(pages.byCreationKey(principal(), version, request.creationKey()))
+                          .isEqualTo(provisional.receipt());
+                      return provisional;
+                    }))
+        .isInstanceOfSatisfying(
+            UiLayoutLifecycleException.class,
+            failure ->
+                assertThat(failure.getCode())
+                    .isEqualTo(UiLayoutLifecycleException.Code.SOURCE_UNAVAILABLE));
+    assertThat(delayedCommitResponses.get()).isEqualTo(delayedBefore + 1);
+    validationBudget = Duration.ofSeconds(40);
+    assertThat(pages.byCreationKey(principal(), version, request.creationKey()))
+        .isEqualTo(committed);
+    assertThat(count("ui_page_catalog")).isEqualTo(1);
+    assertThat(captures.get()).isEqualTo(1);
+    System.out.println(
+        "P2 outer REQUIRED transaction: create and lookup commit together; late real"
+            + " COMMIT response remains uncertain and reconciles the same identity");
+  }
+
+  @Test
   void crossApplicationKnownUuidAndRevokedLookupDoNotExposeContent() {
     var request = command();
     var created = pages.create(principal(), version, request).receipt();
