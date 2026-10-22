@@ -1346,6 +1346,16 @@ class PageCreationPostgresIT {
   @Test
   void participatingCreationAndLookupKeepValidationUntilTheOuterTransactionCompletes() {
     var request = command();
+    transactions.executeWithoutResult(
+        status -> {
+          var provisional = pages.create(principal(), version, request).receipt();
+          assertThat(pages.byCreationKey(principal(), version, request.creationKey()))
+              .isEqualTo(provisional);
+          status.setRollbackOnly();
+        });
+    assertNoCreationFromIndependentConnection();
+    assertThat(captures.get()).isEqualTo(1);
+    captures.set(0); // A rolled-back creation has no durable capture to reuse.
     var committed =
         transactions.execute(
             status -> {
