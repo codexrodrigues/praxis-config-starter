@@ -619,6 +619,11 @@ refletir o ultimo evento nao terminal conhecido, permitindo que clientes mostrem
 mensagens como "a LLM ainda esta resolvendo a intencao" sem inventar logica
 local ou depender de timers opacos no frontend.
 
+O envelope efêmero mantém `eventId=null` e `seq=-1`. No wire SSE, o produtor
+omite o campo `id` por completo: não chama `SseEventBuilder.id(null)`, não envia
+um `id` vazio e não fabrica um cursor para o heartbeat. Somente eventos
+persistidos publicam seu identificador como `id` e avançam o cursor de replay.
+
 No produtor local ativo, checagens internas de terminalidade e o watchdog usam a
 projecao em memoria do ultimo evento que ja foi confirmado pelo event store. A
 reconciliacao com o tail persistido e limitada a uma janela periodica de cinco

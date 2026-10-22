@@ -1048,10 +1048,13 @@ public class AgenticAuthoringTurnStreamService {
 
     private void send(SseEmitter emitter, AiTurnEventEnvelope event) {
         try {
-            emitter.send(SseEmitter.event()
-                    .id(event.getEventId() != null ? event.getEventId().toString() : null)
+            SseEmitter.SseEventBuilder builder = SseEmitter.event()
                     .name(event.getType())
-                    .data(event));
+                    .data(event);
+            if (event.getEventId() != null) {
+                builder.id(event.getEventId().toString());
+            }
+            emitter.send(builder);
         } catch (Exception ex) {
             emitter.completeWithError(ex);
         }

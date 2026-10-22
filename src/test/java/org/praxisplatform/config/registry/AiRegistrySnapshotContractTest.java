@@ -19,13 +19,13 @@ import org.springframework.core.io.ClassPathResource;
 class AiRegistrySnapshotContractTest {
 
     private static final String EXPECTED_SNAPSHOT_HASH =
-            "897caffde69dd534dd06977f0908ad8141ceeeafcf5de8539717b96fdfec1846";
+            "ae5354dcd0f08bc95d43508314eb19e874242e35ed8d56789f9302a83648fdd0";
     private static final String EXPECTED_VERSION = "1.0.0";
-    private static final String EXPECTED_GENERATED_AT = "2026-10-20T01:21:23.842Z";
+    private static final String EXPECTED_GENERATED_AT = "2026-10-22T12:39:23.374Z";
     private static final int EXPECTED_COMPONENT_COUNT = 107;
     private static final int EXPECTED_AUTHORING_MANIFEST_COUNT = 99;
     private static final int EXPECTED_CHUNKED_COMPONENT_COUNT = 107;
-    private static final int EXPECTED_CHUNK_COUNT = 2612;
+    private static final int EXPECTED_CHUNK_COUNT = 2614;
 
     private final ObjectMapper objectMapper = new ObjectMapper();
 
@@ -75,6 +75,22 @@ class AiRegistrySnapshotContractTest {
         assertThat(authoringManifestCount(components)).isEqualTo(EXPECTED_AUTHORING_MANIFEST_COUNT);
         assertThat(chunkedComponentCount(components)).isEqualTo(EXPECTED_CHUNKED_COMPONENT_COUNT);
         assertThat(chunkCount(components)).isEqualTo(EXPECTED_CHUNK_COUNT);
+    }
+
+    @Test
+    void pageBuilderPublishesOptionalInteractionHighlightWithoutReplacingShellSchema() throws IOException {
+        JsonNode manifest = readSnapshot().path("components").path("praxis-page-builder").path("authoringManifest");
+        JsonNode operation = findByOperationId(manifest.path("operations"), "widget.shell.configure");
+        assertThat(operation).isNotNull();
+        JsonNode shell = operation.path("inputSchema").path("properties").path("shell").path("properties");
+        JsonNode card = shell.path("appearance").path("properties").path("card").path("properties");
+        assertThat(card.path("interactionHighlight").path("enum"))
+                .containsExactly(objectMapper.valueToTree("standard"), objectMapper.valueToTree("gradient"));
+        assertThat(card.path("interactionHighlight").path("description").asText())
+                .contains("partial input", "omission preserves an existing override");
+        assertThat(card.has("backdropFilter")).isTrue();
+        assertThat(card.has("fallbackBackground")).isTrue();
+        assertThat(shell.has("avatar")).isTrue();
     }
 
     @Test
