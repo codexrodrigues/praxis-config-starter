@@ -56,6 +56,10 @@ class PageCreationPostgresIT {
       new java.util.concurrent.atomic.AtomicLong();
   private static final java.util.concurrent.atomic.AtomicLong connectionNanos =
       new java.util.concurrent.atomic.AtomicLong();
+  private static final java.util.concurrent.atomic.AtomicLong commitResponseDelayMillis =
+      new java.util.concurrent.atomic.AtomicLong();
+  private static final java.util.concurrent.atomic.AtomicLong delayedCommitResponses =
+      new java.util.concurrent.atomic.AtomicLong();
   private static final java.util.concurrent.atomic.AtomicReference<String> sqlFault =
       new java.util.concurrent.atomic.AtomicReference<>();
   private static final UiLayoutTarget ANCHOR =
@@ -83,6 +87,7 @@ class PageCreationPostgresIT {
 
   @AfterEach
   void closeApplication() {
+    commitResponseDelayMillis.set(0);
     if (application != null) application.close();
   }
 
@@ -235,6 +240,13 @@ class PageCreationPostgresIT {
               try {
                 long connectionMethodStarted = System.nanoTime();
                 Object result = method.invoke(connection, arguments);
+                if (method.getName().equals("commit")) {
+                  long delay = commitResponseDelayMillis.getAndSet(0);
+                  if (delay > 0) {
+                    delayedCommitResponses.incrementAndGet();
+                    pause(delay);
+                  }
+                }
                 if (method.getName().equals("getTransactionIsolation")) {
                   isolationCalls.incrementAndGet();
                   isolationNanos.addAndGet(System.nanoTime() - connectionMethodStarted);
@@ -1274,6 +1286,61 @@ class PageCreationPostgresIT {
                     .isEqualTo(UiLayoutLifecycleException.Code.SOURCE_UNAVAILABLE));
     assertThat(deadlineCommitEntered).isTrue();
     assertNoCreationFromIndependentConnection();
+  }
+
+  @Test
+  void committedButLateResponsesRemainUnacknowledgedAndReconcileWithTheSameKey() {
+    var request = command();
+    validationBudget = Duration.ofSeconds(15);
+    long delayedBefore = delayedCommitResponses.get();
+    commitResponseDelayMillis.set(15_050);
+    assertThatThrownBy(() -> pages.create(principal(), version, request))
+        .isInstanceOfSatisfying(
+            UiLayoutLifecycleException.class,
+            failure ->
+                assertThat(failure.getCode())
+                    .isEqualTo(UiLayoutLifecycleException.Code.SOURCE_UNAVAILABLE));
+    assertThat(delayedCommitResponses.get()).isEqualTo(delayedBefore + 1);
+    // The JDBC commit already succeeded: this is uncertain delivery, never rollback evidence.
+    try (var connection = dataSource.getConnection();
+        var statement =
+            connection.prepareStatement(
+                "select (select count(*) from ui_page_catalog where tenant_id=?),(select count(*)"
+                    + " from ui_page_creation_evidence where tenant_id=?),(select count(*) from"
+                    + " ui_layout_draft where tenant_id=?),(select count(*) from"
+                    + " ui_layout_baseline_metadata_evidence where tenant_id=?)")) {
+      for (int index = 1; index <= 4; index++) statement.setString(index, tenant);
+      try (var result = statement.executeQuery()) {
+        assertThat(result.next()).isTrue();
+        for (int index = 1; index <= 4; index++) assertThat(result.getLong(index)).isEqualTo(1);
+      }
+    } catch (java.sql.SQLException exception) {
+      throw new AssertionError(exception);
+    }
+    validationBudget = Duration.ofSeconds(40);
+    var recovered = pages.byCreationKey(principal(), version, request.creationKey());
+    var replay = pages.create(principal(), version, request);
+    assertThat(replay.created()).isFalse();
+    assertThat(replay.receipt()).isEqualTo(recovered);
+    assertThat(captures.get()).isEqualTo(1);
+
+    validationBudget = Duration.ofSeconds(10);
+    commitResponseDelayMillis.set(10_050);
+    assertThatThrownBy(() -> pages.byCreationKey(principal(), version, request.creationKey()))
+        .isInstanceOfSatisfying(
+            UiLayoutLifecycleException.class,
+            failure ->
+                assertThat(failure.getCode())
+                    .isEqualTo(UiLayoutLifecycleException.Code.SOURCE_UNAVAILABLE));
+    assertThat(delayedCommitResponses.get()).isEqualTo(delayedBefore + 2);
+    validationBudget = Duration.ofSeconds(40);
+    assertThat(pages.byCreationKey(principal(), version, request.creationKey()))
+        .isEqualTo(recovered);
+    assertThat(count("ui_page_catalog")).isEqualTo(1);
+    assertThat(captures.get()).isEqualTo(1);
+    System.out.println(
+        "P2 late real COMMIT response: create and lookup returned SOURCE_UNAVAILABLE; one durable"
+            + " identity reconciled with the original creationKey, no recapture");
   }
 
   @Test

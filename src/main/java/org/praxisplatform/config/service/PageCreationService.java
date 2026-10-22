@@ -99,74 +99,84 @@ public final class PageCreationService {
     UiLayoutValidationContext validation =
         begin(currentContext, UiLayoutLifecycleOperation.CREATE_DRAFT);
     try (var attempt = validation.attempt()) {
-      return transaction(
-          () -> {
-            revalidate(principal, contextVersion, currentContext, validation);
-            authorizeCreate(currentContext, command, validation);
-            validation.run(
-                currentContext.invocation(),
-                () -> store.lock(currentContext, command.creationKey()));
-            revalidate(principal, contextVersion, currentContext, validation);
-            authorizeCreate(currentContext, command, validation);
-            var replay =
-                validation.call(
+      CreationOutcome outcome =
+          transaction(
+              () -> {
+                revalidate(principal, contextVersion, currentContext, validation);
+                authorizeCreate(currentContext, command, validation);
+                validation.run(
                     currentContext.invocation(),
-                    () -> store.byKey(currentContext, command.creationKey()));
-            if (replay.isPresent()) {
-              PageCreationEvidence originalCreation = replay.orElseThrow();
-              if (!hashes
-                  .sha256Exact(codec.tree(command))
-                  .equals(hashes.sha256Exact(codec.tree(originalCreation.command())))) {
-                throw new UiLayoutLifecycleException(
-                    UiLayoutLifecycleException.Code.INVALID_STATE,
-                    "Creation key belongs to a different command.");
-              }
-              bridge.verify(currentContext, originalCreation, attempt);
-              commitCheck(
-                  principal, contextVersion, currentContext, command, originalCreation, validation);
-              return new CreationOutcome(
-                  receipt(principal, contextVersion, currentContext, originalCreation, validation),
-                  false);
-            }
-            var originalSource = bridge.capture(currentContext, command.source(), attempt);
-            UUID pageId = UUID.randomUUID();
-            UUID draftId = UUID.randomUUID();
-            var transformed =
-                new PageCopyTransformation(hashes)
-                    .allocate(
-                        originalSource.document(),
-                        UUID.fromString(originalSource.baseline().target().componentId()),
+                    () -> store.lock(currentContext, command.creationKey()));
+                revalidate(principal, contextVersion, currentContext, validation);
+                authorizeCreate(currentContext, command, validation);
+                var replay =
+                    validation.call(
+                        currentContext.invocation(),
+                        () -> store.byKey(currentContext, command.creationKey()));
+                if (replay.isPresent()) {
+                  PageCreationEvidence originalCreation = replay.orElseThrow();
+                  if (!hashes
+                      .sha256Exact(codec.tree(command))
+                      .equals(hashes.sha256Exact(codec.tree(originalCreation.command())))) {
+                    throw new UiLayoutLifecycleException(
+                        UiLayoutLifecycleException.Code.INVALID_STATE,
+                        "Creation key belongs to a different command.");
+                  }
+                  bridge.verify(currentContext, originalCreation, attempt);
+                  commitCheck(
+                      principal,
+                      contextVersion,
+                      currentContext,
+                      command,
+                      originalCreation,
+                      validation);
+                  return new CreationOutcome(
+                      receipt(
+                          principal, contextVersion, currentContext, originalCreation, validation),
+                      false);
+                }
+                var originalSource = bridge.capture(currentContext, command.source(), attempt);
+                UUID pageId = UUID.randomUUID();
+                UUID draftId = UUID.randomUUID();
+                var transformed =
+                    new PageCopyTransformation(hashes)
+                        .allocate(
+                            originalSource.document(),
+                            UUID.fromString(originalSource.baseline().target().componentId()),
+                            pageId,
+                            command.title());
+                PageCreationEvidence creation =
+                    new PageCreationEvidence(
                         pageId,
-                        command.title());
-            PageCreationEvidence creation =
-                new PageCreationEvidence(
-                    pageId,
-                    draftId,
-                    currentContext,
-                    command,
-                    originalSource,
-                    transformed.sourceHash(),
-                    transformed.outputHash(),
-                    PageCopyTransformation.TRANSFORM,
-                    transformed.identityMap(),
-                    Instant.now());
-            bridge.verify(currentContext, creation, attempt);
-            validation.run(currentContext.invocation(), () -> store.insert(creation));
-            validation.run(
-                currentContext.invocation(),
-                () ->
-                    commands
-                        .get()
-                        .createReservedPageDraft(
-                            principal,
-                            contextVersion,
-                            creation.target(),
-                            command.creationKey().toString(),
-                            draftId));
-            commitCheck(principal, contextVersion, currentContext, command, creation, validation);
-            return new CreationOutcome(
-                receipt(principal, contextVersion, currentContext, creation, validation), true);
-          });
+                        draftId,
+                        currentContext,
+                        command,
+                        originalSource,
+                        transformed.sourceHash(),
+                        transformed.outputHash(),
+                        PageCopyTransformation.TRANSFORM,
+                        transformed.identityMap(),
+                        Instant.now());
+                bridge.verify(currentContext, creation, attempt);
+                validation.run(currentContext.invocation(), () -> store.insert(creation));
+                validation.run(
+                    currentContext.invocation(),
+                    () ->
+                        commands
+                            .get()
+                            .createReservedPageDraft(
+                                principal,
+                                contextVersion,
+                                creation.target(),
+                                command.creationKey().toString(),
+                                draftId));
+                commitCheck(
+                    principal, contextVersion, currentContext, command, creation, validation);
+                return new CreationOutcome(
+                    receipt(principal, contextVersion, currentContext, creation, validation), true);
+              });
+      validation.require(currentContext.invocation());
+      return outcome;
     }
   }
 
@@ -179,37 +189,40 @@ public final class PageCreationService {
     UiLayoutValidationContext validation =
         begin(currentContext, UiLayoutLifecycleOperation.READ_DRAFT);
     try (var attempt = validation.attempt()) {
-      return transaction(
-          () -> {
-            Runnable authorize =
-                () -> {
-                  revalidate(principal, contextVersion, currentContext, validation);
-                  validation.run(
-                      currentContext.invocation(),
-                      () ->
-                          bridge.require(
-                              PageCreationOperation.READ_CREATION, currentContext, null));
-                };
-            authorize.run();
-            PageCreationEvidence creation =
-                validation
-                    .call(currentContext.invocation(), () -> store.byKey(currentContext, key))
-                    .orElseThrow(
-                        () ->
-                            new UiLayoutLifecycleException(
-                                UiLayoutLifecycleException.Code.NOT_FOUND,
-                                "Page creation was not observed."));
-            PageCreationReceipt receipt =
-                receipt(principal, contextVersion, currentContext, creation, validation);
-            authorize.run();
-            beforeCommit(
-                () -> {
-                  authorize.run();
-                  receipt(principal, contextVersion, currentContext, creation, validation);
-                  authorize.run();
-                });
-            return receipt;
-          });
+      PageCreationReceipt result =
+          transaction(
+              () -> {
+                Runnable authorize =
+                    () -> {
+                      revalidate(principal, contextVersion, currentContext, validation);
+                      validation.run(
+                          currentContext.invocation(),
+                          () ->
+                              bridge.require(
+                                  PageCreationOperation.READ_CREATION, currentContext, null));
+                    };
+                authorize.run();
+                PageCreationEvidence creation =
+                    validation
+                        .call(currentContext.invocation(), () -> store.byKey(currentContext, key))
+                        .orElseThrow(
+                            () ->
+                                new UiLayoutLifecycleException(
+                                    UiLayoutLifecycleException.Code.NOT_FOUND,
+                                    "Page creation was not observed."));
+                PageCreationReceipt receipt =
+                    receipt(principal, contextVersion, currentContext, creation, validation);
+                authorize.run();
+                beforeCommit(
+                    () -> {
+                      authorize.run();
+                      receipt(principal, contextVersion, currentContext, creation, validation);
+                      authorize.run();
+                    });
+                return receipt;
+              });
+      validation.require(currentContext.invocation());
+      return result;
     }
   }
 

@@ -89,7 +89,7 @@ falha depois de cada write, nenhuma herança de head/assignment/approval/menu, o
 
 - Selected source READ_SOURCE/COPY_SOURCE apply at create/replay and before its commit. They do not grant content visibility into ancestry and do not become perpetual ancestor ACL requirements for independent copies. Historical producer integrity, exact publication/revision correlation and current domain/metadata dependency admission remain required throughout the chain. Lookup by creation key requires READ_CREATION and the existing READ_DRAFT, without requiring current permission to the old selected source. Receipts expose only their own selected source reference, never ancestral ledger contents.
 - Native output capture separates immutable Config producer identity/B0 from the current observation of a new draft. Alice/context1 evidence remains unchanged; Bob/context2 receives a new observation with the identical immutable output. Source observations retained in the private ledger are never rewritten or used as grants.
-- `resolveLifecycle(invocation)` is an abstract server-only host attestation, necessary because existing metadata/admission callbacks lack Principal/application. Host must independently attest actor, tenant, unit, environment, context version, application and namespace; the invocation is correlation only. Exact invocation equality is required before app-scoped SQL or rebasing. No ThreadLocal, cache, fabricated principal or ledger-derived grant is permitted.
+- `resolveLifecycle(invocation)` is an abstract server-only host attestation, necessary because existing metadata/admission callbacks lack Principal/application. Host must independently attest actor, tenant, unit, environment, context version, application and namespace; the invocation is correlation only. Exact invocation equality is required before app-scoped SQL or rebasing. No authority/context cache, ThreadLocal attestation, fabricated principal or ledger-derived grant is permitted. The later immutable read set never stores an attestation or admission decision.
 - Navigation groups reuse the existing host `UiLayoutLifecycleInvocationProvider` mapping: exactly one stable app-shell UUID per tenant/application/environment/namespace. The request cannot register a second root. No additional groups registry/table or host SPI was introduced. Shape validation in `UiLayoutCompositionRegistration` does not replace host registration. Operational head transitions are blocked in `UiLayoutLifecycleService` itself until P3-A, including direct callers with permissive policy/validator and absent PageCreationHost.
 - Admission before a Config transaction re-attests current context and host policy. Provenance reads requiring the Config connection run during the same transaction and again before commit, not via an unrelated connection outside the transaction.
 - Resource policy is closed: maximum 16 creation nodes per ancestry path, 8 MiB total distinct ledger bytes per traversal and 2,048 traversal checkpoints; deny instead of truncating. These bounds cap recursive reproduction and repeated metadata work while preserving an auditable complete chain. All nested validation uses the remaining monotonic outer budget; entry/return/commit checks reject late results, without claiming cancellation of blocked I/O.
@@ -162,3 +162,13 @@ The proof belongs only to that synchronization's lifetime; REQUIRES_NEW admits i
 transaction. Failed queries or other isolation levels retain nothing. The existing full
 `ConfigJdbcTransactionGuard.require()` remains the mutation/metadata-store boundary.
 No authority decision, source admission, host resolution or deadline is memoized.
+
+Skills canônicas: incrementos persistence/governed integrity, incluindo PRs 823/824, integrados pelo coordenador em `de0121b`, com sincronização seletiva concluída. Domain-decisions permanece adequada. Não há guidance pendente conhecido para o desenho implementado.
+
+Creation and reconciliation also check the same validation attempt after the actual
+transaction returns. A JDBC COMMIT response can arrive after the deadline even though
+the transaction committed. Such a response is SOURCE_UNAVAILABLE, not a success receipt
+and not evidence of rollback. The caller retains its original creationKey and reconciles
+through lookup or an authorized identical replay; it must not allocate a new key merely
+because delivery was uncertain. The integration fixture delays only the response after
+a real delegated JDBC commit and verifies the durable identity from a fresh connection.
