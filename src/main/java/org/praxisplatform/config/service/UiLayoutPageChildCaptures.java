@@ -24,6 +24,11 @@ final class UiLayoutPageChildCaptures {
       .enable(DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS)
       .addMixIn(UiLayoutBaselineMetadataSeed.Source.class, SourceKinds.class)
       .addMixIn(UiLayoutBaselineMetadataSeed.Reproduction.class, ReproductionKinds.class);
+  static ObjectMapper evidenceMapper() { return JSON.copy(); }
+  static UiLayoutPageChildSeed capturedSeed(UiLayoutPageChildEvidence entry) {
+    var codec = new UiLayoutPageChildCaptures(new CanonicalJsonHashService(JSON));
+    return codec.seed(entry, codec.read(entry));
+  }
   private final CanonicalJsonHashService hashes;
   private final UiLayoutMetadataCaptureCodec codec;
 
