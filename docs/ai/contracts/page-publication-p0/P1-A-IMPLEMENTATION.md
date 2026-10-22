@@ -1,6 +1,6 @@
 # P1-A — codec de página e admissão de filhos
 
-Estado: implementação para revisão da issue #508. P0 integrado em `996e15ffb305dfef9a5456530e3d677abf100c15`.
+Estado: implementação para revisão da issue #508, [PR draft #515](https://github.com/codexrodrigues/praxis-config-starter/pull/515). P0 integrado em `996e15ffb305dfef9a5456530e3d677abf100c15`.
 Não habilita catálogo/criação/cópia, grupos, navegação por head ou hosts de páginas.
 
 ## Inventário e impacto
@@ -43,6 +43,8 @@ captura, permitindo restauração com a mesma identidade; a restauração revali
 sem recapturar latest nem aceitar declaração substituta para uma key já conhecida.
 
 Criação, replay, revisão, freeze e ativação de contribuição congelada revalidam os filhos ativos.
+Corrupção da evidência persistida retorna INVALID_STATE sanitizado (HTTP409/no-store); candidatos novos
+continuam VALIDATION_FAILED. A conversão ocorre somente na integridade histórica, fora da admissão atual.
 A rechecagem em `beforeCommit` cobre revogação da fonte mesmo quando o invocation não muda.
 Inspeção current/frozen mantém a fronteira existente: exige contexto/READ_DRAFT, integridade e
 referências persistidas, mas pode mostrar história cuja fonte deixou de admitir novas mutações.
@@ -69,6 +71,8 @@ outro DataSource e outra conexão continuam rejeitados. Não foi introduzido byp
 
 ## Evidência e limites
 
+[Relatório com logs brutos e hashes](evidence/p1-a/README.md), fonte `ce166fed180361801872aea392d69bd45fae2132`.
+
 - Corpus P0: 100 testes, incluindo refinamentos de UUID/whitespace, cinco modos e reason Unicode.
 - Codec e captura: 6 + 5 testes, igualdade schema/resource, guards Form/Table em arrays, envelopes,
   metadados alterados, UUID de draft divergente, remoção/restauração e fontes exatas.
@@ -84,7 +88,7 @@ outro DataSource e outra conexão continuam rejeitados. Não foi introduzido byp
   Fixtures usam source/policy sintéticos, mas JPA, JDBC, JSONB, constraints e transações são reais.
   Fresh connections conferem rollback. Não é prova HTTP do Quickstart, browser ou autorização corporativa.
 - Quickstart: checkout isolado `64080d77986f567f2d9bc6b27b7c6e218dbd7834`, repositório Maven isolado
-  `/tmp/praxis-page-p1-508-m2`; build/linkagem focal, sem ampliar para host de páginas.
+  `/tmp/praxis-page-p1-508-m2`; 28 testes de linkagem/autoconfig e package passaram; JAR Config aninhado igual ao candidato. Sem ampliar para host de páginas.
 
 Execução remota opt-in: `PRAXIS_PAGE_P1_NEON_RUNTIME_FILE=<arquivo privado atribuído> mvn -B
 -Dtest=UiLayoutPageLifecyclePostgresIT -Dpraxis.page.neon.it=true test`. O arquivo privado (chmod 600) contém `projectId`, `branchId`, `endpoint`, `schema`, `username`,

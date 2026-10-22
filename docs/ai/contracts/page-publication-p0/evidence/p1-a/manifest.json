@@ -1,0 +1,105 @@
+{
+  "implementationCommit": "ce166fed180361801872aea392d69bd45fae2132",
+  "implementationTree": "c2eef28b8f9a8368665e2eac4dee99f10cee32d8",
+  "previousImplementationCommit": "23b00e74f4af8dc5bb7fcd899d08b05b6fc877a5",
+  "quickstartCommit": "64080d77986f567f2d9bc6b27b7c6e218dbd7834",
+  "configJarSha256": "e516116460df28fdb2dfb3544fc42eb81e0af7738e4a401768e3f22703f40b9f",
+  "quickstartJarSha256": "3cd717190b27cecf514462860bc997db10b1745b752c01a8ee5b1e15cebad07b",
+  "nestedConfigJarMatches": true,
+  "logs": [
+    {
+      "file": "final-tests.txt",
+      "sha256": "5322e11f12e1d34c63bc8d6c66c8ffb0e6210869939b0b0f12605ff7b79fd7a8",
+      "lastMavenResult": [
+        "273",
+        "0",
+        "1",
+        "0"
+      ],
+      "exit": 1,
+      "class": "modelled-unit-and-neon"
+    },
+    {
+      "file": "store-snapshot-tests.txt",
+      "sha256": "46e5cfe0a7d813ea980af0257b910f3adaefa7b863e815da85f58ce5508d0b51",
+      "lastMavenResult": [
+        "58",
+        "0",
+        "0",
+        "0"
+      ],
+      "exit": 0,
+      "class": "modelled-unit"
+    },
+    {
+      "file": "final-rollback-reason-tests.txt",
+      "sha256": "bdd8da97ac1821be9a111f932f20cf0e3e923bbbf1280ed576441d7b2927a06c",
+      "lastMavenResult": [
+        "15",
+        "0",
+        "0",
+        "0"
+      ],
+      "exit": 0,
+      "class": "unit-and-neon"
+    },
+    {
+      "file": "assignment-tests.txt",
+      "sha256": "3bba1d73d3823846e8f555749dbb0a873e6fb069e890a9daafd554be6e9edd03",
+      "lastMavenResult": [
+        "3",
+        "0",
+        "0",
+        "0"
+      ],
+      "exit": 0,
+      "class": "unit-and-neon"
+    },
+    {
+      "file": "historical-boundary-tests.txt",
+      "sha256": "65f3a8ad71ae8724c67f18e3d148400507015fde55b799a7b5e7f6733eeebc79",
+      "lastMavenResult": [
+        "44",
+        "0",
+        "0",
+        "0"
+      ],
+      "exit": 0,
+      "class": "modelled-unit"
+    },
+    {
+      "file": "neon-prepare.txt",
+      "sha256": "d73cd80d4ef1a3378eb4c787963cc1f4e58af4f8f942d3bee6476b24fa08bb1b",
+      "lastMavenResult": null,
+      "exit": 0,
+      "class": "neon-setup"
+    },
+    {
+      "file": "install-final.txt",
+      "sha256": "f8e6a02027cf8729f2addaebdc26d5dd368ea0dc25edcad83838757e6a50c56b",
+      "lastMavenResult": null,
+      "exit": 0,
+      "class": "build"
+    },
+    {
+      "file": "quickstart-final.txt",
+      "sha256": "fc229afb9a73b7ebdbd1d5bb8edb07ef0b29665e5cc80b2a13f1e23729460fc4",
+      "lastMavenResult": [
+        "28",
+        "0",
+        "0",
+        "0"
+      ],
+      "exit": 0,
+      "class": "downstream-build-and-unit"
+    }
+  ],
+  "limits": [
+    "Logs are original raw outputs, with local filesystem paths and no credentials.",
+    "final-tests has one Mockito restubbing error; the corrected store suite is independently green. Do not reinterpret the broad run as passed.",
+    "The broad run predates the historical-error classification fix; historical-boundary-tests covers that exact production delta.",
+    "Neon first two lifecycle cases ran before test assignment was parameterized; assignment-tests reruns actual assigned TLS and create rollback with the new preflight.",
+    "Focused V64-V68 DDL, no full Flyway, no live HTTP host or browser proof.",
+    "Quickstart tests use actual candidate JAR with synthetic collaborators; packaging proves byte identity, not deployed service."
+  ]
+}
