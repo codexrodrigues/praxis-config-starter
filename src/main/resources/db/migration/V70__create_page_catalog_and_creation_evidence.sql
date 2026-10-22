@@ -42,3 +42,13 @@ CREATE TRIGGER tr_ui_page_creation_evidence_immutable BEFORE UPDATE OR DELETE ON
     FOR EACH ROW EXECUTE FUNCTION reject_ui_layout_immutable_mutation();
 CREATE TRIGGER tr_ui_page_creation_evidence_no_truncate BEFORE TRUNCATE ON ui_page_creation_evidence
     FOR EACH STATEMENT EXECUTE FUNCTION reject_ui_layout_immutable_mutation();
+
+-- A frozen workspace carries the permanent native document and embedded child captures.
+-- The final DRAFT -> RELEASED write remains allowed; every later mutation is forbidden.
+CREATE TRIGGER tr_ui_layout_released_draft_immutable
+    BEFORE UPDATE OR DELETE ON ui_layout_draft
+    FOR EACH ROW WHEN (OLD.state = 'RELEASED')
+    EXECUTE FUNCTION reject_ui_layout_immutable_mutation();
+CREATE TRIGGER tr_ui_layout_draft_no_truncate
+    BEFORE TRUNCATE ON ui_layout_draft
+    FOR EACH STATEMENT EXECUTE FUNCTION reject_ui_layout_immutable_mutation();

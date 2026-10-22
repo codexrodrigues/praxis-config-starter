@@ -246,14 +246,14 @@ public class UiLayoutResolutionAutoConfiguration {
             @Qualifier("configNamedParameterJdbcTemplate") NamedParameterJdbcTemplate jdbc,
             @Qualifier("uiLayoutLifecycleConfigTransactionOperations") TransactionOperations transactions,
             CanonicalJsonHashService hashes, ObjectMapper mapper, UiLayoutDraftWorkspaceSource source,
-            UiLayoutBaselineMetadataAdmission metadata, UiLayoutLifecycleAdmission admission,
+            UiLayoutBaselineMetadataAdmission metadata,
             UiLayoutLifecycleStructureValidator structure, UiLayoutValidationBudgetPolicy budgets,
             UiLayoutDraftRepository drafts, UiLayoutReleaseRepository releases, UiLayoutReleaseMemberRepository members,
             UiLayoutDefinitionRepository definitions, UiLayoutRevisionRepository revisions, UiLayoutAssignmentRevisionRepository assignments,
             org.springframework.beans.factory.ObjectProvider<UiLayoutLifecycleCommandService> commands,
             org.springframework.beans.factory.ObjectProvider<UiLayoutLifecycleReadService> reads) {
         return new org.praxisplatform.config.service.PageCreationService(host, jdbc, transactions, hashes, mapper,
-                source, metadata, admission, structure, budgets, drafts, releases, members, definitions, revisions,
+                source, metadata, structure, budgets, drafts, releases, members, definitions, revisions,
                 assignments, commands::getObject, reads::getObject);
     }
 

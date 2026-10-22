@@ -59,6 +59,16 @@ final class PageCreationCodec {
     }
   }
 
+  PageCreationEvidence.SourceSnapshot snapshot(String text) {
+    try {
+      bounded(text);
+      return mapper.readValue(text, PageCreationEvidence.SourceSnapshot.class);
+    } catch (Exception exception) {
+      throw new UiLayoutLifecycleException(
+          UiLayoutLifecycleException.Code.INVALID_STATE, "Published source evidence is invalid.");
+    }
+  }
+
   JsonNode tree(Object value) {
     return mapper.valueToTree(value);
   }

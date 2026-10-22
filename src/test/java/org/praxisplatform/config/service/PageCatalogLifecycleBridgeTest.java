@@ -57,6 +57,9 @@ class PageCatalogLifecycleBridgeTest {
     when(store.byPage(any(), any()))
         .thenAnswer(call -> Optional.ofNullable(records.get(call.getArgument(1))));
     when(store.knownPage(any())).thenAnswer(call -> records.containsKey(call.getArgument(0)));
+    when(store.immutableRead(any(), any()))
+        .thenAnswer(
+            call -> ((java.util.function.Supplier<Optional<String>>) call.getArgument(1)).get());
     when(store.wasPublished(any(), any()))
         .thenAnswer(call -> snapshots.containsKey(call.getArgument(1)));
     when(frozen.resolve(any(), any(), any()))
@@ -74,7 +77,6 @@ class PageCatalogLifecycleBridgeTest {
             hashes,
             nativeSource,
             metadata,
-            (operation, invocation) -> {},
             mock(UiLayoutLifecycleStructureValidator.class),
             frozen,
             captures,
@@ -160,6 +162,15 @@ class PageCatalogLifecycleBridgeTest {
   private Published publish(PageCreationEvidence creation) {
     records.put(creation.pageId(), creation);
     var seed = bridge.outputSeed(creation);
+    var persistedPatch =
+        UiLayoutAuthoringProjection.project(
+                seed.target(),
+                seed.authoring(),
+                seed.document(),
+                seed.document(),
+                seed.patch(),
+                () -> {})
+            .compilePatch();
     var invocation = context.forTarget(seed.target());
     var validation =
         UiLayoutValidationContext.begin(
@@ -203,7 +214,7 @@ class PageCatalogLifecycleBridgeTest {
             new UiLayoutDraftWorkspaceDocument.RevisionSelection(
                 revisionId,
                 1,
-                hashes.sha256Exact(mapper.createObjectNode()),
+                hashes.sha256Exact(persistedPatch),
                 "praxis.ui-layout/v1",
                 UUID.randomUUID()),
             null,
@@ -216,7 +227,7 @@ class PageCatalogLifecycleBridgeTest {
             UUID.randomUUID(),
             new UiLayoutDraftWorkspaceDocument(
                 UiLayoutDraftWorkspaceDocument.SCHEMA_VERSION, List.of(state), UUID.randomUUID()),
-            List.of(mapper.createObjectNode())));
+            List.of(persistedPatch)));
     return new Published(
         new PageSourceReference.Published(creation.pageId(), releaseId, revisionId),
         new PageCreationEvidence.SourceSnapshot(seed, seed.document(), creation.draftId()));
@@ -224,6 +235,192 @@ class PageCatalogLifecycleBridgeTest {
 
   private record Published(
       PageSourceReference.Published reference, PageCreationEvidence.SourceSnapshot snapshot) {}
+
+  @Test
+  void immutablePublishedBytesAreReusedButCurrentNativeAdmissionIsNot() throws Exception {
+    var original = nativeCreation();
+    var published = publish(original);
+    var copy = creation(published.reference(), published.snapshot(), UUID.randomUUID(), null);
+    var guard =
+        mock(
+            ConfigJdbcTransactionGuard.class,
+            withSettings().mockMaker(org.mockito.MockMakers.INLINE));
+    var holder =
+        new org.springframework.jdbc.datasource.ConnectionHolder(mock(java.sql.Connection.class));
+    when(guard.require()).thenReturn(holder);
+    when(store.immutableRead(any(), any()))
+        .thenAnswer(
+            call ->
+                ConfigTransactionReadSet.read(
+                    store, guard, call.getArgument(0), call.getArgument(1)));
+    org.springframework.transaction.support.TransactionSynchronizationManager.initSynchronization();
+    org.springframework.transaction.support.TransactionSynchronizationManager
+        .setActualTransactionActive(true);
+    try {
+      bridge.verify(context, copy);
+      bridge.verify(context, copy);
+      verify(frozen, times(1)).resolve(any(), eq(published.reference().releaseId()), any());
+      doThrow(
+              new UiLayoutLifecycleException(
+                  UiLayoutLifecycleException.Code.DENIED, "Revoked native producer"))
+          .when(host)
+          .requireNative(any(), any(), any());
+      assertThatThrownBy(() -> bridge.verify(context, copy))
+          .isInstanceOfSatisfying(
+              UiLayoutLifecycleException.class,
+              failure ->
+                  assertThat(failure.getCode()).isEqualTo(UiLayoutLifecycleException.Code.DENIED));
+      verify(frozen, times(1)).resolve(any(), eq(published.reference().releaseId()), any());
+      verify(host, times(3)).requireNative(any(), any(), any());
+    } finally {
+      for (var synchronization :
+          org.springframework.transaction.support.TransactionSynchronizationManager
+              .getSynchronizations())
+        synchronization.afterCompletion(
+            org.springframework.transaction.support.TransactionSynchronization.STATUS_ROLLED_BACK);
+      org.springframework.transaction.support.TransactionSynchronizationManager.clear();
+    }
+  }
+
+  @Test
+  void publishedCandidateMustReproduceTheSelectedImmutablePatch() throws Exception {
+    var original = nativeCreation();
+    var published = publish(original);
+    var frozenValue = snapshots.get(published.reference().releaseId());
+    var state = frozenValue.document().targets().getFirst();
+    var altered = state.working().document().deepCopy();
+    ((com.fasterxml.jackson.databind.node.ObjectNode) altered.at("/config/presentation"))
+        .put("title", "Tampered after release");
+    UiLayoutPageRevisionReproduction.requireNative(
+        state.target(), state.authoring(), state.baseline().document(), altered, state.patch());
+    var alteredState =
+        new UiLayoutDraftWorkspaceDocument.TargetState(
+            state.target(),
+            state.authoring(),
+            state.patch(),
+            state.baseline(),
+            new UiLayoutDraftWorkspaceDocument.WorkingDocument(
+                hashes.sha256Exact(altered), altered),
+            state.selectedRevision(),
+            state.selectedAssignment(),
+            state.pageChildren());
+    snapshots.put(
+        frozenValue.releaseId(),
+        new UiLayoutFrozenWorkspaceResolver.Snapshot(
+            frozenValue.releaseId(),
+            frozenValue.draftId(),
+            frozenValue.draftEtag(),
+            new UiLayoutDraftWorkspaceDocument(
+                UiLayoutDraftWorkspaceDocument.SCHEMA_VERSION,
+                List.of(alteredState),
+                frozenValue.document().freezeCommandRef()),
+            frozenValue.patches()));
+    var validation =
+        UiLayoutValidationContext.begin(
+            (op, inv) -> Duration.ofSeconds(30),
+            context.invocation(),
+            UiLayoutLifecycleOperation.CREATE_DRAFT,
+            UiLayoutValidationPurpose.AUTHORING);
+    try (var attempt = validation.attempt()) {
+      assertThatThrownBy(() -> bridge.capture(context, published.reference(), attempt))
+          .isInstanceOf(UiLayoutLifecycleException.class);
+    }
+  }
+
+  @Test
+  void crossScopeKnownPageAndUnknownDeniedRootHaveTheSameNonDisclosingOutcome() {
+    UUID knownElsewhere = UUID.randomUUID(), unknown = UUID.randomUUID();
+    when(host.resolve(any(), eq("c1"))).thenReturn(context);
+    when(store.knownPage(knownElsewhere)).thenReturn(true);
+    var delegate = mock(UiLayoutLifecycleInvocationProvider.class);
+    when(delegate.resolve(any(), any(), any()))
+        .thenThrow(
+            new UiLayoutLifecycleException(
+                UiLayoutLifecycleException.Code.DENIED, "Private registry"));
+    var provider = bridge.invocations(delegate);
+    for (UUID id : List.of(knownElsewhere, unknown)) {
+      assertThatThrownBy(
+              () ->
+                  provider.resolve(
+                      () -> "alice",
+                      "c1",
+                      new UiLayoutTarget("praxis-dynamic-page", id.toString())))
+          .isInstanceOfSatisfying(
+              UiLayoutLifecycleException.class,
+              failure ->
+                  assertThat(failure.getCode())
+                      .isEqualTo(UiLayoutLifecycleException.Code.NOT_FOUND));
+    }
+    verify(delegate, never())
+        .resolve(
+            any(), any(), eq(new UiLayoutTarget("praxis-dynamic-page", knownElsewhere.toString())));
+    verify(delegate)
+        .resolve(any(), any(), eq(new UiLayoutTarget("praxis-dynamic-page", unknown.toString())));
+  }
+
+  @Test
+  void lastProvenanceExtensionCannotRevokeLifecycleGrantAndStillCommit() throws Exception {
+    var creation = nativeCreation();
+    records.put(creation.pageId(), creation);
+    var revoked = new java.util.concurrent.atomic.AtomicBoolean();
+    doAnswer(
+            call -> {
+              revoked.set(true);
+              return null;
+            })
+        .when(metadata)
+        .require(any(), any(), any(), any(), any(), any());
+    var admission =
+        bridge.admission(
+            (op, invocation) -> {
+              if (revoked.get())
+                throw new UiLayoutLifecycleException(
+                    UiLayoutLifecycleException.Code.DENIED, "Revoked during provenance");
+            });
+    org.springframework.transaction.support.TransactionSynchronizationManager
+        .setActualTransactionActive(true);
+    try {
+      assertThatThrownBy(
+              () ->
+                  admission.require(
+                      UiLayoutLifecycleOperation.EDIT_DRAFT, context.forTarget(creation.target())))
+          .isInstanceOfSatisfying(
+              UiLayoutLifecycleException.class,
+              failure ->
+                  assertThat(failure.getCode()).isEqualTo(UiLayoutLifecycleException.Code.DENIED));
+      assertThat(revoked).isTrue();
+    } finally {
+      org.springframework.transaction.support.TransactionSynchronizationManager.clear();
+    }
+  }
+
+  @Test
+  void lifecycleContextMustBeIndependentlyCurrentBeforeAnyCatalogContentRead() throws Exception {
+    var creation = nativeCreation();
+    records.put(creation.pageId(), creation);
+    var invocation = context.forTarget(creation.target());
+    var stale =
+        new UiLayoutLifecycleInvocation(
+            invocation.actorRef(),
+            invocation.tenantId(),
+            invocation.administrativeUnit(),
+            invocation.environment(),
+            "old-context",
+            invocation.composition());
+    when(host.resolveLifecycle(invocation))
+        .thenReturn(new PageCreationContext("app", "/pages", stale));
+    assertThatThrownBy(
+            () ->
+                bridge
+                    .admission((op, inv) -> {})
+                    .require(UiLayoutLifecycleOperation.READ_DRAFT, invocation))
+        .isInstanceOfSatisfying(
+            UiLayoutLifecycleException.class,
+            failure ->
+                assertThat(failure.getCode())
+                    .isEqualTo(UiLayoutLifecycleException.Code.CONTEXT_STALE));
+    verify(store, never()).byPage(any(), any());
+  }
 
   @Test
   void forgedProducerPrefixWithoutDurableRegistrationNeverDelegatesToPermissiveHost()

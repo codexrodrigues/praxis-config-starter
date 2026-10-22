@@ -35,7 +35,6 @@ public final class PageCreationService {
       ObjectMapper mapper,
       UiLayoutDraftWorkspaceSource source,
       UiLayoutBaselineMetadataAdmission metadata,
-      UiLayoutLifecycleAdmission admission,
       UiLayoutLifecycleStructureValidator structure,
       UiLayoutValidationBudgetPolicy budgets,
       UiLayoutDraftRepository drafts,
@@ -61,7 +60,6 @@ public final class PageCreationService {
             hashes,
             Objects.requireNonNull(source),
             Objects.requireNonNull(metadata),
-            Objects.requireNonNull(admission),
             Objects.requireNonNull(structure),
             new UiLayoutFrozenWorkspaceResolver(
                 releases, drafts, members, definitions, revisions, assignments, mapper, hashes),
@@ -204,7 +202,12 @@ public final class PageCreationService {
             PageCreationReceipt receipt =
                 receipt(principal, contextVersion, currentContext, creation, validation);
             authorize.run();
-            beforeCommit(authorize);
+            beforeCommit(
+                () -> {
+                  authorize.run();
+                  receipt(principal, contextVersion, currentContext, creation, validation);
+                  authorize.run();
+                });
             return receipt;
           });
     }
@@ -276,6 +279,7 @@ public final class PageCreationService {
           revalidate(principal, version, context, validation);
           authorizeCreate(context, command, validation);
           bridge.verify(context, creation, validation.attempt());
+          authorizeCreate(context, command, validation);
           revalidate(principal, version, context, validation);
         };
     check.run();

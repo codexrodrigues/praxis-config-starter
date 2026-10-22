@@ -40,6 +40,10 @@ class PageCreationPostgresIT {
   private static JpaRepositoryFactory repositories;
   private static JdbcTemplate jdbc;
   private static JsonNode assignment;
+  private static final java.util.concurrent.atomic.AtomicLong executedStatements =
+      new java.util.concurrent.atomic.AtomicLong();
+  private static final java.util.concurrent.atomic.AtomicLong statementNanos =
+      new java.util.concurrent.atomic.AtomicLong();
   private static final java.util.concurrent.atomic.AtomicReference<String> sqlFault =
       new java.util.concurrent.atomic.AtomicReference<>();
   private static final UiLayoutTarget ANCHOR =
@@ -54,7 +58,14 @@ class PageCreationPostgresIT {
 
   private volatile boolean denyCopy, denyDependency, denyLookup, denyAncestorRead, revokeAtCommit;
   private volatile String fault;
-  private boolean metadataCommitPhase, metadataMarkerRegistered;
+  private boolean metadataCommitPhase, metadataMarkerRegistered, copyCheckedAtCommit;
+  private boolean deadlineCommitEntered,
+      denyDraft,
+      revokeDraftAtLookupCommit,
+      lookupMarkerRegistered;
+  private Duration validationBudget = Duration.ofSeconds(40);
+  private long grantDelayMillis;
+  private int delayedGrantCalls;
   private ObjectNode groupDocument;
   private org.springframework.context.annotation.AnnotationConfigApplicationContext application;
 
@@ -216,8 +227,13 @@ class PageCreationPostgresIT {
                       new Class<?>[] {java.sql.PreparedStatement.class},
                       (statementProxy, statementMethod, statementArguments) -> {
                         try {
+                          long started = System.nanoTime();
                           Object statementResult =
                               statementMethod.invoke(statement, statementArguments);
+                          if (statementMethod.getName().startsWith("execute")) {
+                            executedStatements.incrementAndGet();
+                            statementNanos.addAndGet(System.nanoTime() - started);
+                          }
                           String table = sqlFault.get();
                           if (table != null
                               && statementMethod.getName().startsWith("execute")
@@ -286,8 +302,10 @@ class PageCreationPostgresIT {
         Map.of(new GroupScope(tenant, "app-a", "test", "/pages"), ANCHOR);
     UiLayoutLifecycleInvocationProvider provider =
         (p, v, t) -> {
+          if (!v.equals(version))
+            throw new UiLayoutLifecycleException(
+                UiLayoutLifecycleException.Code.CONTEXT_STALE, "Fixture context changed");
           if (!p.getName().equals(actor)
-              || !v.equals(version)
               || !(groupsFixture
                   ? t.equals(
                       groupRoots.get(new GroupScope(selectedTenant, app, environment, namespace)))
@@ -296,7 +314,12 @@ class PageCreationPostgresIT {
                 UiLayoutLifecycleException.Code.DENIED, "Fixture root unavailable");
           return invocation(t);
         };
-    UiLayoutLifecycleAdmission admission = (operation, i) -> {};
+    UiLayoutLifecycleAdmission admission =
+        (operation, i) -> {
+          if (operation == UiLayoutLifecycleOperation.READ_DRAFT && denyDraft)
+            throw new UiLayoutLifecycleException(
+                UiLayoutLifecycleException.Code.DENIED, "Draft visibility revoked");
+        };
     UiLayoutLifecycleStructureValidator structure =
         new UiLayoutLifecycleStructureValidator() {
           public void validateTarget(
@@ -379,9 +402,11 @@ class PageCreationPostgresIT {
         };
     UiLayoutBaselineMetadataAdmission metadata =
         (i, t, d, s, b, m) -> {
-          if ("last-metadata-context".equals(fault)) {
-            if (metadataCommitPhase) version = "revoked-context";
-            else if (!metadataMarkerRegistered) {
+          if ("last-metadata-context".equals(fault) || "last-metadata-copy".equals(fault)) {
+            if (metadataCommitPhase) {
+              if ("last-metadata-context".equals(fault)) version = "revoked-context";
+              else if (copyCheckedAtCommit) denyCopy = true;
+            } else if (!metadataMarkerRegistered) {
               metadataMarkerRegistered = true;
               TransactionSynchronizationManager.registerSynchronization(
                   new TransactionSynchronization() {
@@ -424,6 +449,29 @@ class PageCreationPostgresIT {
 
           public void require(
               PageCreationOperation op, PageCreationContext c, PageSourceReference source) {
+            if (grantDelayMillis > 0) {
+              delayedGrantCalls++;
+              pause(grantDelayMillis);
+            }
+            if (op == PageCreationOperation.COPY_SOURCE && metadataCommitPhase)
+              copyCheckedAtCommit = true;
+            if (op == PageCreationOperation.READ_CREATION
+                && revokeDraftAtLookupCommit
+                && !lookupMarkerRegistered) {
+              lookupMarkerRegistered = true;
+              TransactionSynchronizationManager.registerSynchronization(
+                  new TransactionSynchronization() {
+                    @Override
+                    public int getOrder() {
+                      return Integer.MIN_VALUE;
+                    }
+
+                    @Override
+                    public void beforeCommit(boolean readOnly) {
+                      denyDraft = true;
+                    }
+                  });
+            }
             if ((op == PageCreationOperation.COPY_SOURCE && denyCopy)
                 || (op == PageCreationOperation.READ_CREATION && denyLookup)
                 || (denyAncestorRead
@@ -438,6 +486,20 @@ class PageCreationPostgresIT {
               PageCreationContext c, PageSourceReference.Native selected) {
             captures.incrementAndGet();
             var i = c.invocation();
+            if ("deadline-commit".equals(fault))
+              TransactionSynchronizationManager.registerSynchronization(
+                  new TransactionSynchronization() {
+                    @Override
+                    public int getOrder() {
+                      return -10;
+                    }
+
+                    @Override
+                    public void beforeCommit(boolean readOnly) {
+                      deadlineCommitEntered = true;
+                      pause(validationBudget.toMillis() + 50);
+                    }
+                  });
             if ("rollback-only".equals(fault)) {
               var holder =
                   (org.springframework.jdbc.datasource.ConnectionHolder)
@@ -502,7 +564,7 @@ class PageCreationPostgresIT {
         };
     var hashes = new CanonicalJsonHashService(JSON);
     var named = new NamedParameterJdbcTemplate(dataSource);
-    UiLayoutValidationBudgetPolicy budget = (op, i) -> Duration.ofSeconds(40);
+    UiLayoutValidationBudgetPolicy budget = (op, i) -> validationBudget;
     application = new org.springframework.context.annotation.AnnotationConfigApplicationContext();
     application.registerBean(ObjectMapper.class, () -> JSON);
     application.registerBean(CanonicalJsonHashService.class, () -> hashes);
@@ -738,6 +800,34 @@ class PageCreationPostgresIT {
     assertThat(captures.get()).isEqualTo(1);
   }
 
+  private void assertReleasedDraftIsSealed(UUID draftId) {
+    for (String change :
+        List.of(
+            "draft_document = jsonb_set(draft_document,'{tampered}','true'::jsonb)",
+            "draft_etag = gen_random_uuid()",
+            "state = 'DRAFT'")) {
+      assertThatThrownBy(
+              () ->
+                  jdbc.update(
+                      "update ui_layout_draft set " + change + " where id = ? and tenant_id = ?",
+                      draftId,
+                      tenant))
+          .hasRootCauseInstanceOf(java.sql.SQLException.class)
+          .rootCause()
+          .hasMessageContaining("ui layout revisions and releases are immutable");
+    }
+    assertThatThrownBy(
+            () ->
+                jdbc.update(
+                    "delete from ui_layout_draft where id = ? and tenant_id = ?", draftId, tenant))
+        .hasRootCauseInstanceOf(java.sql.SQLException.class);
+    assertThatThrownBy(() -> jdbc.execute("truncate ui_layout_draft"))
+        .hasRootCauseInstanceOf(java.sql.SQLException.class);
+    System.out.println(
+        "P2 released-draft runtime UPDATE body/etag/state rejected by immutable trigger;"
+            + " DELETE/TRUNCATE denied");
+  }
+
   @Test
   void publishedHistoricalCopyUsesFixedReleaseWithoutAncestorReadGrant() {
     var original = pages.create(principal(), version, command()).receipt();
@@ -777,14 +867,26 @@ class PageCreationPostgresIT {
                 (short) 0,
                 "page"));
     var frozen =
-        commands.freezeRelease(
-            principal(),
-            version,
-            original.target(),
-            original.draftId(),
-            assigned.nextDraft().draft().draftEtag(),
-            UUID.randomUUID());
+        transactions.execute(
+            status -> {
+              var result =
+                  commands.freezeRelease(
+                      principal(),
+                      version,
+                      original.target(),
+                      original.draftId(),
+                      assigned.nextDraft().draft().draftEtag(),
+                      UUID.randomUUID());
+              var entityManager = SharedEntityManagerCreator.createSharedEntityManager(factory);
+              entityManager.flush();
+              entityManager.flush();
+              entityManager.clear();
+              assertThat(entityManager.find(UiLayoutDraft.class, original.draftId()).getState())
+                  .isEqualTo("RELEASED");
+              return result;
+            });
     UUID releaseId = UUID.fromString(frozen.release().releaseRef());
+    assertReleasedDraftIsSealed(original.draftId());
     var selected =
         new PageSourceReference.Published(
             original.pageId(), releaseId, UUID.fromString(revision.revision().revisionRef()));
@@ -822,13 +924,29 @@ class PageCreationPostgresIT {
     actor = "bob";
     version = "c2";
     denyAncestorRead = true;
-    var copied =
-        pages
-            .create(
-                principal(),
-                version,
-                new PageCreationCommand(UUID.randomUUID(), selected, "Independent copy"))
-            .receipt();
+    long started = System.nanoTime(),
+        statementsBefore = executedStatements.get(),
+        sqlBefore = statementNanos.get();
+    PageCreationReceipt copied;
+    try {
+      copied =
+          pages
+              .create(
+                  principal(),
+                  version,
+                  new PageCreationCommand(UUID.randomUUID(), selected, "Independent copy"))
+              .receipt();
+    } finally {
+      System.out.println(
+          "P2 published-copy measurement elapsedMs="
+              + (System.nanoTime() - started) / 1_000_000
+              + " jdbcStatements="
+              + (executedStatements.get() - statementsBefore)
+              + " jdbcExecutionMs="
+              + (statementNanos.get() - sqlBefore) / 1_000_000
+              + " hostBudgetMs="
+              + validationBudget.toMillis());
+    }
     var copiedWorkspace = reads.draft(principal(), version, copied.target(), copied.draftId());
     assertThat(
             copiedWorkspace
@@ -1022,6 +1140,72 @@ class PageCreationPostgresIT {
                     .isEqualTo(UiLayoutLifecycleException.Code.SOURCE_UNAVAILABLE));
     assertThat(count("ui_layout_release_head")).isZero();
     assertThat(count("ui_page_catalog")).isZero();
+  }
+
+  @Test
+  void lookupRechecksDraftVisibilityAtCommitWithoutRequiringTheOldSource() {
+    var request = command();
+    var original = pages.create(principal(), version, request).receipt();
+    denyAncestorRead = true;
+    assertThat(pages.byCreationKey(principal(), version, request.creationKey()))
+        .isEqualTo(original);
+    revokeDraftAtLookupCommit = true;
+    assertThatThrownBy(() -> pages.byCreationKey(principal(), version, request.creationKey()))
+        .isInstanceOfSatisfying(
+            UiLayoutLifecycleException.class,
+            failure ->
+                assertThat(failure.getCode()).isEqualTo(UiLayoutLifecycleException.Code.DENIED));
+    assertThat(denyDraft).isTrue();
+    assertThat(count("ui_page_catalog")).isEqualTo(1);
+  }
+
+  private static void pause(long millis) {
+    try {
+      Thread.sleep(millis);
+    } catch (InterruptedException failure) {
+      Thread.currentThread().interrupt();
+      throw new IllegalStateException(failure);
+    }
+  }
+
+  @Test
+  void lateSelectedCopyRevocationAfterFinalMetadataValidationRollsBack() {
+    fault = "last-metadata-copy";
+    assertThatThrownBy(() -> pages.create(principal(), version, command()))
+        .isInstanceOfSatisfying(
+            UiLayoutLifecycleException.class,
+            failure ->
+                assertThat(failure.getCode()).isEqualTo(UiLayoutLifecycleException.Code.DENIED));
+    assertThat(metadataCommitPhase).isTrue();
+    assertThat(copyCheckedAtCommit).isTrue();
+    assertThat(denyCopy).isTrue();
+    assertNoCreationFromIndependentConnection();
+  }
+
+  @Test
+  void repeatedGrantsAndCommitExtensionsCannotRenewTheOuterDeadline() {
+    validationBudget = Duration.ofSeconds(5);
+    grantDelayMillis = 2100;
+    assertThatThrownBy(() -> pages.create(principal(), version, command()))
+        .isInstanceOfSatisfying(
+            UiLayoutLifecycleException.class,
+            failure ->
+                assertThat(failure.getCode())
+                    .isEqualTo(UiLayoutLifecycleException.Code.SOURCE_UNAVAILABLE));
+    assertThat(delayedGrantCalls).isGreaterThanOrEqualTo(2);
+    assertThat(captures.get()).isZero();
+    assertNoCreationFromIndependentConnection();
+    validationBudget = Duration.ofSeconds(15);
+    grantDelayMillis = 0;
+    fault = "deadline-commit";
+    assertThatThrownBy(() -> pages.create(principal(), version, command()))
+        .isInstanceOfSatisfying(
+            UiLayoutLifecycleException.class,
+            failure ->
+                assertThat(failure.getCode())
+                    .isEqualTo(UiLayoutLifecycleException.Code.SOURCE_UNAVAILABLE));
+    assertThat(deadlineCommitEntered).isTrue();
+    assertNoCreationFromIndependentConnection();
   }
 
   @Test

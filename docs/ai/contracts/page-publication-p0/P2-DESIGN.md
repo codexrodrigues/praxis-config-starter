@@ -103,3 +103,45 @@ return private wrappers for the existing seams. Auto-configuration retains one o
 The page service holds lazy command/read suppliers; wrappers hold only original delegates. The actual
 application-context integration test starts all services and performs the first creation/replay/read.
 Absent PageCreationHost leaves normal lifecycle operational and page endpoints absent.
+
+### Transaction-local immutable read reuse (reviewed adjustment)
+
+The Neon diagnostic measured a published copy at 46,743 ms with 295 JDBC statements
+(40,599 ms in JDBC) against the unchanged 40-second host validation budget. Repeated
+resolution of the same immutable publication was structural work, so increasing the
+budget alone is not the correction.
+
+The bounded internal read set belongs to the current Config transaction synchronization,
+identified by its store owner and the exact guarded JDBC holder/connection. Suspended
+synchronizations are not visible to REQUIRES_NEW; resume restores the original set, and
+completion clears it. Outside an active synchronized transaction, reads follow the normal
+path. The cache contains only positive serialized immutable data, with defensive decoding:
+app/tenant/environment/page catalogue plus creation evidence, and an exact
+app/tenant/environment/namespace/page/release/revision source snapshot after the historical
+publication event, frozen workspace and correlated captures have been read successfully.
+Creation-key lookup remains SQL; no actor-sensitive receipt or mutable draft state is cached.
+
+Each hit still requires the Config connection guard. Context/namespace matching, host
+resolution, grants, source/native/domain admission, metadata and structure callbacks,
+transformation and hashes remain current and execute again, including beforeCommit.
+No negative lookup, current head, admission result, authority context or verified flag is
+retained. A frozen-snapshot hit repeats the current target structure callback normally
+invoked by the frozen resolver. A positive publication event proves only exact history.
+
+The internal read set uses at most 16 entries and 8 MiB of UTF-8 values across its owner;
+least-recently-used eviction causes a full reload and does not truncate provenance or relax
+chain/deadline limits. Oversized values are read normally without retention. Tests cover
+same-transaction reuse, separate owner/connection, suspend/REQUIRES_NEW/resume, completion,
+defensive values, bounded eviction, uncached misses and current revocation after a hit.
+The published-copy measurement will be repeated on the same isolated Neon branch and
+40-second budget; it is evidence of this test workload, not a latency/SLA claim.
+
+The frozen workspace inventory found no legitimate post-RELEASED mutation:
+`UiLayoutLifecycleService` creates DRAFT, gates edits/revision/assignment/freeze through
+`editableDraft`, and performs the sole final body/state/ETag write at freeze. Reviews
+and heads update separate records. V70 now seals UPDATE/DELETE of OLD.RELEASED and
+TRUNCATE using the existing immutable-record function. This applies to page, form,
+table and navigation-group frozen workspaces; no backfill or historical rewrite occurs.
+A proposed mutable-body fingerprint fallback was rejected because it would preserve
+a physical mutation path inconsistent with this lifecycle rule. Published copy also
+requires reproduction against the exact persisted selected patch before snapshot reuse.

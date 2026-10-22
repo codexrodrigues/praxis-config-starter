@@ -25,7 +25,6 @@ final class PageCatalogLifecycleBridge {
   private final CanonicalJsonHashService hashes;
   private final UiLayoutDraftWorkspaceSource nativeSource;
   private final UiLayoutBaselineMetadataAdmission metadata;
-  private final UiLayoutLifecycleAdmission admission;
   private final UiLayoutLifecycleStructureValidator structure;
   private final UiLayoutFrozenWorkspaceResolver frozen;
   private final UiLayoutMetadataCapturePersistence captures;
@@ -39,7 +38,6 @@ final class PageCatalogLifecycleBridge {
       CanonicalJsonHashService hashes,
       UiLayoutDraftWorkspaceSource nativeSource,
       UiLayoutBaselineMetadataAdmission metadata,
-      UiLayoutLifecycleAdmission admission,
       UiLayoutLifecycleStructureValidator structure,
       UiLayoutFrozenWorkspaceResolver frozen,
       UiLayoutMetadataCapturePersistence captures,
@@ -51,7 +49,6 @@ final class PageCatalogLifecycleBridge {
     this.hashes = hashes;
     this.nativeSource = nativeSource;
     this.metadata = metadata;
-    this.admission = admission;
     this.structure = structure;
     this.frozen = frozen;
     this.captures = captures;
@@ -119,7 +116,12 @@ final class PageCatalogLifecycleBridge {
             case READ_DRAFT, READ_REVIEW, READ_HEAD, READ_HISTORICAL_EVIDENCE, DIAGNOSE_EVOLUTION ->
                 false;
             default -> true;
-          }) verify(context(invocation, record.orElseThrow()), record.orElseThrow());
+          }) {
+        var creation = record.orElseThrow();
+        verify(context(invocation, creation), creation);
+        delegate.require(operation, invocation);
+        context(invocation, creation);
+      }
     };
   }
 
@@ -227,7 +229,49 @@ final class PageCatalogLifecycleBridge {
     return snapshot;
   }
 
+  private record PublishedKey(
+      String application,
+      String tenant,
+      String environment,
+      String namespace,
+      UUID page,
+      UUID release,
+      UUID revision) {}
+
   private PageCreationEvidence.SourceSnapshot published(
+      PageCreationContext context, PageSourceReference.Published source, Chain chain) {
+    chain.check();
+    var key =
+        new PublishedKey(
+            context.applicationId(),
+            context.invocation().tenantId(),
+            context.invocation().environment(),
+            context.routeNamespace(),
+            source.pageId(),
+            source.releaseId(),
+            source.revisionId());
+    var snapshot =
+        codec.snapshot(
+            store
+                .immutableRead(
+                    key,
+                    () -> java.util.Optional.of(codec.write(loadPublished(context, source, chain))))
+                .orElseThrow(() -> failure(UiLayoutLifecycleException.Code.INVALID_STATE)));
+    // This callback is current policy, so it executes even when immutable bytes were reused.
+    var sourceInvocation = context.forTarget(snapshot.baseline().target());
+    var validation =
+        chain.nested(sourceInvocation, UiLayoutLifecycleOperation.READ_HISTORICAL_EVIDENCE);
+    try (var attempt = validation.attempt()) {
+      validation.run(
+          sourceInvocation,
+          () ->
+              structure.validateTarget(sourceInvocation, snapshot.baseline().target(), validation));
+    }
+    chain.check();
+    return snapshot;
+  }
+
+  private PageCreationEvidence.SourceSnapshot loadPublished(
       PageCreationContext context, PageSourceReference.Published source, Chain chain) {
     chain.check();
     var catalog =
@@ -240,10 +284,7 @@ final class PageCatalogLifecycleBridge {
     var validation = chain.nested(invocation, UiLayoutLifecycleOperation.READ_HISTORICAL_EVIDENCE);
     try (var attempt = validation.attempt()) {
       var value =
-          frozen.resolve(
-              invocation,
-              source.releaseId(),
-              target -> structure.validateTarget(invocation, target, validation));
+          frozen.resolve(invocation, source.releaseId(), target -> validation.require(invocation));
       if (value.document().targets().size() != 1)
         throw failure(UiLayoutLifecycleException.Code.INVALID_STATE);
       var state = value.document().targets().getFirst();
@@ -264,6 +305,16 @@ final class PageCatalogLifecycleBridge {
       // with the entire chain.
       var capture =
           captures.read(invocation, binding, (observedInvocation, historicalCapture) -> {});
+      if (value.patches().size() != 1) {
+        throw failure(UiLayoutLifecycleException.Code.INVALID_STATE);
+      }
+      UiLayoutPageRevisionReproduction.require(
+          state.target(),
+          state.authoring(),
+          capture.baselineDocument(),
+          state.working().document(),
+          state.patch(),
+          value.patches().getFirst());
       // The capture preserves exact input property order; the frozen JSONB workspace does not.
       // Its binding/hash was already correlated to this frozen baseline by the capture store.
       var rootMetadata =

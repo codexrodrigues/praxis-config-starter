@@ -28,6 +28,40 @@ class PageCreationCodecTest {
   }
 
   @Test
+  void receiptSerializationConformsToP0IncludingSourceDiscriminatorAndQuotedEtag()
+      throws Exception {
+    var schema =
+        (com.fasterxml.jackson.databind.node.ObjectNode)
+            UiLayoutPageRevisionReproductionTest.JSON.readTree(
+                Path.of("docs/ai/contracts/page-publication-p0/contracts.schema.json").toFile());
+    schema.put("$ref", "#/$defs/creationReceipt");
+    var validator =
+        com.networknt.schema.JsonSchemaFactory.getInstance(
+                com.networknt.schema.SpecVersion.VersionFlag.V202012)
+            .getSchema(schema);
+    var page = java.util.UUID.randomUUID();
+    for (var source :
+        java.util.List.of(
+            new org.praxisplatform.config.dto.PageSourceReference.Native("fixture", "r1"),
+            new org.praxisplatform.config.dto.PageSourceReference.Published(
+                java.util.UUID.randomUUID(),
+                java.util.UUID.randomUUID(),
+                java.util.UUID.randomUUID()))) {
+      var receipt =
+          new org.praxisplatform.config.dto.PageCreationReceipt(
+              java.util.UUID.randomUUID(),
+              page,
+              new org.praxisplatform.config.dto.UiLayoutTarget(
+                  "praxis-dynamic-page", page.toString()),
+              "/pages/" + page,
+              java.util.UUID.randomUUID(),
+              "\"" + java.util.UUID.randomUUID() + "\"",
+              source);
+      assertTrue(validator.validate(codec.tree(receipt)).isEmpty());
+    }
+  }
+
+  @Test
   void executesEveryNormativeCreationCase() throws Exception {
     var corpus =
         UiLayoutPageRevisionReproductionTest.JSON.readTree(

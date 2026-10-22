@@ -11,3 +11,19 @@ O default validateFrozenRelease chama validação de target, authoring baseline,
 Os 97 testes focais de fonte passaram, incluindo 11 novos casos com transação Spring e repositories simulados. Testes negativos cobrem falhas anteriores ao core.publish/core.rollback; eles não são rollback PostgreSQL real. Recuperação histórica continua aceitando targets removidos somente sob seu access gate; head mutation exige composição atual. As permissões e beforeCommit continuam locais, sem fencing IAM.
 
 A fonte/candidata privada rc.163 inclui esta alteração; rc.162 congelada não a inclui. A publicação Table lab histórica materializada continua incompatível com revisão compacta (G1); não foi modificada. Provider oficial, metadata/source admission e DEC-01–04 continuam gates próprios. Sem execução de owners admitida, banco/browser ou publicação pública, não há aceite integrado.
+
+## Permanent workspace seal
+
+V70 enforces the existing lifecycle rule in PostgreSQL: after the final `DRAFT` →
+`RELEASED` write, UPDATE and DELETE of that draft are rejected by the canonical
+immutable-record trigger. TRUNCATE is rejected because the table carries frozen
+native documents and embedded child captures. No legitimate review, approval,
+publication, withdrawal or rollback rewrites this workspace; those operations keep
+using their existing records. The transition itself remains atomic and editable
+DRAFT operations keep their previous behavior. No historical body is rewritten.
+
+Page copying additionally reproduces the selected immutable revision patch against
+the original captured B0 before accepting a published candidate. Positive immutable
+source bytes may be reused inside the same guarded Config transaction, while current
+host context, structure, metadata, domain dependencies and grants are checked again.
+See [P2 implementation and evidence](page-publication-p0/P2-IMPLEMENTATION.md).
