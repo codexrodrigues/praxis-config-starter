@@ -278,6 +278,7 @@ final class PageCatalogLifecycleBridge {
         store
             .byPage(context, source.pageId())
             .orElseThrow(() -> failure(UiLayoutLifecycleException.Code.NOT_FOUND));
+    sameNamespace(context, catalog);
     var invocation = context.forTarget(catalog.target());
     if (!store.wasPublished(invocation, source.releaseId()))
       throw failure(UiLayoutLifecycleException.Code.VALIDATION_FAILED);

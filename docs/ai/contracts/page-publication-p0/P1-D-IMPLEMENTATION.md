@@ -117,3 +117,24 @@ permanecem atribuídos ao trabalhador até revisão; nenhuma migração foi rese
 PR draft [#516](https://github.com/codexrodrigues/praxis-config-starter/pull/516).
 Próximo passo: integrar costuras pelo escritor P2 e revisar o fluxo integrado. Sem merge,
 fechamento de issue, deploy ou release autorizado neste pacote.
+
+## Shared lifecycle integration in P2
+
+The P2 implementation supplies the previously pending shared seams: navigation-groups
+seed validation before persistence, authoring projection and revision/frozen reproduction,
+root metadata/source rechecks followed by current context/admission at commit, and the
+central `UiLayoutLifecycleService` block on publish/withdraw/rollback until P3-A.
+The operational fixture uses the existing host scope-to-root mapping, repeats the same
+scope/root and rejects alternative UUIDs or tenant/application/environment/namespace.
+It starts the real lifecycle graph without `PageCreationHost`.
+
+V70 physically seals every RELEASED workspace, including app-shell, against UPDATE and
+DELETE and prevents TRUNCATE. The final DRAFT→RELEASED write is still allowed. The table
+contains permanent frozen documents and embedded captures; later reviews/heads use their
+own records. The codec alone neither registers a root nor admits icons/domain sources.
+
+Source checkpoint: `8d588c41` plus final P2 evidence follow-up. The focused Neon run
+`neon-diagnostics` passed the groups scenario, but its combined run failed a separate page
+copy timeout; that mixed result is not a global gate. Final source/log/XML and acceptance
+status are tracked in [P2-IMPLEMENTATION](P2-IMPLEMENTATION.md). This does not enable P3-A
+or independently close issue #509.
