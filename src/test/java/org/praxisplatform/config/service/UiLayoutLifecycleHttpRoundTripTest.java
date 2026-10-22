@@ -563,6 +563,80 @@ class UiLayoutLifecycleHttpRoundTripTest {
     assertThat(before.getDraftDocument()).isEqualTo(documentBefore);
   }
 
+  @Test
+  void pageRootCreateEditFreezePublishAndHistoricalReadKeepInternalChildEvidence() throws Exception {
+    Fixture fixture = new Fixture(); fixture.pageMode = true;
+    MockMvc http = fixture.http();
+    var target = UiLayoutPageRevisionReproductionTest.PAGE;
+    MvcResult created = http.perform(pagePost("/api/praxis/config/ui-layouts/drafts")
+        .header("Idempotency-Key", "page-create")).andExpect(status().isCreated()).andReturn();
+    String draftId = json(created).path("draft").path("draftRef").asText();
+    assertThat(json(created).path("targets")).hasSize(1);
+    assertThat(json(created).toString()).doesNotContain("pageChildren", "rawInputText");
+    var document = UiLayoutPageRevisionReproductionTest.page();
+    ((com.fasterxml.jackson.databind.node.ObjectNode) document.at("/config/presentation")).put("title", "Changed title");
+    MvcResult revised = http.perform(pagePost("/api/praxis/config/ui-layouts/drafts/" + draftId + "/revisions")
+        .header(HttpHeaders.IF_MATCH, requiredEtag(created)).content(pageRevisionBody(document)))
+        .andExpect(status().isCreated()).andReturn();
+    assertThat(json(revised).at("/nextDraft/targets/0/working/document")).isEqualTo(document);
+    var stored = new UiLayoutDraftWorkspaceCodec(mapper,new CanonicalJsonHashService(mapper)).decodeHistorical(fixture.draftRows.get(UUID.fromString(draftId)).getDraftDocument());
+    assertThat(stored.targets().getFirst().pageChildren()).hasSize(2);
+    MvcResult assigned = http.perform(pagePost("/api/praxis/config/ui-layouts/drafts/" + draftId + "/assignments")
+        .header(HttpHeaders.IF_MATCH, requiredEtag(revised)).content("{\"commandRef\":\""+UUID.randomUUID()+"\",\"target\":"+target(target)
+            +",\"layerClass\":\"TENANT\",\"selector\":{\"tenant\":\"tenant-a\"},\"priority\":10,\"contributionKey\":\"page\"}"))
+        .andExpect(status().isCreated()).andReturn();
+    MvcResult frozen = http.perform(pagePost("/api/praxis/config/ui-layouts/drafts/" + draftId + "/releases")
+        .header(HttpHeaders.IF_MATCH, requiredEtag(assigned)).content("{\"commandRef\":\""+UUID.randomUUID()+"\"}"))
+        .andExpect(status().isCreated()).andReturn();
+    String release = json(frozen).at("/release/releaseRef").asText();
+    assertThat(fixture.memberRows.get(UUID.fromString(release))).hasSize(1);
+    MvcResult submitted = http.perform(pagePost("/api/praxis/config/ui-layouts/releases/"+release+"/submit")
+        .header(HttpHeaders.IF_MATCH,requiredEtag(frozen))).andExpect(status().isOk()).andReturn();
+    http.perform(pagePost("/api/praxis/config/ui-layouts/releases/"+release+"/approve")
+        .header(HttpHeaders.IF_MATCH,requiredEtag(submitted)).content("{\"reason\":\"approve page\"}"))
+        .andExpect(status().isOk());
+    http.perform(pagePost("/api/praxis/config/ui-layouts/release-head/publish")
+        .header(HttpHeaders.IF_NONE_MATCH,"*").content(headBody(release,"publish page"))).andExpect(status().isOk());
+    assertThat(fixture.headRows).hasSize(1);
+    var frozenSource = new UiLayoutFrozenWorkspaceResolver(fixture.releases,fixture.drafts,fixture.members,fixture.definitions,
+        fixture.revisions,fixture.assignments,mapper,new CanonicalJsonHashService(mapper));
+    var invocation = new UiLayoutLifecycleInvocation(publisher.getName(),"tenant-a","procurement","lab",CONTEXT,new UiLayoutCompositionRegistration(target,List.of(target)));
+    var recovered = frozenSource.resolve(invocation,UUID.fromString(release),ignored -> {});
+    assertThat(recovered.document().targets().getFirst().pageChildren()).isEqualTo(stored.targets().getFirst().pageChildren());
+    fixture.pageRevoked = true;
+    int mutations = fixture.mutations.get();
+    http.perform(pagePost("/api/praxis/config/ui-layouts/release-head/rollback")
+        .header(HttpHeaders.IF_MATCH,"\""+fixture.headRows.values().iterator().next().getHeadEtag()+"\"")
+        .content(headBody(release,"revoked child"))).andExpect(status().isForbidden());
+    assertThat(fixture.mutations).hasValue(mutations);
+  }
+
+  @Test
+  void pageSourceRevokedAtCommitForcesTransactionRollbackSignal() throws Exception {
+    Fixture fixture = new Fixture(); fixture.pageMode = true;
+    MockMvc http = fixture.http();
+    MvcResult created = http.perform(pagePost("/api/praxis/config/ui-layouts/drafts").header("Idempotency-Key","page-revoke"))
+        .andExpect(status().isCreated()).andReturn();
+    String draftId = json(created).at("/draft/draftRef").asText();
+    int commits = fixture.configCommits.get(); int rollbacks = fixture.configRollbacks.get();
+    fixture.revokePageBeforeCommit = true;
+    http.perform(pagePost("/api/praxis/config/ui-layouts/drafts/"+draftId+"/revisions")
+        .header(HttpHeaders.IF_MATCH,requiredEtag(created)).content(pageRevisionBody(UiLayoutPageRevisionReproductionTest.page())))
+        .andExpect(status().isForbidden());
+    assertThat(fixture.configCommits).hasValue(commits);
+    assertThat(fixture.configRollbacks).hasValue(rollbacks+1);
+    // Mockito maps do not roll back durable rows. This proves Spring guard ordering/signals only; Neon proves persistence.
+  }
+
+  private org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder pagePost(String url) {
+    return post(url).principal(publisher).param("rootComponentType",UiLayoutPageRevisionReproductionTest.PAGE.componentType())
+        .param("rootComponentId",UiLayoutPageRevisionReproductionTest.PAGE.componentId()).header("X-Praxis-Context-Version",CONTEXT).contentType("application/json");
+  }
+  private String pageRevisionBody(JsonNode document) {
+    return "{\"commandRef\":\""+UUID.randomUUID()+"\",\"target\":"+target(UiLayoutPageRevisionReproductionTest.PAGE)
+        +",\"authoringDocument\":"+document+",\"reason\":\"page revision\"}";
+  }
+
   private ApprovedRelease createApprovedRelease(MockMvc http, String marker) throws Exception {
     MvcResult created = http.perform(post("/api/praxis/config/ui-layouts/drafts").principal(publisher)
             .param("rootComponentType", ROOT_TYPE).param("rootComponentId", ROOT_ID)
@@ -692,6 +766,10 @@ class UiLayoutLifecycleHttpRoundTripTest {
   private record ApprovedRelease(String releaseRef, String reviewEtag) {}
 
   private final class Fixture {
+    boolean pageMode;
+    boolean pageRevoked;
+    boolean revokePageBeforeCommit;
+    final Map<String, UiLayoutPageChildSeed> pageSeeds = new LinkedHashMap<>();
     JsonNode nativeTableBaseline;
     JsonNode nativeFormBaseline;
     boolean unmappedChild;
@@ -730,16 +808,18 @@ class UiLayoutLifecycleHttpRoundTripTest {
     }
 
     MockMvc http() {
+      UiLayoutTarget root = pageMode ? UiLayoutPageRevisionReproductionTest.PAGE : UiLayoutLifecycleHttpRoundTripTest.this.root;
+      List<UiLayoutTarget> registeredTargets = pageMode ? List.of(root) : List.of(root, child);
       TransactionTemplate operational = new TransactionTemplate(new DataSourceTransactionManager(operationalDataSource));
       UiLayoutLifecycleInvocationProvider provider = (principal, context, requestedRoot) -> {
         // Final revalidation reads current claims without nesting an operational transaction into Config writes.
         if (TransactionSynchronizationManager.hasResource(configDataSource)) return new UiLayoutLifecycleInvocation(
-            principal.getName(), "tenant-a", "procurement", "lab", CONTEXT, new UiLayoutCompositionRegistration(root, List.of(root, child)));
+            principal.getName(), "tenant-a", "procurement", "lab", CONTEXT, new UiLayoutCompositionRegistration(root, registeredTargets));
         return operational.execute(status -> {
         assertThat(TransactionSynchronizationManager.hasResource(operationalDataSource)).isTrue();
         assertThat(TransactionSynchronizationManager.hasResource(configDataSource)).isFalse();
         return new UiLayoutLifecycleInvocation(principal.getName(), "tenant-a", "procurement", "lab", CONTEXT,
-            new UiLayoutCompositionRegistration(root, List.of(root, child)));
+            new UiLayoutCompositionRegistration(root, registeredTargets));
         });
       };
       UiLayoutLifecycleAdmission admission = (operation, invocation) -> {
@@ -749,23 +829,57 @@ class UiLayoutLifecycleHttpRoundTripTest {
         @Override public void validateTarget(UiLayoutLifecycleInvocation invocation, UiLayoutTarget target, org.praxisplatform.config.service.UiLayoutValidationContext validation) { assertThat(invocation.composition().targets()).contains(target); assertConfigWhenActive(); }
         @Override public void validateAuthoringBaseline(UiLayoutLifecycleInvocation invocation, UiLayoutTarget target, UiLayoutAuthoringDocumentDescriptor descriptor, JsonNode baselineDocument, org.praxisplatform.config.service.UiLayoutValidationContext validation) { assertThat(descriptor.documentType()).isNotBlank(); assertThat(baselineDocument.isObject()).isTrue(); }
         @Override public void validateAuthoringRevision(UiLayoutLifecycleInvocation invocation, UiLayoutTarget target, UiLayoutAuthoringDocumentDescriptor baselineDescriptor, JsonNode baselineDocument, UiLayoutAuthoringDocumentDescriptor candidateDescriptor, JsonNode candidateDocument, UiLayoutPatchDocumentDescriptor patchDescriptor, JsonNode patchDocument, org.praxisplatform.config.service.UiLayoutValidationContext validation) { assertThat(candidateDescriptor).isEqualTo(baselineDescriptor); assertThat(baselineDocument.isObject()).isTrue(); assertThat(candidateDocument.isObject()).isTrue(); assertThat(patchDescriptor.schemaVersion()).isEqualTo("praxis.ui-layout/v1"); }
-        @Override public void validatePatch(UiLayoutLifecycleInvocation invocation, UiLayoutTarget target, JsonNode patch, org.praxisplatform.config.service.UiLayoutValidationContext validation) { assertThat(patch.isObject()).isTrue(); }
+        @Override public void validatePatch(UiLayoutLifecycleInvocation invocation, UiLayoutTarget target, JsonNode patch, org.praxisplatform.config.service.UiLayoutValidationContext validation) { assertThat(patch.isObject()).isTrue();
+          if (revokePageBeforeCommit) TransactionSynchronizationManager.registerSynchronization(new org.springframework.transaction.support.TransactionSynchronization() {
+            @Override public int getOrder() { return -10; }
+            @Override public void beforeCommit(boolean readOnly) { pageRevoked = true; }
+          });
+        }
         @Override public void validateAssignment(UiLayoutLifecycleInvocation invocation, UiLayoutTarget target, UiLayoutResolutionCandidate.LayerClass layer, UiLayoutAudienceSelector selector, org.praxisplatform.config.service.UiLayoutValidationContext validation) { assertThat(selector.tenant()).isEqualTo("tenant-a"); }
-        @Override public void validateReleaseTargets(UiLayoutLifecycleInvocation invocation, List<UiLayoutTarget> targets, org.praxisplatform.config.service.UiLayoutValidationContext validation) { assertThat(targets).containsExactly(root, child); }
+        @Override public void validateReleaseTargets(UiLayoutLifecycleInvocation invocation, List<UiLayoutTarget> targets, org.praxisplatform.config.service.UiLayoutValidationContext validation) { assertThat(targets).containsExactlyElementsOf(registeredTargets); }
       };
       JdbcUiLayoutRevisionAllocationLock lock = new JdbcUiLayoutRevisionAllocationLock(
           new NamedParameterJdbcTemplate(new JdbcTemplate(configDataSource)));
       JdbcUiLayoutDraftCreationLock creationLock = new JdbcUiLayoutDraftCreationLock(
           new NamedParameterJdbcTemplate(new JdbcTemplate(configDataSource)));
-      UiLayoutDraftWorkspaceSource workspaceSource = (invocation, validation) -> {
-        workspaceCaptures.incrementAndGet();
-        return new UiLayoutDraftWorkspaceSeed(List.of(
-            targetSeed(root, "praxis.dynamic-page.authoring-document", "page-authoring/v2", "root-source", invocation),
-            targetSeed(child, "praxis.table.authoring-document", "table-authoring/v3", "child-source", invocation)));
+      UiLayoutDraftWorkspaceSource workspaceSource = new UiLayoutDraftWorkspaceSource() {
+        @Override public UiLayoutDraftWorkspaceSeed capture(UiLayoutLifecycleInvocation invocation, UiLayoutValidationContext validation) {
+          workspaceCaptures.incrementAndGet();
+          if (pageMode) {
+            try {
+              var document = UiLayoutPageRevisionReproductionTest.page();
+              var children = new ArrayList<UiLayoutPageChildSeed>();
+              for (var entry : UiLayoutPageRevisionReproduction.children(document).entrySet()) {
+                var request = new org.praxisplatform.config.dto.UiLayoutPageChildSource(entry.getKey(),
+                    new org.praxisplatform.config.dto.UiLayoutPageChildSource.NativeSource("registered-native", "fixture:" + entry.getKey(), "r1"));
+                var seed = new UiLayoutPageChildSeed(request, new UiLayoutAuthoringDocumentDescriptor(entry.getValue().path("kind").asText(), "fixture:native", "1"),
+                    UiLayoutPageRevisionReproductionTest.PATCH, "fixture:" + entry.getKey(), entry.getValue(),
+                    UiLayoutMetadataTestFixtures.nativeMetadata(entry.getValue(), invocation.actorRef(), invocation.administrativeUnit(), invocation.contextVersion()));
+                children.add(seed); pageSeeds.put(entry.getKey(), seed);
+              }
+              return new UiLayoutDraftWorkspaceSeed(List.of(new UiLayoutDraftWorkspaceSeed.TargetSeed(root, UiLayoutPageRevisionReproductionTest.DESCRIPTOR,
+                  UiLayoutPageRevisionReproductionTest.PATCH, "fixture:page", document,
+                  UiLayoutMetadataTestFixtures.nativeMetadata(document, invocation.actorRef(), invocation.administrativeUnit(), invocation.contextVersion()), children)));
+            } catch (Exception exception) { throw new IllegalStateException(exception); }
+          }
+          return new UiLayoutDraftWorkspaceSeed(List.of(
+              targetSeed(root, "praxis.dynamic-page.authoring-document", "page-authoring/v2", "root-source", invocation),
+              targetSeed(child, "praxis.table.authoring-document", "table-authoring/v3", "child-source", invocation)));
+        }
+        @Override public UiLayoutPageChildSeed capturePageChild(UiLayoutLifecycleInvocation invocation, UiLayoutTarget page,
+            org.praxisplatform.config.dto.UiLayoutPageChildSource request, UiLayoutValidationContext validation) {
+          return pageSeeds.get(request.widgetKey());
+        }
+        @Override public void requirePageChild(UiLayoutLifecycleInvocation invocation, UiLayoutTarget page,
+            UiLayoutPageChildSeed seed, UiLayoutValidationContext validation) {
+          if (pageRevoked || !pageSeeds.containsKey(seed.request().widgetKey()))
+            throw new UiLayoutLifecycleException(UiLayoutLifecycleException.Code.DENIED, "Fixture child revoked");
+          assertConfigWhenActive();
+        }
       };
       UiLayoutLifecycleCommandService commands = UiLayoutLifecycleCommandService.assemble(definitions, revisions, assignments, drafts,
           releases, members, reviews, approvals, heads, events, lock, new CanonicalJsonHashService(mapper), mapper,
-          (release, frozen) -> assertThat(frozen).hasSize(2), provider, admission, structure,
+          (release, frozen) -> assertThat(frozen).hasSize(registeredTargets.size()), provider, admission, structure,
           workspaceSource, creationLock, new UiLayoutMetadataTestFixtures.MemoryStore(),
           (invocation, target, authoring, source, baseline, metadata) -> assertConfigWhenActive(),
           new TransactionTemplate(new DataSourceTransactionManager(configDataSource)), (budgetOperation, budgetInvocation) -> java.time.Duration.ofMinutes(1));

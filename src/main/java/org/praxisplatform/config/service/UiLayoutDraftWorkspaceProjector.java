@@ -18,11 +18,13 @@ public class UiLayoutDraftWorkspaceProjector {
   private final UiLayoutReleaseRepository releases;
   private final UiLayoutWorkspaceSelectionVerifier selections;
   private final UiLayoutLifecycleStructureValidator structure;
+  private final UiLayoutPageChildCaptures children;
 
   public UiLayoutDraftWorkspaceProjector(UiLayoutDraftWorkspaceCodec codec, UiLayoutDefinitionRepository definitions,
       UiLayoutRevisionRepository revisions, UiLayoutAssignmentRevisionRepository assignments,
       UiLayoutReleaseRepository releases, ObjectMapper mapper, UiLayoutLifecycleStructureValidator structure) {
     this.codec = codec;
+    this.children = new UiLayoutPageChildCaptures(new CanonicalJsonHashService(mapper));
     this.releases = releases; this.structure = new UiLayoutBoundedStructureValidator(structure);
     this.selections = new UiLayoutWorkspaceSelectionVerifier(definitions, revisions, assignments, mapper, new CanonicalJsonHashService(mapper));
   }
@@ -34,6 +36,8 @@ public class UiLayoutDraftWorkspaceProjector {
     List<UiLayoutDraftWorkspaceReceipt.Target> targets = new ArrayList<>();
     for (UiLayoutDraftWorkspaceDocument.TargetState state : document.targets()) {
       structure.validateTarget(invocation, state.target(), validation);
+      children.integrity(draft.getId(), state.target(),
+          state.baseline().document(), state.working().document(), state.pageChildren());
       selections.verify(invocation, state);
       targets.add(target(state));
     }

@@ -53,7 +53,10 @@ public class UiLayoutLifecycleRequestDecoder {
       uuid(body, "commandRef");
       target(body, "target");
       UiLayoutJsonBounds.requireDocument(object(body, "authoringDocument"), UiLayoutLifecycleException.Code.INVALID_REQUEST, () -> {});
-      text(body, "reason");
+      reason(body);
+      if (body.has("childSources")) {
+        if (!"praxis-dynamic-page".equals(body.path("target").path("componentType").asText()) || !body.get("childSources").isArray()) throw invalid();
+      }
     } else if (type == UiLayoutAssignmentCommandRequest.class) {
       uuid(body, "commandRef");
       target(body, "target");
@@ -65,10 +68,16 @@ public class UiLayoutLifecycleRequestDecoder {
       uuid(body, "commandRef");
     } else if (type == UiLayoutHeadReleaseRequest.class) {
       uuid(body, "releaseId");
-      text(body, "reason");
+      reason(body);
     } else if (type == UiLayoutReasonRequest.class) {
-      text(body, "reason");
+      reason(body);
     }
+  }
+
+  private void reason(ObjectNode body) {
+    text(body, "reason");
+    String value = body.get("reason").textValue();
+    if (value.codePointCount(0, value.length()) > 1024) throw invalid();
   }
 
   private void target(ObjectNode body, String name) {

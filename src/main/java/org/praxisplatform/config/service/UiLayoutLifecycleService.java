@@ -78,14 +78,20 @@ class UiLayoutLifecycleService {
 
   @Transactional(transactionManager = ConfigTransactionManagerNames.CONFIG)
   public UiLayoutDraft createDraft(Scope scope, String document, String actor, String creationIdempotencyKey) {
+    return createDraft(UUID.randomUUID(), scope, document, actor, creationIdempotencyKey);
+  }
+
+  /** Server-reserved draft identity permits child evidence to be sealed before the atomic write. */
+  UiLayoutDraft createDraft(UUID draftId, Scope scope, String document, String actor, String creationIdempotencyKey) {
+    java.util.Objects.requireNonNull(draftId, "draftId");
     requirePolicy(UiLayoutLifecycleOperation.CREATE_DRAFT, scope, actor);
     Instant now = Instant.now(clock);
-    return drafts.save(UiLayoutDraft.builder().id(UUID.randomUUID()).tenantId(scope.tenantId())
+    return drafts.save(UiLayoutDraft.builder().id(draftId).tenantId(scope.tenantId())
         .environment(scope.environment()).rootComponentType(scope.rootTarget().componentType())
         .rootComponentId(scope.rootTarget().componentId()).draftDocument(requireWorkspaceObject(document, "draftDocument"))
         .draftEtag(UUID.randomUUID()).state("DRAFT").createdBy(require(actor, "actor"))
         .creationIdempotencyKey(require(creationIdempotencyKey, "creationIdempotencyKey"))
-        .createdAt(now).updatedAt(now).rowVersion(0L).build());
+        .createdAt(now).updatedAt(now).build());
   }
 
   @Transactional(transactionManager = ConfigTransactionManagerNames.CONFIG)
@@ -107,6 +113,7 @@ class UiLayoutLifecycleService {
   public UiLayoutRevision createRevision(RevisionCommand command, String actor) {
     requirePolicy(UiLayoutLifecycleOperation.EDIT_DRAFT, command.scope(), actor);
     UiLayoutDraft draft = editableDraft(command.scope(), command.draftId(), command.ifMatch());
+    String reason = requireReason(command.reason());
     String patch = requireJsonObject(command.patchDocument(), "patchDocument");
     requireRevisionAllocationLock(command.scope(), command.target());
     UiLayoutDefinition definition = definitions.findForUpdateByTarget(
@@ -121,7 +128,7 @@ class UiLayoutLifecycleService {
     UiLayoutRevision revision = revisions.save(UiLayoutRevision.builder().id(UUID.randomUUID())
         .definitionId(definition.getId()).revisionNumber(revisionNumber).patchDocument(patch)
         .contentHash(hashExact(patch)).schemaVersion(require(command.schemaVersion(), "schemaVersion"))
-        .createdBy(require(actor, "actor")).createdReason(require(command.reason(), "reason"))
+        .createdBy(require(actor, "actor")).createdReason(reason)
         .createdAt(Instant.now(clock)).build());
     return revision;
   }
@@ -191,7 +198,7 @@ class UiLayoutLifecycleService {
     }
     members.saveAll(persisted);
     reviews.save(UiLayoutReleaseReview.builder().id(UUID.randomUUID()).releaseId(release.getId()).state("DRAFT")
-        .reviewEtag(UUID.randomUUID()).rowVersion(0L).build());
+        .reviewEtag(UUID.randomUUID()).build());
     draft.setDraftDocument(releasedDraftDocument);
     draft.setState("RELEASED"); draft.setDraftEtag(UUID.randomUUID()); draft.setUpdatedAt(Instant.now(clock)); drafts.save(draft);
     append("RELEASE_CREATED", release, null, null, null, actor, "Release created from draft.");
@@ -218,6 +225,7 @@ class UiLayoutLifecycleService {
   @Transactional(transactionManager = ConfigTransactionManagerNames.CONFIG)
   public UiLayoutReleaseHead withdraw(Scope scope, UUID ifMatch, String actor, String reason) {
     requirePolicy(UiLayoutLifecycleOperation.WITHDRAW_RELEASE, scope, actor);
+    reason = requireReason(reason);
     UiLayoutReleaseHead head = head(scope); requireMatch(ifMatch, head.getHeadEtag());
     UUID previous = head.getActiveReleaseId();
     if (previous == null) fail(UiLayoutLifecycleException.Code.INVALID_STATE, "There is no active release to withdraw.");
@@ -233,14 +241,16 @@ class UiLayoutLifecycleService {
 
   private UiLayoutReleaseHead moveHead(Scope scope, UUID releaseId, UUID ifMatch, String actor, String reason,
       UiLayoutLifecycleOperation operation, String eventType, boolean rollback) {
-    requirePolicy(operation, scope, actor); UiLayoutRelease release = release(scope, releaseId); requireApproved(releaseId);
+    requirePolicy(operation, scope, actor);
+    reason = requireReason(reason);
+    UiLayoutRelease release = release(scope, releaseId); requireApproved(releaseId);
     List<UiLayoutReleaseMember> releaseMembers = members.findByReleaseIdOrderByMemberOrder(releaseId);
     if (releaseMembers.isEmpty()) fail(UiLayoutLifecycleException.Code.INVALID_RELEASE, "A release without members cannot be activated.");
     validator.validate(release, List.copyOf(releaseMembers));
     var existingHead = heads.findForUpdate(scope.tenantId(), scope.environment(), scope.rootTarget().componentType(), scope.rootTarget().componentId());
     UiLayoutReleaseHead head = existingHead.orElseGet(() -> UiLayoutReleaseHead.builder().id(UUID.randomUUID()).tenantId(scope.tenantId())
         .environment(scope.environment()).rootComponentType(scope.rootTarget().componentType()).rootComponentId(scope.rootTarget().componentId())
-        .headEtag(UUID.randomUUID()).updatedAt(Instant.now(clock)).rowVersion(0L).build());
+        .headEtag(UUID.randomUUID()).updatedAt(Instant.now(clock)).build());
     if (existingHead.isPresent()) requireMatch(ifMatch, head.getHeadEtag());
     else if (ifMatch != null) fail(UiLayoutLifecycleException.Code.PRECONDITION_FAILED, "A creation precondition cannot name a head that does not exist.");
     if (releaseId.equals(head.getActiveReleaseId())) fail(UiLayoutLifecycleException.Code.INVALID_STATE, "The requested release is already active.");
@@ -255,7 +265,9 @@ class UiLayoutLifecycleService {
 
   private void transitionReview(Scope scope, UUID releaseId, UUID ifMatch, String actor, String from, String to,
       UiLayoutLifecycleOperation operation, String eventType, String reason) {
-    requirePolicy(operation, scope, actor); UiLayoutRelease release = release(scope, releaseId);
+    requirePolicy(operation, scope, actor);
+    reason = requireReason(reason);
+    UiLayoutRelease release = release(scope, releaseId);
     UiLayoutReleaseReview review = reviews.findForUpdateByReleaseId(releaseId)
         .orElseThrow(() -> failure(UiLayoutLifecycleException.Code.NOT_FOUND, "Release review was not found."));
     requireMatch(ifMatch, review.getReviewEtag());
@@ -264,7 +276,7 @@ class UiLayoutLifecycleService {
     if ("SUBMITTED".equals(to)) { review.setSubmittedBy(require(actor, "actor")); review.setSubmittedAt(Instant.now(clock)); }
     reviews.save(review);
     if ("APPROVED".equals(to)) approvals.save(UiLayoutReleaseApproval.builder().id(UUID.randomUUID()).releaseId(releaseId)
-        .actor(require(actor, "actor")).reason(require(reason, "reason")).approvedAt(Instant.now(clock)).build());
+        .actor(require(actor, "actor")).reason(requireReason(reason)).approvedAt(Instant.now(clock)).build());
     append(eventType, release, null, releaseId, null, actor, reason);
   }
 
@@ -287,7 +299,7 @@ class UiLayoutLifecycleService {
   private void requireApproved(UUID releaseId) { if (!reviews.findByReleaseId(releaseId).map(value -> "APPROVED".equals(value.getState())).orElse(false)) fail(UiLayoutLifecycleException.Code.INVALID_STATE, "Only an approved release can be activated."); }
   private void append(String eventType, UiLayoutRelease release, UUID from, UUID to, UUID headEtag, String actor, String reason) { events.save(UiLayoutReleaseEvent.builder().id(UUID.randomUUID()).tenantId(release.getTenantId()).environment(release.getEnvironment())
       .rootComponentType(release.getRootComponentType()).rootComponentId(release.getRootComponentId()).eventType(eventType).fromReleaseId(from).toReleaseId(to)
-      .headEtag(headEtag).actor(require(actor, "actor")).reason(require(reason, "reason")).createdAt(Instant.now(clock)).build()); }
+      .headEtag(headEtag).actor(require(actor, "actor")).reason(requireReason(reason)).createdAt(Instant.now(clock)).build()); }
   private void requirePolicy(UiLayoutLifecycleOperation operation, Scope scope, String actor) { if (!policy.allows(operation, require(actor, "actor"), scope.tenantId(), scope.administrativeUnit(), scope.environment(), scope.rootTarget())) fail(UiLayoutLifecycleException.Code.DENIED, "Host lifecycle policy denied the requested operation."); }
   private void requireRevisionAllocationLock(Scope scope, UiLayoutTarget target) {
     if (revisionAllocationLock == null) fail(UiLayoutLifecycleException.Code.INVALID_STATE, "No revision allocation lock is installed.");
@@ -326,6 +338,12 @@ class UiLayoutLifecycleService {
   }
   private static String require(String value, String name) { if (value == null || value.isBlank()) throw failure(UiLayoutLifecycleException.Code.INVALID_RELEASE, name + " is required."); return value.trim(); }
   private static void fail(UiLayoutLifecycleException.Code code, String message) { throw failure(code, message); }
+  private String requireReason(String value) {
+    String reason = require(value, "reason");
+    if (reason.codePointCount(0, reason.length()) > 1024) throw failure(UiLayoutLifecycleException.Code.INVALID_RELEASE, "reason exceeds 1024 Unicode codepoints.");
+    return reason;
+  }
+
   private static UiLayoutLifecycleException failure(UiLayoutLifecycleException.Code code, String message) { return new UiLayoutLifecycleException(code, message); }
 
   public record Scope(String tenantId, String administrativeUnit, String environment, UiLayoutTarget rootTarget) {

@@ -401,3 +401,12 @@ UiCompositionPlan (por exemplo Config #444); são referências de inventário, n
 inventadas. Cada worker deve repetir busca focal antes de criar contrato ou duplicar trabalho.
 Novos arquétipos como tabs, fontes de dados e state estão fora do perfil inicial P0; qualquer
 expansão exige decisão e prova no owner, sem promoção silenciosa de uma demo.
+
+## Registro P1-A — 22/10/2026
+
+Issue #508, escritor `p1_config`, branch `codex/page-publication-p1-config-508`, worktree isolada;
+revisor é o coordenador distinto do autor. P0 #506 e refinamento #514 integrados, base atual
+`996e15ffb305dfef9a5456530e3d677abf100c15`. Codec/admissão implementados, testes focais e Neon
+em execução/revisão; detalhes, fontes, recursos e limites em [P1-A-IMPLEMENTATION.md](P1-A-IMPLEMENTATION.md).
+Sem P1-D/P2, migração adicional, host de páginas ou release. Skills canônicas sob responsabilidade
+do coordenador; nenhum arquivo compartilhado de skills foi editado por este trabalhador.

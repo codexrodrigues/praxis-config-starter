@@ -66,6 +66,22 @@ class UiLayoutLifecycleServiceTest {
     when(heads.saveAndFlush(any())).thenAnswer(invocation -> invocation.getArgument(0));
   }
 
+  @Test void oversizedReasonsFailBeforeRevisionApprovalOrEventWrites() {
+    UUID id=UUID.randomUUID();
+    UiLayoutDraft draft=draft(UUID.randomUUID(),"DRAFT");
+    when(drafts.findForUpdateById(draft.getId())).thenReturn(Optional.of(draft));
+    for (String reason : List.of("x".repeat(1025), "🧭".repeat(1025))) {
+      assertThatThrownBy(() -> service.createRevision(new UiLayoutLifecycleService.RevisionCommand(scope,draft.getId(),draft.getDraftEtag(),root,"{}","1",reason),"actor")).isInstanceOf(UiLayoutLifecycleException.class);
+      assertThatThrownBy(() -> service.approve(scope,id,id,"actor",reason)).isInstanceOf(UiLayoutLifecycleException.class);
+      assertThatThrownBy(() -> service.publish(scope,id,id,"actor",reason)).isInstanceOf(UiLayoutLifecycleException.class);
+      assertThatThrownBy(() -> service.withdraw(scope,id,"actor",reason)).isInstanceOf(UiLayoutLifecycleException.class);
+      assertThatThrownBy(() -> service.rollback(scope,id,id,"actor",reason)).isInstanceOf(UiLayoutLifecycleException.class);
+    }
+    verify(definitions,never()).save(any()); verify(revisions,never()).save(any());
+    verify(approvals,never()).save(any()); verify(events,never()).save(any());
+    verify(heads,never()).saveAndFlush(any()); verify(reviews,never()).save(any());
+  }
+
   @Test
   void draftCasRejectsASecondAuthorWithThePreviousStrongEtag() {
     UUID current = UUID.randomUUID();

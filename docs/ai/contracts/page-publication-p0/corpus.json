@@ -3857,6 +3857,410 @@
         "sourceId": "😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀",
         "revision": "r1"
       }
+    },
+    {
+      "id": "p1-reason-ascii-1024",
+      "contract": "pageRevisionCommand",
+      "valid": true,
+      "input": {
+        "commandRef": "00000000-0000-4000-8000-000000000005",
+        "target": {
+          "componentType": "praxis-dynamic-page",
+          "componentId": "00000000-0000-4000-8000-000000000001"
+        },
+        "authoringDocument": {
+          "kind": "praxis.dynamic-page.editor",
+          "version": 1,
+          "config": {
+            "definition": {
+              "widgets": [
+                {
+                  "key": "00000000-0000-4000-8000-000000000011",
+                  "definition": {
+                    "id": "praxis-dynamic-form",
+                    "inputs": {
+                      "mode": "view",
+                      "config": {
+                        "editorialContext": {
+                          "title": "Contato"
+                        },
+                        "fieldMetadata": [
+                          {
+                            "name": "email"
+                          }
+                        ],
+                        "sections": []
+                      }
+                    }
+                  }
+                },
+                {
+                  "key": "00000000-0000-4000-8000-000000000012",
+                  "definition": {
+                    "id": "praxis-table",
+                    "inputs": {
+                      "resourcePath": "/contacts",
+                      "horizontalScroll": "auto",
+                      "config": {
+                        "columns": [],
+                        "columnProjection": {
+                          "source": "schema",
+                          "include": [
+                            "email"
+                          ]
+                        }
+                      }
+                    }
+                  }
+                }
+              ],
+              "layout": {
+                "orientation": "columns",
+                "columns": 2,
+                "gap": "16px",
+                "breakpoints": {
+                  "sm": 1
+                }
+              }
+            },
+            "presentation": {
+              "title": "Atendimento",
+              "icon": "web"
+            },
+            "navigation": [
+              {
+                "id": "00000000-0000-4000-8000-000000000031",
+                "groupId": "00000000-0000-4000-8000-000000000041",
+                "label": "Atendimento",
+                "icon": "web",
+                "order": 0
+              }
+            ]
+          }
+        },
+        "reason": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "childSources": [
+          {
+            "widgetKey": "00000000-0000-4000-8000-000000000011",
+            "source": {
+              "kind": "registered-native",
+              "sourceId": "fixture/contact-view",
+              "revision": "fixture-1"
+            }
+          },
+          {
+            "widgetKey": "00000000-0000-4000-8000-000000000012",
+            "source": {
+              "kind": "registered-native",
+              "sourceId": "fixture/contact-table",
+              "revision": "fixture-1"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "p1-reason-astral-1024",
+      "contract": "pageRevisionCommand",
+      "valid": true,
+      "input": {
+        "commandRef": "00000000-0000-4000-8000-000000000005",
+        "target": {
+          "componentType": "praxis-dynamic-page",
+          "componentId": "00000000-0000-4000-8000-000000000001"
+        },
+        "authoringDocument": {
+          "kind": "praxis.dynamic-page.editor",
+          "version": 1,
+          "config": {
+            "definition": {
+              "widgets": [
+                {
+                  "key": "00000000-0000-4000-8000-000000000011",
+                  "definition": {
+                    "id": "praxis-dynamic-form",
+                    "inputs": {
+                      "mode": "view",
+                      "config": {
+                        "editorialContext": {
+                          "title": "Contato"
+                        },
+                        "fieldMetadata": [
+                          {
+                            "name": "email"
+                          }
+                        ],
+                        "sections": []
+                      }
+                    }
+                  }
+                },
+                {
+                  "key": "00000000-0000-4000-8000-000000000012",
+                  "definition": {
+                    "id": "praxis-table",
+                    "inputs": {
+                      "resourcePath": "/contacts",
+                      "horizontalScroll": "auto",
+                      "config": {
+                        "columns": [],
+                        "columnProjection": {
+                          "source": "schema",
+                          "include": [
+                            "email"
+                          ]
+                        }
+                      }
+                    }
+                  }
+                }
+              ],
+              "layout": {
+                "orientation": "columns",
+                "columns": 2,
+                "gap": "16px",
+                "breakpoints": {
+                  "sm": 1
+                }
+              }
+            },
+            "presentation": {
+              "title": "Atendimento",
+              "icon": "web"
+            },
+            "navigation": [
+              {
+                "id": "00000000-0000-4000-8000-000000000031",
+                "groupId": "00000000-0000-4000-8000-000000000041",
+                "label": "Atendimento",
+                "icon": "web",
+                "order": 0
+              }
+            ]
+          }
+        },
+        "reason": "😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀",
+        "childSources": [
+          {
+            "widgetKey": "00000000-0000-4000-8000-000000000011",
+            "source": {
+              "kind": "registered-native",
+              "sourceId": "fixture/contact-view",
+              "revision": "fixture-1"
+            }
+          },
+          {
+            "widgetKey": "00000000-0000-4000-8000-000000000012",
+            "source": {
+              "kind": "registered-native",
+              "sourceId": "fixture/contact-table",
+              "revision": "fixture-1"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "p1-reason-ascii-1025",
+      "contract": "pageRevisionCommand",
+      "valid": false,
+      "input": {
+        "commandRef": "00000000-0000-4000-8000-000000000005",
+        "target": {
+          "componentType": "praxis-dynamic-page",
+          "componentId": "00000000-0000-4000-8000-000000000001"
+        },
+        "authoringDocument": {
+          "kind": "praxis.dynamic-page.editor",
+          "version": 1,
+          "config": {
+            "definition": {
+              "widgets": [
+                {
+                  "key": "00000000-0000-4000-8000-000000000011",
+                  "definition": {
+                    "id": "praxis-dynamic-form",
+                    "inputs": {
+                      "mode": "view",
+                      "config": {
+                        "editorialContext": {
+                          "title": "Contato"
+                        },
+                        "fieldMetadata": [
+                          {
+                            "name": "email"
+                          }
+                        ],
+                        "sections": []
+                      }
+                    }
+                  }
+                },
+                {
+                  "key": "00000000-0000-4000-8000-000000000012",
+                  "definition": {
+                    "id": "praxis-table",
+                    "inputs": {
+                      "resourcePath": "/contacts",
+                      "horizontalScroll": "auto",
+                      "config": {
+                        "columns": [],
+                        "columnProjection": {
+                          "source": "schema",
+                          "include": [
+                            "email"
+                          ]
+                        }
+                      }
+                    }
+                  }
+                }
+              ],
+              "layout": {
+                "orientation": "columns",
+                "columns": 2,
+                "gap": "16px",
+                "breakpoints": {
+                  "sm": 1
+                }
+              }
+            },
+            "presentation": {
+              "title": "Atendimento",
+              "icon": "web"
+            },
+            "navigation": [
+              {
+                "id": "00000000-0000-4000-8000-000000000031",
+                "groupId": "00000000-0000-4000-8000-000000000041",
+                "label": "Atendimento",
+                "icon": "web",
+                "order": 0
+              }
+            ]
+          }
+        },
+        "reason": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "childSources": [
+          {
+            "widgetKey": "00000000-0000-4000-8000-000000000011",
+            "source": {
+              "kind": "registered-native",
+              "sourceId": "fixture/contact-view",
+              "revision": "fixture-1"
+            }
+          },
+          {
+            "widgetKey": "00000000-0000-4000-8000-000000000012",
+            "source": {
+              "kind": "registered-native",
+              "sourceId": "fixture/contact-table",
+              "revision": "fixture-1"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "p1-reason-astral-1025",
+      "contract": "pageRevisionCommand",
+      "valid": false,
+      "input": {
+        "commandRef": "00000000-0000-4000-8000-000000000005",
+        "target": {
+          "componentType": "praxis-dynamic-page",
+          "componentId": "00000000-0000-4000-8000-000000000001"
+        },
+        "authoringDocument": {
+          "kind": "praxis.dynamic-page.editor",
+          "version": 1,
+          "config": {
+            "definition": {
+              "widgets": [
+                {
+                  "key": "00000000-0000-4000-8000-000000000011",
+                  "definition": {
+                    "id": "praxis-dynamic-form",
+                    "inputs": {
+                      "mode": "view",
+                      "config": {
+                        "editorialContext": {
+                          "title": "Contato"
+                        },
+                        "fieldMetadata": [
+                          {
+                            "name": "email"
+                          }
+                        ],
+                        "sections": []
+                      }
+                    }
+                  }
+                },
+                {
+                  "key": "00000000-0000-4000-8000-000000000012",
+                  "definition": {
+                    "id": "praxis-table",
+                    "inputs": {
+                      "resourcePath": "/contacts",
+                      "horizontalScroll": "auto",
+                      "config": {
+                        "columns": [],
+                        "columnProjection": {
+                          "source": "schema",
+                          "include": [
+                            "email"
+                          ]
+                        }
+                      }
+                    }
+                  }
+                }
+              ],
+              "layout": {
+                "orientation": "columns",
+                "columns": 2,
+                "gap": "16px",
+                "breakpoints": {
+                  "sm": 1
+                }
+              }
+            },
+            "presentation": {
+              "title": "Atendimento",
+              "icon": "web"
+            },
+            "navigation": [
+              {
+                "id": "00000000-0000-4000-8000-000000000031",
+                "groupId": "00000000-0000-4000-8000-000000000041",
+                "label": "Atendimento",
+                "icon": "web",
+                "order": 0
+              }
+            ]
+          }
+        },
+        "reason": "😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀",
+        "childSources": [
+          {
+            "widgetKey": "00000000-0000-4000-8000-000000000011",
+            "source": {
+              "kind": "registered-native",
+              "sourceId": "fixture/contact-view",
+              "revision": "fixture-1"
+            }
+          },
+          {
+            "widgetKey": "00000000-0000-4000-8000-000000000012",
+            "source": {
+              "kind": "registered-native",
+              "sourceId": "fixture/contact-table",
+              "revision": "fixture-1"
+            }
+          }
+        ]
+      }
     }
   ],
   "nativeCases": [

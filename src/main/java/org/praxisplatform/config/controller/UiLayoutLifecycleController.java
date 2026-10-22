@@ -123,7 +123,7 @@ public class UiLayoutLifecycleController {
       @RequestBody String rawBody, Principal principal) {
     UiLayoutRevisionCommandRequest request = decoder.decode(rawBody, UiLayoutRevisionCommandRequest.class);
     var body = commands.createRevision(principal, contextVersion, root(rootComponentType, rootComponentId), draftId, strong(ifMatch),
-        new UiLayoutLifecycleCommandService.RevisionInput(request.commandRef(), request.target(), request.authoringDocument().toString(), request.reason()));
+        new UiLayoutLifecycleCommandService.RevisionInput(request.commandRef(), request.target(), request.authoringDocument().toString(), request.reason(), request.childSources()));
     return ResponseEntity.status(HttpStatus.CREATED).header(HttpHeaders.CACHE_CONTROL, CACHE_CONTROL).eTag(body.nextDraft().draft().draftEtag()).body(body);
   }
 
