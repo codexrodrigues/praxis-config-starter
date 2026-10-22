@@ -271,3 +271,15 @@ ensinado. Evolução das skills de persistência/composição/round-trip é `atu
 da implementação, antes da adoção P6. Nenhuma skill local foi editada ou anunciada como publicada.
 Não atualizar corpus HTTP executável, manifests ativos, Landing ou release notes como se esta
 capacidade estivesse disponível. O índice de contratos aponta explicitamente para esta especificação.
+
+### Refinamento de paridade P1 (22/10/2026)
+
+A admissão usa fim absoluto portável `(?![\s\S])` nos padrões; `$` sozinho pode
+aceitar uma quebra de linha final em alguns engines. UUIDs também exigem exatamente
+36 caracteres. Os textos delimitados usam explicitamente o conjunto de whitespace
+ECMAScript nas extremidades e rejeitam controles U+0000–001F/U+007F e separadores
+U+2028/U+2029, evitando divergência entre Java e TypeScript. `maxLength` continua
+medido em codepoints Unicode, incluindo referências com caracteres astrais.
+O corpus inclui fronteiras de whitespace, newline final, UUID, ícone, comprimento
+de layout e `snoozeMs` inteiro não negativo sem teto implícito de MAX_SAFE_INTEGER.
+Isso não atesta fidelidade de parsing numérico fora da identidade exata já exigida.
