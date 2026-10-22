@@ -24,6 +24,7 @@ final class UiLayoutAuthoringProjection {
     UiLayoutJsonBounds.requireDocument(baseline, Code.INVALID_STATE, checkpoint);
     UiLayoutJsonBounds.requireDocument(candidate, Code.INVALID_REQUEST, checkpoint);
     switch (descriptor.documentType()) {
+      case "praxis.navigation-groups.editor" -> UiLayoutNavigationGroupsRevisionReproduction.requireNative(target, descriptor, baseline, candidate, patchDescriptor);
       case "praxis.dynamic-page.editor" -> UiLayoutPageRevisionReproduction.requireNative(target, descriptor, baseline, candidate, patchDescriptor);
       case "praxis.table.editor" -> UiLayoutTableRevisionReproduction.requireNative(target, descriptor, baseline, candidate, patchDescriptor);
       case "praxis.dynamic-form.editor" -> UiLayoutFormRevisionReproduction.requireNative(target, descriptor, baseline, candidate, patchDescriptor);

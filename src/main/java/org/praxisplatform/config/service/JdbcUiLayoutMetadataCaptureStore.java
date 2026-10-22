@@ -1,7 +1,6 @@
 package org.praxisplatform.config.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import java.sql.Connection;
 import java.sql.ResultSet;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -13,7 +12,6 @@ import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.jdbc.datasource.ConnectionHolder;
 import org.springframework.transaction.TransactionStatus;
-import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 /** Internal append-only Config store. No bean, public SPI, capture source or lifecycle wiring. */
 final class JdbcUiLayoutMetadataCaptureStore implements UiLayoutMetadataCapturePersistence {
@@ -22,7 +20,7 @@ final class JdbcUiLayoutMetadataCaptureStore implements UiLayoutMetadataCaptureP
       + " AND environment=:environment AND root_component_type=:root_component_type"
       + " AND root_component_id=:root_component_id";
   private final NamedParameterJdbcTemplate jdbc;
-  private final jakarta.persistence.EntityManagerFactory configEntityManagerFactory;
+  private final ConfigJdbcTransactionGuard transactionGuard;
   private final ObjectMapper mapper;
   private final UiLayoutMetadataCaptureCodec captures;
   private final UiLayoutDraftWorkspaceCodec workspaces;
@@ -35,10 +33,7 @@ final class JdbcUiLayoutMetadataCaptureStore implements UiLayoutMetadataCaptureP
   JdbcUiLayoutMetadataCaptureStore(NamedParameterJdbcTemplate configJdbc, ObjectMapper mapper,
       CanonicalJsonHashService hashes, org.springframework.transaction.support.TransactionOperations transactions) {
     this.jdbc = configJdbc;
-    this.configEntityManagerFactory = transactions instanceof org.springframework.transaction.support.TransactionTemplate template
-        && template.getTransactionManager() instanceof org.springframework.orm.jpa.JpaTransactionManager manager
-        && manager.getDataSource() == configJdbc.getJdbcTemplate().getDataSource()
-        ? manager.getEntityManagerFactory() : null;
+    this.transactionGuard = new ConfigJdbcTransactionGuard(configJdbc.getJdbcTemplate().getDataSource(), transactions);
     this.mapper = UiLayoutMetadataCaptureCodec.strictMapper(mapper);
     this.captures = new UiLayoutMetadataCaptureCodec(mapper, hashes);
     this.workspaces = new UiLayoutDraftWorkspaceCodec(mapper, hashes);
@@ -113,26 +108,7 @@ final class JdbcUiLayoutMetadataCaptureStore implements UiLayoutMetadataCaptureP
   }
 
   private ConnectionHolder transaction() {
-    try {
-      var source = jdbc.getJdbcTemplate().getDataSource();
-      if (source == null || !TransactionSynchronizationManager.isActualTransactionActive()
-          || !(TransactionSynchronizationManager.getResource(source) instanceof ConnectionHolder holder)
-          || (!holder.isSynchronizedWithTransaction() && !isJpaConnection(holder.getConnection()))
-          || holder.getConnection().getAutoCommit()
-          || holder.getConnection().getTransactionIsolation() != Connection.TRANSACTION_READ_COMMITTED) {
-        throw failure(UiLayoutLifecycleException.Code.SOURCE_UNAVAILABLE);
-      }
-      return holder;
-    } catch (Exception exception) { throw failure(UiLayoutLifecycleException.Code.SOURCE_UNAVAILABLE); }
-  }
-
-  /** JpaTransactionManager binds its JDBC handle without the JDBC manager's synchronization flag. */
-  private boolean isJpaConnection(Connection connection) {
-    if (configEntityManagerFactory == null) return false;
-    Object resource = TransactionSynchronizationManager.getResource(configEntityManagerFactory);
-    if (!(resource instanceof org.springframework.orm.jpa.EntityManagerHolder holder)
-        || !holder.isSynchronizedWithTransaction() || !holder.getEntityManager().getTransaction().isActive()) return false;
-    return holder.getEntityManager().unwrap(org.hibernate.Session.class).doReturningWork(actual -> actual == connection);
+    return transactionGuard.require();
   }
 
   private static void requireScope(UiLayoutLifecycleInvocation invocation, UiLayoutMetadataCapture.Binding expected) {

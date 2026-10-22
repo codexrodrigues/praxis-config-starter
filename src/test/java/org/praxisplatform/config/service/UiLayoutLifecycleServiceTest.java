@@ -66,6 +66,22 @@ class UiLayoutLifecycleServiceTest {
     when(heads.saveAndFlush(any())).thenAnswer(invocation -> invocation.getArgument(0));
   }
 
+  @Test
+  void navigationGroupHeadTransitionsAreClosedWithoutPageHostEvenWithPermissivePolicyAndValidator() {
+    var groups = new UiLayoutLifecycleService.Scope("tenant-a", "unit", "lab",
+        new UiLayoutTarget("praxis-app-shell", UUID.randomUUID().toString()));
+    UUID release = UUID.randomUUID();
+    for (Runnable transition : List.<Runnable>of(
+        () -> service.publish(groups, release, null, "actor", "publish"),
+        () -> service.withdraw(groups, UUID.randomUUID(), "actor", "withdraw"),
+        () -> service.rollback(groups, release, UUID.randomUUID(), "actor", "rollback"))) {
+      assertThatThrownBy(transition::run).isInstanceOf(UiLayoutLifecycleException.class)
+          .extracting(error -> ((UiLayoutLifecycleException) error).getCode())
+          .isEqualTo(UiLayoutLifecycleException.Code.SOURCE_UNAVAILABLE);
+    }
+    org.mockito.Mockito.verifyNoInteractions(heads, events, releases, reviews, members);
+  }
+
   @Test void oversizedReasonsFailBeforeRevisionApprovalOrEventWrites() {
     UUID id=UUID.randomUUID();
     UiLayoutDraft draft=draft(UUID.randomUUID(),"DRAFT");

@@ -128,6 +128,17 @@ public class UiLayoutLifecycleCommandService {
 
   public UiLayoutDraftWorkspaceReceipt createDraft(Principal principal, String contextVersion, UiLayoutTarget root,
       String idempotencyKey) {
+    return createDraft(principal, contextVersion, root, idempotencyKey, null);
+  }
+
+  UiLayoutDraftWorkspaceReceipt createReservedPageDraft(Principal principal, String contextVersion, UiLayoutTarget root,
+      String idempotencyKey, UUID reservedDraftId) {
+    if (reservedDraftId == null || !UiLayoutPageRevisionReproduction.TYPE.equals(root.componentType())) throw invalid("Reserved page draft is invalid.");
+    return createDraft(principal, contextVersion, root, idempotencyKey, reservedDraftId);
+  }
+
+  private UiLayoutDraftWorkspaceReceipt createDraft(Principal principal, String contextVersion, UiLayoutTarget root,
+      String idempotencyKey, UUID assignedDraftId) {
     String key = bounded(idempotencyKey, "Idempotency-Key", 180);
     UiLayoutLifecycleInvocation invocation = invoke(principal, contextVersion, root, UiLayoutLifecycleOperation.CREATE_DRAFT);
     UiLayoutValidationContext validation = beginValidation(invocation, UiLayoutLifecycleOperation.CREATE_DRAFT, UiLayoutValidationPurpose.AUTHORING);
@@ -157,11 +168,15 @@ public class UiLayoutLifecycleCommandService {
       catch (RuntimeException exception) { throw unavailable("Workspace source is unavailable."); }
       if (seed == null) throw unavailable("Workspace source returned no seed.");
       for (var target : seed.targets()) metadataCodec.requireSeedSyntax(target.metadata(), target.document());
-      UUID reservedDraftId = UUID.randomUUID();
+      UUID reservedDraftId = assignedDraftId == null ? UUID.randomUUID() : assignedDraftId;
       UiLayoutDraftWorkspaceDocument seeded = workspaceCodec.fromSeed(invocation, seed);
       var initialTargets = new ArrayList<UiLayoutDraftWorkspaceDocument.TargetState>();
       for (int index = 0; index < seeded.targets().size(); index++) {
         var state = seeded.targets().get(index);
+        if (UiLayoutNavigationGroupsRevisionReproduction.TYPE.equals(state.target().componentType())) {
+          UiLayoutNavigationGroupsRevisionReproduction.requireNative(state.target(), state.authoring(),
+              state.baseline().document(), state.working().document(), state.patch());
+        }
         var children = pageChildren.initial(invocation, reservedDraftId, seed.targets().get(index), workspaceSource, metadataAdmission, validation);
         initialTargets.add(new UiLayoutDraftWorkspaceDocument.TargetState(state.target(), state.authoring(), state.patch(),
             state.baseline(), state.working(), null, null, children));
@@ -195,6 +210,13 @@ public class UiLayoutLifecycleCommandService {
       var receipt = workspaceProjector.project(invocation, draft, validation.forPurpose(UiLayoutValidationPurpose.CURRENT_WORKSPACE_READ));
       revalidate(principal, contextVersion, root, invocation, UiLayoutLifecycleOperation.CREATE_DRAFT, validation);
       requireMetadataEvidence(invocation, draft, captured, validation);
+      if (UiLayoutNavigationGroupsRevisionReproduction.TYPE.equals(root.componentType())) {
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+          @Override public void beforeCommit(boolean readOnly) {
+            requireMetadataEvidence(invocation, draft, captured, validation);
+          }
+        });
+      }
       for (var state : document.targets()) recheckPageChildren(invocation, draft.getId(), state, validation);
       revalidate(principal, contextVersion, root, invocation, UiLayoutLifecycleOperation.CREATE_DRAFT, validation);
       return receipt;
@@ -293,6 +315,7 @@ public class UiLayoutLifecycleCommandService {
           target.baseline().document(), candidate, target.patch(), patch);
       UiLayoutFormRevisionReproduction.require(input.target(), target.authoring(),
           target.baseline().document(), candidate, target.patch(), patch);
+      UiLayoutNavigationGroupsRevisionReproduction.require(input.target(), target.authoring(), target.baseline().document(), candidate, target.patch(), patch);
       UiLayoutPageRevisionReproduction.require(input.target(), target.authoring(), target.baseline().document(), candidate, target.patch(), patch);
       UiLayoutRevision revision = validation.call(invocation, () -> core.createRevision(new UiLayoutLifecycleService.RevisionCommand(scope(invocation), draftId,
           uuid(draftEtag, "If-Match"), input.target(), patch.toString(), target.patch().schemaVersion(), input.reason()), invocation.actorRef()));
@@ -302,7 +325,15 @@ public class UiLayoutLifecycleCommandService {
               revision.getContentHash(), revision.getSchemaVersion(), input.commandRef()), null, childEvidence);
       UiLayoutDraft updated = validation.call(invocation, () -> core.updateDraftWorkspace(scope(invocation), draftId, uuid(draftEtag, "If-Match"),
           workspaceCodec.encode(replaceTarget(workspace, index, nextTarget)), invocation.actorRef()));
-      if (UiLayoutPageRevisionReproduction.TYPE.equals(nextTarget.target().componentType())) requireMetadataEvidence(invocation, updated, null, validation);
+      if (UiLayoutPageRevisionReproduction.TYPE.equals(nextTarget.target().componentType())
+          || UiLayoutNavigationGroupsRevisionReproduction.TYPE.equals(nextTarget.target().componentType())) {
+        requireMetadataEvidence(invocation, updated, null, validation);
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+          @Override public void beforeCommit(boolean readOnly) {
+            requireMetadataEvidence(invocation, updated, null, validation);
+          }
+        });
+      }
       recheckPageChildren(invocation, draftId, nextTarget, validation);
       return new RevisionResult(new UiLayoutRevisionReceipt(revision.getId().toString(), input.target(), revision.getContentHash(),
           revision.getSchemaVersion(), revision.getRevisionNumber()), workspaceProjector.project(invocation, updated, validation.forPurpose(UiLayoutValidationPurpose.CURRENT_WORKSPACE_READ)));
@@ -361,6 +392,12 @@ public class UiLayoutLifecycleCommandService {
         derivedMembers.add(new UiLayoutLifecycleService.MemberCommand(index, target.target(),
             target.selectedAssignment().assignmentRevisionRef(), target.selectedRevision().revisionRef()));
       }
+      requireMetadataEvidence(invocation, current, null, validation);
+      TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+        @Override public void beforeCommit(boolean readOnly) {
+          requireMetadataEvidence(invocation, currentDraft(invocation, root, draftId), null, validation);
+        }
+      });
       for (var state : workspace.targets()) recheckPageChildren(invocation, draftId, state, validation);
       structure.validateReleaseTargets(invocation, workspace.targets().stream().map(UiLayoutDraftWorkspaceDocument.TargetState::target).toList(), validation);
       UiLayoutDraftWorkspaceDocument frozenWorkspace = new UiLayoutDraftWorkspaceDocument(
@@ -425,6 +462,11 @@ public class UiLayoutLifecycleCommandService {
       UiLayoutLifecycleInvocation invocation = invocations.resolve(principal, contextVersion.trim(), root);
       if (invocation == null || !contextVersion.trim().equals(invocation.contextVersion()) || !root.equals(invocation.rootTarget())) {
         throw new UiLayoutLifecycleException(UiLayoutLifecycleException.Code.CONTEXT_STALE, "Lifecycle context changed before the operation.");
+      }
+      if (UiLayoutNavigationGroupsRevisionReproduction.TYPE.equals(root.componentType())
+          && (operation == UiLayoutLifecycleOperation.PUBLISH_RELEASE || operation == UiLayoutLifecycleOperation.ROLLBACK_RELEASE
+              || operation == UiLayoutLifecycleOperation.WITHDRAW_RELEASE)) {
+        throw new UiLayoutLifecycleException(UiLayoutLifecycleException.Code.SOURCE_UNAVAILABLE, "Navigation group head transitions require the page/group integrity owner.");
       }
       admission.require(operation, invocation);
       return invocation;
@@ -506,6 +548,7 @@ public class UiLayoutLifecycleCommandService {
           state.working().document(), state.patch(), patch);
       UiLayoutFormRevisionReproduction.require(state.target(), state.authoring(), state.baseline().document(),
           state.working().document(), state.patch(), patch);
+      UiLayoutNavigationGroupsRevisionReproduction.require(state.target(), state.authoring(), state.baseline().document(), state.working().document(), state.patch(), patch);
       UiLayoutPageRevisionReproduction.require(state.target(), state.authoring(), state.baseline().document(),
           state.working().document(), state.patch(), patch);
       result.add(new UiLayoutLifecycleFrozenContribution(state.target(), assignment.contributionKey(),
