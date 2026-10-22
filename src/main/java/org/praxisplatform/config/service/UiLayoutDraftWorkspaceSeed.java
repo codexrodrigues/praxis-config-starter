@@ -18,8 +18,13 @@ public record UiLayoutDraftWorkspaceSeed(List<TargetSeed> targets) {
       UiLayoutPatchDocumentDescriptor patch,
       String sourceRef,
       JsonNode document,
-      UiLayoutBaselineMetadataSeed metadata) {
+      UiLayoutBaselineMetadataSeed metadata, List<UiLayoutPageChildSeed> pageChildren) {
+    public TargetSeed(UiLayoutTarget target, UiLayoutAuthoringDocumentDescriptor authoring,
+        UiLayoutPatchDocumentDescriptor patch, String sourceRef, JsonNode document, UiLayoutBaselineMetadataSeed metadata) {
+      this(target, authoring, patch, sourceRef, document, metadata, List.of());
+    }
     public TargetSeed {
+      pageChildren = pageChildren == null ? List.of() : List.copyOf(pageChildren);
       if (target == null) throw new IllegalArgumentException("target is required.");
       if (authoring == null) throw new IllegalArgumentException("authoring is required.");
       if (patch == null) throw new IllegalArgumentException("patch is required.");

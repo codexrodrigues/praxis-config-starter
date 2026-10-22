@@ -22,13 +22,23 @@ final class JdbcUiLayoutMetadataCaptureStore implements UiLayoutMetadataCaptureP
       + " AND environment=:environment AND root_component_type=:root_component_type"
       + " AND root_component_id=:root_component_id";
   private final NamedParameterJdbcTemplate jdbc;
+  private final jakarta.persistence.EntityManagerFactory configEntityManagerFactory;
   private final ObjectMapper mapper;
   private final UiLayoutMetadataCaptureCodec captures;
   private final UiLayoutDraftWorkspaceCodec workspaces;
 
   JdbcUiLayoutMetadataCaptureStore(NamedParameterJdbcTemplate configJdbc, ObjectMapper mapper,
       CanonicalJsonHashService hashes) {
+    this(configJdbc, mapper, hashes, null);
+  }
+
+  JdbcUiLayoutMetadataCaptureStore(NamedParameterJdbcTemplate configJdbc, ObjectMapper mapper,
+      CanonicalJsonHashService hashes, org.springframework.transaction.support.TransactionOperations transactions) {
     this.jdbc = configJdbc;
+    this.configEntityManagerFactory = transactions instanceof org.springframework.transaction.support.TransactionTemplate template
+        && template.getTransactionManager() instanceof org.springframework.orm.jpa.JpaTransactionManager manager
+        && manager.getDataSource() == configJdbc.getJdbcTemplate().getDataSource()
+        ? manager.getEntityManagerFactory() : null;
     this.mapper = UiLayoutMetadataCaptureCodec.strictMapper(mapper);
     this.captures = new UiLayoutMetadataCaptureCodec(mapper, hashes);
     this.workspaces = new UiLayoutDraftWorkspaceCodec(mapper, hashes);
@@ -107,12 +117,22 @@ final class JdbcUiLayoutMetadataCaptureStore implements UiLayoutMetadataCaptureP
       var source = jdbc.getJdbcTemplate().getDataSource();
       if (source == null || !TransactionSynchronizationManager.isActualTransactionActive()
           || !(TransactionSynchronizationManager.getResource(source) instanceof ConnectionHolder holder)
-          || !holder.isSynchronizedWithTransaction()
+          || (!holder.isSynchronizedWithTransaction() && !isJpaConnection(holder.getConnection()))
+          || holder.getConnection().getAutoCommit()
           || holder.getConnection().getTransactionIsolation() != Connection.TRANSACTION_READ_COMMITTED) {
         throw failure(UiLayoutLifecycleException.Code.SOURCE_UNAVAILABLE);
       }
       return holder;
     } catch (Exception exception) { throw failure(UiLayoutLifecycleException.Code.SOURCE_UNAVAILABLE); }
+  }
+
+  /** JpaTransactionManager binds its JDBC handle without the JDBC manager's synchronization flag. */
+  private boolean isJpaConnection(Connection connection) {
+    if (configEntityManagerFactory == null) return false;
+    Object resource = TransactionSynchronizationManager.getResource(configEntityManagerFactory);
+    if (!(resource instanceof org.springframework.orm.jpa.EntityManagerHolder holder)
+        || !holder.isSynchronizedWithTransaction() || !holder.getEntityManager().getTransaction().isActive()) return false;
+    return holder.getEntityManager().unwrap(org.hibernate.Session.class).doReturningWork(actual -> actual == connection);
   }
 
   private static void requireScope(UiLayoutLifecycleInvocation invocation, UiLayoutMetadataCapture.Binding expected) {

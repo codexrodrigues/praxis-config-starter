@@ -79,6 +79,8 @@ public class UiLayoutDraftWorkspaceCodec {
     try {
       UiLayoutDraftWorkspaceDocument document = mapper.readValue(json, UiLayoutDraftWorkspaceDocument.class);
       validate(document);
+      var children = new UiLayoutPageChildCaptures(hashes);
+      for (var state : document.targets()) children.historicalIntegrity(null, state.target(), state.baseline().document(), state.working().document(), state.pageChildren());
       return document;
     } catch (UiLayoutLifecycleException exception) { throw exception; }
     catch (Exception exception) { throw invalid("Workspace document is unavailable or malformed."); }

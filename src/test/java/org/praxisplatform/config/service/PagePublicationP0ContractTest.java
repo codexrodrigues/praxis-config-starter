@@ -22,7 +22,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestFactory;
 import org.praxisplatform.config.dto.UiLayoutTarget;
 
-/** P0 corpus checks only. No page codec, authorization, database or HTTP implementation is exercised. */
+/** P0 corpus and native codec checks. No authorization, database or live HTTP proof. */
 @Tag("unit")
 class PagePublicationP0ContractTest {
   private static final Path ROOT = Path.of("docs/ai/contracts/page-publication-p0");
@@ -177,17 +177,20 @@ class PagePublicationP0ContractTest {
   }
 
   @Test
-  void p0DoesNotPretendPageAndGroupsAlreadyHaveNativeProjection() throws Exception {
+  void pageProjectionIsImplementedWhileGroupsRemainUnavailable() throws Exception {
     for (String contract : Set.of("pageDocument", "groupsDocument")) {
       JsonNode example = nodes(read("corpus.json").path("schemaCases"))
           .filter(c -> c.path("contract").asText().equals(contract) && c.path("valid").asBoolean())
           .findFirst().orElseThrow().get("input");
-      var target = new UiLayoutTarget(contract.equals("pageDocument") ? "praxis-dynamic-page" : "praxis-app-shell", "fixture-root");
+      var target = new UiLayoutTarget(contract.equals("pageDocument") ? "praxis-dynamic-page" : "praxis-app-shell", "11111111-1111-4111-8111-111111111111");
       var descriptor = new UiLayoutAuthoringDocumentDescriptor(example.path("kind").asText(), "fixture:proposed", "1");
-      assertThrows(UiLayoutLifecycleException.class, () ->
+      if (contract.equals("pageDocument")) {
+        var projection = UiLayoutAuthoringProjection.project(target, descriptor, example, example, PATCH, () -> {});
+        UiLayoutPageRevisionReproduction.require(target, descriptor, example, example, PATCH, projection.compilePatch());
+      } else assertThrows(UiLayoutLifecycleException.class, () ->
           UiLayoutAuthoringProjection.project(target, descriptor, example, example, PATCH, () -> {}));
     }
-    // This assertion is deliberately removed/replaced by positive codec tests in P1.
+
   }
 
   @Test

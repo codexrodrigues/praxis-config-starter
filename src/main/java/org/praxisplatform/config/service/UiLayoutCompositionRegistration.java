@@ -11,6 +11,10 @@ public record UiLayoutCompositionRegistration(UiLayoutTarget rootTarget, List<Ui
       throw new IllegalArgumentException("A composition registration requires rootTarget as its first target.");
     }
     targets = List.copyOf(targets);
+    if ("praxis-dynamic-page".equals(rootTarget.componentType())
+        && (targets.size() != 1 || !rootTarget.componentId().matches(UiLayoutPageRevisionReproduction.UUID_PATTERN))) {
+      throw new IllegalArgumentException("A page requires one stable UUID root target.");
+    }
     if (new LinkedHashSet<>(targets).size() != targets.size()) {
       throw new IllegalArgumentException("A composition registration cannot repeat a target.");
     }

@@ -283,3 +283,8 @@ medido em codepoints Unicode, incluindo referências com caracteres astrais.
 O corpus inclui fronteiras de whitespace, newline final, UUID, ícone, comprimento
 de layout e `snoozeMs` inteiro não negativo sem teto implícito de MAX_SAFE_INTEGER.
 Isso não atesta fidelidade de parsing numérico fora da identidade exata já exigida.
+
+`pageRevisionCommand.reason` conserva o limite do lifecycle existente: 1024
+codepoints Unicode, igual a revision/approval/event no V64. O valor 2000 da primeira
+especificação P0 era divergência documental, corrigida no P1 sem nova coluna ou
+migration. Os decoders e o writer canônico rejeitam excessos antes da persistência.

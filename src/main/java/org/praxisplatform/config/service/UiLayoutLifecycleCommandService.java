@@ -67,6 +67,7 @@ public class UiLayoutLifecycleCommandService {
   private final UiLayoutBaselineMetadataAdmission metadataAdmission;
   private final UiLayoutMetadataCaptureCodec metadataCodec;
   private final UiLayoutFrozenWorkspaceResolver frozenWorkspace;
+  private final UiLayoutPageChildCaptures pageChildren;
 
   UiLayoutLifecycleCommandService(UiLayoutLifecycleService core, UiLayoutLifecycleInvocationProvider invocations,
       UiLayoutLifecycleAdmission admission, UiLayoutLifecycleStructureValidator structure, UiLayoutDraftRepository drafts,
@@ -85,6 +86,7 @@ public class UiLayoutLifecycleCommandService {
     this.metadataStore = metadataStore;
     this.metadataAdmission = metadataAdmission == null ? UiLayoutBaselineMetadataAdmission.denyAll() : metadataAdmission;
     this.metadataCodec = new UiLayoutMetadataCaptureCodec(objectMapper, hashes);
+    this.pageChildren = new UiLayoutPageChildCaptures(hashes);
     this.workspaceCodec = new UiLayoutDraftWorkspaceCodec(objectMapper, hashes);
     this.frozenWorkspace = new UiLayoutFrozenWorkspaceResolver(releases, drafts, members, definitions, revisions, assignments, objectMapper, hashes);
     this.workspaceProjector = new UiLayoutDraftWorkspaceProjector(workspaceCodec, definitions, revisions, assignments,
@@ -104,7 +106,7 @@ public class UiLayoutLifecycleCommandService {
     if (configJdbc == null || metadataAdmission == null) throw new IllegalArgumentException("Config metadata storage and admission are required.");
     return assemble(definitions, revisions, assignments, drafts, releases, members, reviews, approvals, heads, events,
         allocationLock, hashes, mapper, releaseValidator, invocations, admission, structure, workspaceSource, creationLock,
-        new JdbcUiLayoutMetadataCaptureStore(configJdbc, mapper, hashes), metadataAdmission, transactions, budgetPolicy);
+        new JdbcUiLayoutMetadataCaptureStore(configJdbc, mapper, hashes, transactions), metadataAdmission, transactions, budgetPolicy);
   }
 
   /** Internal composition seam; production factory always installs the canonical Config JDBC store. */
@@ -155,7 +157,16 @@ public class UiLayoutLifecycleCommandService {
       catch (RuntimeException exception) { throw unavailable("Workspace source is unavailable."); }
       if (seed == null) throw unavailable("Workspace source returned no seed.");
       for (var target : seed.targets()) metadataCodec.requireSeedSyntax(target.metadata(), target.document());
-      UiLayoutDraftWorkspaceDocument document = workspaceCodec.fromSeed(invocation, seed);
+      UUID reservedDraftId = UUID.randomUUID();
+      UiLayoutDraftWorkspaceDocument seeded = workspaceCodec.fromSeed(invocation, seed);
+      var initialTargets = new ArrayList<UiLayoutDraftWorkspaceDocument.TargetState>();
+      for (int index = 0; index < seeded.targets().size(); index++) {
+        var state = seeded.targets().get(index);
+        var children = pageChildren.initial(invocation, reservedDraftId, seed.targets().get(index), workspaceSource, metadataAdmission, validation);
+        initialTargets.add(new UiLayoutDraftWorkspaceDocument.TargetState(state.target(), state.authoring(), state.patch(),
+            state.baseline(), state.working(), null, null, children));
+      }
+      UiLayoutDraftWorkspaceDocument document = new UiLayoutDraftWorkspaceDocument(seeded.schemaVersion(), initialTargets, null);
       for (UiLayoutDraftWorkspaceDocument.TargetState target : document.targets()) {
         structure.validateTarget(invocation, target.target(), validation);
         structure.validateAuthoringBaseline(invocation, target.target(), target.authoring(), target.baseline().document(), validation);
@@ -170,7 +181,7 @@ public class UiLayoutLifecycleCommandService {
         requireMetadata(invocation, target.target(), target.authoring(), target.sourceRef(), target.document(), target.metadata(), validation);
       }
       revalidate(principal, contextVersion, root, invocation, UiLayoutLifecycleOperation.CREATE_DRAFT, validation);
-      UiLayoutDraft draft = validation.call(invocation, () -> core.createDraft(scope(invocation), workspaceCodec.encode(document), invocation.actorRef(), key));
+      UiLayoutDraft draft = validation.call(invocation, () -> core.createDraft(reservedDraftId, scope(invocation), workspaceCodec.encode(document), invocation.actorRef(), key));
       // The Config JDBC store must see the new JPA draft inside this same transaction.
       validation.run(invocation, () -> drafts.flush());
       List<UiLayoutMetadataCapture> captured = new ArrayList<>();
@@ -184,6 +195,7 @@ public class UiLayoutLifecycleCommandService {
       var receipt = workspaceProjector.project(invocation, draft, validation.forPurpose(UiLayoutValidationPurpose.CURRENT_WORKSPACE_READ));
       revalidate(principal, contextVersion, root, invocation, UiLayoutLifecycleOperation.CREATE_DRAFT, validation);
       requireMetadataEvidence(invocation, draft, captured, validation);
+      for (var state : document.targets()) recheckPageChildren(invocation, draft.getId(), state, validation);
       revalidate(principal, contextVersion, root, invocation, UiLayoutLifecycleOperation.CREATE_DRAFT, validation);
       return receipt;
     });
@@ -217,6 +229,16 @@ public class UiLayoutLifecycleCommandService {
       storedCaptures.add(stored);
     }
     metadataCodec.requireCompositionBudget(storedCaptures);
+    long captureBytes = 0;
+    for (var capture : storedCaptures) {
+      captureBytes += capture.rawInputText().getBytes(java.nio.charset.StandardCharsets.UTF_8).length;
+      if (capture.reproduction() instanceof UiLayoutBaselineMetadataSeed.SchemaProjection projection)
+        captureBytes += projection.assembly().inputText().getBytes(java.nio.charset.StandardCharsets.UTF_8).length;
+    }
+    for (var state : document.targets()) captureBytes += UiLayoutPageChildCaptures.bodyBytes(state.pageChildren());
+    if (captureBytes > UiLayoutMetadataCaptureCodec.MAX_COMPOSITION_BODY_BYTES) throw invalid("Composition metadata exceeds its capture budget.");
+    for (var state : document.targets()) pageChildren.verify(invocation, draft.getId(), state.target(), state.baseline().document(),
+        state.working().document(), state.pageChildren(), workspaceSource, metadataAdmission, validation);
   }
 
   private void requireMetadataAccess(UiLayoutLifecycleInvocation invocation, UiLayoutMetadataCapture capture, UiLayoutValidationContext validation) {
@@ -260,6 +282,7 @@ public class UiLayoutLifecycleCommandService {
       UiLayoutJsonBounds.requireDocument(target.baseline().document(), UiLayoutLifecycleException.Code.INVALID_STATE,
           () -> validation.require(invocation));
       structure.validateTarget(invocation, input.target(), validation);
+      var childEvidence = pageChildren.revision(invocation, draftId, target, candidate, input.childSources(), workspaceSource, metadataAdmission, validation);
       JsonNode patch = UiLayoutAuthoringProjection.project(input.target(), target.authoring(),
           target.baseline().document(), candidate, target.patch(), () -> validation.require(invocation)).compilePatch();
       workspaceCodec.requireSize(patch, "patchDocument");
@@ -270,14 +293,17 @@ public class UiLayoutLifecycleCommandService {
           target.baseline().document(), candidate, target.patch(), patch);
       UiLayoutFormRevisionReproduction.require(input.target(), target.authoring(),
           target.baseline().document(), candidate, target.patch(), patch);
+      UiLayoutPageRevisionReproduction.require(input.target(), target.authoring(), target.baseline().document(), candidate, target.patch(), patch);
       UiLayoutRevision revision = validation.call(invocation, () -> core.createRevision(new UiLayoutLifecycleService.RevisionCommand(scope(invocation), draftId,
           uuid(draftEtag, "If-Match"), input.target(), patch.toString(), target.patch().schemaVersion(), input.reason()), invocation.actorRef()));
       var nextTarget = new UiLayoutDraftWorkspaceDocument.TargetState(target.target(), target.authoring(), target.patch(),
           target.baseline(), new UiLayoutDraftWorkspaceDocument.WorkingDocument(hashes.sha256Exact(candidate), candidate),
           new UiLayoutDraftWorkspaceDocument.RevisionSelection(revision.getId(), revision.getRevisionNumber(),
-              revision.getContentHash(), revision.getSchemaVersion(), input.commandRef()), null);
+              revision.getContentHash(), revision.getSchemaVersion(), input.commandRef()), null, childEvidence);
       UiLayoutDraft updated = validation.call(invocation, () -> core.updateDraftWorkspace(scope(invocation), draftId, uuid(draftEtag, "If-Match"),
           workspaceCodec.encode(replaceTarget(workspace, index, nextTarget)), invocation.actorRef()));
+      if (UiLayoutPageRevisionReproduction.TYPE.equals(nextTarget.target().componentType())) requireMetadataEvidence(invocation, updated, null, validation);
+      recheckPageChildren(invocation, draftId, nextTarget, validation);
       return new RevisionResult(new UiLayoutRevisionReceipt(revision.getId().toString(), input.target(), revision.getContentHash(),
           revision.getSchemaVersion(), revision.getRevisionNumber()), workspaceProjector.project(invocation, updated, validation.forPurpose(UiLayoutValidationPurpose.CURRENT_WORKSPACE_READ)));
     });
@@ -308,7 +334,7 @@ public class UiLayoutLifecycleCommandService {
       var nextTarget = new UiLayoutDraftWorkspaceDocument.TargetState(target.target(), target.authoring(), target.patch(),
           target.baseline(), target.working(), target.selectedRevision(),
           new UiLayoutDraftWorkspaceDocument.AssignmentSelection(assignment.getId(), assignment.getRevisionId(),
-              assignment.getLayerClass(), input.selector(), assignment.getPriority(), assignment.getContributionKey(), input.commandRef()));
+              assignment.getLayerClass(), input.selector(), assignment.getPriority(), assignment.getContributionKey(), input.commandRef()), target.pageChildren());
       UiLayoutDraft updated = validation.call(invocation, () -> core.updateDraftWorkspace(scope(invocation), draftId, uuid(draftEtag, "If-Match"),
           workspaceCodec.encode(replaceTarget(workspace, index, nextTarget)), invocation.actorRef()));
       return new AssignmentResult(new UiLayoutAssignmentRevisionReceipt(assignment.getId().toString(), assignment.getRevisionId().toString(),
@@ -335,6 +361,7 @@ public class UiLayoutLifecycleCommandService {
         derivedMembers.add(new UiLayoutLifecycleService.MemberCommand(index, target.target(),
             target.selectedAssignment().assignmentRevisionRef(), target.selectedRevision().revisionRef()));
       }
+      for (var state : workspace.targets()) recheckPageChildren(invocation, draftId, state, validation);
       structure.validateReleaseTargets(invocation, workspace.targets().stream().map(UiLayoutDraftWorkspaceDocument.TargetState::target).toList(), validation);
       UiLayoutDraftWorkspaceDocument frozenWorkspace = new UiLayoutDraftWorkspaceDocument(
           workspace.schemaVersion(), workspace.targets(), commandRef);
@@ -472,11 +499,14 @@ public class UiLayoutLifecycleCommandService {
     List<UiLayoutLifecycleFrozenContribution> result = new ArrayList<>();
     for (int index = 0; index < frozen.document().targets().size(); index++) {
       var state = frozen.document().targets().get(index);
+      recheckPageChildren(invocation, frozen.draftId(), state, validation);
       var assignment = state.selectedAssignment(); var revision = state.selectedRevision();
       var patch = frozen.patches().get(index);
       UiLayoutTableRevisionReproduction.require(state.target(), state.authoring(), state.baseline().document(),
           state.working().document(), state.patch(), patch);
       UiLayoutFormRevisionReproduction.require(state.target(), state.authoring(), state.baseline().document(),
+          state.working().document(), state.patch(), patch);
+      UiLayoutPageRevisionReproduction.require(state.target(), state.authoring(), state.baseline().document(),
           state.working().document(), state.patch(), patch);
       result.add(new UiLayoutLifecycleFrozenContribution(state.target(), assignment.contributionKey(),
           new UiLayoutResolutionCandidate(state.target(), revision.revisionRef().toString(), revision.contentHash(),
@@ -486,6 +516,17 @@ public class UiLayoutLifecycleCommandService {
               state.working().contentHash(), state.working().document())));
     }
     return List.copyOf(result);
+  }
+
+  private void recheckPageChildren(UiLayoutLifecycleInvocation invocation, UUID draftId,
+      UiLayoutDraftWorkspaceDocument.TargetState state, UiLayoutValidationContext validation) {
+    if (!UiLayoutPageRevisionReproduction.TYPE.equals(state.target().componentType())) return;
+    Runnable check = () -> pageChildren.verify(invocation, draftId, state.target(), state.baseline().document(),
+        state.working().document(), state.pageChildren(), workspaceSource, metadataAdmission, validation);
+    check.run();
+    TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+      @Override public void beforeCommit(boolean readOnly) { check.run(); }
+    });
   }
 
   private UiLayoutReleaseReviewReceipt review(UUID releaseId, UiLayoutTarget root) {
@@ -519,7 +560,13 @@ public class UiLayoutLifecycleCommandService {
   private UiLayoutLifecycleException unavailable(String message) { return new UiLayoutLifecycleException(UiLayoutLifecycleException.Code.SOURCE_UNAVAILABLE, message); }
   private UiLayoutLifecycleException precondition() { return new UiLayoutLifecycleException(UiLayoutLifecycleException.Code.PRECONDITION_FAILED, "Lifecycle precondition failed."); }
 
-  public record RevisionInput(UUID commandRef, UiLayoutTarget target, String authoringDocument, String reason) {}
+  public record RevisionInput(UUID commandRef, UiLayoutTarget target, String authoringDocument, String reason,
+      List<org.praxisplatform.config.dto.UiLayoutPageChildSource> childSources) {
+    public RevisionInput(UUID commandRef, UiLayoutTarget target, String authoringDocument, String reason) {
+      this(commandRef, target, authoringDocument, reason, null);
+    }
+    public RevisionInput { if (childSources != null) childSources = List.copyOf(childSources); }
+  }
   public record AssignmentInput(UUID commandRef, UiLayoutTarget target, String layerClass, UiLayoutAudienceSelectorCommand selector, short priority, String contributionKey) {}
   @io.swagger.v3.oas.annotations.media.Schema(description = "Result of creating one immutable revision and rotating its source draft validator.")
   public record RevisionResult(

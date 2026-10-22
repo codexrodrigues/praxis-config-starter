@@ -17,6 +17,7 @@ final class UiLayoutFrozenWorkspaceResolver {
   private final UiLayoutReleaseMemberRepository members;
   private final UiLayoutDraftWorkspaceCodec codec;
   private final UiLayoutWorkspaceSelectionVerifier selections;
+  private final UiLayoutPageChildCaptures children;
 
   UiLayoutFrozenWorkspaceResolver(UiLayoutReleaseRepository releases, UiLayoutDraftRepository drafts,
       UiLayoutReleaseMemberRepository members, UiLayoutDefinitionRepository definitions,
@@ -24,6 +25,7 @@ final class UiLayoutFrozenWorkspaceResolver {
       ObjectMapper mapper, CanonicalJsonHashService hashes) {
     this.releases = releases; this.drafts = drafts; this.members = members;
     this.codec = new UiLayoutDraftWorkspaceCodec(mapper, hashes);
+    this.children = new UiLayoutPageChildCaptures(hashes);
     this.selections = new UiLayoutWorkspaceSelectionVerifier(definitions, revisions, assignments, mapper, hashes);
   }
 
@@ -57,6 +59,7 @@ final class UiLayoutFrozenWorkspaceResolver {
       }
       List<com.fasterxml.jackson.databind.JsonNode> patches = new ArrayList<>();
       for (var state : document.targets()) {
+        children.historicalIntegrity(draft.getId(), state.target(), state.baseline().document(), state.working().document(), state.pageChildren());
         if (state.selectedRevision() == null || state.selectedAssignment() == null) throw failure(UiLayoutLifecycleException.Code.INVALID_STATE);
         targetAdmission.accept(state.target());
       }

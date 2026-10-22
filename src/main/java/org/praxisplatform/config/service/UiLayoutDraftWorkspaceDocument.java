@@ -23,8 +23,14 @@ public record UiLayoutDraftWorkspaceDocument(String schemaVersion, List<TargetSt
       BaselineDocument baseline,
       WorkingDocument working,
       RevisionSelection selectedRevision,
-      AssignmentSelection selectedAssignment) {
+      AssignmentSelection selectedAssignment, List<UiLayoutPageChildEvidence> pageChildren) {
+    public TargetState(UiLayoutTarget target, UiLayoutAuthoringDocumentDescriptor authoring,
+        UiLayoutPatchDocumentDescriptor patch, BaselineDocument baseline, WorkingDocument working,
+        RevisionSelection selectedRevision, AssignmentSelection selectedAssignment) {
+      this(target, authoring, patch, baseline, working, selectedRevision, selectedAssignment, List.of());
+    }
     public TargetState {
+      pageChildren = pageChildren == null ? List.of() : List.copyOf(pageChildren);
       if (target == null || authoring == null || patch == null || baseline == null || working == null) {
         throw invalid("Workspace target state is incomplete.");
       }

@@ -10,4 +10,10 @@ public record UiLayoutRevisionCommandRequest(
     @Schema(description = "Client-known correlation of the accepted selection. It is not an idempotency key.", requiredMode = Schema.RequiredMode.REQUIRED) UUID commandRef,
     @Schema(description = "Registered draft target whose pinned baseline, native format and presentation policy govern this revision.", requiredMode = Schema.RequiredMode.REQUIRED) UiLayoutTarget target,
     @Schema(description = "Complete native authoring document accepted for deterministic reopen; never published as a release member.", requiredMode = Schema.RequiredMode.REQUIRED) JsonNode authoringDocument,
-    @Schema(description = "Bounded business reason for the immutable revision.", requiredMode = Schema.RequiredMode.REQUIRED) String reason) {}
+    @Schema(description = "Bounded business reason for the immutable revision.", requiredMode = Schema.RequiredMode.REQUIRED) String reason,
+    @Schema(description = "Exact registered source references for previously unknown page widget keys. Never source attestation.") java.util.List<UiLayoutPageChildSource> childSources) {
+  public UiLayoutRevisionCommandRequest(UUID commandRef, UiLayoutTarget target, JsonNode authoringDocument, String reason) {
+    this(commandRef, target, authoringDocument, reason, null);
+  }
+  public UiLayoutRevisionCommandRequest { if (childSources != null) childSources = java.util.List.copyOf(childSources); }
+}

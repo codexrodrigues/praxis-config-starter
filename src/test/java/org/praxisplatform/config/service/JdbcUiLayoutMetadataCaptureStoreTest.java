@@ -231,6 +231,40 @@ class JdbcUiLayoutMetadataCaptureStoreTest {
     assertThat(rows).isEmpty();
   }
 
+  @Test void rejectsAutoCommitEvenWithSynchronizedHolder() throws Exception {
+    when(connection.getAutoCommit()).thenReturn(true);
+    assertCode(this::append, UiLayoutLifecycleException.Code.SOURCE_UNAVAILABLE);
+    assertThat(rows).isEmpty();
+  }
+
+  @Test void acceptsOnlyExactConfigJpaConnectionWhenJdbcFlagIsUnset() throws Exception {
+    holder.setSynchronizedWithTransaction(false);
+    var emf = mock(jakarta.persistence.EntityManagerFactory.class);
+    var em = mock(jakarta.persistence.EntityManager.class);
+    var tx = mock(jakarta.persistence.EntityTransaction.class);
+    var session = mock(org.hibernate.Session.class);
+    var emHolder = new org.springframework.orm.jpa.EntityManagerHolder(em);
+    emHolder.setSynchronizedWithTransaction(true);
+    when(em.getTransaction()).thenReturn(tx); when(tx.isActive()).thenReturn(true);
+    when(em.unwrap(org.hibernate.Session.class)).thenReturn(session);
+    doAnswer(call -> ((org.hibernate.jdbc.ReturningWork<?>)call.getArgument(0)).execute(connection)).when(session).doReturningWork(any());
+    var manager = new org.springframework.orm.jpa.JpaTransactionManager();
+    manager.setEntityManagerFactory(emf); manager.setDataSource(dataSource);
+    store = new JdbcUiLayoutMetadataCaptureStore(jdbc, mapper, hashes, new org.springframework.transaction.support.TransactionTemplate(manager));
+    TransactionSynchronizationManager.bindResource(emf, emHolder);
+    try {
+      append(); assertThat(rows).hasSize(2); rows.clear();
+      doAnswer(call -> ((org.hibernate.jdbc.ReturningWork<?>)call.getArgument(0)).execute(mock(Connection.class))).when(session).doReturningWork(any());
+      assertCode(this::append, UiLayoutLifecycleException.Code.SOURCE_UNAVAILABLE);
+      assertThat(rows).isEmpty();
+      doAnswer(call -> ((org.hibernate.jdbc.ReturningWork<?>)call.getArgument(0)).execute(connection)).when(session).doReturningWork(any());
+      manager.setDataSource(mock(DataSource.class));
+      store = new JdbcUiLayoutMetadataCaptureStore(jdbc, mapper, hashes, new org.springframework.transaction.support.TransactionTemplate(manager));
+      assertCode(this::append, UiLayoutLifecycleException.Code.SOURCE_UNAVAILABLE);
+      assertThat(rows).isEmpty();
+    } finally { TransactionSynchronizationManager.unbindResource(emf); }
+  }
+
   @Test void rejectsRepeatableReadQuotaSnapshot() throws Exception {
     when(connection.getTransactionIsolation()).thenReturn(Connection.TRANSACTION_REPEATABLE_READ);
     assertCode(this::append, UiLayoutLifecycleException.Code.SOURCE_UNAVAILABLE);
