@@ -1,0 +1,1443 @@
+{
+  "version": 1,
+  "relationalCases": [
+    {
+      "id": "references-valid",
+      "page": {
+        "kind": "praxis.dynamic-page.editor",
+        "version": 1,
+        "config": {
+          "definition": {
+            "widgets": [
+              {
+                "key": "00000000-0000-4000-8000-000000000011",
+                "definition": {
+                  "id": "praxis-dynamic-form",
+                  "inputs": {
+                    "mode": "view",
+                    "config": {
+                      "editorialContext": {
+                        "title": "Contato"
+                      },
+                      "fieldMetadata": [
+                        {
+                          "name": "email"
+                        }
+                      ],
+                      "sections": []
+                    }
+                  }
+                }
+              },
+              {
+                "key": "00000000-0000-4000-8000-000000000012",
+                "definition": {
+                  "id": "praxis-table",
+                  "inputs": {
+                    "resourcePath": "/contacts",
+                    "horizontalScroll": "auto",
+                    "config": {
+                      "columns": [],
+                      "columnProjection": {
+                        "source": "schema",
+                        "include": [
+                          "email"
+                        ]
+                      }
+                    }
+                  }
+                }
+              }
+            ],
+            "layout": {
+              "orientation": "columns",
+              "columns": 2,
+              "gap": "16px",
+              "breakpoints": {
+                "sm": 1
+              }
+            }
+          },
+          "presentation": {
+            "title": "Atendimento",
+            "icon": "web"
+          },
+          "navigation": [
+            {
+              "id": "00000000-0000-4000-8000-000000000031",
+              "groupId": "00000000-0000-4000-8000-000000000041",
+              "label": "Atendimento",
+              "icon": "web",
+              "order": 0
+            }
+          ]
+        }
+      },
+      "groups": {
+        "kind": "praxis.navigation-groups.editor",
+        "version": 1,
+        "config": {
+          "groups": [
+            {
+              "id": "00000000-0000-4000-8000-000000000041",
+              "label": "Operações",
+              "icon": "folder",
+              "order": 0
+            }
+          ]
+        }
+      },
+      "errors": []
+    },
+    {
+      "id": "duplicate-widget",
+      "page": {
+        "kind": "praxis.dynamic-page.editor",
+        "version": 1,
+        "config": {
+          "definition": {
+            "widgets": [
+              {
+                "key": "00000000-0000-4000-8000-000000000011",
+                "definition": {
+                  "id": "praxis-dynamic-form",
+                  "inputs": {
+                    "mode": "view",
+                    "config": {
+                      "editorialContext": {
+                        "title": "Contato"
+                      },
+                      "fieldMetadata": [
+                        {
+                          "name": "email"
+                        }
+                      ],
+                      "sections": []
+                    }
+                  }
+                }
+              },
+              {
+                "key": "00000000-0000-4000-8000-000000000012",
+                "definition": {
+                  "id": "praxis-table",
+                  "inputs": {
+                    "resourcePath": "/contacts",
+                    "horizontalScroll": "auto",
+                    "config": {
+                      "columns": [],
+                      "columnProjection": {
+                        "source": "schema",
+                        "include": [
+                          "email"
+                        ]
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "key": "00000000-0000-4000-8000-000000000011",
+                "definition": {
+                  "id": "praxis-dynamic-form",
+                  "inputs": {
+                    "mode": "view",
+                    "config": {
+                      "editorialContext": {
+                        "title": "Contato"
+                      },
+                      "fieldMetadata": [
+                        {
+                          "name": "email"
+                        }
+                      ],
+                      "sections": []
+                    }
+                  }
+                }
+              }
+            ],
+            "layout": {
+              "orientation": "columns",
+              "columns": 2,
+              "gap": "16px",
+              "breakpoints": {
+                "sm": 1
+              }
+            }
+          },
+          "presentation": {
+            "title": "Atendimento",
+            "icon": "web"
+          },
+          "navigation": [
+            {
+              "id": "00000000-0000-4000-8000-000000000031",
+              "groupId": "00000000-0000-4000-8000-000000000041",
+              "label": "Atendimento",
+              "icon": "web",
+              "order": 0
+            }
+          ]
+        }
+      },
+      "groups": {
+        "kind": "praxis.navigation-groups.editor",
+        "version": 1,
+        "config": {
+          "groups": [
+            {
+              "id": "00000000-0000-4000-8000-000000000041",
+              "label": "Operações",
+              "icon": "folder",
+              "order": 0
+            }
+          ]
+        }
+      },
+      "errors": [
+        "DUPLICATE_WIDGET"
+      ]
+    },
+    {
+      "id": "duplicate-binding",
+      "page": {
+        "kind": "praxis.dynamic-page.editor",
+        "version": 1,
+        "config": {
+          "definition": {
+            "widgets": [
+              {
+                "key": "00000000-0000-4000-8000-000000000011",
+                "definition": {
+                  "id": "praxis-dynamic-form",
+                  "inputs": {
+                    "mode": "view",
+                    "config": {
+                      "editorialContext": {
+                        "title": "Contato"
+                      },
+                      "fieldMetadata": [
+                        {
+                          "name": "email"
+                        }
+                      ],
+                      "sections": []
+                    }
+                  }
+                }
+              },
+              {
+                "key": "00000000-0000-4000-8000-000000000012",
+                "definition": {
+                  "id": "praxis-table",
+                  "inputs": {
+                    "resourcePath": "/contacts",
+                    "horizontalScroll": "auto",
+                    "config": {
+                      "columns": [],
+                      "columnProjection": {
+                        "source": "schema",
+                        "include": [
+                          "email"
+                        ]
+                      }
+                    }
+                  }
+                }
+              }
+            ],
+            "layout": {
+              "orientation": "columns",
+              "columns": 2,
+              "gap": "16px",
+              "breakpoints": {
+                "sm": 1
+              }
+            }
+          },
+          "presentation": {
+            "title": "Atendimento",
+            "icon": "web"
+          },
+          "navigation": [
+            {
+              "id": "00000000-0000-4000-8000-000000000031",
+              "groupId": "00000000-0000-4000-8000-000000000041",
+              "label": "Atendimento",
+              "icon": "web",
+              "order": 0
+            },
+            {
+              "id": "00000000-0000-4000-8000-000000000031",
+              "groupId": "00000000-0000-4000-8000-000000000041",
+              "label": "Atendimento",
+              "icon": "web",
+              "order": 0
+            }
+          ]
+        }
+      },
+      "groups": {
+        "kind": "praxis.navigation-groups.editor",
+        "version": 1,
+        "config": {
+          "groups": [
+            {
+              "id": "00000000-0000-4000-8000-000000000041",
+              "label": "Operações",
+              "icon": "folder",
+              "order": 0
+            }
+          ]
+        }
+      },
+      "errors": [
+        "DUPLICATE_BINDING"
+      ]
+    },
+    {
+      "id": "missing-group",
+      "page": {
+        "kind": "praxis.dynamic-page.editor",
+        "version": 1,
+        "config": {
+          "definition": {
+            "widgets": [
+              {
+                "key": "00000000-0000-4000-8000-000000000011",
+                "definition": {
+                  "id": "praxis-dynamic-form",
+                  "inputs": {
+                    "mode": "view",
+                    "config": {
+                      "editorialContext": {
+                        "title": "Contato"
+                      },
+                      "fieldMetadata": [
+                        {
+                          "name": "email"
+                        }
+                      ],
+                      "sections": []
+                    }
+                  }
+                }
+              },
+              {
+                "key": "00000000-0000-4000-8000-000000000012",
+                "definition": {
+                  "id": "praxis-table",
+                  "inputs": {
+                    "resourcePath": "/contacts",
+                    "horizontalScroll": "auto",
+                    "config": {
+                      "columns": [],
+                      "columnProjection": {
+                        "source": "schema",
+                        "include": [
+                          "email"
+                        ]
+                      }
+                    }
+                  }
+                }
+              }
+            ],
+            "layout": {
+              "orientation": "columns",
+              "columns": 2,
+              "gap": "16px",
+              "breakpoints": {
+                "sm": 1
+              }
+            }
+          },
+          "presentation": {
+            "title": "Atendimento",
+            "icon": "web"
+          },
+          "navigation": [
+            {
+              "id": "00000000-0000-4000-8000-000000000031",
+              "groupId": "00000000-0000-4000-8000-000000000099",
+              "label": "Atendimento",
+              "icon": "web",
+              "order": 0
+            }
+          ]
+        }
+      },
+      "groups": {
+        "kind": "praxis.navigation-groups.editor",
+        "version": 1,
+        "config": {
+          "groups": [
+            {
+              "id": "00000000-0000-4000-8000-000000000041",
+              "label": "Operações",
+              "icon": "folder",
+              "order": 0
+            }
+          ]
+        }
+      },
+      "errors": [
+        "MISSING_GROUP"
+      ]
+    },
+    {
+      "id": "duplicate-group",
+      "page": {
+        "kind": "praxis.dynamic-page.editor",
+        "version": 1,
+        "config": {
+          "definition": {
+            "widgets": [
+              {
+                "key": "00000000-0000-4000-8000-000000000011",
+                "definition": {
+                  "id": "praxis-dynamic-form",
+                  "inputs": {
+                    "mode": "view",
+                    "config": {
+                      "editorialContext": {
+                        "title": "Contato"
+                      },
+                      "fieldMetadata": [
+                        {
+                          "name": "email"
+                        }
+                      ],
+                      "sections": []
+                    }
+                  }
+                }
+              },
+              {
+                "key": "00000000-0000-4000-8000-000000000012",
+                "definition": {
+                  "id": "praxis-table",
+                  "inputs": {
+                    "resourcePath": "/contacts",
+                    "horizontalScroll": "auto",
+                    "config": {
+                      "columns": [],
+                      "columnProjection": {
+                        "source": "schema",
+                        "include": [
+                          "email"
+                        ]
+                      }
+                    }
+                  }
+                }
+              }
+            ],
+            "layout": {
+              "orientation": "columns",
+              "columns": 2,
+              "gap": "16px",
+              "breakpoints": {
+                "sm": 1
+              }
+            }
+          },
+          "presentation": {
+            "title": "Atendimento",
+            "icon": "web"
+          },
+          "navigation": [
+            {
+              "id": "00000000-0000-4000-8000-000000000031",
+              "groupId": "00000000-0000-4000-8000-000000000041",
+              "label": "Atendimento",
+              "icon": "web",
+              "order": 0
+            }
+          ]
+        }
+      },
+      "groups": {
+        "kind": "praxis.navigation-groups.editor",
+        "version": 1,
+        "config": {
+          "groups": [
+            {
+              "id": "00000000-0000-4000-8000-000000000041",
+              "label": "Operações",
+              "icon": "folder",
+              "order": 0
+            },
+            {
+              "id": "00000000-0000-4000-8000-000000000041",
+              "label": "Operações",
+              "icon": "folder",
+              "order": 0
+            }
+          ]
+        }
+      },
+      "errors": [
+        "DUPLICATE_GROUP"
+      ]
+    },
+    {
+      "id": "structural-link-only",
+      "page": {
+        "kind": "praxis.dynamic-page.editor",
+        "version": 1,
+        "config": {
+          "definition": {
+            "widgets": [
+              {
+                "key": "00000000-0000-4000-8000-000000000011",
+                "definition": {
+                  "id": "praxis-dynamic-form",
+                  "inputs": {
+                    "mode": "view",
+                    "config": {
+                      "editorialContext": {
+                        "title": "Contato"
+                      },
+                      "fieldMetadata": [
+                        {
+                          "name": "email"
+                        }
+                      ],
+                      "sections": []
+                    }
+                  }
+                }
+              },
+              {
+                "key": "00000000-0000-4000-8000-000000000012",
+                "definition": {
+                  "id": "praxis-table",
+                  "inputs": {
+                    "resourcePath": "/contacts",
+                    "horizontalScroll": "auto",
+                    "config": {
+                      "columns": [],
+                      "columnProjection": {
+                        "source": "schema",
+                        "include": [
+                          "email"
+                        ]
+                      }
+                    }
+                  }
+                }
+              }
+            ],
+            "layout": {
+              "orientation": "columns",
+              "columns": 2,
+              "gap": "16px",
+              "breakpoints": {
+                "sm": 1
+              }
+            },
+            "composition": {
+              "links": [
+                {
+                  "id": "00000000-0000-4000-8000-000000000021",
+                  "from": {
+                    "kind": "component-port",
+                    "ref": {
+                      "widget": "00000000-0000-4000-8000-000000000011",
+                      "port": "fixture-output",
+                      "direction": "output"
+                    }
+                  },
+                  "to": {
+                    "kind": "component-port",
+                    "ref": {
+                      "widget": "00000000-0000-4000-8000-000000000012",
+                      "port": "fixture-input",
+                      "direction": "input"
+                    }
+                  },
+                  "intent": "event-propagation"
+                }
+              ]
+            }
+          },
+          "presentation": {
+            "title": "Atendimento",
+            "icon": "web"
+          },
+          "navigation": [
+            {
+              "id": "00000000-0000-4000-8000-000000000031",
+              "groupId": "00000000-0000-4000-8000-000000000041",
+              "label": "Atendimento",
+              "icon": "web",
+              "order": 0
+            }
+          ]
+        }
+      },
+      "groups": {
+        "kind": "praxis.navigation-groups.editor",
+        "version": 1,
+        "config": {
+          "groups": [
+            {
+              "id": "00000000-0000-4000-8000-000000000041",
+              "label": "Operações",
+              "icon": "folder",
+              "order": 0
+            }
+          ]
+        }
+      },
+      "errors": []
+    },
+    {
+      "id": "orphan-link",
+      "page": {
+        "kind": "praxis.dynamic-page.editor",
+        "version": 1,
+        "config": {
+          "definition": {
+            "widgets": [
+              {
+                "key": "00000000-0000-4000-8000-000000000011",
+                "definition": {
+                  "id": "praxis-dynamic-form",
+                  "inputs": {
+                    "mode": "view",
+                    "config": {
+                      "editorialContext": {
+                        "title": "Contato"
+                      },
+                      "fieldMetadata": [
+                        {
+                          "name": "email"
+                        }
+                      ],
+                      "sections": []
+                    }
+                  }
+                }
+              },
+              {
+                "key": "00000000-0000-4000-8000-000000000012",
+                "definition": {
+                  "id": "praxis-table",
+                  "inputs": {
+                    "resourcePath": "/contacts",
+                    "horizontalScroll": "auto",
+                    "config": {
+                      "columns": [],
+                      "columnProjection": {
+                        "source": "schema",
+                        "include": [
+                          "email"
+                        ]
+                      }
+                    }
+                  }
+                }
+              }
+            ],
+            "layout": {
+              "orientation": "columns",
+              "columns": 2,
+              "gap": "16px",
+              "breakpoints": {
+                "sm": 1
+              }
+            },
+            "composition": {
+              "links": [
+                {
+                  "id": "00000000-0000-4000-8000-000000000021",
+                  "from": {
+                    "kind": "component-port",
+                    "ref": {
+                      "widget": "00000000-0000-4000-8000-000000000011",
+                      "port": "fixture-output",
+                      "direction": "output"
+                    }
+                  },
+                  "to": {
+                    "kind": "component-port",
+                    "ref": {
+                      "widget": "00000000-0000-4000-8000-000000000099",
+                      "port": "fixture-input",
+                      "direction": "input"
+                    }
+                  },
+                  "intent": "event-propagation"
+                }
+              ]
+            }
+          },
+          "presentation": {
+            "title": "Atendimento",
+            "icon": "web"
+          },
+          "navigation": [
+            {
+              "id": "00000000-0000-4000-8000-000000000031",
+              "groupId": "00000000-0000-4000-8000-000000000041",
+              "label": "Atendimento",
+              "icon": "web",
+              "order": 0
+            }
+          ]
+        }
+      },
+      "groups": {
+        "kind": "praxis.navigation-groups.editor",
+        "version": 1,
+        "config": {
+          "groups": [
+            {
+              "id": "00000000-0000-4000-8000-000000000041",
+              "label": "Operações",
+              "icon": "folder",
+              "order": 0
+            }
+          ]
+        }
+      },
+      "errors": [
+        "ORPHAN_LINK"
+      ]
+    },
+    {
+      "id": "duplicate-link",
+      "page": {
+        "kind": "praxis.dynamic-page.editor",
+        "version": 1,
+        "config": {
+          "definition": {
+            "widgets": [
+              {
+                "key": "00000000-0000-4000-8000-000000000011",
+                "definition": {
+                  "id": "praxis-dynamic-form",
+                  "inputs": {
+                    "mode": "view",
+                    "config": {
+                      "editorialContext": {
+                        "title": "Contato"
+                      },
+                      "fieldMetadata": [
+                        {
+                          "name": "email"
+                        }
+                      ],
+                      "sections": []
+                    }
+                  }
+                }
+              },
+              {
+                "key": "00000000-0000-4000-8000-000000000012",
+                "definition": {
+                  "id": "praxis-table",
+                  "inputs": {
+                    "resourcePath": "/contacts",
+                    "horizontalScroll": "auto",
+                    "config": {
+                      "columns": [],
+                      "columnProjection": {
+                        "source": "schema",
+                        "include": [
+                          "email"
+                        ]
+                      }
+                    }
+                  }
+                }
+              }
+            ],
+            "layout": {
+              "orientation": "columns",
+              "columns": 2,
+              "gap": "16px",
+              "breakpoints": {
+                "sm": 1
+              }
+            },
+            "composition": {
+              "links": [
+                {
+                  "id": "00000000-0000-4000-8000-000000000021",
+                  "from": {
+                    "kind": "component-port",
+                    "ref": {
+                      "widget": "00000000-0000-4000-8000-000000000011",
+                      "port": "fixture-output",
+                      "direction": "output"
+                    }
+                  },
+                  "to": {
+                    "kind": "component-port",
+                    "ref": {
+                      "widget": "00000000-0000-4000-8000-000000000012",
+                      "port": "fixture-input",
+                      "direction": "input"
+                    }
+                  },
+                  "intent": "event-propagation"
+                },
+                {
+                  "id": "00000000-0000-4000-8000-000000000021",
+                  "from": {
+                    "kind": "component-port",
+                    "ref": {
+                      "widget": "00000000-0000-4000-8000-000000000011",
+                      "port": "fixture-output",
+                      "direction": "output"
+                    }
+                  },
+                  "to": {
+                    "kind": "component-port",
+                    "ref": {
+                      "widget": "00000000-0000-4000-8000-000000000012",
+                      "port": "fixture-input",
+                      "direction": "input"
+                    }
+                  },
+                  "intent": "event-propagation"
+                }
+              ]
+            }
+          },
+          "presentation": {
+            "title": "Atendimento",
+            "icon": "web"
+          },
+          "navigation": [
+            {
+              "id": "00000000-0000-4000-8000-000000000031",
+              "groupId": "00000000-0000-4000-8000-000000000041",
+              "label": "Atendimento",
+              "icon": "web",
+              "order": 0
+            }
+          ]
+        }
+      },
+      "groups": {
+        "kind": "praxis.navigation-groups.editor",
+        "version": 1,
+        "config": {
+          "groups": [
+            {
+              "id": "00000000-0000-4000-8000-000000000041",
+              "label": "Operações",
+              "icon": "folder",
+              "order": 0
+            }
+          ]
+        }
+      },
+      "errors": [
+        "DUPLICATE_LINK"
+      ]
+    }
+  ],
+  "copyExamples": [
+    {
+      "id": "copy-remap-preserves-literal",
+      "source": {
+        "kind": "praxis.dynamic-page.editor",
+        "version": 1,
+        "config": {
+          "definition": {
+            "widgets": [
+              {
+                "key": "00000000-0000-4000-8000-000000000011",
+                "definition": {
+                  "id": "praxis-dynamic-form",
+                  "inputs": {
+                    "mode": "view",
+                    "config": {
+                      "editorialContext": {
+                        "title": "00000000-0000-4000-8000-000000000011"
+                      },
+                      "fieldMetadata": [
+                        {
+                          "name": "email"
+                        }
+                      ],
+                      "sections": []
+                    }
+                  }
+                }
+              },
+              {
+                "key": "00000000-0000-4000-8000-000000000012",
+                "definition": {
+                  "id": "praxis-table",
+                  "inputs": {
+                    "resourcePath": "/contacts",
+                    "horizontalScroll": "auto",
+                    "config": {
+                      "columns": [],
+                      "columnProjection": {
+                        "source": "schema",
+                        "include": [
+                          "email"
+                        ]
+                      }
+                    }
+                  }
+                }
+              }
+            ],
+            "layout": {
+              "orientation": "columns",
+              "columns": 2,
+              "gap": "16px",
+              "breakpoints": {
+                "sm": 1
+              }
+            },
+            "composition": {
+              "links": [
+                {
+                  "id": "00000000-0000-4000-8000-000000000021",
+                  "from": {
+                    "kind": "component-port",
+                    "ref": {
+                      "widget": "00000000-0000-4000-8000-000000000011",
+                      "port": "fixture-output",
+                      "direction": "output"
+                    }
+                  },
+                  "to": {
+                    "kind": "component-port",
+                    "ref": {
+                      "widget": "00000000-0000-4000-8000-000000000012",
+                      "port": "fixture-input",
+                      "direction": "input"
+                    }
+                  },
+                  "intent": "event-propagation"
+                }
+              ]
+            }
+          },
+          "presentation": {
+            "title": "Atendimento",
+            "icon": "web"
+          },
+          "navigation": [
+            {
+              "id": "00000000-0000-4000-8000-000000000031",
+              "groupId": "00000000-0000-4000-8000-000000000041",
+              "label": "Atendimento",
+              "icon": "web",
+              "order": 0
+            }
+          ]
+        }
+      },
+      "candidate": {
+        "kind": "praxis.dynamic-page.editor",
+        "version": 1,
+        "config": {
+          "definition": {
+            "widgets": [
+              {
+                "key": "00000000-0000-4000-8000-000000000111",
+                "definition": {
+                  "id": "praxis-dynamic-form",
+                  "inputs": {
+                    "mode": "view",
+                    "config": {
+                      "editorialContext": {
+                        "title": "00000000-0000-4000-8000-000000000011"
+                      },
+                      "fieldMetadata": [
+                        {
+                          "name": "email"
+                        }
+                      ],
+                      "sections": []
+                    }
+                  }
+                }
+              },
+              {
+                "key": "00000000-0000-4000-8000-000000000112",
+                "definition": {
+                  "id": "praxis-table",
+                  "inputs": {
+                    "resourcePath": "/contacts",
+                    "horizontalScroll": "auto",
+                    "config": {
+                      "columns": [],
+                      "columnProjection": {
+                        "source": "schema",
+                        "include": [
+                          "email"
+                        ]
+                      }
+                    }
+                  }
+                }
+              }
+            ],
+            "layout": {
+              "orientation": "columns",
+              "columns": 2,
+              "gap": "16px",
+              "breakpoints": {
+                "sm": 1
+              }
+            },
+            "composition": {
+              "links": [
+                {
+                  "id": "00000000-0000-4000-8000-000000000121",
+                  "from": {
+                    "kind": "component-port",
+                    "ref": {
+                      "widget": "00000000-0000-4000-8000-000000000111",
+                      "port": "fixture-output",
+                      "direction": "output"
+                    }
+                  },
+                  "to": {
+                    "kind": "component-port",
+                    "ref": {
+                      "widget": "00000000-0000-4000-8000-000000000112",
+                      "port": "fixture-input",
+                      "direction": "input"
+                    }
+                  },
+                  "intent": "event-propagation"
+                }
+              ]
+            }
+          },
+          "presentation": {
+            "title": "Cópia de Atendimento",
+            "icon": "web"
+          },
+          "navigation": []
+        }
+      },
+      "title": "Cópia de Atendimento",
+      "identityMap": [
+        {
+          "kind": "widget",
+          "from": "00000000-0000-4000-8000-000000000011",
+          "to": "00000000-0000-4000-8000-000000000111"
+        },
+        {
+          "kind": "widget",
+          "from": "00000000-0000-4000-8000-000000000012",
+          "to": "00000000-0000-4000-8000-000000000112"
+        },
+        {
+          "kind": "link",
+          "from": "00000000-0000-4000-8000-000000000021",
+          "to": "00000000-0000-4000-8000-000000000121"
+        }
+      ],
+      "evidence": {
+        "source": {
+          "kind": "published-page",
+          "pageId": "00000000-0000-4000-8000-000000000001",
+          "releaseId": "00000000-0000-4000-8000-000000000002",
+          "revisionId": "00000000-0000-4000-8000-000000000003"
+        },
+        "sourceHash": "d38779117f201379b338540a7cd64ae2ed139c3bb5db4631da55827bd56b5b7f",
+        "outputHash": "508fee17e38582f4304b4b9c76018110919fc92639ca85ac79bf8ea445011b4f",
+        "transformRef": "praxis.page-copy/1",
+        "identityMap": [
+          {
+            "kind": "widget",
+            "from": "00000000-0000-4000-8000-000000000011",
+            "to": "00000000-0000-4000-8000-000000000111"
+          },
+          {
+            "kind": "widget",
+            "from": "00000000-0000-4000-8000-000000000012",
+            "to": "00000000-0000-4000-8000-000000000112"
+          },
+          {
+            "kind": "link",
+            "from": "00000000-0000-4000-8000-000000000021",
+            "to": "00000000-0000-4000-8000-000000000121"
+          }
+        ]
+      }
+    },
+    {
+      "id": "copy-cross-kind-identity-collision",
+      "source": {
+        "kind": "praxis.dynamic-page.editor",
+        "version": 1,
+        "config": {
+          "definition": {
+            "widgets": [
+              {
+                "key": "00000000-0000-4000-8000-000000000011",
+                "definition": {
+                  "id": "praxis-dynamic-form",
+                  "inputs": {
+                    "mode": "view",
+                    "config": {
+                      "editorialContext": {
+                        "title": "00000000-0000-4000-8000-000000000011"
+                      },
+                      "fieldMetadata": [
+                        {
+                          "name": "email"
+                        }
+                      ],
+                      "sections": []
+                    }
+                  }
+                }
+              },
+              {
+                "key": "00000000-0000-4000-8000-000000000012",
+                "definition": {
+                  "id": "praxis-table",
+                  "inputs": {
+                    "resourcePath": "/contacts",
+                    "horizontalScroll": "auto",
+                    "config": {
+                      "columns": [],
+                      "columnProjection": {
+                        "source": "schema",
+                        "include": [
+                          "email"
+                        ]
+                      }
+                    }
+                  }
+                }
+              }
+            ],
+            "layout": {
+              "orientation": "columns",
+              "columns": 2,
+              "gap": "16px",
+              "breakpoints": {
+                "sm": 1
+              }
+            },
+            "composition": {
+              "links": [
+                {
+                  "id": "00000000-0000-4000-8000-000000000011",
+                  "from": {
+                    "kind": "component-port",
+                    "ref": {
+                      "widget": "00000000-0000-4000-8000-000000000011",
+                      "port": "fixture-output",
+                      "direction": "output"
+                    }
+                  },
+                  "to": {
+                    "kind": "component-port",
+                    "ref": {
+                      "widget": "00000000-0000-4000-8000-000000000012",
+                      "port": "fixture-input",
+                      "direction": "input"
+                    }
+                  },
+                  "intent": "event-propagation"
+                }
+              ]
+            }
+          },
+          "presentation": {
+            "title": "Atendimento",
+            "icon": "web"
+          },
+          "navigation": [
+            {
+              "id": "00000000-0000-4000-8000-000000000031",
+              "groupId": "00000000-0000-4000-8000-000000000041",
+              "label": "Atendimento",
+              "icon": "web",
+              "order": 0
+            }
+          ]
+        }
+      },
+      "candidate": {
+        "kind": "praxis.dynamic-page.editor",
+        "version": 1,
+        "config": {
+          "definition": {
+            "widgets": [
+              {
+                "key": "00000000-0000-4000-8000-000000000111",
+                "definition": {
+                  "id": "praxis-dynamic-form",
+                  "inputs": {
+                    "mode": "view",
+                    "config": {
+                      "editorialContext": {
+                        "title": "00000000-0000-4000-8000-000000000011"
+                      },
+                      "fieldMetadata": [
+                        {
+                          "name": "email"
+                        }
+                      ],
+                      "sections": []
+                    }
+                  }
+                }
+              },
+              {
+                "key": "00000000-0000-4000-8000-000000000112",
+                "definition": {
+                  "id": "praxis-table",
+                  "inputs": {
+                    "resourcePath": "/contacts",
+                    "horizontalScroll": "auto",
+                    "config": {
+                      "columns": [],
+                      "columnProjection": {
+                        "source": "schema",
+                        "include": [
+                          "email"
+                        ]
+                      }
+                    }
+                  }
+                }
+              }
+            ],
+            "layout": {
+              "orientation": "columns",
+              "columns": 2,
+              "gap": "16px",
+              "breakpoints": {
+                "sm": 1
+              }
+            },
+            "composition": {
+              "links": [
+                {
+                  "id": "00000000-0000-4000-8000-000000000121",
+                  "from": {
+                    "kind": "component-port",
+                    "ref": {
+                      "widget": "00000000-0000-4000-8000-000000000111",
+                      "port": "fixture-output",
+                      "direction": "output"
+                    }
+                  },
+                  "to": {
+                    "kind": "component-port",
+                    "ref": {
+                      "widget": "00000000-0000-4000-8000-000000000112",
+                      "port": "fixture-input",
+                      "direction": "input"
+                    }
+                  },
+                  "intent": "event-propagation"
+                }
+              ]
+            }
+          },
+          "presentation": {
+            "title": "Cópia de Atendimento",
+            "icon": "web"
+          },
+          "navigation": []
+        }
+      },
+      "title": "Cópia de Atendimento",
+      "identityMap": [
+        {
+          "kind": "widget",
+          "from": "00000000-0000-4000-8000-000000000011",
+          "to": "00000000-0000-4000-8000-000000000111"
+        },
+        {
+          "kind": "widget",
+          "from": "00000000-0000-4000-8000-000000000012",
+          "to": "00000000-0000-4000-8000-000000000112"
+        },
+        {
+          "kind": "link",
+          "from": "00000000-0000-4000-8000-000000000011",
+          "to": "00000000-0000-4000-8000-000000000121"
+        }
+      ],
+      "evidence": {
+        "source": {
+          "kind": "published-page",
+          "pageId": "00000000-0000-4000-8000-000000000001",
+          "releaseId": "00000000-0000-4000-8000-000000000002",
+          "revisionId": "00000000-0000-4000-8000-000000000003"
+        },
+        "sourceHash": "c6aee31ba2ed96cdddeff3b876804e85499a331cb7124beae3ccce4072f5a273",
+        "outputHash": "508fee17e38582f4304b4b9c76018110919fc92639ca85ac79bf8ea445011b4f",
+        "transformRef": "praxis.page-copy/1",
+        "identityMap": [
+          {
+            "kind": "widget",
+            "from": "00000000-0000-4000-8000-000000000011",
+            "to": "00000000-0000-4000-8000-000000000111"
+          },
+          {
+            "kind": "widget",
+            "from": "00000000-0000-4000-8000-000000000012",
+            "to": "00000000-0000-4000-8000-000000000112"
+          },
+          {
+            "kind": "link",
+            "from": "00000000-0000-4000-8000-000000000011",
+            "to": "00000000-0000-4000-8000-000000000121"
+          }
+        ]
+      }
+    }
+  ],
+  "integrationGates": [
+    {
+      "id": "new-child-seed",
+      "phase": "P1",
+      "given": "Candidate adds a fresh widget key with an exact registered source declaration.",
+      "expected": "Capture genuine seed and validate native revision against that seed; persist capture correlated to root/key.",
+      "failureInvariant": "Missing/extra/duplicate/unadmitted seed: reject whole revision, preserve draft ETag.",
+      "status": "not-executed",
+      "requiredEvidence": "Owner tests; for database paths isolated remote Neon branch and real HTTP in Quickstart."
+    },
+    {
+      "id": "same-child-binding",
+      "phase": "P1",
+      "given": "Existing key changes mode or resourcePath.",
+      "expected": "Reject; new identity plus admitted seed is required.",
+      "failureInvariant": "No implicit rebaseline or reuse of old evidence.",
+      "status": "not-executed",
+      "requiredEvidence": "Owner tests; for database paths isolated remote Neon branch and real HTTP in Quickstart."
+    },
+    {
+      "id": "copy-idempotency",
+      "phase": "P2",
+      "given": "Concurrent create requests share actor/scope/creationKey.",
+      "expected": "Equal body returns same page/draft; unequal body conflicts.",
+      "failureInvariant": "No duplicate catalog/root or dangling draft; authorization checked before replay.",
+      "status": "not-executed",
+      "requiredEvidence": "Owner tests; for database paths isolated remote Neon branch and real HTTP in Quickstart."
+    },
+    {
+      "id": "copy-source",
+      "phase": "P2",
+      "given": "Selected source is published authorial revision with user overlays and runtime data elsewhere.",
+      "expected": "Copy only pinned authorial revision; independent identities, empty navigation, no head/approval/assignments.",
+      "failureInvariant": "Draft/effective source, missing hash reproduction or cross-scope source denied.",
+      "status": "not-executed",
+      "requiredEvidence": "Owner tests; for database paths isolated remote Neon branch and real HTTP in Quickstart."
+    },
+    {
+      "id": "atomic-creation",
+      "phase": "P2",
+      "given": "Fail after catalog allocation or after baseline capture, before commit.",
+      "expected": "Roll back catalog, registration, captures, draft and creation receipt together.",
+      "failureInvariant": "Retry/reconciliation cannot expose partial creation.",
+      "status": "not-executed",
+      "requiredEvidence": "Owner tests; for database paths isolated remote Neon branch and real HTTP in Quickstart."
+    },
+    {
+      "id": "page-group-race",
+      "phase": "P3",
+      "given": "Page publish races group omission by publish, group rollback or withdraw.",
+      "expected": "Locks on same scoped group identities serialize transitions; re-read old/candidate heads after lock.",
+      "failureInvariant": "No active page reference to absent group in any committed outcome.",
+      "status": "not-executed",
+      "requiredEvidence": "Owner tests; for database paths isolated remote Neon branch and real HTTP in Quickstart."
+    },
+    {
+      "id": "rollback-independent",
+      "phase": "P3",
+      "given": "Pages A/B share group; B and group changed after old A release.",
+      "expected": "Rollback A restores only A; B/group remain; reject if old group no longer admitted.",
+      "failureInvariant": "Preserve current A head on failure; never rewrite historic release.",
+      "status": "not-executed",
+      "requiredEvidence": "Owner tests; for database paths isolated remote Neon branch and real HTTP in Quickstart."
+    },
+    {
+      "id": "authorization-and-cache",
+      "phase": "P3",
+      "given": "Revoke permission after menu cached; caller sends matching If-None-Match.",
+      "expected": "Authorize current scope before conditional response or content.",
+      "failureInvariant": "No 304/content based on stale grant; no cross-tenant existence leak.",
+      "status": "not-executed",
+      "requiredEvidence": "Owner tests; for database paths isolated remote Neon branch and real HTTP in Quickstart."
+    },
+    {
+      "id": "head-and-reload",
+      "phase": "P3",
+      "given": "Publish/withdraw/click stale menu/direct reload.",
+      "expected": "Route and navigation use authorized active head; unpublished/withdrawn never falls back to draft.",
+      "failureInvariant": "Outbox/invalidation recovery tested across process failure.",
+      "status": "not-executed",
+      "requiredEvidence": "Owner tests; for database paths isolated remote Neon branch and real HTTP in Quickstart."
+    },
+    {
+      "id": "context-switch",
+      "phase": "P4",
+      "given": "Create/save response returns after context A→B→A.",
+      "expected": "Ignore stale callback by monotonic context generation; reconcile original authorized scope.",
+      "failureInvariant": "Do not attach old result to the new context instance.",
+      "status": "not-executed",
+      "requiredEvidence": "Owner tests; for database paths isolated remote Neon branch and real HTTP in Quickstart."
+    },
+    {
+      "id": "child-storage",
+      "phase": "P4",
+      "given": "Local/personal child preferences conflict with published page; child editor saves.",
+      "expected": "Runtime uses page release; editor updates only draft.",
+      "failureInvariant": "No independent storage write or latest read wins over aggregate.",
+      "status": "not-executed",
+      "requiredEvidence": "Owner tests; for database paths isolated remote Neon branch and real HTTP in Quickstart."
+    },
+    {
+      "id": "preview-hooks",
+      "phase": "P4",
+      "given": "Preview attempts submit plus automatic/nested hook mutations.",
+      "expected": "Admitted adapters prevent all domain mutations; unsupported adapter cannot preview interactively.",
+      "failureInvariant": "Network/action spies cover indirect effects, not only disabled button.",
+      "status": "not-executed",
+      "requiredEvidence": "Owner tests; for database paths isolated remote Neon branch and real HTTP in Quickstart."
+    },
+    {
+      "id": "migration-local",
+      "phase": "P5",
+      "given": "Legacy browser pages have old UUIDs and missing icons; quota/corruption during migration.",
+      "expected": "Preserve URLs, use web default and unknown provenance; atomic lock, bytes preserved on failure.",
+      "failureInvariant": "No corporate receipt fabricated; no two active stores.",
+      "status": "not-executed",
+      "requiredEvidence": "Owner tests; for database paths isolated remote Neon branch and real HTTP in Quickstart."
+    },
+    {
+      "id": "legacy-import",
+      "phase": "P5",
+      "given": "published-page UUID record lacks source or includes unadmitted structure.",
+      "expected": "Preserve/export original and explain denial; supported import creates governed draft with same URL.",
+      "failureInvariant": "No fabricated approval or invisible legacy fallback.",
+      "status": "not-executed",
+      "requiredEvidence": "Owner tests; for database paths isolated remote Neon branch and real HTTP in Quickstart."
+    },
+    {
+      "id": "thousand-pages",
+      "phase": "P5",
+      "given": "Catalog has 1000 synthetic identities.",
+      "expected": "Paginate/load on demand; publish A does not rewrite unrelated pages.",
+      "failureInvariant": "Measure latency/memory; do not assert an unmeasured SLO.",
+      "status": "not-executed",
+      "requiredEvidence": "Owner tests; for database paths isolated remote Neon branch and real HTTP in Quickstart."
+    }
+  ]
+}
