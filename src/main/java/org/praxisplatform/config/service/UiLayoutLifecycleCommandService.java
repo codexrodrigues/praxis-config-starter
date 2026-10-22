@@ -214,6 +214,7 @@ public class UiLayoutLifecycleCommandService {
         TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
           @Override public void beforeCommit(boolean readOnly) {
             requireMetadataEvidence(invocation, draft, captured, validation);
+            revalidate(principal, contextVersion, root, invocation, UiLayoutLifecycleOperation.CREATE_DRAFT, validation);
           }
         });
       }
@@ -331,6 +332,7 @@ public class UiLayoutLifecycleCommandService {
         TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
           @Override public void beforeCommit(boolean readOnly) {
             requireMetadataEvidence(invocation, updated, null, validation);
+            revalidate(principal, contextVersion, root, invocation, UiLayoutLifecycleOperation.EDIT_DRAFT, validation);
           }
         });
       }
@@ -396,6 +398,7 @@ public class UiLayoutLifecycleCommandService {
       TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
         @Override public void beforeCommit(boolean readOnly) {
           requireMetadataEvidence(invocation, currentDraft(invocation, root, draftId), null, validation);
+          revalidate(principal, contextVersion, root, invocation, UiLayoutLifecycleOperation.SUBMIT_RELEASE, validation);
         }
       });
       for (var state : workspace.targets()) recheckPageChildren(invocation, draftId, state, validation);

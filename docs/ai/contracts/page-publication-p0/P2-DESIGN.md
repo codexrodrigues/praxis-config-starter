@@ -1,6 +1,6 @@
-# P2 — inventário e proposta para revisão
+# P2 — desenho aprovado e implementação em validação
 
-Estado: proposta antes de alterar SPIs públicos. Base Config `6144b485`; issue #510.
+Estado: direção A e assinaturas server-only aprovadas pela coordenação; implementação e gates finais sob revisão independente, sem aceite/merge. Base integrada Config `468f9de696330be2ee16d181c5145cfe849dc29b` (inclui codec grupos P1-D); issue #510. Inventário original auditado em `6144b485`, preservado abaixo como fonte de decisão.
 Classificação: contrato-publico/transversal. Autor `p2_catalog`; revisão coordenador.
 
 ## Aderência e restrições verificadas
@@ -17,7 +17,7 @@ Classificação: contrato-publico/transversal. Autor `p2_catalog`; revisão coor
 
 `createCommand`, `source` (registered-native ou published-page exata), `creationReceipt`, `copyEvidence`; transformação `praxis.page-copy/1`; UUID por servidor, typed map widget/link, endpoints por mapa widget, navegação vazia, preservação de strings comuns. HTTP POST pages e GET by-creation-key. Sem descoberta/runtime P3 nem publish paralelo. CreationKey ator+app+tenant+env; contextVersion não altera identidade do comando, mas precisa ser atual em todas operações.
 
-## Fluxo proposto
+## Fluxo implementado
 
 1. Resolver contexto autenticado atual independente de root: ator/tenant/env/unidade/contextVersion + app/namespace registrados. Reutilizar as cinco dimensões existentes; acrescentar somente app/namespace na fronteira páginas, sem reescrever lifecycle global.
 2. Autorizar CREATE, READ_SOURCE e COPY_SOURCE explicitamente; reading não implica copy. Serializar por chave exata via lock PostgreSQL transacional. Revalidar contexto após lock. Replay igual retorna catálogo e ETag atual do draft; divergente409. Não recapturar nem transformar replay. Lookup não exige integridade completa/publicação, somente autoridade atual de ler associação e draft.
@@ -28,7 +28,7 @@ Classificação: contrato-publico/transversal. Autor `p2_catalog`; revisão coor
 
 ## Opções de reprodução para decisão
 
-A. **Proposta**: output imutável é documento nativo produzido pelo Config, apontado por NativeDocumentSource de criação (producer=transformRef, revision=outputHash). NativeIdentity reproduz esse output, enquanto a admissão canônica Config comprova source original + transformação + mapa + captura dos filhos. Filhos copiados são snapshots nativos do mesmo produtor, nunca falsamente apresentados como B0 de uma fonte host antiga. Source JSON/capturas ficam evidência imutável da criação, não corpo autoral mutável. É obrigatório verificar o registro completo, hash e reprodução a cada admissão, e revalidar grants/dependências da origem atual. Nenhum simples prefixo de sourceId ou existence check concede admissão.
+A. **Decisão aprovada**: output imutável é documento nativo produzido pelo Config, apontado por NativeDocumentSource de criação (producer=transformRef, revision=outputHash). NativeIdentity reproduz esse output, enquanto a admissão canônica Config comprova source original + transformação + mapa + captura dos filhos. Filhos copiados são snapshots nativos do mesmo produtor, nunca falsamente apresentados como B0 de uma fonte host antiga. Source JSON/capturas ficam evidência imutável da criação, não corpo autoral mutável. É obrigatório verificar o registro completo, hash e reprodução a cada admissão, e revalidar grants da fonte selecionada na criação e dependências atuais da cadeia. Nenhum simples prefixo de sourceId ou existence check concede admissão.
 
 B. Novo Reproduction PageCopy no codec metadata e nova origem/colunas/constraints. Expressa transformação diretamente no codec, mas muda toda superfície de evidência (JDBC mapper, V68 constraints, mixins filhos, owner admission) e requer correlação recursiva de fontes publicadas/filhos. Mais explícito, maior impacto. Só adotar se A não puder preservar invariantes existentes sem fingir fonte.
 
@@ -38,7 +38,7 @@ Rejeitados: source original + NativeIdentity após alterar conteúdo; copiar úl
 
 Config é dono. Consumidores futuros Core/Page Builder/Quickstart P3/P4; nenhuma UI/host ativada neste corte. Docs P2 e fontes P0; Landing/corpus operacional pertencem P6, sem anunciar endpoints antes da prova. Skill persistence atualizar-existente após contrato aprovado e prova; domain-decisions existente-adequada. Escrita skills exclusiva coordenador.
 
-Unitários: copy/paridade, schema fechado, ausência/null, autorização/escopo/context, replay/divergência, reabertura, statusHTTP. Neon branch `br-aged-bonus-a4rhfqwp` projeto `ancient-leaf-72055027`, schema exclusivo `p2_page_510_20261022`, atribuição coordenador 22/10/2026. Provas JPA/JDBC runtime restrito, falha de cada etapa/commit, chamadas concorrentes e leitura independente. Nenhuma conexão realizada ainda. Target da worktree e Maven `/tmp/praxis-page-p2-510-m2` exclusivos.
+Unitários: copy/paridade, schema fechado, ausência/null, autorização/escopo/context, replay/divergência, reabertura, statusHTTP. Neon branch `br-aged-bonus-a4rhfqwp` projeto `ancient-leaf-72055027`, schema exclusivo `p2_page_510_20261022`, atribuição coordenador 22/10/2026. Provas JPA/JDBC runtime restrito, falha de cada etapa/commit, chamadas concorrentes e leitura independente. Preflight e ensaios remotos realizados em PostgreSQL 17.11/TLS verify-full, papel `p2_page_510_runtime` sem superuser/createdb/createrole/bypassrls. Rodada inicial 5 IT green; rodada autoconfig + fault-after-insert/rollback-only 2 IT green e 15 testes do serviço central green. Evidência final/proveniência será congelada no P2-IMPLEMENTATION; estas rodadas são checkpoints, não aceite. Target da worktree e Maven `/tmp/praxis-page-p2-510-m2` exclusivos.
 
 ## Decisão de coordenação e assinaturas para revisão
 
@@ -48,7 +48,7 @@ Cadeia transitiva limitada a 16 criações, cycle detection por pageId e limite 
 conservador; atingido limite nega sem truncar. A publicação histórica exata é demonstrada por
 release/member/revision e evento PUBLISH/ROLLBACK persistido, nunca pelo head corrente.
 
-API mínima proposta (sem implementação pública ainda):
+API mínima aprovada e implementada:
 
 - `PageCreationContext(String applicationId, String routeNamespace, UiLayoutLifecycleInvocation invocation)`:
   contexto server-only. Reutiliza a invocation autenticada existente, cujo root é uma composição
@@ -84,3 +84,22 @@ revogação no commit, source exata ausente, draft como origem, release congelad
 revision de outra release, mapa incompleto/injetividade/tipos, hash/bytes/captura adulterados,
 ciclo/limite transitive, metadata antiga vs config evoluída, replay diferente e concorrente,
 falha depois de cada write, nenhuma herança de head/assignment/approval/menu, origem preservada.
+
+## Decisions confirmed during implementation review (2026-10-22)
+
+- Selected source READ_SOURCE/COPY_SOURCE apply at create/replay and before its commit. They do not grant content visibility into ancestry and do not become perpetual ancestor ACL requirements for independent copies. Historical producer integrity, exact publication/revision correlation and current domain/metadata dependency admission remain required throughout the chain. Lookup by creation key requires READ_CREATION and the existing READ_DRAFT, without requiring current permission to the old selected source. Receipts expose only their own selected source reference, never ancestral ledger contents.
+- Native output capture separates immutable Config producer identity/B0 from the current observation of a new draft. Alice/context1 evidence remains unchanged; Bob/context2 receives a new observation with the identical immutable output. Source observations retained in the private ledger are never rewritten or used as grants.
+- `resolveLifecycle(invocation)` is an abstract server-only host attestation, necessary because existing metadata/admission callbacks lack Principal/application. Host must independently attest actor, tenant, unit, environment, context version, application and namespace; the invocation is correlation only. Exact invocation equality is required before app-scoped SQL or rebasing. No ThreadLocal, cache, fabricated principal or ledger-derived grant is permitted.
+- Navigation groups reuse the existing host `UiLayoutLifecycleInvocationProvider` mapping: exactly one stable app-shell UUID per tenant/application/environment/namespace. The request cannot register a second root. No additional groups registry/table or host SPI was introduced. Shape validation in `UiLayoutCompositionRegistration` does not replace host registration. Operational head transitions are blocked in `UiLayoutLifecycleService` itself until P3-A, including direct callers with permissive policy/validator and absent PageCreationHost.
+- Admission before a Config transaction re-attests current context and host policy. Provenance reads requiring the Config connection run during the same transaction and again before commit, not via an unrelated connection outside the transaction.
+- Resource policy is closed: maximum 16 creation nodes per ancestry path, 8 MiB total distinct ledger bytes per traversal and 2,048 traversal checkpoints; deny instead of truncating. These bounds cap recursive reproduction and repeated metadata work while preserving an auditable complete chain. All nested validation uses the remaining monotonic outer budget; entry/return/commit checks reject late results, without claiming cancellation of blocked I/O.
+- `ConfigJdbcTransactionGuard` is package-private reuse of the existing metadata store connection invariant, including READ_COMMITTED, the actual JPA/JDBC connection, active transaction and rollback-only detection. No new transaction SPI was added. Catalogue, original ledger, draft and metadata capture are one atomic transaction; an explicitly rollback-only result cannot be acknowledged as creation.
+
+### Current wiring additions (existing SPIs returned, no adapter beans)
+
+`PageCreationService.invocationProvider(UiLayoutLifecycleInvocationProvider)`,
+`lifecycleAdmission(UiLayoutLifecycleAdmission)`, `workspaceSource()` and `metadataAdmission()`
+return private wrappers for the existing seams. Auto-configuration retains one original host bean per seam.
+The page service holds lazy command/read suppliers; wrappers hold only original delegates. The actual
+application-context integration test starts all services and performs the first creation/replay/read.
+Absent PageCreationHost leaves normal lifecycle operational and page endpoints absent.
