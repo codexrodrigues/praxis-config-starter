@@ -247,12 +247,14 @@ class PageCatalogLifecycleBridgeTest {
             withSettings().mockMaker(org.mockito.MockMakers.INLINE));
     var holder =
         new org.springframework.jdbc.datasource.ConnectionHolder(mock(java.sql.Connection.class));
-    when(guard.require()).thenReturn(holder);
-    when(store.immutableRead(any(), any()))
-        .thenAnswer(
+    when(guard.admitImmutableReadTransaction()).thenReturn(holder);
+    when(guard.requireImmutableReadTransaction(any(), any())).thenReturn(holder);
+    doAnswer(
             call ->
                 ConfigTransactionReadSet.read(
-                    store, guard, call.getArgument(0), call.getArgument(1)));
+                    store, guard, call.getArgument(0), call.getArgument(1)))
+        .when(store)
+        .immutableRead(any(), any());
     org.springframework.transaction.support.TransactionSynchronizationManager.initSynchronization();
     org.springframework.transaction.support.TransactionSynchronizationManager
         .setActualTransactionActive(true);

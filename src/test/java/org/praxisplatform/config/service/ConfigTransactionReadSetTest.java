@@ -38,6 +38,17 @@ class ConfigTransactionReadSetTest {
     Connection connection = mock(Connection.class);
     when(connection.getAutoCommit()).thenReturn(false);
     when(connection.getTransactionIsolation()).thenReturn(Connection.TRANSACTION_READ_COMMITTED);
+    var statement = mock(java.sql.PreparedStatement.class);
+    var result = mock(java.sql.ResultSet.class);
+    when(connection.prepareStatement("SELECT current_setting('transaction_isolation')"))
+        .thenReturn(statement);
+    when(statement.executeQuery())
+        .thenAnswer(
+            call -> {
+              when(result.next()).thenReturn(true, false);
+              return result;
+            });
+    when(result.getString(1)).thenReturn("read committed");
     return connection;
   }
 
@@ -127,6 +138,86 @@ class ConfigTransactionReadSetTest {
           assertThat(read(owner, "oversized", () -> Optional.of(oversized))).contains(oversized);
           assertThat(read("oversized")).contains("value-20");
         });
+  }
+
+  @Test
+  void evenSynchronizedJdbcHolderCannotMaskChangedJpaConnectionOrRollbackOnly() throws Exception {
+    Connection actual = connection();
+    when(source.getConnection()).thenReturn(actual);
+    var factory = mock(jakarta.persistence.EntityManagerFactory.class);
+    var entityManager = mock(jakarta.persistence.EntityManager.class);
+    var entityTransaction = mock(jakarta.persistence.EntityTransaction.class);
+    var session = mock(org.hibernate.Session.class);
+    var entityHolder = new org.springframework.orm.jpa.EntityManagerHolder(entityManager);
+    entityHolder.setSynchronizedWithTransaction(true);
+    when(entityManager.getTransaction()).thenReturn(entityTransaction);
+    when(entityTransaction.isActive()).thenReturn(true);
+    when(entityManager.unwrap(org.hibernate.Session.class)).thenReturn(session);
+    doAnswer(call -> ((org.hibernate.jdbc.ReturningWork<?>) call.getArgument(0)).execute(actual))
+        .when(session)
+        .doReturningWork(any());
+    var manager = new org.springframework.orm.jpa.JpaTransactionManager();
+    manager.setEntityManagerFactory(factory);
+    manager.setDataSource(source);
+    guard = new ConfigJdbcTransactionGuard(source, new TransactionTemplate(manager));
+    TransactionSynchronizationManager.bindResource(factory, entityHolder);
+    try {
+      transaction.executeWithoutResult(
+          status -> {
+            assertThat(read("key")).isPresent();
+            when(entityTransaction.getRollbackOnly()).thenReturn(true);
+            assertThatThrownBy(() -> read("key")).isInstanceOf(UiLayoutLifecycleException.class);
+            when(entityTransaction.getRollbackOnly()).thenReturn(false);
+            doAnswer(
+                    call ->
+                        ((org.hibernate.jdbc.ReturningWork<?>) call.getArgument(0))
+                            .execute(mock(Connection.class)))
+                .when(session)
+                .doReturningWork(any());
+            assertThatThrownBy(() -> read("key")).isInstanceOf(UiLayoutLifecycleException.class);
+          });
+    } finally {
+      TransactionSynchronizationManager.unbindResource(factory);
+    }
+  }
+
+  @Test
+  void isolationIsProvenOnceWithSelectAndNeverInspectedWithShowOnHits() throws Exception {
+    Connection actual = connection();
+    when(source.getConnection()).thenReturn(actual);
+    transaction.executeWithoutResult(
+        status -> {
+          read("key");
+          read("key");
+          read("another");
+        });
+    verify(actual, times(1)).prepareStatement("SELECT current_setting('transaction_isolation')");
+    verify(actual, never()).getTransactionIsolation();
+  }
+
+  @Test
+  void wrongIsolationAndFailedAdmissionRetainNothing() throws Exception {
+    for (boolean queryFails : new boolean[] {false, true}) {
+      Connection actual = connection();
+      var statement = actual.prepareStatement("SELECT current_setting('transaction_isolation')");
+      if (queryFails) {
+        when(statement.executeQuery()).thenThrow(new java.sql.SQLException("Unreachable"));
+      } else {
+        var result = mock(java.sql.ResultSet.class);
+        when(result.next()).thenReturn(true, false);
+        when(result.getString(1)).thenReturn("repeatable read");
+        when(statement.executeQuery()).thenReturn(result);
+      }
+      when(source.getConnection()).thenReturn(actual);
+      transaction.executeWithoutResult(
+          status -> {
+            assertThatThrownBy(() -> read("key")).isInstanceOf(UiLayoutLifecycleException.class);
+            assertThat(TransactionSynchronizationManager.getSynchronizations())
+                .noneMatch(sync -> sync instanceof ConfigTransactionReadSet);
+            status.setRollbackOnly();
+          });
+    }
+    assertThat(loads.get()).isZero();
   }
 
   @Test

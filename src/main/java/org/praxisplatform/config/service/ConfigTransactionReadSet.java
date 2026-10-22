@@ -34,7 +34,6 @@ final class ConfigTransactionReadSet implements TransactionSynchronization {
         || !TransactionSynchronizationManager.isSynchronizationActive()) {
       return loader.get();
     }
-    ConnectionHolder currentHolder = guard.require();
     ConfigTransactionReadSet readSet = null;
     // Spring suspends this list with the transaction and restores it on resume. No global
     // registry or separately bound resource can leak into REQUIRES_NEW.
@@ -45,24 +44,16 @@ final class ConfigTransactionReadSet implements TransactionSynchronization {
       }
     }
     if (readSet == null) {
-      readSet = new ConfigTransactionReadSet(owner, currentHolder);
+      readSet = new ConfigTransactionReadSet(owner, guard.admitImmutableReadTransaction());
       TransactionSynchronizationManager.registerSynchronization(readSet);
     }
-    readSet.requireConnection(currentHolder);
+    guard.requireImmutableReadTransaction(readSet.holder, readSet.connection);
     String cached = readSet.values.get(key);
     if (cached != null) return Optional.of(cached);
     Optional<String> loaded = loader.get();
-    readSet.requireConnection(guard.require());
+    guard.requireImmutableReadTransaction(readSet.holder, readSet.connection);
     if (loaded.isPresent()) readSet.retain(key, loaded.orElseThrow());
     return loaded;
-  }
-
-  private void requireConnection(ConnectionHolder currentHolder) {
-    if (holder != currentHolder || connection != currentHolder.getConnection()) {
-      throw new UiLayoutLifecycleException(
-          UiLayoutLifecycleException.Code.SOURCE_UNAVAILABLE,
-          "The immutable read set belongs to another Config transaction.");
-    }
   }
 
   private void retain(Object key, String value) {

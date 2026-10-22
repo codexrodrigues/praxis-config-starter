@@ -44,6 +44,18 @@ class PageCreationPostgresIT {
       new java.util.concurrent.atomic.AtomicLong();
   private static final java.util.concurrent.atomic.AtomicLong statementNanos =
       new java.util.concurrent.atomic.AtomicLong();
+  private static final java.util.concurrent.atomic.AtomicLong isolationCalls =
+      new java.util.concurrent.atomic.AtomicLong();
+  private static final java.util.concurrent.atomic.AtomicLong isolationNanos =
+      new java.util.concurrent.atomic.AtomicLong();
+  private static final java.util.concurrent.atomic.AtomicLong autoCommitCalls =
+      new java.util.concurrent.atomic.AtomicLong();
+  private static final java.util.concurrent.atomic.AtomicLong autoCommitNanos =
+      new java.util.concurrent.atomic.AtomicLong();
+  private static final java.util.concurrent.atomic.AtomicLong connectionCalls =
+      new java.util.concurrent.atomic.AtomicLong();
+  private static final java.util.concurrent.atomic.AtomicLong connectionNanos =
+      new java.util.concurrent.atomic.AtomicLong();
   private static final java.util.concurrent.atomic.AtomicReference<String> sqlFault =
       new java.util.concurrent.atomic.AtomicReference<>();
   private static final UiLayoutTarget ANCHOR =
@@ -113,7 +125,10 @@ class PageCreationPostgresIT {
             url, assignment.path("username").asText(), assignment.path("password").asText()) {
           @Override
           public Connection getConnection() throws java.sql.SQLException {
+            long started = System.nanoTime();
             Connection c = super.getConnection();
+            connectionCalls.incrementAndGet();
+            connectionNanos.addAndGet(System.nanoTime() - started);
             try {
               c.setSchema(assignment.path("schema").asText());
               c.setTransactionIsolation(Connection.TRANSACTION_READ_COMMITTED);
@@ -218,7 +233,16 @@ class PageCreationPostgresIT {
             new Class<?>[] {Connection.class},
             (proxy, method, arguments) -> {
               try {
+                long connectionMethodStarted = System.nanoTime();
                 Object result = method.invoke(connection, arguments);
+                if (method.getName().equals("getTransactionIsolation")) {
+                  isolationCalls.incrementAndGet();
+                  isolationNanos.addAndGet(System.nanoTime() - connectionMethodStarted);
+                }
+                if (method.getName().equals("getAutoCommit")) {
+                  autoCommitCalls.incrementAndGet();
+                  autoCommitNanos.addAndGet(System.nanoTime() - connectionMethodStarted);
+                }
                 if (result instanceof java.sql.PreparedStatement statement
                     && arguments != null
                     && arguments[0] instanceof String sql) {
@@ -627,6 +651,50 @@ class PageCreationPostgresIT {
   private long count(String table) {
     return jdbc.queryForObject(
         "select count(*) from " + table + " where tenant_id=?", Long.class, tenant);
+  }
+
+  @Test
+  void repeatedImmutableReadsUseOneSelectOnTheActualConfigConnection() {
+    var created = pages.create(principal(), version, command()).receipt();
+    var store =
+        new PageCatalogStore(
+            new NamedParameterJdbcTemplate(dataSource),
+            transactions,
+            new PageCreationCodec(),
+            new CanonicalJsonHashService(JSON));
+    long started = System.nanoTime(),
+        sql = executedStatements.get(),
+        isoCalls = isolationCalls.get(),
+        isoTime = isolationNanos.get(),
+        autoCalls = autoCommitCalls.get(),
+        autoTime = autoCommitNanos.get(),
+        opens = connectionCalls.get(),
+        openTime = connectionNanos.get();
+    transactions.executeWithoutResult(
+        status -> {
+          for (int index = 0; index < 20; index++) {
+            assertThat(store.byPage(context(invocation(ANCHOR)), created.pageId())).isPresent();
+          }
+        });
+    assertThat(executedStatements.get() - sql).isEqualTo(2); // admission SELECT + one ledger SELECT
+    assertThat(isolationCalls.get() - isoCalls).isZero();
+    System.out.println(
+        "P2 immutable-readset 20reads wallMs="
+            + (System.nanoTime() - started) / 1_000_000
+            + " preparedStatements="
+            + (executedStatements.get() - sql)
+            + " isolationCalls="
+            + (isolationCalls.get() - isoCalls)
+            + " isolationMs="
+            + (isolationNanos.get() - isoTime) / 1_000_000
+            + " autoCommitCalls="
+            + (autoCommitCalls.get() - autoCalls)
+            + " autoCommitMs="
+            + (autoCommitNanos.get() - autoTime) / 1_000_000
+            + " connectionOpens="
+            + (connectionCalls.get() - opens)
+            + " connectionOpenMs="
+            + (connectionNanos.get() - openTime) / 1_000_000);
   }
 
   @Test

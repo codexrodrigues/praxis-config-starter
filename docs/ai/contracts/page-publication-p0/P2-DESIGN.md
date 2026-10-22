@@ -145,3 +145,20 @@ table and navigation-group frozen workspaces; no backfill or historical rewrite 
 A proposed mutable-body fingerprint fallback was rejected because it would preserve
 a physical mutation path inconsistent with this lifecycle rule. Published copy also
 requires reproduction against the exact persisted selected patch before snapshot reuse.
+
+PgJDBC 42.7.11's `PgConnection.getTransactionIsolation()` executes `SHOW TRANSACTION
+ISOLATION LEVEL` (verified from the effective dependency bytecode). The first readset
+implementation therefore still repeated remote SQL through a JDBC getter. A focused
+Neon probe of 20 reads measured one ledger SELECT but 21 isolation calls taking 2,942 ms
+of 4,687 ms total; 22 autoCommit getters took less than 1 ms, and one connection open
+consumed 1,004 ms. These diagnostic values do not establish a general latency budget.
+
+Readset admission now explicitly executes `SELECT current_setting('transaction_isolation')`
+once and requires READ COMMITTED. The Neon proof demonstrated that SHOW alone still
+permits isolation change, while this SELECT causes a later SET TRANSACTION isolation
+change to fail with SQLSTATE 25001. Every hit rechecks active transaction/synchronization,
+exact JDBC holder/connection, JPA holder/connection and rollback state, and autoCommit.
+The proof belongs only to that synchronization's lifetime; REQUIRES_NEW admits its own
+transaction. Failed queries or other isolation levels retain nothing. The existing full
+`ConfigJdbcTransactionGuard.require()` remains the mutation/metadata-store boundary.
+No authority decision, source admission, host resolution or deadline is memoized.
