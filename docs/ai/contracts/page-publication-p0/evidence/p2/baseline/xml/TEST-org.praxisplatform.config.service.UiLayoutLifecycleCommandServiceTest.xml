@@ -1,0 +1,20 @@
+<testsuite xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="https://maven.apache.org/surefire/maven-surefire-plugin/xsd/surefire-test-report.xsd" version="3.0.2" name="org.praxisplatform.config.service.UiLayoutLifecycleCommandServiceTest" time="0.048" tests="18" errors="0" skipped="0" failures="0" flakes="0">
+  <testcase name="missingHistoricalCaptureDeniesReplayWithoutSourceOrAppend" classname="org.praxisplatform.config.service.UiLayoutLifecycleCommandServiceTest" time="0.005" />
+  <testcase name="repeatedCreateLocksAndReturnsCurrentWorkspaceWithoutRecapturingBaseline" classname="org.praxisplatform.config.service.UiLayoutLifecycleCommandServiceTest" time="0.007" />
+  <testcase name="sourceNativeValidationAndResponseProjectionShareOneAttempt" classname="org.praxisplatform.config.service.UiLayoutLifecycleCommandServiceTest" time="0.003" />
+  <testcase name="invalidBaselineAbortsBeforeAnyDraftRowIsPersisted" classname="org.praxisplatform.config.service.UiLayoutLifecycleCommandServiceTest" time="0.001" />
+  <testcase name="deniedCreateStopsBeforeLockReplaySourceAndPersistence" classname="org.praxisplatform.config.service.UiLayoutLifecycleCommandServiceTest" time="0.0" />
+  <testcase name="finalContextChangeRequestsRollbackAfterAppend" classname="org.praxisplatform.config.service.UiLayoutLifecycleCommandServiceTest" time="0.003" />
+  <testcase name="sourceAndPersistenceRunInsideTheConfigTransactionAfterInvocationResolution" classname="org.praxisplatform.config.service.UiLayoutLifecycleCommandServiceTest" time="0.002" />
+  <testcase name="invalidatedCaptureCannotProceedToNativeValidationOrPersistence" classname="org.praxisplatform.config.service.UiLayoutLifecycleCommandServiceTest" time="0.001" />
+  <testcase name="contextChangeDuringCreationStopsBeforeSourceCapture" classname="org.praxisplatform.config.service.UiLayoutLifecycleCommandServiceTest" time="0.0" />
+  <testcase name="rejectsForeignBaselineBeforeGetterExecutionAndPersistence" classname="org.praxisplatform.config.service.UiLayoutLifecycleCommandServiceTest" time="0.001" />
+  <testcase name="currentProducerRevocationDeniesReplayWithoutRecapture" classname="org.praxisplatform.config.service.UiLayoutLifecycleCommandServiceTest" time="0.002" />
+  <testcase name="producerTechnicalFailureIsRedactedAndStopsBeforePersistence" classname="org.praxisplatform.config.service.UiLayoutLifecycleCommandServiceTest" time="0.001" />
+  <testcase name="createsAndReplaysMixedNativePageAndResourceTableWithoutRecapture" classname="org.praxisplatform.config.service.UiLayoutLifecycleCommandServiceTest" time="0.004" />
+  <testcase name="directRevisionInvalidInputFailsBeforeRepositoryMutation" classname="org.praxisplatform.config.service.UiLayoutLifecycleCommandServiceTest" time="0.001" />
+  <testcase name="flushPrecedesCaptureAppendAndStoredEvidenceMatchesTheSameDraft" classname="org.praxisplatform.config.service.UiLayoutLifecycleCommandServiceTest" time="0.009" />
+  <testcase name="formLiteralNullStopsBeforeRevisionAndDraftWritesEvenWithPermissiveHost" classname="org.praxisplatform.config.service.UiLayoutLifecycleCommandServiceTest" time="0.003" />
+  <testcase name="staleObservationIsRejectedBeforePersistence" classname="org.praxisplatform.config.service.UiLayoutLifecycleCommandServiceTest" time="0.001" />
+  <testcase name="sourceLifecycleFailurePreservesCodeAndRedactsPrivateContent" classname="org.praxisplatform.config.service.UiLayoutLifecycleCommandServiceTest" time="0.001" />
+</testsuite>

@@ -1,0 +1,28 @@
+<testsuite xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="https://maven.apache.org/surefire/maven-surefire-plugin/xsd/surefire-test-report.xsd" version="3.0.2" name="org.praxisplatform.config.service.PageCreationHttpTest" time="1.198" tests="4" errors="0" skipped="0" failures="0" flakes="0">
+  <testcase name="conflictsAndAdmissionErrorsAreSanitizedAndNeverCached" classname="org.praxisplatform.config.service.PageCreationHttpTest" time="0.543">
+    <system-out>Standard Commons Logging discovery in action with spring-jcl: please remove commons-logging.jar from classpath in order to avoid potential conflicts
+20:31:05.834 [main] INFO org.hibernate.validator.internal.util.Version -- HV000001: Hibernate Validator 8.0.3.Final
+20:31:06.015 [main] INFO org.springframework.mock.web.MockServletContext -- Initializing Spring TestDispatcherServlet ''
+20:31:06.015 [main] INFO org.springframework.test.web.servlet.TestDispatcherServlet -- Initializing Servlet ''
+20:31:06.016 [main] INFO org.springframework.test.web.servlet.TestDispatcherServlet -- Completed initialization in 1 ms
+</system-out>
+  </testcase>
+  <testcase name="oversizedAndMalformedUtf8BodiesAreRejectedBeforeDecode" classname="org.praxisplatform.config.service.PageCreationHttpTest" time="0.019">
+    <system-out>20:31:06.292 [main] INFO org.springframework.mock.web.MockServletContext -- Initializing Spring TestDispatcherServlet ''
+20:31:06.292 [main] INFO org.springframework.test.web.servlet.TestDispatcherServlet -- Initializing Servlet ''
+20:31:06.292 [main] INFO org.springframework.test.web.servlet.TestDispatcherServlet -- Completed initialization in 0 ms
+</system-out>
+  </testcase>
+  <testcase name="rawWireIsClosedBeforeHostJacksonCanDiscardInput" classname="org.praxisplatform.config.service.PageCreationHttpTest" time="0.018">
+    <system-out>20:31:06.312 [main] INFO org.springframework.mock.web.MockServletContext -- Initializing Spring TestDispatcherServlet ''
+20:31:06.313 [main] INFO org.springframework.test.web.servlet.TestDispatcherServlet -- Initializing Servlet ''
+20:31:06.313 [main] INFO org.springframework.test.web.servlet.TestDispatcherServlet -- Completed initialization in 0 ms
+</system-out>
+  </testcase>
+  <testcase name="locationIsUsableAndReplayNeverBecomesConditional304" classname="org.praxisplatform.config.service.PageCreationHttpTest" time="0.09">
+    <system-out>20:31:06.333 [main] INFO org.springframework.mock.web.MockServletContext -- Initializing Spring TestDispatcherServlet ''
+20:31:06.333 [main] INFO org.springframework.test.web.servlet.TestDispatcherServlet -- Initializing Servlet ''
+20:31:06.333 [main] INFO org.springframework.test.web.servlet.TestDispatcherServlet -- Completed initialization in 0 ms
+</system-out>
+  </testcase>
+</testsuite>

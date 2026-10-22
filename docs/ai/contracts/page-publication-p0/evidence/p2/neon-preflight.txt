@@ -1,0 +1,8 @@
+Owner preflight: ('neondb_owner', 'neondb', '17.11 (11592b3)', False, True, True, True) TLS: True
+Applied V64__create_ui_layout_lifecycle.sql
+Applied V65__add_ui_layout_workspace_idempotency.sql
+Applied V66__create_ui_layout_baseline_metadata_evidence.sql
+Applied V67__extend_ui_layout_evidence_native_origin.sql
+Applied V68__capture_ui_layout_document_assembly.sql
+Applied V70__create_page_catalog_and_creation_evidence.sql
+Runtime preflight: ('p2_page_510_runtime', 'p2_page_510_20261022', False, False, False, False, False, False, False)

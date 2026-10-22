@@ -17,12 +17,14 @@ import org.springframework.web.bind.annotation.ControllerAdvice;
 import org.springframework.web.servlet.mvc.method.annotation.RequestBodyAdviceAdapter;
 
 /** Scoped MVC entry control, after host servlet security filters and before String conversion. */
-@ControllerAdvice(assignableTypes = UiLayoutLifecycleController.class)
+@ControllerAdvice(assignableTypes = {UiLayoutLifecycleController.class, PageCreationController.class})
 public class UiLayoutRevisionRequestBodyAdvice extends RequestBodyAdviceAdapter {
   @Override public boolean supports(MethodParameter parameter, Type type, Class<? extends HttpMessageConverter<?>> converter) {
+    if (parameter.getMethod() == null || parameter.getParameterType() != String.class) return false;
     return UiLayoutLifecycleController.class.isAssignableFrom(parameter.getContainingClass())
-        && parameter.getMethod() != null && parameter.getMethod().getName().equals("revision")
-        && parameter.getParameterType() == String.class;
+        && parameter.getMethod().getName().equals("revision")
+        || PageCreationController.class.isAssignableFrom(parameter.getContainingClass())
+        && parameter.getMethod().getName().equals("create");
   }
 
   @Override public HttpInputMessage beforeBodyRead(HttpInputMessage input, MethodParameter parameter, Type type,

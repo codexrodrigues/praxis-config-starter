@@ -1,0 +1,6 @@
+<testsuite xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="https://maven.apache.org/surefire/maven-surefire-plugin/xsd/surefire-test-report.xsd" version="3.0.2" name="org.praxisplatform.config.service.PageCopyTransformationTest" time="0.004" tests="4" errors="0" skipped="0" failures="0" flakes="0">
+  <testcase name="rejectsMissingExtraRepeatedOrIntersectingMappingsAndInvalidTitle" classname="org.praxisplatform.config.service.PageCopyTransformationTest" time="0.001" />
+  <testcase name="typedNamespacesRemapOnlyIdentitiesAndPreserveSourceAndAuthoredPresence" classname="org.praxisplatform.config.service.PageCopyTransformationTest" time="0.001" />
+  <testcase name="reproducesBothSharedP0CopyVectorsAndExactHashes" classname="org.praxisplatform.config.service.PageCopyTransformationTest" time="0.001" />
+  <testcase name="allocatedCopyReproducesWithoutNewAllocationAndDefensivelyCopiesContent" classname="org.praxisplatform.config.service.PageCopyTransformationTest" time="0.001" />
+</testsuite>

@@ -224,6 +224,7 @@ class UiLayoutLifecycleService {
 
   @Transactional(transactionManager = ConfigTransactionManagerNames.CONFIG)
   public UiLayoutReleaseHead withdraw(Scope scope, UUID ifMatch, String actor, String reason) {
+    requireHeadPublicationAvailable(scope);
     requirePolicy(UiLayoutLifecycleOperation.WITHDRAW_RELEASE, scope, actor);
     reason = requireReason(reason);
     UiLayoutReleaseHead head = head(scope); requireMatch(ifMatch, head.getHeadEtag());
@@ -239,8 +240,16 @@ class UiLayoutLifecycleService {
     return moveHead(scope, releaseId, ifMatch, actor, reason, UiLayoutLifecycleOperation.ROLLBACK_RELEASE, "ROLLED_BACK", true);
   }
 
+  private void requireHeadPublicationAvailable(Scope scope) {
+    if (UiLayoutNavigationGroupsRevisionReproduction.TYPE.equals(scope.rootTarget().componentType())) {
+      throw failure(UiLayoutLifecycleException.Code.SOURCE_UNAVAILABLE,
+          "Navigation group head transitions require the P3-A materialization contract.");
+    }
+  }
+
   private UiLayoutReleaseHead moveHead(Scope scope, UUID releaseId, UUID ifMatch, String actor, String reason,
       UiLayoutLifecycleOperation operation, String eventType, boolean rollback) {
+    requireHeadPublicationAvailable(scope);
     requirePolicy(operation, scope, actor);
     reason = requireReason(reason);
     UiLayoutRelease release = release(scope, releaseId); requireApproved(releaseId);

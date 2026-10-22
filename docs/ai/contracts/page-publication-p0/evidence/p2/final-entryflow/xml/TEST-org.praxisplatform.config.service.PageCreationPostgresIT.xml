@@ -1,0 +1,48 @@
+<testsuite xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="https://maven.apache.org/surefire/maven-surefire-plugin/xsd/surefire-test-report.xsd" version="3.0.2" name="org.praxisplatform.config.service.PageCreationPostgresIT" time="519.697" tests="16" errors="0" skipped="0" failures="0" flakes="0">
+  <testcase name="participatingCreationAndLookupKeepValidationUntilTheOuterTransactionCompletes" classname="org.praxisplatform.config.service.PageCreationPostgresIT" time="50.053">
+    <system-out>P2 Neon project=ancient-leaf-72055027 branch=br-aged-bonus-a4rhfqwp role=p2_page_510_runtime schema=p2_page_510_20261022 PostgreSQL=17.11 (11592b3) clientTLS=TLSv1.3 peer=CN=*.us-east-1.aws.neon.tech
+20:34:48.378 [main] INFO org.hibernate.Version -- HHH000412: Hibernate ORM core version 6.6.53.Final
+20:34:48.402 [main] INFO org.hibernate.cache.internal.RegionFactoryInitiator -- HHH000026: Second-level cache disabled
+20:34:50.682 [main] INFO org.hibernate.orm.connections.pooling -- HHH10001005: Database info:
+	Database JDBC URL [Connecting through datasource 'org.praxisplatform.config.service.PageCreationPostgresIT$1@62cf873a']
+	Database driver: undefined/unknown
+	Database version: 17.11
+	Autocommit mode: undefined/unknown
+	Isolation level: undefined/unknown
+	Minimum pool size: undefined/unknown
+	Maximum pool size: undefined/unknown
+20:34:51.021 [main] INFO org.hibernate.engine.transaction.jta.platform.internal.JtaPlatformInitiator -- HHH000489: No JTA platform available (set 'hibernate.transaction.jta.platform' to enable JTA platform integration)
+20:34:53.521 [main] INFO org.springframework.data.jpa.repository.query.QueryEnhancerFactory -- Hibernate is in classpath; If applicable, HQL parser will be used.
+P2 outer REQUIRED transaction: create and lookup commit together; late real COMMIT response remains uncertain and reconciles the same identity
+</system-out>
+  </testcase>
+  <testcase name="everyDurableWriteAndSilentRollbackOnlyRollBackTheCompleteCreation" classname="org.praxisplatform.config.service.PageCreationPostgresIT" time="63.217">
+    <system-out>20:36:10.939 [main] WARN org.hibernate.engine.jdbc.spi.SqlExceptionHelper -- SQL Error: 0, SQLState: XX000
+20:36:10.939 [main] ERROR org.hibernate.engine.jdbc.spi.SqlExceptionHelper -- Injected failure after ui_layout_draft insert
+</system-out>
+  </testcase>
+  <testcase name="repeatedImmutableReadsUseOneSelectOnTheActualConfigConnection" classname="org.praxisplatform.config.service.PageCreationPostgresIT" time="6.87">
+    <system-out>P2 immutable-readset 20reads wallMs=1896 preparedStatements=2 isolationCalls=0 isolationMs=0 autoCommitCalls=25 autoCommitMs=0 connectionOpens=1 connectionOpenMs=1013
+</system-out>
+  </testcase>
+  <testcase name="committedButLateResponsesRemainUnacknowledgedAndReconcileWithTheSameKey" classname="org.praxisplatform.config.service.PageCreationPostgresIT" time="45.339">
+    <system-out>P2 late real COMMIT response: create and lookup returned SOURCE_UNAVAILABLE; one durable identity reconciled with the original creationKey, no recapture
+</system-out>
+  </testcase>
+  <testcase name="groupsUseExistingLifecycleWithoutPageHostAndRejectMalformedSeedsAndRevokedMetadata" classname="org.praxisplatform.config.service.PageCreationPostgresIT" time="64.472" />
+  <testcase name="createsAtomicPageAndReplaysReconcilesWithoutRecapture" classname="org.praxisplatform.config.service.PageCreationPostgresIT" time="32.173" />
+  <testcase name="lateSelectedCopyRevocationAfterFinalMetadataValidationRollsBack" classname="org.praxisplatform.config.service.PageCreationPostgresIT" time="14.413" />
+  <testcase name="repeatedGrantsAndCommitExtensionsCannotRenewTheOuterDeadline" classname="org.praxisplatform.config.service.PageCreationPostgresIT" time="44.876" />
+  <testcase name="concurrentDifferentCommandsHaveOneWinnerAndOneConflict" classname="org.praxisplatform.config.service.PageCreationPostgresIT" time="8.345" />
+  <testcase name="concurrentSameCommandHasOneDurableIdentity" classname="org.praxisplatform.config.service.PageCreationPostgresIT" time="9.358" />
+  <testcase name="injectedCommitAndRevocationRollbackEverythingFromFreshConnection" classname="org.praxisplatform.config.service.PageCreationPostgresIT" time="21.992" />
+  <testcase name="publishedHistoricalCopyUsesFixedReleaseWithoutAncestorReadGrant" classname="org.praxisplatform.config.service.PageCreationPostgresIT" time="98.287">
+    <system-out>P2 released-draft runtime UPDATE body/etag/state rejected by immutable trigger; DELETE/TRUNCATE denied
+P2 published-copy measurement elapsedMs=6535 jdbcStatements=24 jdbcExecutionMs=3441 hostBudgetMs=40000
+</system-out>
+  </testcase>
+  <testcase name="crossApplicationKnownUuidAndRevokedLookupDoNotExposeContent" classname="org.praxisplatform.config.service.PageCreationPostgresIT" time="11.593" />
+  <testcase name="creationLookupDoesNotRequireCurrentAccessToHistoricalSource" classname="org.praxisplatform.config.service.PageCreationPostgresIT" time="9.385" />
+  <testcase name="lookupRechecksDraftVisibilityAtCommitWithoutRequiringTheOldSource" classname="org.praxisplatform.config.service.PageCreationPostgresIT" time="11.997" />
+  <testcase name="existingPageCanStartNewDraftUnderNewAuthorizedActorAndContext" classname="org.praxisplatform.config.service.PageCreationPostgresIT" time="13.293" />
+</testsuite>

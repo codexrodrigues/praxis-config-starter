@@ -228,6 +228,43 @@ public class UiLayoutResolutionAutoConfiguration {
         return source;
     }
 
+
+    @Bean
+    @ConditionalOnBean(value = {org.praxisplatform.config.service.PageCreationHost.class,
+            UiLayoutLifecycleInvocationProvider.class, UiLayoutLifecycleAdmission.class,
+            UiLayoutDraftWorkspaceSource.class, UiLayoutBaselineMetadataAdmission.class,
+            UiLayoutLifecycleStructureValidator.class, UiLayoutValidationBudgetPolicy.class,
+            UiLayoutReleaseValidator.class, UiLayoutRevisionAllocationLock.class, UiLayoutDraftCreationLock.class,
+            UiLayoutReleaseReviewRepository.class, UiLayoutReleaseApprovalRepository.class,
+            UiLayoutReleaseHeadRepository.class, UiLayoutReleaseEventRepository.class,
+            UiLayoutDraftRepository.class, UiLayoutReleaseRepository.class, UiLayoutReleaseMemberRepository.class,
+            UiLayoutDefinitionRepository.class, UiLayoutRevisionRepository.class, UiLayoutAssignmentRevisionRepository.class},
+            name = {"uiLayoutLifecycleConfigTransactionOperations", "configNamedParameterJdbcTemplate"})
+    @ConditionalOnMissingBean
+    public org.praxisplatform.config.service.PageCreationService pageCreationService(
+            org.praxisplatform.config.service.PageCreationHost host,
+            @Qualifier("configNamedParameterJdbcTemplate") NamedParameterJdbcTemplate jdbc,
+            @Qualifier("uiLayoutLifecycleConfigTransactionOperations") TransactionOperations transactions,
+            CanonicalJsonHashService hashes, ObjectMapper mapper, UiLayoutDraftWorkspaceSource source,
+            UiLayoutBaselineMetadataAdmission metadata,
+            UiLayoutLifecycleStructureValidator structure, UiLayoutValidationBudgetPolicy budgets,
+            UiLayoutDraftRepository drafts, UiLayoutReleaseRepository releases, UiLayoutReleaseMemberRepository members,
+            UiLayoutDefinitionRepository definitions, UiLayoutRevisionRepository revisions, UiLayoutAssignmentRevisionRepository assignments,
+            org.springframework.beans.factory.ObjectProvider<UiLayoutLifecycleCommandService> commands,
+            org.springframework.beans.factory.ObjectProvider<UiLayoutLifecycleReadService> reads) {
+        return new org.praxisplatform.config.service.PageCreationService(host, jdbc, transactions, hashes, mapper,
+                source, metadata, structure, budgets, drafts, releases, members, definitions, revisions,
+                assignments, commands::getObject, reads::getObject);
+    }
+
+    @Bean
+    @ConditionalOnBean(org.praxisplatform.config.service.PageCreationService.class)
+    @ConditionalOnMissingBean
+    public org.praxisplatform.config.controller.PageCreationController pageCreationController(
+            org.praxisplatform.config.service.PageCreationService pages) {
+        return new org.praxisplatform.config.controller.PageCreationController(pages);
+    }
+
     @Bean
     @ConditionalOnBean(value = {UiLayoutValidationBudgetPolicy.class, UiLayoutLifecycleInvocationProvider.class, UiLayoutLifecycleAdmission.class,
             UiLayoutLifecycleStructureValidator.class, UiLayoutReleaseValidator.class, UiLayoutRevisionAllocationLock.class,
@@ -248,7 +285,17 @@ public class UiLayoutResolutionAutoConfiguration {
             UiLayoutDraftCreationLock creationLock,
             UiLayoutBaselineMetadataAdmission metadataAdmission,
             @Qualifier("configNamedParameterJdbcTemplate") NamedParameterJdbcTemplate configJdbc,
-            @Qualifier("uiLayoutLifecycleConfigTransactionOperations") TransactionOperations transactions, UiLayoutValidationBudgetPolicy budgetPolicy) {
+            @Qualifier("uiLayoutLifecycleConfigTransactionOperations") TransactionOperations transactions, UiLayoutValidationBudgetPolicy budgetPolicy,
+            @Autowired(required = false) org.praxisplatform.config.service.PageCreationService pages) {
+        if (pages != null) {
+            invocations = pages.invocationProvider(invocations);
+            admission = pages.lifecycleAdmission(admission);
+        }
+
+        if (pages != null) {
+            workspaceSource = pages.workspaceSource();
+            metadataAdmission = pages.metadataAdmission();
+        }
         return UiLayoutLifecycleCommandService.create(definitions, revisions, assignments, drafts, releases, members, reviews,
                 approvals, heads, events, allocationLock, hashes, objectMapper,
                 releaseValidator, invocations, admission, structure, workspaceSource, creationLock, configJdbc, metadataAdmission, transactions, budgetPolicy);
@@ -265,7 +312,13 @@ public class UiLayoutResolutionAutoConfiguration {
             UiLayoutReleaseReviewRepository reviews, UiLayoutReleaseHeadRepository heads,
             UiLayoutDefinitionRepository definitions, UiLayoutRevisionRepository revisions,
             UiLayoutAssignmentRevisionRepository assignments, ObjectMapper objectMapper,
-            CanonicalJsonHashService hashes, UiLayoutLifecycleStructureValidator structure, UiLayoutValidationBudgetPolicy budgetPolicy) {
+            CanonicalJsonHashService hashes, UiLayoutLifecycleStructureValidator structure, UiLayoutValidationBudgetPolicy budgetPolicy,
+            @Autowired(required = false) org.praxisplatform.config.service.PageCreationService pages) {
+        if (pages != null) {
+            invocations = pages.invocationProvider(invocations);
+            admission = pages.lifecycleAdmission(admission);
+        }
+
         return new UiLayoutLifecycleReadService(invocations, admission, drafts, releases, reviews, heads,
                 definitions, revisions, assignments, objectMapper, hashes, structure, budgetPolicy);
     }
@@ -280,7 +333,13 @@ public class UiLayoutResolutionAutoConfiguration {
             UiLayoutLifecycleAdmission admission, UiLayoutHistoricalEvidenceAccess access, UiLayoutReleaseRepository releases,
             UiLayoutDraftRepository drafts, UiLayoutReleaseMemberRepository members, UiLayoutDefinitionRepository definitions,
             UiLayoutRevisionRepository revisions, UiLayoutAssignmentRevisionRepository assignments, ObjectMapper mapper,
-            CanonicalJsonHashService hashes, UiLayoutValidationBudgetPolicy budgetPolicy) {
+            CanonicalJsonHashService hashes, UiLayoutValidationBudgetPolicy budgetPolicy,
+            @Autowired(required = false) org.praxisplatform.config.service.PageCreationService pages) {
+        if (pages != null) {
+            invocations = pages.invocationProvider(invocations);
+            admission = pages.lifecycleAdmission(admission);
+        }
+
         return new UiLayoutHistoricalEvidenceService(invocations, admission, access, releases, drafts, members,
                 definitions, revisions, assignments, mapper, hashes, budgetPolicy);
     }
@@ -293,7 +352,14 @@ public class UiLayoutResolutionAutoConfiguration {
     public UiLayoutEvolutionReadinessService uiLayoutEvolutionReadinessService(UiLayoutHistoricalEvidenceService history,
             UiLayoutLifecycleInvocationProvider invocations, UiLayoutLifecycleAdmission admission,
             UiLayoutDraftWorkspaceSource source, UiLayoutCurrentEvolutionEvidenceAccess access,
-            UiLayoutLifecycleStructureValidator structure, ObjectMapper mapper, CanonicalJsonHashService hashes, UiLayoutValidationBudgetPolicy budgetPolicy) {
+            UiLayoutLifecycleStructureValidator structure, ObjectMapper mapper, CanonicalJsonHashService hashes, UiLayoutValidationBudgetPolicy budgetPolicy,
+            @Autowired(required = false) org.praxisplatform.config.service.PageCreationService pages) {
+        if (pages != null) {
+            invocations = pages.invocationProvider(invocations);
+            admission = pages.lifecycleAdmission(admission);
+        }
+
+        if (pages != null) source = pages.workspaceSource();
         return new UiLayoutEvolutionReadinessService(history, invocations, admission, source, access, structure, mapper, hashes, budgetPolicy);
     }
 

@@ -1,119 +1,86 @@
-# P1-D — documento nativo de grupos
+# P1-D — grupos nativos e integração do lifecycle
 
-22/10/2026. Issue [#509](https://github.com/codexrodrigues/praxis-config-starter/issues/509).
-**Corte isolado de codec: não habilita um host nem transições operacionais.**
-Base confirmada `6144b4855d7e852ecffaa9af80abd3de2a0721e6`, após P0/P1-A.
-Branch `codex/navigation-groups-509`; autor `p1d_groups`; revisão independente:
-coordenador, concluída para o codec `635c7765`, sem bloqueadores identificados.
-Costuras e aceite integral da issue continuam pendentes. Modelo/esforço solicitados pelo
-coordenador: Sol/high; não há verificação independente da configuração efetiva.
+Implementação de [#509](https://github.com/codexrodrigues/praxis-config-starter/issues/509),
+com costuras compartilhadas entregues no [PR #517](https://github.com/codexrodrigues/praxis-config-starter/pull/517).
+A fonte de código/testes comprovada é `fef0cb2cf31ad0bd9be6fc0424dcdf41b92283f0`.
+Os resultados finais e os limites estão em [P2-IMPLEMENTATION](P2-IMPLEMENTATION.md).
+Revisão e integração são registradas no PR; este documento não antecipa merge nem
+habilita hosts ou mudanças de head de grupos antes de P3-A.
 
-## Inventário, plano e impacto
+## Inventário e impacto
 
-Classificação `contrato-publico`, transversal. A fonte canônica é Config.
+Classificação `contrato-publico`, com fonte canônica Config e perfil fechado P0.
 
-| Necessidade | Aderência e decisão |
-|---|---|
-| Grupos planos, identidade/ícone/ordem e exclusão por ausência | `suportado-parcialmente`: P0 já especifica `groupsDocument`; faltava reprodução Java. Implementar o perfil existente, sem outro DTO/schema. |
-| Draft/revisão/review/head, ETag, bounds e metadata admission | `ja-suportado-mal-nomeado-ou-mal-materializado`: reutilizar lifecycle e patch existentes. Não criar máquina de publicação. |
-| Root registrado estável e despacho nativo app-shell | `lacuna-real-de-contrato`: costuras no registro/dispatcher atuais; escrita exclusiva do trabalhador P2, em coordenação. O codec apenas valida a forma UUID; não gera nem registra root. |
-| Catálogo de ícones e fonte concretamente admitidos | `suportado-parcialmente`: SPIs de policy/source existem; nenhum catálogo app-shell está comprovado neste corte. Sintaxe aceita nunca equivale a admissão. |
-| Integridade grupos/páginas em mudança de head | `lacuna-real-de-contrato`: gate P3-A. Nenhuma ativação operacional pode precedê-lo. |
+| Necessidade | Aderência e solução |
+| --- | --- |
+| Grupos planos, identidade, ícone, ordem e remoção por ausência | `suportado-parcialmente`: reutilizar `groupsDocument` P0 e implementar reprodução Java. |
+| Draft, revisão, review, ETag e metadata admission | `ja-suportado-mal-nomeado-ou-mal-materializado`: integrar o lifecycle existente. |
+| Root estável por tenant/app/environment/namespace | `ja-suportado-mal-nomeado-ou-mal-materializado`: explicitar a invariável no mapping host de `UiLayoutLifecycleInvocationProvider` e exercitá-la operacionalmente. Validar UUID não registra uma composição. |
+| Ícone e fonte concretamente admitidos | `suportado-parcialmente`: usar structure/source/metadata SPIs atuais; o schema não atesta o catálogo do host. |
+| Integridade entre grupos e páginas em mudança de head | `lacuna-real-de-contrato`: pertence a P3-A; as transições continuam fechadas. |
 
-Plano: (1) codec/reprodução fechado reutilizando o schema P0; (2) testes focais de
-corpus, identidade/presença/remoção e patch; (3) entrega da API package-private ao
-escritor único das costuras; (4) revisão independente e integração sequencial.
+O plano isolou o codec, integrou-o sequencialmente no escritor P2, validou as costuras
+sem PageCreationHost e submeteu os dois recortes à revisão independente. Consumidores
+futuros são Core/shell, Quickstart, Hero e o exemplo oficial. A adoção host/UI, a
+projeção de navegação e os artefatos operacionais derivados continuam nos cortes P3–P6.
+Não foi publicado artefato Maven, renderer ou nova API de navegação neste incremento.
 
-Consumidores futuros: Core/shell, Quickstart, Hero e exemplo oficial. Este corte não
-altera qualquer artefato Maven já publicado, DTO de navegação, endpoint, DDL,
-renderer ou consumidor. O helper fará parte do próximo JAR quando distribuído.
-Risco: novos documentos nativos só serão aceitos no perfil P0; não muda os perfis
-Form/Table/Page. Landing, corpus HTTP e recipes não precisam de alteração neste
-corte isolado porque não há operação nova ativa; sua adoção continua em P3–P6.
+## Comportamento entregue
 
-## Implementação e fronteiras
+`UiLayoutNavigationGroupsRevisionReproduction` seleciona `$defs/groupsDocument` no
+mesmo schema P0. Exige target `praxis-app-shell` com UUID canônico, descritor v1 e
+patch `praxis.ui-layout/v1`. Baseline/candidato têm perfil fechado, IDs únicos,
+limites de 256 KiB/profundidade 64, envelope imutável e reprodução exata pelo patch.
+Arrays são substituídos atomicamente; ausência remove uma entrada e `groups:[]`
+remove todas. Labels, ícones e ordem não são identidade; empates são admitidos.
+A autoria mantém a ordem do array. Não aceita páginas, vínculos, hierarquia, URLs
+arbitrárias de ícone, status ou campos externos ao perfil.
 
-`UiLayoutNavigationGroupsRevisionReproduction` usa o mesmo recurso de schema P0,
-selecionando `$defs/groupsDocument`; não mantém outra cópia. Exige target
-`praxis-app-shell` com UUID canônico, descritor v1 e patch `praxis.ui-layout/v1`.
-Valida baseline e candidato, incluindo unicidade de group.id, documento fechado e
-os limites existentes de 256 KiB/profundidade64. Usa `UiLayoutRevisionRelation`
-para envelope imutável e reprodução exata. Os arrays são substituídos atomicamente:
-omitir entrada remove grupo; `groups:[]` remove todos, sujeito ao gate P3-A no head.
-Labels/ícones/ordem não são identidade; empates são admitidos. A autoria preserva
-a ordem do array sem ordenar ou normalizar. A futura projeção de navegação ordena
-por order/id conforme P0/P3-B, sem reescrever a autoria.
+As costuras compartilhadas agora validam a seed antes de persistir, despacham a
+projeção e reproduzem revisões e frozen releases. Revisão/freeze e callbacks de
+commit rechecam metadata do root e são seguidos por revalidação atual de contexto
+e autoridade. O histórico verifica integridade sem recapturar a origem.
 
-Não admite pages, vínculos, hierarquia, URLs de ícone, status ou campos externos ao
-perfil P0. Não introduz fallback, feature flag, fonte paralela ou storage no host.
+O provider existente do host deve resolver exatamente um root app-shell por escopo.
+A fixture operacional mapeia a tupla autenticada, resolve repetidamente o mesmo root,
+rejeita um segundo UUID e rejeita tenant/app/environment/namespace desconhecidos.
+Isso não instala um cadastro paralelo. Host sem fonte/root/ícones admitidos deve negar;
+os defaults dos SPIs permanecem fechados.
 
-Admissão existente e limites da prova:
+`UiLayoutLifecycleService` bloqueia publish, withdraw e rollback de app-shell até
+P3-A, incluindo chamadas diretas com policy/validator permissivos e sem PageCreationHost.
+Não há flag temporária para contornar esse gate. V70 também sela UPDATE/DELETE de
+qualquer draft já RELEASED e impede TRUNCATE, usando a função canônica de imutabilidade.
+A escrita final DRAFT→RELEASED permanece permitida; reviews/heads mantêm seus próprios
+registros. O documento congelado e as capturas embutidas não são reescritos.
 
-- `UiLayoutDraftWorkspaceSource.capture` fornece B0/metadata correlacionados sob
-  invocation; `UiLayoutBaselineMetadataAdmission.require` exige origem verdadeira,
-  reprodução e política atual. Nenhum payload do cliente atesta a própria fonte.
-- `UiLayoutLifecycleStructureValidator.validateAuthoringBaseline` e
-  `validateAuthoringRevision` são a fronteira atual para política de apresentação,
-  incluindo IDs do catálogo de ícones; `validateFrozenRelease` repete esses checks
-  sob o contexto da operação. `UiLayoutBoundedStructureValidator` conserva o budget.
-- Este corte não implementa nem atesta um catálogo de ícones. Sem implementação
-  host capaz de admitir fonte/root/ícones, o host deve negar. Os defaults dessas
-  SPIs já negam. A regex do schema verifica só sintaxe de ID.
+## Evidência e proveniência
 
-## Costuras reservadas ao escritor P2
+O codec isolado veio de `635c7765`, seguido de documentação em `ecfdf73f`, integrado
+pelo PR [#516](https://github.com/codexrodrigues/praxis-config-starter/pull/516) na base
+`468f9de696330be2ee16d181c5145cfe849dc29b`. A revisão independente do coordenador
+não encontrou bloqueadores nesse recorte. Reserva original:
+[comentário](https://github.com/codexrodrigues/praxis-config-starter/issues/509#issuecomment-6352337817).
 
-API entregue: constantes `KIND`/`TYPE`, `requireNative(target, descriptor,
-baseline, candidate, patchDescriptor)` e `require(..., patch)` (package-private).
-O último método ignora outros documentTypes, igual aos codecs existentes.
+A prova histórica isolada de 22/10/2026 19:07:48 America/Sao_Paulo executou 112 testes
+(12 codec + 100 corpus P0), sem falhas/erros/skips, Java Temurin 21.0.10+7 e Maven
+3.9.15, sem banco. Usou `/tmp/praxis-navigation-groups-509-m2`, cópia CoW do cache
+pré-existente, sem install/deploy compartilhado. Log bruto:
+`/tmp/praxis-navigation-groups-509-tests.log`; manifesto:
+`/tmp/praxis-navigation-groups-509-test-evidence.json`. Esse resultado não é apresentado
+como gate do lifecycle integrado ou da árvore atual.
 
-Integração ainda necessária: despacho `UiLayoutAuthoringProjection`; reprodução
-nas revisões e frozen releases; registro único UUID de app-shell por escopo
-server-owned de navegação; bloquear publish/rollback/withdraw até P3-A. Não criar
-UUID derivado de string ou presumir que validar UUID prova unicidade por escopo.
-O registro deve vir da fonte canônica atual tenant/app/environment/namespace.
-`UiLayoutDraftWorkspaceCodec` continua codec de envelope/hash, sem virar autoridade.
-O escritor P2/coordenador mantém esses arquivos compartilhados e a integração
-sequencial. Lifecycle/mock de root, admissão concreta, integridade entre agregados,
-Neon, HTTP real e host/browser continuam pendentes; não são provados pelo codec.
-
-## Validação observada
-
-Runtime: macOS arm64; Java Temurin21.0.10+7; Maven3.9.15; Config fonte
-0.1.0-rc.166 (sem alteração/publicação de versão). Target exclusivo desta worktree;
-repo Maven exclusivo `/tmp/praxis-navigation-groups-509-m2`, cópia CoW do cache
-pré-existente, sem install/deploy e sem coordenadas sobrescritas no cache compartilhado.
-Nenhum recurso de banco ou servidor foi usado.
-
-```sh
-mvn -B -Dmaven.repo.local=/tmp/praxis-navigation-groups-509-m2 \
-  -Dtest=UiLayoutNavigationGroupsRevisionReproductionTest,PagePublicationP0ContractTest test
-```
-
-Execução concluída em 22/10/2026 19:07:48 America/Sao_Paulo: Maven exit0,
-112 testes, falhas0/erros0/skips0 (12 codec; 100 corpus P0). Output limpo antes da
-primeira execução: worktree nova sem target. Validação focal suficiente para o
-codec isolado; não executa banco, HTTP ou lifecycle de grupos. Log bruto local
-`/tmp/praxis-navigation-groups-509-tests.log`; XMLs novos em target/surefire-reports;
-identidades/hashes em `/tmp/praxis-navigation-groups-509-test-evidence.json`.
-`git diff --check` aprovado. Revisão independente do codec `635c7765` concluída
-pelo coordenador, com leitura de fonte/testes/registro e logs, sem bloqueadores;
-costuras e aceite integral continuam pendentes. Ajuste editorial posterior não
-alterou código/testes e não exigiu repetição da suíte.
+A prova integrada e sua fonte, DDL, runtime restrito Neon, logs e XML estão reunidos
+com P2. Inclui seed inválida, revisão com remoção/rename/ordem, revogação de metadata,
+root estável e guard central sem PageCreationHost. Não equivale a HTTP real do host,
+E2E browser, catálogo concreto de ícones ou integridade P3-A entre agregados.
 
 ## Skills e continuidade
 
-Fonte inspecionada: `praxis-codex-skills` commit `1405560`,
-`codex-skills/praxis-config-runtime-persistence/references/governed-layout-integrity.md`.
-Classificação `atualizar-existente`: documentar a distinção entre sintaxe do codec,
-admissão de ícone/fonte/root e gate P3-A antes de ativar head; sem instruir uma
-fonte/catálogo não implementado. Escritor canônico é o coordenador; nenhuma skill
-ou espelho local alterado por este trabalhador. Entrega/sincronização pendentes.
-
-Reserva de execução publicada antes da edição e confirmada pelo coordenador:
-[comentário de reserva](https://github.com/codexrodrigues/praxis-config-starter/issues/509#issuecomment-6352337817).
-Correção da reserva: repo Maven efetivamente usado é `/tmp/praxis-navigation-groups-509-m2`.
-Não há dev server, shell interativo ou conexão de banco a encerrar. Recursos
-permanecem atribuídos ao trabalhador até revisão; nenhuma migração foi reservada.
-PR draft [#516](https://github.com/codexrodrigues/praxis-config-starter/pull/516).
-Próximo passo: integrar costuras pelo escritor P2 e revisar o fluxo integrado. Sem merge,
-fechamento de issue, deploy ou release autorizado neste pacote.
+A avaliação foi `atualizar-existente` para persistence e `existente-adequada` para
+fronteiras de domínio. O coordenador integrou os incrementos canônicos, incluindo
+PRs 823/824/825, no estado `7988937c2b2fbb02ae569257da0e987fa783203a` de `praxis-codex-skills`, com sincronização seletiva
+concluída. O guidance distingue sintaxe, fonte/ícones admitidos, root registrado,
+selagem de RELEASED, reuso de bytes imutáveis e gates P3/P4. Não há pendência de skill
+conhecida neste incremento. O fechamento das issues e a adoção permanecem atos de
+coordenação separados da evidência técnica.

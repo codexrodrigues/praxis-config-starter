@@ -14,7 +14,7 @@ import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.MissingRequestHeaderException;
 
 /** Maps resolution failures to stable sanitized HTTP outcomes. */
-@RestControllerAdvice(assignableTypes = {EffectiveUiLayoutController.class, EffectiveUiLayoutCompositionController.class, UiLayoutLifecycleController.class})
+@RestControllerAdvice(assignableTypes = {EffectiveUiLayoutController.class, EffectiveUiLayoutCompositionController.class, UiLayoutLifecycleController.class, PageCreationController.class})
 @Order(Ordered.HIGHEST_PRECEDENCE)
 public class UiLayoutResolutionExceptionHandler {
     @ExceptionHandler(UiLayoutRevisionRequestBodyAdvice.BodyTooLarge.class)

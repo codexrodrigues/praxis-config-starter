@@ -1,0 +1,7 @@
+<testsuite xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="https://maven.apache.org/surefire/maven-surefire-plugin/xsd/surefire-test-report.xsd" version="3.0.2" name="org.praxisplatform.config.service.UiLayoutPageChildCapturesTest" time="0.103" tests="5" errors="0" skipped="0" failures="0" flakes="0">
+  <testcase name="newKeysRequireExactServerResolvedSourcesAndKeepB0ForLaterEdits" classname="org.praxisplatform.config.service.UiLayoutPageChildCapturesTest" time="0.065" />
+  <testcase name="missingInitialEvidenceAndWrongDraftOrHashAreRejected" classname="org.praxisplatform.config.service.UiLayoutPageChildCapturesTest" time="0.006" />
+  <testcase name="sourceReferencesUseP0UnicodeCodePointLimits" classname="org.praxisplatform.config.service.UiLayoutPageChildCapturesTest" time="0.0" />
+  <testcase name="clientAttestationAndUnknownPropertiesNeverEnterTheSourceSpi" classname="org.praxisplatform.config.service.UiLayoutPageChildCapturesTest" time="0.008" />
+  <testcase name="capturesRoundTripInWorkspaceAndPreserveRemovedChildForRestoration" classname="org.praxisplatform.config.service.UiLayoutPageChildCapturesTest" time="0.02" />
+</testsuite>
