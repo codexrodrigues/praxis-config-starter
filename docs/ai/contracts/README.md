@@ -1,5 +1,13 @@
 # AI API Contract (Single Source)
 
+## Especificações em preparação
+
+- [Publicação de páginas — P0](page-publication-p0/README.md): contratos propostos,
+  schemas e corpus de validação. **Sem endpoints novos ativos**; implementação de
+  codecs/lifecycle e integração dos hosts dependem dos gates descritos no documento.
+
+## Contrato operacional existente
+
 Arquivo fonte unico atual:
 
 - `docs/ai/contracts/praxis-ai-api-contract-v1.1.openapi.yaml`

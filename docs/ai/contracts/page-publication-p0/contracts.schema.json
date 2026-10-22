@@ -1,0 +1,785 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Praxis page publication P0 — structural admission profile",
+  "description": "Normative proposed contracts; no runtime/API availability. Select a $defs contract. Additional native and relational admission is mandatory.",
+  "$defs": {
+    "target": {
+      "type": "object",
+      "properties": {
+        "componentType": {
+          "const": "praxis-dynamic-page"
+        },
+        "componentId": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+        }
+      },
+      "required": [
+        "componentType",
+        "componentId"
+      ],
+      "additionalProperties": false
+    },
+    "presentation": {
+      "type": "object",
+      "properties": {
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160,
+          "pattern": "^(?!.*[\\u0000-\\u001f\\u007f])\\S(?:.*\\S)?$"
+        },
+        "description": {
+          "type": "string",
+          "maxLength": 2000
+        },
+        "icon": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80,
+          "pattern": "^[a-z][a-z0-9_]*$",
+          "description": "Identificador no catálogo de ícones admitido; sintaxe não atesta admissão."
+        }
+      },
+      "required": [
+        "title",
+        "icon"
+      ],
+      "additionalProperties": false
+    },
+    "binding": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+        },
+        "groupId": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+        },
+        "label": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160,
+          "pattern": "^(?!.*[\\u0000-\\u001f\\u007f])\\S(?:.*\\S)?$"
+        },
+        "icon": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80,
+          "pattern": "^[a-z][a-z0-9_]*$",
+          "description": "Identificador no catálogo de ícones admitido; sintaxe não atesta admissão."
+        },
+        "order": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 2147483647
+        }
+      },
+      "required": [
+        "id",
+        "groupId",
+        "label",
+        "icon",
+        "order"
+      ],
+      "additionalProperties": false
+    },
+    "layout": {
+      "type": "object",
+      "properties": {
+        "orientation": {
+          "enum": [
+            "vertical",
+            "columns"
+          ]
+        },
+        "columns": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 24
+        },
+        "gap": {
+          "type": "string",
+          "pattern": "^(0|[0-9]+(px|rem))$"
+        },
+        "paddingInline": {
+          "type": "string",
+          "pattern": "^(0|[0-9]+(px|rem))$"
+        },
+        "breakpoints": {
+          "type": "object",
+          "properties": {
+            "sm": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 24
+            },
+            "md": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 24
+            },
+            "lg": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 24
+            },
+            "xl": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 24
+            }
+          },
+          "required": [],
+          "additionalProperties": false
+        }
+      },
+      "required": [],
+      "additionalProperties": false
+    },
+    "formWidget": {
+      "type": "object",
+      "properties": {
+        "key": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+        },
+        "definition": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "const": "praxis-dynamic-form"
+            },
+            "inputs": {
+              "type": "object",
+              "properties": {
+                "config": {
+                  "type": "object",
+                  "description": "Conteúdo do owner, sem JSON Schema público completo neste baseline. Exige codec, schema/policy e evidência nativos; validar apenas este schema NÃO admite publicação."
+                },
+                "mode": {
+                  "enum": [
+                    "create",
+                    "edit",
+                    "view",
+                    "presentation",
+                    "dossier"
+                  ]
+                },
+                "emptyState": {
+                  "type": [
+                    "object",
+                    "null"
+                  ]
+                },
+                "presentationModeGlobal": {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                },
+                "backConfig": {
+                  "type": "object",
+                  "description": "Conteúdo do owner, sem JSON Schema público completo neste baseline. Exige codec, schema/policy e evidência nativos; validar apenas este schema NÃO admite publicação."
+                },
+                "presentation": {
+                  "type": [
+                    "object",
+                    "null"
+                  ]
+                },
+                "notifyIfOutdated": {
+                  "enum": [
+                    "inline",
+                    "snackbar",
+                    "both",
+                    "none"
+                  ]
+                },
+                "snoozeMs": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "autoOpenSettingsOnOutdated": {
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "config"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "id",
+            "inputs"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "key",
+        "definition"
+      ],
+      "additionalProperties": false
+    },
+    "tableWidget": {
+      "type": "object",
+      "properties": {
+        "key": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+        },
+        "definition": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "const": "praxis-table"
+            },
+            "inputs": {
+              "type": "object",
+              "properties": {
+                "config": {
+                  "type": "object",
+                  "description": "Conteúdo do owner, sem JSON Schema público completo neste baseline. Exige codec, schema/policy e evidência nativos; validar apenas este schema NÃO admite publicação."
+                },
+                "resourcePath": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "maxLength": 1024
+                },
+                "horizontalScroll": {
+                  "enum": [
+                    "auto",
+                    "wrap",
+                    "none"
+                  ]
+                }
+              },
+              "required": [
+                "config"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "id",
+            "inputs"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "key",
+        "definition"
+      ],
+      "additionalProperties": false
+    },
+    "inputEndpoint": {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "const": "component-port"
+        },
+        "ref": {
+          "type": "object",
+          "properties": {
+            "widget": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+            },
+            "port": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 255,
+              "pattern": "^(?!.*[\\u0000-\\u001f\\u007f])\\S(?:.*\\S)?$"
+            },
+            "direction": {
+              "const": "input"
+            }
+          },
+          "required": [
+            "widget",
+            "port",
+            "direction"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "kind",
+        "ref"
+      ],
+      "additionalProperties": false
+    },
+    "outputEndpoint": {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "const": "component-port"
+        },
+        "ref": {
+          "type": "object",
+          "properties": {
+            "widget": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+            },
+            "port": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 255,
+              "pattern": "^(?!.*[\\u0000-\\u001f\\u007f])\\S(?:.*\\S)?$"
+            },
+            "direction": {
+              "const": "output"
+            }
+          },
+          "required": [
+            "widget",
+            "port",
+            "direction"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "kind",
+        "ref"
+      ],
+      "additionalProperties": false
+    },
+    "link": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+        },
+        "from": {
+          "$ref": "#/$defs/outputEndpoint"
+        },
+        "to": {
+          "$ref": "#/$defs/inputEndpoint"
+        },
+        "intent": {
+          "const": "event-propagation"
+        }
+      },
+      "required": [
+        "id",
+        "from",
+        "to",
+        "intent"
+      ],
+      "additionalProperties": false
+    },
+    "definition": {
+      "type": "object",
+      "properties": {
+        "widgets": {
+          "type": "array",
+          "items": {
+            "oneOf": [
+              {
+                "$ref": "#/$defs/formWidget"
+              },
+              {
+                "$ref": "#/$defs/tableWidget"
+              }
+            ]
+          }
+        },
+        "layout": {
+          "$ref": "#/$defs/layout"
+        },
+        "composition": {
+          "type": "object",
+          "properties": {
+            "version": {
+              "const": "1.0.0"
+            },
+            "links": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/link"
+              }
+            }
+          },
+          "required": [
+            "links"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "widgets"
+      ],
+      "additionalProperties": false
+    },
+    "pageDocument": {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "const": "praxis.dynamic-page.editor"
+        },
+        "version": {
+          "const": 1
+        },
+        "config": {
+          "type": "object",
+          "properties": {
+            "definition": {
+              "$ref": "#/$defs/definition"
+            },
+            "presentation": {
+              "$ref": "#/$defs/presentation"
+            },
+            "navigation": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/binding"
+              }
+            }
+          },
+          "required": [
+            "definition",
+            "presentation",
+            "navigation"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "kind",
+        "version",
+        "config"
+      ],
+      "additionalProperties": false
+    },
+    "group": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+        },
+        "label": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160,
+          "pattern": "^(?!.*[\\u0000-\\u001f\\u007f])\\S(?:.*\\S)?$"
+        },
+        "icon": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80,
+          "pattern": "^[a-z][a-z0-9_]*$",
+          "description": "Identificador no catálogo de ícones admitido; sintaxe não atesta admissão."
+        },
+        "order": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 2147483647
+        }
+      },
+      "required": [
+        "id",
+        "label",
+        "icon",
+        "order"
+      ],
+      "additionalProperties": false
+    },
+    "groupsDocument": {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "const": "praxis.navigation-groups.editor"
+        },
+        "version": {
+          "const": 1
+        },
+        "config": {
+          "type": "object",
+          "properties": {
+            "groups": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/group"
+              }
+            }
+          },
+          "required": [
+            "groups"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "kind",
+        "version",
+        "config"
+      ],
+      "additionalProperties": false
+    },
+    "nativeSource": {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "const": "registered-native"
+        },
+        "sourceId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 255,
+          "pattern": "^(?!.*[\\u0000-\\u001f\\u007f])\\S(?:.*\\S)?$"
+        },
+        "revision": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 255,
+          "pattern": "^(?!.*[\\u0000-\\u001f\\u007f])\\S(?:.*\\S)?$"
+        }
+      },
+      "required": [
+        "kind",
+        "sourceId",
+        "revision"
+      ],
+      "additionalProperties": false
+    },
+    "publishedSource": {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "const": "published-page"
+        },
+        "pageId": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+        },
+        "releaseId": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+        },
+        "revisionId": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+        }
+      },
+      "required": [
+        "kind",
+        "pageId",
+        "releaseId",
+        "revisionId"
+      ],
+      "additionalProperties": false
+    },
+    "source": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/nativeSource"
+        },
+        {
+          "$ref": "#/$defs/publishedSource"
+        }
+      ]
+    },
+    "createCommand": {
+      "type": "object",
+      "properties": {
+        "creationKey": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+        },
+        "source": {
+          "$ref": "#/$defs/source"
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160,
+          "pattern": "^(?!.*[\\u0000-\\u001f\\u007f])\\S(?:.*\\S)?$"
+        }
+      },
+      "required": [
+        "creationKey",
+        "source",
+        "title"
+      ],
+      "additionalProperties": false
+    },
+    "childSource": {
+      "type": "object",
+      "properties": {
+        "widgetKey": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+        },
+        "source": {
+          "$ref": "#/$defs/nativeSource"
+        }
+      },
+      "required": [
+        "widgetKey",
+        "source"
+      ],
+      "additionalProperties": false
+    },
+    "pageRevisionCommand": {
+      "type": "object",
+      "properties": {
+        "commandRef": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+        },
+        "target": {
+          "$ref": "#/$defs/target"
+        },
+        "authoringDocument": {
+          "$ref": "#/$defs/pageDocument"
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 2000
+        },
+        "childSources": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/childSource"
+          }
+        }
+      },
+      "required": [
+        "commandRef",
+        "target",
+        "authoringDocument",
+        "reason"
+      ],
+      "additionalProperties": false
+    },
+    "creationReceipt": {
+      "type": "object",
+      "properties": {
+        "creationKey": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+        },
+        "pageId": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+        },
+        "target": {
+          "$ref": "#/$defs/target"
+        },
+        "routePath": {
+          "type": "string",
+          "pattern": "^/[^?#\\\\]*$"
+        },
+        "draftId": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+        },
+        "draftEtag": {
+          "type": "string",
+          "pattern": "^\"[^\"\\r\\n]+\"$"
+        },
+        "source": {
+          "$ref": "#/$defs/source"
+        }
+      },
+      "required": [
+        "creationKey",
+        "pageId",
+        "target",
+        "routePath",
+        "draftId",
+        "draftEtag",
+        "source"
+      ],
+      "additionalProperties": false
+    },
+    "copyEvidence": {
+      "type": "object",
+      "properties": {
+        "source": {
+          "$ref": "#/$defs/source"
+        },
+        "sourceHash": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "outputHash": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "transformRef": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 255,
+          "pattern": "^(?!.*[\\u0000-\\u001f\\u007f])\\S(?:.*\\S)?$"
+        },
+        "identityMap": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "enum": [
+                  "widget",
+                  "link"
+                ]
+              },
+              "from": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+              },
+              "to": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+              }
+            },
+            "required": [
+              "kind",
+              "from",
+              "to"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": [
+        "source",
+        "sourceHash",
+        "outputHash",
+        "transformRef",
+        "identityMap"
+      ],
+      "additionalProperties": false
+    },
+    "groupTarget": {
+      "type": "object",
+      "properties": {
+        "componentType": {
+          "const": "praxis-app-shell"
+        },
+        "componentId": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+        }
+      },
+      "required": [
+        "componentType",
+        "componentId"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "$ref": "#/$defs/pageDocument"
+}
