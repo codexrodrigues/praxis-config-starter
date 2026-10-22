@@ -1,6 +1,6 @@
 # Evidência e revisão do P0
 
-22/10/2026. **Aceito como formalização local de contrato; runtime/hosts não implementados.**
+22/10/2026. **Aceito como formalização de contrato; runtime/hosts não implementados.**
 
 ## Baseline e isolamento
 
@@ -11,7 +11,29 @@
 - Checkouts principais tinham alterações anteriores; permaneceram preservadas. Coordenador é
   único escritor deste pacote. Nenhum processo concorrente usou target/Maven install/banco.
 - Sem modificação de `src/main`, pom, migrations, public-api Angular ou aplicação host.
-- No corte de validação original não houve commit/push/PR. A disponibilização posterior no GitHub usa branch/PR de planejamento; merge, Actions manuais, deploy e release não fazem parte desta entrega.
+- No corte de validação original não houve commit/push/PR. A publicação posterior abriu o PR #506; a revisão de integração autorizada está registrada abaixo. Deploy e release não fazem parte desta entrega.
+
+## Revisão para integração do PR #506
+
+O commit `6e6a535cfec18aef1569a8676658f5fab7ac8e82` incorpora a main
+`59d9b9abf22e4b79079c084689642ade4482c892` à branch P0. Merge sem conflitos;
+o diff contra essa main permanece restrito aos dez arquivos de contrato, corpus,
+documentação e teste. Nenhuma classe canônica usada pelas provas mudou nessa atualização.
+
+O coordenador repetiu o comando focal abaixo nessa árvore em 22/10/2026,
+17:29:54 -03:00: **BUILD SUCCESS — 63 testes, 0 falhas, 0 erros, 0 ignorados**,
+16,829 s. `git diff --check origin/main...HEAD` também passou. O log local desta
+execução está em `/tmp/praxis-page-p0-integration-test.log` (efêmero); o relatório
+Surefire permanece no caminho indicado na próxima seção. Os hashes abaixo não mudaram.
+
+O revisor independente `page_inventory` confrontou novamente o diff e os fluxos
+com a main atual, sem editar ou executar builds/banco. Parecer: **apto para merge do
+P0, sem impeditivos**. Revisou presença/null, provenance, childSources, bindings,
+remapeamento tipado, aprovação independente, publicação/rollback e grupos. Os
+15 gates futuros continuam `not-executed`; o parecer não aprova codecs ou hosts futuros.
+
+A atualização desta seção é somente documental. O merge remoto deve ser confirmado
+no PR #506 e na issue #507; este registro não presume o resultado dessa operação.
 
 ## Validação executada
 
