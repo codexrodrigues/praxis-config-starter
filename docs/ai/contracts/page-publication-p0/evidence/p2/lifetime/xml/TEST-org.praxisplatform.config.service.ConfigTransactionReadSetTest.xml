@@ -1,0 +1,11 @@
+<testsuite xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="https://maven.apache.org/surefire/maven-surefire-plugin/xsd/surefire-test-report.xsd" version="3.0.2" name="org.praxisplatform.config.service.ConfigTransactionReadSetTest" time="0.169" tests="9" errors="0" skipped="0" failures="0" flakes="0">
+  <testcase name="isolationIsProvenOnceWithSelectAndNeverInspectedWithShowOnHits" classname="org.praxisplatform.config.service.ConfigTransactionReadSetTest" time="0.085" />
+  <testcase name="nestedSavepointRollbackDiscardsPositiveBytesWithoutRenewingTransactionAdmission" classname="org.praxisplatform.config.service.ConfigTransactionReadSetTest" time="0.021" />
+  <testcase name="evictsRatherThanTruncatingOrSkippingLoadsAtEntryAndByteBounds" classname="org.praxisplatform.config.service.ConfigTransactionReadSetTest" time="0.006" />
+  <testcase name="rejectsChangedConnectionAndRollbackOnlyEvenOnAHit" classname="org.praxisplatform.config.service.ConfigTransactionReadSetTest" time="0.003" />
+  <testcase name="reusesOnlyPositiveImmutableBytesWithinTheSameTransactionAndOwner" classname="org.praxisplatform.config.service.ConfigTransactionReadSetTest" time="0.002" />
+  <testcase name="evenSynchronizedJdbcHolderCannotMaskChangedJpaConnectionOrRollbackOnly" classname="org.praxisplatform.config.service.ConfigTransactionReadSetTest" time="0.042" />
+  <testcase name="outsideTransactionAlwaysLoadsWithoutCreatingSynchronization" classname="org.praxisplatform.config.service.ConfigTransactionReadSetTest" time="0.001" />
+  <testcase name="wrongIsolationAndFailedAdmissionRetainNothing" classname="org.praxisplatform.config.service.ConfigTransactionReadSetTest" time="0.005" />
+  <testcase name="suspendsForRequiresNewAndResumesTheOriginalConnectionReadSet" classname="org.praxisplatform.config.service.ConfigTransactionReadSetTest" time="0.002" />
+</testsuite>

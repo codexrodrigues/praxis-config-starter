@@ -1,0 +1,17 @@
+<testsuite xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="https://maven.apache.org/surefire/maven-surefire-plugin/xsd/surefire-test-report.xsd" version="3.0.2" name="org.praxisplatform.config.service.UiLayoutLifecycleServiceTest" time="0.027" tests="15" errors="0" skipped="0" failures="0" flakes="0">
+  <testcase name="releaseLookupRejectsTheSameTenantReleaseWhenItsRootTargetDiffers" classname="org.praxisplatform.config.service.UiLayoutLifecycleServiceTest" time="0.004" />
+  <testcase name="publishDoesNotMoveHeadWhenOneFixedMemberFailsCurrentValidation" classname="org.praxisplatform.config.service.UiLayoutLifecycleServiceTest" time="0.003" />
+  <testcase name="rollbackRevalidatesTheWholeReleaseBeforeChangingTheHead" classname="org.praxisplatform.config.service.UiLayoutLifecycleServiceTest" time="0.001" />
+  <testcase name="navigationGroupHeadTransitionsAreClosedWithoutPageHostEvenWithPermissivePolicyAndValidator" classname="org.praxisplatform.config.service.UiLayoutLifecycleServiceTest" time="0.001" />
+  <testcase name="anExistingWithdrawnHeadRequiresItsCurrentEtagBeforeRepublish" classname="org.praxisplatform.config.service.UiLayoutLifecycleServiceTest" time="0.002" />
+  <testcase name="withdrawOnlyClearsTheAggregateHeadAndDoesNotMutateRelease" classname="org.praxisplatform.config.service.UiLayoutLifecycleServiceTest" time="0.001" />
+  <testcase name="absentPolicyDeniesBeforePersistence" classname="org.praxisplatform.config.service.UiLayoutLifecycleServiceTest" time="0.001" />
+  <testcase name="submitRequiresTheCurrentReviewEtag" classname="org.praxisplatform.config.service.UiLayoutLifecycleServiceTest" time="0.0" />
+  <testcase name="approveRequiresTheCurrentReviewEtagAndWritesSeparateApprovalEvidence" classname="org.praxisplatform.config.service.UiLayoutLifecycleServiceTest" time="0.0" />
+  <testcase name="assignmentRejectsRevisionWhoseDefinitionIsOutsideTheTenantScope" classname="org.praxisplatform.config.service.UiLayoutLifecycleServiceTest" time="0.001" />
+  <testcase name="publishRequiresAnApprovedReviewBeforeItCanLoadTheHead" classname="org.praxisplatform.config.service.UiLayoutLifecycleServiceTest" time="0.001" />
+  <testcase name="releasedDraftCannotBeReusedForRevisionAssignmentOrRelease" classname="org.praxisplatform.config.service.UiLayoutLifecycleServiceTest" time="0.001" />
+  <testcase name="publishMovesOneAggregateHeadAfterValidationAndKeepsBothMembers" classname="org.praxisplatform.config.service.UiLayoutLifecycleServiceTest" time="0.001" />
+  <testcase name="oversizedReasonsFailBeforeRevisionApprovalOrEventWrites" classname="org.praxisplatform.config.service.UiLayoutLifecycleServiceTest" time="0.002" />
+  <testcase name="draftCasRejectsASecondAuthorWithThePreviousStrongEtag" classname="org.praxisplatform.config.service.UiLayoutLifecycleServiceTest" time="0.001" />
+</testsuite>

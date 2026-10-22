@@ -1,0 +1,12 @@
+<testsuite xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="https://maven.apache.org/surefire/maven-surefire-plugin/xsd/surefire-test-report.xsd" version="3.0.2" name="org.praxisplatform.config.service.PageCatalogLifecycleBridgeTest" time="0.947" tests="10" errors="0" skipped="0" failures="0" flakes="0">
+  <testcase name="lastProvenanceExtensionCannotRevokeLifecycleGrantAndStillCommit" classname="org.praxisplatform.config.service.PageCatalogLifecycleBridgeTest" time="0.011" />
+  <testcase name="crossScopeKnownPageAndUnknownDeniedRootHaveTheSameNonDisclosingOutcome" classname="org.praxisplatform.config.service.PageCatalogLifecycleBridgeTest" time="0.001" />
+  <testcase name="ledgerHashMapAndTransformTamperingAreRejectedBeforeProducerAdmission" classname="org.praxisplatform.config.service.PageCatalogLifecycleBridgeTest" time="0.005" />
+  <testcase name="lifecycleContextMustBeIndependentlyCurrentBeforeAnyCatalogContentRead" classname="org.praxisplatform.config.service.PageCatalogLifecycleBridgeTest" time="0.003" />
+  <testcase name="publishedCandidateMustReproduceTheSelectedImmutablePatch" classname="org.praxisplatform.config.service.PageCatalogLifecycleBridgeTest" time="0.005" />
+  <testcase name="immutablePublishedBytesAreReusedButCurrentNativeAdmissionIsNot" classname="org.praxisplatform.config.service.PageCatalogLifecycleBridgeTest" time="0.064" />
+  <testcase name="forgedProducerPrefixWithoutDurableRegistrationNeverDelegatesToPermissiveHost" classname="org.praxisplatform.config.service.PageCatalogLifecycleBridgeTest" time="0.002" />
+  <testcase name="allNestedRootsConsumeTheOriginalDeadlineAndNeverReopenAnExpiredAttempt" classname="org.praxisplatform.config.service.PageCatalogLifecycleBridgeTest" time="0.014" />
+  <testcase name="aggregateLedgerBytesAreBoundedAcrossOtherwiseValidSources" classname="org.praxisplatform.config.service.PageCatalogLifecycleBridgeTest" time="0.705" />
+  <testcase name="completeLineageIsBoundedAndCyclesCannotHideBehindValidHashes" classname="org.praxisplatform.config.service.PageCatalogLifecycleBridgeTest" time="0.066" />
+</testsuite>

@@ -1,6 +1,6 @@
 # P2 — desenho aprovado e implementação em validação
 
-Estado: direção A e assinaturas server-only aprovadas pela coordenação; implementação e gates finais sob revisão independente, sem aceite/merge. Base integrada Config `468f9de696330be2ee16d181c5145cfe849dc29b` (inclui codec grupos P1-D); issue #510. Inventário original auditado em `6144b485`, preservado abaixo como fonte de decisão.
+Estado: direção A e assinaturas server-only aprovadas pela coordenação; implementação entregue com [evidência versionada](evidence/p2/README.md); revisão e integração registradas no PR #517. Base integrada Config `468f9de696330be2ee16d181c5145cfe849dc29b` (inclui codec grupos P1-D); issue #510. Inventário original auditado em `6144b485`, preservado abaixo como fonte de decisão.
 Classificação: contrato-publico/transversal. Autor `p2_catalog`; revisão coordenador.
 
 ## Aderência e restrições verificadas
@@ -133,8 +133,8 @@ least-recently-used eviction causes a full reload and does not truncate provenan
 chain/deadline limits. Oversized values are read normally without retention. Tests cover
 same-transaction reuse, separate owner/connection, suspend/REQUIRES_NEW/resume, completion,
 defensive values, bounded eviction, uncached misses and current revocation after a hit.
-The published-copy measurement will be repeated on the same isolated Neon branch and
-40-second budget; it is evidence of this test workload, not a latency/SLA claim.
+Published-copy measurements are recorded per run on the same isolated Neon branch and
+40-second budget; they are evidence of this test workload, not a latency/SLA claim.
 
 The frozen workspace inventory found no legitimate post-RELEASED mutation:
 `UiLayoutLifecycleService` creates DRAFT, gates edits/revision/assignment/freeze through
@@ -163,7 +163,7 @@ transaction. Failed queries or other isolation levels retain nothing. The existi
 `ConfigJdbcTransactionGuard.require()` remains the mutation/metadata-store boundary.
 No authority decision, source admission, host resolution or deadline is memoized.
 
-Skills canônicas: incrementos persistence/governed integrity, incluindo PRs 823/824, integrados pelo coordenador em `de0121b`, com sincronização seletiva concluída. Domain-decisions permanece adequada. Não há guidance pendente conhecido para o desenho implementado.
+Skills canônicas: incrementos persistence/governed integrity, incluindo PRs 823/824/825, integrados pelo coordenador em `7988937c2b2fbb02ae569257da0e987fa783203a`, com sincronização seletiva concluída. Domain-decisions permanece adequada. Não há guidance pendente conhecido para o desenho implementado.
 
 Creation and reconciliation also check the same validation attempt after the actual
 transaction returns. A JDBC COMMIT response can arrive after the deadline even though

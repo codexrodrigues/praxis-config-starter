@@ -1,0 +1,3 @@
+SHOW alone does not pin isolation: SET succeeds before first SELECT
+After SELECT, SET TRANSACTION isolation rejected: SQLSTATE=25001
+Runtime=p2_page_510_runtime branch=br-aged-bonus-a4rhfqwp TLS=verify-full; no rows mutated

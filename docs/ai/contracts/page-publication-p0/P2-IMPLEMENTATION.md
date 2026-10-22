@@ -1,8 +1,8 @@
 # P2 — criação governada, catálogo de identidade e cópia independente
 
-Implementação da issue [Config #510](https://github.com/codexrodrigues/praxis-config-starter/issues/510), incluindo as costuras compartilhadas de [#509](https://github.com/codexrodrigues/praxis-config-starter/issues/509). Estado: implementação sob revisão; gates finais e aceite ainda pendentes. Nenhum merge, deploy ou release é autorizado por este artefato.
+Implementação da issue [Config #510](https://github.com/codexrodrigues/praxis-config-starter/issues/510), incluindo as costuras compartilhadas de [#509](https://github.com/codexrodrigues/praxis-config-starter/issues/509). Implementação entregue; gates e limites abaixo. Revisão e integração são registradas no [PR #517](https://github.com/codexrodrigues/praxis-config-starter/pull/517); adoção por hosts depende de P3/P4. Este artefato não autoriza release ou deploy.
 
-O [desenho aprovado](P2-DESIGN.md) registra inventário de aderência, alternativas rejeitadas, assinaturas e decisões de coordenação. A base integrada é `468f9de696330be2ee16d181c5145cfe849dc29b`; os checkpoints de revisão são `1b060a8e` (costuras/guard transacional) e `b4a176e7` (bridge, HTTP e wiring). A fonte final e os hashes da evidência serão adicionados após os gates.
+O [desenho aprovado](P2-DESIGN.md) registra inventário de aderência, alternativas rejeitadas, assinaturas e decisões de coordenação. A base integrada é `468f9de696330be2ee16d181c5145cfe849dc29b`; os checkpoints de revisão são `1b060a8e` (costuras/guard transacional) e `b4a176e7` (bridge, HTTP e wiring). A fonte final de código/testes é `fef0cb2cf31ad0bd9be6fc0424dcdf41b92283f0`; logs, XML e hashes estão no [pacote de evidência](evidence/p2/README.md).
 
 ## Contrato entregue
 
@@ -52,10 +52,23 @@ A resolução usa o mapping host existente, com um único app-shell UUID estáve
 
 ## Validação e limites
 
-Gate final em andamento. Os resultados finais, comandos, SHA de fonte/dependências/artefato e logs/XML sanitizados serão vinculados aqui. Checkpoints anteriores não representam aceite da árvore final.
+O [manifesto auditável](evidence/p2/manifest.json) vincula fonte, árvore, hashes por arquivo/rodada, 208 dependências efetivas, artefato e logs/XML sanitizados. As rodadas são separadas e suas contagens se sobrepõem:
+
+| Rodada | Fonte | Resultado |
+| --- | --- | --- |
+| Baseline focal | `17592e69` | 206 (192 unitários + 14 Neon), zero falhas/erros/skips |
+| Lifetime/savepoint | `cd91f4d0` | 13 unitários, zero falhas/erros/skips |
+| Entryflow final | `8cc699ec` | 20 (16 Neon + 4 HTTP), zero falhas/erros/skips |
+| Concorrência com barreira | `fef0cb2c` | 2 Neon focais, zero falhas/erros/skips |
+
+Não são 206 testes executados na árvore final. Após o baseline mudaram apenas PageCreationService e ConfigTransactionReadSet em produção, com os fluxos afetados cobertos pelas rodadas posteriores. O JAR local `0.1.0-rc.166`, construído em cd91, tem SHA-256 `9dac94dbcda6999d91d150ac8ac1f1ecdb5744ed10ab60f51fc4a2f6caacd91f`; `src/main` e `pom.xml` são idênticos em cd91/fef. Não houve install/deploy.
+
+A barreira de concorrência é exclusiva da fixture: duas conexões subjacentes distintas devem chegar ao mesmo escopo/chave antes de executar qualquer lock, com espera limitada. As contagens são verificadas após ambas as futures; comandos iguais retornam created true/false, e divergentes têm um vencedor e um conflito. Não foi observada espera via pg_locks. O diagnóstico inicial de cópia publicada excedeu 40 s (46.743 ms/295 SQL preparados); a prova final mediu 6.535 ms/24 SQL preparados, 3.441 ms em JDBC, com o mesmo orçamento de 40 s. Isso não estabelece SLA de produção.
+
+A falha denominada commit na fixture ocorre em beforeCommit, após as escritas, e prova rollback dessa callback. Não foi simulada rejeição do JDBC COMMIT pelo servidor ou validado rollbackOnCommitFailure. O cenário de resposta tardia delega um COMMIT real bem-sucedido e só depois atrasa a resposta, comprovando recuperação do resultado incerto pela mesma chave.
 
 A política operacional fecha cadeia em 16 nós, 8 MiB distintos de ledger e 2.048 checkpoints por travessia. O prazo monotônico externo não renova em fontes internas; respostas tardias e callbacks fora do orçamento são rejeitados. Isso não cancela I/O bloqueado. O orçamento do host é obrigatório; a fixture de teste não define um default de produção.
 
 Unitários cobrem corpus P0 (incluindo os dois exemplos de cópia), ingresso bruto, source/receipt, invariantes de transformação, adulteração, prefixo sem ledger, ciclo, limite de cadeia/bytes, prazo externo, isolamento de app e grafo de auto-configuração. Neon cobre JPA/JDBC real, concorrência igual/divergente, lost response, falha após cada INSERT, rollback-only, revogação tardia, novo autor/contexto, cópia histórica e lifecycle de grupos.
 
-Não foi rodada suite integral, host real Quickstart, UI/P3/P4 ou release. A menor validação suficiente é focada nos fluxos e stores alterados. Artefatos públicos operacionais dos consumidores permanecem gates posteriores; a documentação Config e o OpenAPI local descrevem este corte. Skills: persistence `atualizar-existente` entregue pelo coordenador nos incrementos canônicos, incluindo PRs 823/824 no estado `de0121b`, com sincronização seletiva concluída; domain-decisions `existente-adequada`. A revisão independente do código e dos resultados ainda é requisito para aceite.
+Não foi rodada suite integral, host real Quickstart, UI/P3/P4 ou release. A menor validação suficiente é focada nos fluxos e stores alterados. Artefatos públicos operacionais dos consumidores permanecem gates posteriores; a documentação Config e o OpenAPI local descrevem este corte. Skills: persistence `atualizar-existente` entregue pelo coordenador nos incrementos canônicos, incluindo PRs 823/824/825 no estado `7988937c2b2fbb02ae569257da0e987fa783203a`, com sincronização seletiva concluída; domain-decisions `existente-adequada`. A revisão independente e a integração do pacote são registradas no PR #517. Processos/aplicações/conexões dos testes foram encerrados; schema e branch Neon ficam preservados para evidência com autosuspend300, sem autorização de reutilização por P3 sem nova atribuição.

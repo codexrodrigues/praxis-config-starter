@@ -1,0 +1,5 @@
+Applied only new V70 released-draft triggers; project=ancient-leaf-72055027 branch=br-aged-bonus-a4rhfqwp schema=p2_page_510_20261022
+Owner/version/TLS: ('neondb_owner', 'neondb', '17.11 (11592b3)', False) True
+V70 SHA256: f49cc29c52059996e45f74b534cc464b1535249abc2ce3d9dad5d427afbff9b0
+('tr_ui_layout_draft_no_truncate', 'CREATE TRIGGER tr_ui_layout_draft_no_truncate BEFORE TRUNCATE ON p2_page_510_20261022.ui_layout_draft FOR EACH STATEMENT EXECUTE FUNCTION reject_ui_layout_immutable_mutation()')
+('tr_ui_layout_released_draft_immutable', "CREATE TRIGGER tr_ui_layout_released_draft_immutable BEFORE DELETE OR UPDATE ON p2_page_510_20261022.ui_layout_draft FOR EACH ROW WHEN (((old.state)::text = 'RELEASED'::text)) EXECUTE FUNCTION reject_ui_layout_immutable_mutation()")

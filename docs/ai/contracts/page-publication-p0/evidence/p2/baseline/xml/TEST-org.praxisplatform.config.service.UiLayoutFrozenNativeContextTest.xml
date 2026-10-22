@@ -1,0 +1,14 @@
+<testsuite xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="https://maven.apache.org/surefire/maven-surefire-plugin/xsd/surefire-test-report.xsd" version="3.0.2" name="org.praxisplatform.config.service.UiLayoutFrozenNativeContextTest" time="0.122" tests="12" errors="0" skipped="0" failures="0" flakes="0">
+  <testcase name="lateOwnerValidationFailureRollsBackWithoutHeadWrite" classname="org.praxisplatform.config.service.UiLayoutFrozenNativeContextTest" time="0.022" />
+  <testcase name="inconsistentNativeFormIsRejectedBeforePublishOrRollbackHeadMutation" classname="org.praxisplatform.config.service.UiLayoutFrozenNativeContextTest" time="0.01" />
+  <testcase name="wrongSourceReleaseFailsBeforeHeadWrite" classname="org.praxisplatform.config.service.UiLayoutFrozenNativeContextTest" time="0.005" />
+  <testcase name="missingSourceDraftFailsBeforeHeadWrite" classname="org.praxisplatform.config.service.UiLayoutFrozenNativeContextTest" time="0.005" />
+  <testcase name="staleCompositionFailsBeforeHeadWrite" classname="org.praxisplatform.config.service.UiLayoutFrozenNativeContextTest" time="0.008" />
+  <testcase name="forgedPatchFailsBeforeHeadWrite" classname="org.praxisplatform.config.service.UiLayoutFrozenNativeContextTest" time="0.008" />
+  <testcase name="transportsExactNativeContextThroughDefaultValidatorOnPublishAndRollback" classname="org.praxisplatform.config.service.UiLayoutFrozenNativeContextTest" time="0.012" />
+  <testcase name="wrongPinnedAssignmentFailsBeforeHeadWrite" classname="org.praxisplatform.config.service.UiLayoutFrozenNativeContextTest" time="0.007" />
+  <testcase name="forgedBaselineHashFailsBeforeHeadWrite" classname="org.praxisplatform.config.service.UiLayoutFrozenNativeContextTest" time="0.006" />
+  <testcase name="wrongSourceDraftScopeFailsBeforeHeadWrite" classname="org.praxisplatform.config.service.UiLayoutFrozenNativeContextTest" time="0.004" />
+  <testcase name="notReleasedWorkspaceFailsBeforeHeadWrite" classname="org.praxisplatform.config.service.UiLayoutFrozenNativeContextTest" time="0.003" />
+  <testcase name="wrongPinnedRevisionFailsBeforeHeadWrite" classname="org.praxisplatform.config.service.UiLayoutFrozenNativeContextTest" time="0.006" />
+</testsuite>

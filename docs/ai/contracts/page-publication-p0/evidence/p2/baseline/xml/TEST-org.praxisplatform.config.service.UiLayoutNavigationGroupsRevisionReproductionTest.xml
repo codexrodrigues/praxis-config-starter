@@ -1,0 +1,14 @@
+<testsuite xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="https://maven.apache.org/surefire/maven-surefire-plugin/xsd/surefire-test-report.xsd" version="3.0.2" name="org.praxisplatform.config.service.UiLayoutNavigationGroupsRevisionReproductionTest" time="0.009" tests="12" errors="0" skipped="0" failures="0" flakes="0">
+  <testcase name="unrelatedNativeKindsAreNotCapturedByGroupsReproduction" classname="org.praxisplatform.config.service.UiLayoutNavigationGroupsRevisionReproductionTest" time="0.0" />
+  <testcase name="iconsAreOnlySyntacticallyCheckedAndNeverAttestCatalogAdmission" classname="org.praxisplatform.config.service.UiLayoutNavigationGroupsRevisionReproductionTest" time="0.001" />
+  <testcase name="profileRejectsPageBindingsGlobalPageListsHierarchyAndUnknownFields" classname="org.praxisplatform.config.service.UiLayoutNavigationGroupsRevisionReproductionTest" time="0.0" />
+  <testcase name="oversizedAndDeepDocumentsAreRejectedBeforeSchemaValidation" classname="org.praxisplatform.config.service.UiLayoutNavigationGroupsRevisionReproductionTest" time="0.001" />
+  <testcase name="idsAndOrderAreStrictWithoutCoercion" classname="org.praxisplatform.config.service.UiLayoutNavigationGroupsRevisionReproductionTest" time="0.0" />
+  <testcase name="duplicateIdsAreRejectedInBothBaselineAndCandidateDespiteAtomicArrayPatches" classname="org.praxisplatform.config.service.UiLayoutNavigationGroupsRevisionReproductionTest" time="0.001" />
+  <testcase name="completeArrayRepresentsAddRemoveRenameReorderAndEmptyWithoutMutatingSource" classname="org.praxisplatform.config.service.UiLayoutNavigationGroupsRevisionReproductionTest" time="0.001" />
+  <testcase name="unsupportedTargetAndDescriptorsFailClosedWithoutInventingRootIdentity" classname="org.praxisplatform.config.service.UiLayoutNavigationGroupsRevisionReproductionTest" time="0.0" />
+  <testcase name="patchMustExactlyReproduceCandidateAndPreserveAuthoredPresence" classname="org.praxisplatform.config.service.UiLayoutNavigationGroupsRevisionReproductionTest" time="0.001" />
+  <testcase name="labelsUseCodepointBoundsAndRejectWhitespaceAndControls" classname="org.praxisplatform.config.service.UiLayoutNavigationGroupsRevisionReproductionTest" time="0.001" />
+  <testcase name="requiredFieldsPresenceAndNullAreNotNormalized" classname="org.praxisplatform.config.service.UiLayoutNavigationGroupsRevisionReproductionTest" time="0.001" />
+  <testcase name="normativeGroupsCorpusRunsThroughNativeCodecWithoutNormalization" classname="org.praxisplatform.config.service.UiLayoutNavigationGroupsRevisionReproductionTest" time="0.001" />
+</testsuite>

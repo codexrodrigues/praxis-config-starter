@@ -1,0 +1,8 @@
+<testsuite xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="https://maven.apache.org/surefire/maven-surefire-plugin/xsd/surefire-test-report.xsd" version="3.0.2" name="org.praxisplatform.config.autoconfig.PageCreationAutoConfigurationTest" time="0.772" tests="3" errors="0" skipped="0" failures="0" flakes="0">
+  <testcase name="incompleteLifecycleNeverExposesAServiceWithUnresolvableSuppliers" classname="org.praxisplatform.config.autoconfig.PageCreationAutoConfigurationTest" time="0.681">
+    <system-out>Standard Commons Logging discovery in action with spring-jcl: please remove commons-logging.jar from classpath in order to avoid potential conflicts
+</system-out>
+  </testcase>
+  <testcase name="missingPageHostKeepsLifecycleButDoesNotExposePageCreation" classname="org.praxisplatform.config.autoconfig.PageCreationAutoConfigurationTest" time="0.027" />
+  <testcase name="completeHostCreatesOneGraphWithOriginalDelegatesAndBodyGuard" classname="org.praxisplatform.config.autoconfig.PageCreationAutoConfigurationTest" time="0.054" />
+</testsuite>

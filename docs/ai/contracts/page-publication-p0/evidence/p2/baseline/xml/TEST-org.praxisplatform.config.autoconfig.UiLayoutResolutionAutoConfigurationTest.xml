@@ -1,0 +1,38 @@
+<testsuite xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="https://maven.apache.org/surefire/maven-surefire-plugin/xsd/surefire-test-report.xsd" version="3.0.2" name="org.praxisplatform.config.autoconfig.UiLayoutResolutionAutoConfigurationTest" time="0.661" tests="20" errors="0" skipped="0" failures="0" flakes="0">
+  <testcase name="hostComponentScanAndCompleteAutoConfigurationKeepSingleControllerInstances" classname="org.praxisplatform.config.autoconfig.UiLayoutResolutionAutoConfigurationTest" time="0.058" />
+  <testcase name="revisionBodyAdviceDoesNotActivateWithoutLifecycleCommands" classname="org.praxisplatform.config.autoconfig.UiLayoutResolutionAutoConfigurationTest" time="0.009" />
+  <testcase name="hostCanReplaceTheSingleResolverFacadeWithoutASecondDefaultFacade" classname="org.praxisplatform.config.autoconfig.UiLayoutResolutionAutoConfigurationTest" time="0.005" />
+  <testcase name="registersOneFailClosedReadSurface" classname="org.praxisplatform.config.autoconfig.UiLayoutResolutionAutoConfigurationTest" time="0.385">
+    <system-out>20:17:48.149 [main] INFO org.hibernate.validator.internal.util.Version -- HV000001: Hibernate Validator 8.0.3.Final
+20:17:48.380 [main] INFO org.springframework.mock.web.MockServletContext -- Initializing Spring TestDispatcherServlet ''
+20:17:48.380 [main] INFO org.springframework.test.web.servlet.TestDispatcherServlet -- Initializing Servlet ''
+20:17:48.381 [main] INFO org.springframework.test.web.servlet.TestDispatcherServlet -- Completed initialization in 0 ms
+</system-out>
+  </testcase>
+  <testcase name="historicalServiceIsRegisteredWithCompleteHostButAddsNoController" classname="org.praxisplatform.config.autoconfig.UiLayoutResolutionAutoConfigurationTest" time="0.01" />
+  <testcase name="hostProvidersReplaceDefaultsWithoutCallerAudienceFacts" classname="org.praxisplatform.config.autoconfig.UiLayoutResolutionAutoConfigurationTest" time="0.006" />
+  <testcase name="historicalServiceRequiresExplicitContentAccessProvider" classname="org.praxisplatform.config.autoconfig.UiLayoutResolutionAutoConfigurationTest" time="0.006" />
+  <testcase name="hostComponentScanDoesNotInstantiateOptionalControllersWithoutServices" classname="org.praxisplatform.config.autoconfig.UiLayoutResolutionAutoConfigurationTest" time="0.015" />
+  <testcase name="autoConfiguredControllerRecoversCreationIdentityWithoutWriterExecution" classname="org.praxisplatform.config.autoconfig.UiLayoutResolutionAutoConfigurationTest" time="0.048">
+    <system-out>20:17:48.559 [main] INFO org.springframework.mock.web.MockServletContext -- Initializing Spring TestDispatcherServlet ''
+20:17:48.559 [main] INFO org.springframework.test.web.servlet.TestDispatcherServlet -- Initializing Servlet ''
+20:17:48.559 [main] INFO org.springframework.test.web.servlet.TestDispatcherServlet -- Completed initialization in 0 ms
+</system-out>
+  </testcase>
+  <testcase name="leavesWriterAndLifecycleControllerAbsentWithoutExplicitMetadataAdmission" classname="org.praxisplatform.config.autoconfig.UiLayoutResolutionAutoConfigurationTest" time="0.008" />
+  <testcase name="publishesTheAutoConfigurationThroughTheStarterImportsResource" classname="org.praxisplatform.config.autoconfig.UiLayoutResolutionAutoConfigurationTest" time="0.003" />
+  <testcase name="readinessRegistersOnlyWithCompleteExplicitHostComposition" classname="org.praxisplatform.config.autoconfig.UiLayoutResolutionAutoConfigurationTest" time="0.008" />
+  <testcase name="defaultBudgetPolicyProvidesOneMinuteDefaultAndCanBeOverridden" classname="org.praxisplatform.config.autoconfig.UiLayoutResolutionAutoConfigurationTest" time="0.008" />
+  <testcase name="autoConfiguredLookupDenialPrecedesTheRepository" classname="org.praxisplatform.config.autoconfig.UiLayoutResolutionAutoConfigurationTest" time="0.025">
+    <system-out>20:17:48.628 [main] INFO org.springframework.mock.web.MockServletContext -- Initializing Spring TestDispatcherServlet ''
+20:17:48.628 [main] INFO org.springframework.test.web.servlet.TestDispatcherServlet -- Initializing Servlet ''
+20:17:48.628 [main] INFO org.springframework.test.web.servlet.TestDispatcherServlet -- Completed initialization in 0 ms
+</system-out>
+  </testcase>
+  <testcase name="readinessRequiresNativeValidatorEvenWhenContentAccessIsConfigured" classname="org.praxisplatform.config.autoconfig.UiLayoutResolutionAutoConfigurationTest" time="0.006" />
+  <testcase name="hostCanonicalHashServiceReplacesTheDefaultWithoutDuplicate" classname="org.praxisplatform.config.autoconfig.UiLayoutResolutionAutoConfigurationTest" time="0.009" />
+  <testcase name="materializesLifecycleWithDefaultPlatformBeansWithoutManualMocks" classname="org.praxisplatform.config.autoconfig.UiLayoutResolutionAutoConfigurationTest" time="0.009" />
+  <testcase name="readinessRequiresCurrentEvidenceAccessInAdditionToHistoricalAccess" classname="org.praxisplatform.config.autoconfig.UiLayoutResolutionAutoConfigurationTest" time="0.005" />
+  <testcase name="revisionBodyAdviceIsRegisteredWithLifecycleCommands" classname="org.praxisplatform.config.autoconfig.UiLayoutResolutionAutoConfigurationTest" time="0.017" />
+  <testcase name="materializesB1bAndB1cFromRealAutoConfigurationWhenHostDependenciesAreComplete" classname="org.praxisplatform.config.autoconfig.UiLayoutResolutionAutoConfigurationTest" time="0.007" />
+</testsuite>

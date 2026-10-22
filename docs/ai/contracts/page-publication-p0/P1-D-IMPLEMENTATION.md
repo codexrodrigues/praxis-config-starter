@@ -2,7 +2,7 @@
 
 Implementação de [#509](https://github.com/codexrodrigues/praxis-config-starter/issues/509),
 com costuras compartilhadas entregues no [PR #517](https://github.com/codexrodrigues/praxis-config-starter/pull/517).
-A fonte integrada sob validação é `17592e69917a30ceeea950a7e1eba8ef75b2dcae`.
+A fonte de código/testes comprovada é `fef0cb2cf31ad0bd9be6fc0424dcdf41b92283f0`.
 Os resultados finais e os limites estão em [P2-IMPLEMENTATION](P2-IMPLEMENTATION.md).
 Revisão e integração são registradas no PR; este documento não antecipa merge nem
 habilita hosts ou mudanças de head de grupos antes de P3-A.
@@ -79,7 +79,7 @@ E2E browser, catálogo concreto de ícones ou integridade P3-A entre agregados.
 
 A avaliação foi `atualizar-existente` para persistence e `existente-adequada` para
 fronteiras de domínio. O coordenador integrou os incrementos canônicos, incluindo
-PRs 823/824, no estado `de0121b` de `praxis-codex-skills`, com sincronização seletiva
+PRs 823/824/825, no estado `7988937c2b2fbb02ae569257da0e987fa783203a` de `praxis-codex-skills`, com sincronização seletiva
 concluída. O guidance distingue sintaxe, fonte/ícones admitidos, root registrado,
 selagem de RELEASED, reuso de bytes imutáveis e gates P3/P4. Não há pendência de skill
 conhecida neste incremento. O fechamento das issues e a adoção permanecem atos de

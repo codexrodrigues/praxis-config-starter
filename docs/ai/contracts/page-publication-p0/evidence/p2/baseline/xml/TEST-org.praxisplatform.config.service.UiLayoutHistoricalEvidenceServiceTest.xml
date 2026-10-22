@@ -1,0 +1,27 @@
+<testsuite xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="https://maven.apache.org/surefire/maven-surefire-plugin/xsd/surefire-test-report.xsd" version="3.0.2" name="org.praxisplatform.config.service.UiLayoutHistoricalEvidenceServiceTest" time="0.061" tests="25" errors="0" skipped="0" failures="0" flakes="0">
+  <testcase name="recoversRemovedTargetWithVerifiedEvidenceAndNoSelectorsOrMutation" classname="org.praxisplatform.config.service.UiLayoutHistoricalEvidenceServiceTest" time="0.005" />
+  <testcase name="missingSourceOrLegacyEnvelopeDoesNotUseCurrentHead" classname="org.praxisplatform.config.service.UiLayoutHistoricalEvidenceServiceTest" time="0.001" />
+  <testcase name="returnsExactVerifiedPatchFromOneRevisionReadAndDefendsItsContent" classname="org.praxisplatform.config.service.UiLayoutHistoricalEvidenceServiceTest" time="0.003" />
+  <testcase name="selectedRecordIdentityCannotDifferFromFrozenReference" classname="org.praxisplatform.config.service.UiLayoutHistoricalEvidenceServiceTest" time="0.002" />
+  <testcase name="sourceWorkspaceMustBeFrozenByThisExactRelease" classname="org.praxisplatform.config.service.UiLayoutHistoricalEvidenceServiceTest" time="0.001" />
+  <testcase name="actorChangedAfterFinalAccessWithholdsDocumentsWithSameContextVersion" classname="org.praxisplatform.config.service.UiLayoutHistoricalEvidenceServiceTest" time="0.002" />
+  <testcase name="finalOperationTechnicalFailureIsSanitizedAndClosesTheAttempt" classname="org.praxisplatform.config.service.UiLayoutHistoricalEvidenceServiceTest" time="0.004" />
+  <testcase name="nestedRecoveryRetainsCallerAttemptAndDoesNotSelectAnotherBudget" classname="org.praxisplatform.config.service.UiLayoutHistoricalEvidenceServiceTest" time="0.004" />
+  <testcase name="absentAdmissionOrContentProviderDeniesBeforeRepositories" classname="org.praxisplatform.config.service.UiLayoutHistoricalEvidenceServiceTest" time="0.002" />
+  <testcase name="finalAuthorityLookupCannotAcceptAnExpiredAttempt" classname="org.praxisplatform.config.service.UiLayoutHistoricalEvidenceServiceTest" time="0.002" />
+  <testcase name="sourceDraftScopeAndFreezeStateAreRequired" classname="org.praxisplatform.config.service.UiLayoutHistoricalEvidenceServiceTest" time="0.002" />
+  <testcase name="anotherTenantEnvironmentOrRootIsNotDisclosed" classname="org.praxisplatform.config.service.UiLayoutHistoricalEvidenceServiceTest" time="0.001" />
+  <testcase name="finalPatchAccessRevocationDiscardsEvidence" classname="org.praxisplatform.config.service.UiLayoutHistoricalEvidenceServiceTest" time="0.002" />
+  <testcase name="membershipMustMatchFrozenTargetsOrderAndRefs" classname="org.praxisplatform.config.service.UiLayoutHistoricalEvidenceServiceTest" time="0.002" />
+  <testcase name="contentSafetyFailureIsSanitizedAndNotPartiallyReturned" classname="org.praxisplatform.config.service.UiLayoutHistoricalEvidenceServiceTest" time="0.003" />
+  <testcase name="preservesNullFalseAndEmptyArrayWithoutInferringTheirMeaning" classname="org.praxisplatform.config.service.UiLayoutHistoricalEvidenceServiceTest" time="0.003" />
+  <testcase name="immutableDefinitionOrSelectorDriftFailsClosed" classname="org.praxisplatform.config.service.UiLayoutHistoricalEvidenceServiceTest" time="0.002" />
+  <testcase name="contextChangedDuringRecoveryDiscardsEvidence" classname="org.praxisplatform.config.service.UiLayoutHistoricalEvidenceServiceTest" time="0.002" />
+  <testcase name="corruptedNativeOrPatchHashFailsClosed" classname="org.praxisplatform.config.service.UiLayoutHistoricalEvidenceServiceTest" time="0.002" />
+  <testcase name="protectedPatchWithholdsCompleteReceiptAndSanitizesReason" classname="org.praxisplatform.config.service.UiLayoutHistoricalEvidenceServiceTest" time="0.002" />
+  <testcase name="oldDocumentOnlyProviderCannotImplicitlyAuthorizePatchContent" classname="org.praxisplatform.config.service.UiLayoutHistoricalEvidenceServiceTest" time="0.002" />
+  <testcase name="sessionAndStaleContextFailBeforeRepositories" classname="org.praxisplatform.config.service.UiLayoutHistoricalEvidenceServiceTest" time="0.002" />
+  <testcase name="operationRevokedAfterFinalAccessWithholdsHistoricalDocuments" classname="org.praxisplatform.config.service.UiLayoutHistoricalEvidenceServiceTest" time="0.002" />
+  <testcase name="deniedRemovedTargetPreventsAnyReceiptAndDoesNotLeakPolicyReason" classname="org.praxisplatform.config.service.UiLayoutHistoricalEvidenceServiceTest" time="0.002" />
+  <testcase name="ambiguousOrOversizedPersistedPatchCannotBeReturned" classname="org.praxisplatform.config.service.UiLayoutHistoricalEvidenceServiceTest" time="0.002" />
+</testsuite>
