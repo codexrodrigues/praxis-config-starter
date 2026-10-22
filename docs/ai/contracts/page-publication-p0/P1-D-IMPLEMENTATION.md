@@ -4,7 +4,8 @@
 **Corte isolado de codec: não habilita um host nem transições operacionais.**
 Base confirmada `6144b4855d7e852ecffaa9af80abd3de2a0721e6`, após P0/P1-A.
 Branch `codex/navigation-groups-509`; autor `p1d_groups`; revisão independente:
-coordenador (pendente no momento deste registro). Modelo/esforço solicitados pelo
+coordenador, concluída para o codec `635c7765`, sem bloqueadores identificados.
+Costuras e aceite integral da issue continuam pendentes. Modelo/esforço solicitados pelo
 coordenador: Sol/high; não há verificação independente da configuração efetiva.
 
 ## Inventário, plano e impacto
@@ -24,7 +25,8 @@ corpus, identidade/presença/remoção e patch; (3) entrega da API package-priva
 escritor único das costuras; (4) revisão independente e integração sequencial.
 
 Consumidores futuros: Core/shell, Quickstart, Hero e exemplo oficial. Este corte não
-altera artefatos Maven, DTO de navegação, endpoint, DDL, renderer ou consumidor.
+altera qualquer artefato Maven já publicado, DTO de navegação, endpoint, DDL,
+renderer ou consumidor. O helper fará parte do próximo JAR quando distribuído.
 Risco: novos documentos nativos só serão aceitos no perfil P0; não muda os perfis
 Form/Table/Page. Landing, corpus HTTP e recipes não precisam de alteração neste
 corte isolado porque não há operação nova ativa; sua adoção continua em P3–P6.
@@ -93,7 +95,10 @@ primeira execução: worktree nova sem target. Validação focal suficiente para
 codec isolado; não executa banco, HTTP ou lifecycle de grupos. Log bruto local
 `/tmp/praxis-navigation-groups-509-tests.log`; XMLs novos em target/surefire-reports;
 identidades/hashes em `/tmp/praxis-navigation-groups-509-test-evidence.json`.
-`git diff --check` aprovado. Revisão independente e costuras ainda pendentes.
+`git diff --check` aprovado. Revisão independente do codec `635c7765` concluída
+pelo coordenador, com leitura de fonte/testes/registro e logs, sem bloqueadores;
+costuras e aceite integral continuam pendentes. Ajuste editorial posterior não
+alterou código/testes e não exigiu repetição da suíte.
 
 ## Skills e continuidade
 
@@ -109,5 +114,6 @@ Reserva de execução publicada antes da edição e confirmada pelo coordenador:
 Correção da reserva: repo Maven efetivamente usado é `/tmp/praxis-navigation-groups-509-m2`.
 Não há dev server, shell interativo ou conexão de banco a encerrar. Recursos
 permanecem atribuídos ao trabalhador até revisão; nenhuma migração foi reservada.
-Próximo passo: revisar codec e integrar costuras pelo escritor P2. Sem merge,
+PR draft [#516](https://github.com/codexrodrigues/praxis-config-starter/pull/516).
+Próximo passo: integrar costuras pelo escritor P2 e revisar o fluxo integrado. Sem merge,
 fechamento de issue, deploy ou release autorizado neste pacote.
