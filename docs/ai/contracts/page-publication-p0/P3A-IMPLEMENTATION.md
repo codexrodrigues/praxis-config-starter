@@ -74,6 +74,6 @@ Os rechecks de contexto, mapping e grants ocorrem no servidor durante a transaç
 
 A admissão P2 de producer continua aplicável às mutações de página, inclusive WITHDRAW. Este incremento não promete retirada emergencial com producer indisponível; qualquer exceção exigiria decisão canônica própria. Não existe bypass local dessa política.
 
-Skills: `atualizar-existente` em persistence; a coordenação mantém o incremento canônico no PR 828 e registra seu aceite/sincronização. O head canônico proposto é `bd018bc45fe3380152a8d774f57d11263daed5a0`; integração e sincronização seletiva ainda pendentes de registro pela coordenação. O pacote não declara concluída essa parte.
+Skills: `atualizar-existente` em persistence; a coordenação mantém o incremento canônico no PR 828 e registra seu aceite/sincronização. O head canônico entregue e revisado contra a fonte final é `930bb6a7c68b1a79d0697df440a6f5462a1d590a` ([PR 828](https://github.com/codexrodrigues/praxis-codex-skills/pull/828)); integração e sincronização seletiva ainda pendentes de registro pela coordenação. O pacote não declara concluída essa parte.
 
 As conexões de teste foram encerradas pelos fixtures e os processos de teste terminaram. Schema e branch Neon ficam preservados para evidência, compute0,25–1CU/autosuspend300; não há autorização de reutilização/mutação por etapa futura sem nova atribuição. O artefato foi apenas empacotado localmente; nenhum install/deploy/release foi realizado.
