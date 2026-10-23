@@ -38,16 +38,16 @@ class UiLayoutPageGroupDensityPostgresIT extends UiLayoutPageGroupPostgresFixtur
       var positive = measure(host, valid, head.headEtag(), "all-1000-valid", seed.workspaceEncodedInputBytes);
       assertThat(positive.failure).isNull();
       assertLoadedPages(positive, seed.pageIds(), 2);
-      assertThat(positive.pageQueries).isEqualTo(66); // 32 nonempty + one terminal query, twice.
-      assertThat(positive.peakManaged).isLessThanOrEqualTo(positive.baselineManaged + 32 * 6 + 12);
+      assertThat(positive.pageQueries).isEqualTo(18); // Eight nonempty + one terminal query, twice.
+      assertThat(positive.peakManaged).isLessThanOrEqualTo(positive.baselineManaged + 128 * 6 + 12);
       var before = jdbc.queryForMap("SELECT active_release_id,head_etag,row_version FROM ui_layout_release_head WHERE tenant_id=? AND root_component_id=?",
           host.scope.tenant(), host.groups.componentId());
       long events = jdbc.queryForObject("SELECT count(*) FROM ui_layout_release_event WHERE tenant_id=?", Long.class, host.scope.tenant());
       var negative = measure(host, invalid, positive.receipt.headEtag(), "last-page-blocks", seed.workspaceEncodedInputBytes);
       assertThat(negative.failure).isInstanceOf(UiLayoutLifecycleException.class).extracting("code").isEqualTo(UiLayoutLifecycleException.Code.INVALID_RELEASE);
       assertLoadedPages(negative, seed.pageIds(), 1);
-      assertThat(negative.pageQueries).isEqualTo(32); // Sentinel in final nonempty batch prevents the terminal query.
-      assertThat(negative.peakManaged).isLessThanOrEqualTo(negative.baselineManaged + 32 * 6 + 12);
+      assertThat(negative.pageQueries).isEqualTo(8); // Sentinel in final nonempty batch prevents the terminal query.
+      assertThat(negative.peakManaged).isLessThanOrEqualTo(negative.baselineManaged + 128 * 6 + 12);
       assertThat(jdbc.queryForMap("SELECT active_release_id,head_etag,row_version FROM ui_layout_release_head WHERE tenant_id=? AND root_component_id=?",
           host.scope.tenant(), host.groups.componentId())).isEqualTo(before);
       assertThat(jdbc.queryForObject("SELECT count(*) FROM ui_layout_release_event WHERE tenant_id=?", Long.class, host.scope.tenant())).isEqualTo(events);
@@ -71,11 +71,21 @@ class UiLayoutPageGroupDensityPostgresIT extends UiLayoutPageGroupPostgresFixtur
     var baseline = new AtomicInteger(-1);
     var nextBatchManaged = new AtomicInteger();
     var currentPass = new AtomicInteger();
+    var currentBatchBytes = new java.util.concurrent.atomic.AtomicLong();
+    var maxBatchBytes = new java.util.concurrent.atomic.AtomicLong();
+    var currentBatchPatchBytes = new java.util.concurrent.atomic.AtomicLong();
+    var maxBatchPatchBytes = new java.util.concurrent.atomic.AtomicLong();
+    Map<Integer, Long> loadedPatchBytes = new LinkedHashMap<>();
     Map<Integer, Map<UUID, Integer>> loadedPages = new LinkedHashMap<>();
     Map<Integer, Long> loadedWorkspaceBytes = new LinkedHashMap<>();
     probe = new SqlProbe() {
       @Override public void managed(int count) { peak.accumulateAndGet(count, Math::max); }
       @Override public void loaded(Object entity) {
+        if (currentPass.get() > 0 && entity instanceof org.praxisplatform.config.domain.UiLayoutRevision revision) {
+          long bytes = revision.getPatchDocument().getBytes(java.nio.charset.StandardCharsets.UTF_8).length;
+          loadedPatchBytes.merge(currentPass.get(), bytes, Long::sum);
+          maxBatchPatchBytes.accumulateAndGet(currentBatchPatchBytes.addAndGet(bytes), Math::max);
+        }
         if (!(entity instanceof org.praxisplatform.config.domain.UiLayoutDraft draft)
             || !draft.getRootComponentType().equals("praxis-dynamic-page")
             || !draft.getTenantId().equals(host.scope.tenant())) return;
@@ -83,12 +93,15 @@ class UiLayoutPageGroupDensityPostgresIT extends UiLayoutPageGroupPostgresFixtur
         assertThat(pass).isPositive();
         loadedPages.computeIfAbsent(pass, ignored -> new LinkedHashMap<>())
             .merge(UUID.fromString(draft.getRootComponentId()), 1, Integer::sum);
-        loadedWorkspaceBytes.merge(pass,
-            (long) draft.getDraftDocument().getBytes(java.nio.charset.StandardCharsets.UTF_8).length, Long::sum);
+        long bytes = draft.getDraftDocument().getBytes(java.nio.charset.StandardCharsets.UTF_8).length;
+        loadedWorkspaceBytes.merge(pass, bytes, Long::sum);
+        maxBatchBytes.accumulateAndGet(currentBatchBytes.addAndGet(bytes), Math::max);
       }
       @Override public void before(java.sql.Connection connection, String sql, Map<Integer, Object> binds) {
         if (!sql.contains("SELECT c.page_id, c.root_component_type")) return;
         if (!sql.contains("c.page_id >")) currentPass.incrementAndGet();
+        currentBatchBytes.set(0);
+        currentBatchPatchBytes.set(0);
         var holder = (org.springframework.orm.jpa.EntityManagerHolder) TransactionSynchronizationManager.getResource(factory);
         int count = holder.getEntityManager().unwrap(org.hibernate.engine.spi.SessionImplementor.class)
             .getPersistenceContextInternal().getNumberOfManagedEntities();
@@ -111,11 +124,12 @@ class UiLayoutPageGroupDensityPostgresIT extends UiLayoutPageGroupPostgresFixtur
     }
     var identitiesPerPass = new LinkedHashMap<Integer, Integer>();
     loadedPages.forEach((pass, identities) -> identitiesPerPass.put(pass, identities.size()));
-    System.out.println("P3-A density case=" + name + " catalogPages=1000 budgetMs=" + host.budget.toMillis()
+    System.out.println("P3-A density case=" + name + " catalogPages=1000 batchSize=" + UiLayoutPageGroupHeadStore.PAGE_BATCH_SIZE + " budgetMs=" + host.budget.toMillis()
         + " wallMs=" + wallMs + " SQL=" + statements + " jdbcMs=" + jdbcMs
         + " isolationCalls=" + isolationCount + " isolationMs=" + isolationMs
         + " attemptedPageQueries=" + queries.get() + " loadedWorkspaceIdentitiesPerPass=" + identitiesPerPass
-        + " loadedWorkspaceBytesPerPass=" + loadedWorkspaceBytes
+        + " loadedWorkspaceBytesPerPass=" + loadedWorkspaceBytes + " maxBatchLoadedWorkspaceTextBytes=" + maxBatchBytes.get()
+        + " revisionPatchTextBytesLoadedDuringPass=" + loadedPatchBytes + " maxBatchLoadedPatchTextBytes=" + maxBatchPatchBytes.get()
         + " managedBaseline=" + baseline.get() + " managedPeak=" + peak.get() + " managedAtLastBatchStart=" + nextBatchManaged.get()
         + " knownWorkspaceEncodedInputBytesPerFullPass=" + workspaceBytes + " freshRollbackChecked=" + (failure != null)
         + " outcome=" + (failure == null ? "accepted" : failure));

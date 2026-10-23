@@ -13,7 +13,8 @@ import org.springframework.transaction.support.TransactionOperations;
 
 /** Current heads and reference locks, always read from the active Config connection. Never cached. */
 final class UiLayoutPageGroupHeadStore {
-  static final int PAGE_BATCH_SIZE = 32;
+  static final int PAGE_BATCH_SIZE = 128;
+  static final long WORKSPACE_TEXT_BATCH_BYTES = 8L * 1024 * 1024;
   private final NamedParameterJdbcTemplate jdbc;
   private final ConfigJdbcTransactionGuard transactions;
   private final UiLayoutReleaseHeadRepository heads;
@@ -87,8 +88,12 @@ final class UiLayoutPageGroupHeadStore {
     transactions.require();
     var parameters = scope(context.invocation(), context.invocation().rootTarget())
         .addValue("application", context.applicationId()).addValue("namespace", context.routeNamespace())
-        .addValue("after", after).addValue("limit", PAGE_BATCH_SIZE);
+        .addValue("after", after).addValue("limit", PAGE_BATCH_SIZE)
+        .addValue("workspaceBytes", WORKSPACE_TEXT_BATCH_BYTES);
+    // The byte estimate bounds workspace text, not patches, Java objects or total heap. Preserve
+    // an oversized/missing first record for canonical verification; never skip a keyset identity.
     return jdbc.query("""
+        WITH candidates AS (
         SELECT c.page_id, c.root_component_type, c.root_component_id, h.active_release_id
         FROM ui_page_catalog c JOIN ui_layout_release_head h
           ON h.tenant_id=c.tenant_id AND h.environment=c.environment
@@ -96,7 +101,23 @@ final class UiLayoutPageGroupHeadStore {
         WHERE c.tenant_id=:tenant AND c.environment=:environment
           AND c.application_id=:application AND c.route_namespace=:namespace
           AND h.active_release_id IS NOT NULL
-        """ + (after == null ? "" : " AND c.page_id > :after ") + " ORDER BY c.page_id LIMIT :limit",
+        """ + (after == null ? "" : " AND c.page_id > :after ") + """
+         ORDER BY c.page_id LIMIT :limit
+        ), weighted AS (
+          SELECT c.*, GREATEST(COALESCE(octet_length(d.draft_document::text)::bigint,
+            CAST(:workspaceBytes AS bigint) + 1), 1::bigint) AS workspace_text_bytes
+          FROM candidates c
+          LEFT JOIN ui_layout_release r ON r.id=c.active_release_id
+          LEFT JOIN ui_layout_draft d ON d.id=r.source_draft_id
+        ), prefixes AS (
+          SELECT weighted.*, row_number() OVER (ORDER BY page_id) AS ordinal,
+            sum(workspace_text_bytes) OVER (ORDER BY page_id ROWS UNBOUNDED PRECEDING) AS cumulative_bytes
+          FROM weighted
+        )
+        SELECT page_id, root_component_type, root_component_id, active_release_id
+        FROM prefixes WHERE ordinal=1 OR cumulative_bytes<=:workspaceBytes
+        ORDER BY page_id
+        """,
         parameters, (row, index) -> new ActivePage(row.getObject("page_id", UUID.class),
             new UiLayoutTarget(row.getString("root_component_type"), row.getString("root_component_id")),
             row.getObject("active_release_id", UUID.class)));

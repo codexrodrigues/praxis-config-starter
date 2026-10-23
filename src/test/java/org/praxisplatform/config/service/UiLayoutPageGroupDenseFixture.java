@@ -39,6 +39,22 @@ final class UiLayoutPageGroupDenseFixture {
 
   List<UUID> pageIds() { return pageIds; }
 
+  UUID releaseId(int index) { return (UUID) rows.get(index).tables.get("ui_layout_release").get("id"); }
+
+  /** Deliberate negative storage fixture, never used by the 1000 valid-page density seed. */
+  void malformedFrozenWorkspaceForSelectionProbe(int index, int postgresqlTextBytes) {
+    var row = rows.get(index);
+    workspaceEncodedInputBytes -= row.frozenDocument.getBytes(java.nio.charset.StandardCharsets.UTF_8).length;
+    // PostgreSQL renders this object as {"padding": "..."}: 15 UTF-8 bytes of envelope.
+    row.frozenDocument = "{\"padding\":\"" + "x".repeat(postgresqlTextBytes - 15) + "\"}";
+    workspaceEncodedInputBytes += row.frozenDocument.getBytes(java.nio.charset.StandardCharsets.UTF_8).length;
+  }
+
+  /** V65 permits a legacy release without source_draft_id. Selection must not hide it. */
+  void missingSourceDraftForSelectionProbe(int index) {
+    rows.get(index).tables.get("ui_layout_release").put("source_draft_id", null);
+  }
+
   void insert() {
     long started = System.nanoTime();
     for (int offset = 0; offset < rows.size(); offset += 50) {
