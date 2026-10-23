@@ -201,6 +201,9 @@ class PageRuntimeDensityPostgresIT extends PageRuntimePostgresFixture {
     report.put("metadataCallbacks", metadataCalls.get());
     report.put("structureCallbacks", structureCalls.get());
     report.put("pageRootsObservedByStructureCallback", structurePageRoots.size());
+    var seededPageRoots = seed.pageIds().stream().map(UUID::toString).collect(java.util.stream.Collectors.toSet());
+    report.put("seededPageRootsObservedByStructureCallback", structurePageRoots.stream().filter(seededPageRoots::contains).count());
+    report.put("otherPageRootsObservedByStructureCallback", structurePageRoots.stream().filter(root -> !seededPageRoots.contains(root)).count());
     report.put("loadedIdentitiesDoNotProveAdmission", true);
     report.put("failedSqlExecutionTimeExcluded", true);
     report.put("loadedWorkspaceIdentities", loadedPages.size());
@@ -229,6 +232,8 @@ class PageRuntimeDensityPostgresIT extends PageRuntimePostgresFixture {
       // This records unavailability after the budget, not its exact cause and never successful capacity.
       return;
     }
+    assertThat(structurePageRoots).describedAs("Every authorized seeded page reached current structural admission")
+        .containsAll(seededPageRoots);
     assertThat(loadedPages.keySet()).containsExactlyInAnyOrderElementsOf(seed.pageIds());
     assertThat(loadedPages.values()).allMatch(value -> value == 1);
     assertThat(response[0].items()).hasSize(1);
