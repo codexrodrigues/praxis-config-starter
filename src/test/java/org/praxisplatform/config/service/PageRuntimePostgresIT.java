@@ -329,6 +329,58 @@ class PageRuntimePostgresIT extends PageRuntimePostgresFixture {
     assertThat(eventCount()).isEqualTo(events + 1);
   }
 
+  @Test void independentPublishedCopyReadsItsOwnHeadAfterOriginWithdrawalAndAncestorGrantRevocation() throws Exception {
+    UUID group = UUID.randomUUID();
+    publish(host.groups, groupRelease(group), null);
+    var original = newPage();
+    UUID originalRelease = pageRelease(original, "Published source", group);
+    var originalHead = publish(original.target(), originalRelease, null);
+    UUID originalRevision = jdbc.queryForObject(
+        "SELECT content_revision_id FROM ui_layout_release_member WHERE release_id=?", UUID.class, originalRelease);
+    var source = new PageSourceReference.Published(original.pageId(), originalRelease, originalRevision);
+    var copied = host.pages.create(host.alice, "c1",
+        new PageCreationCommand(UUID.randomUUID(), source, "Independent runtime copy")).receipt();
+    UUID copiedRelease = pageRelease(copied, "Independent runtime copy", group);
+    var copiedHead = publish(copied.target(), copiedRelease, null);
+    host.commands.withdraw(host.alice, "c1", original.target(),
+        UiLayoutLifecycleCommandService.HeadWriteCondition.match(originalHead.headEtag()), "Retire source head");
+    var sourceAfter = headState(original.target());
+    var copiedAfter = headState(copied.target());
+    long events = eventCount();
+    var selectedSourceChecks = new AtomicInteger();
+    host.pageGrant = (operation, context, reference) -> {
+      if (operation == PageCreationOperation.READ_SOURCE || operation == PageCreationOperation.COPY_SOURCE) {
+        selectedSourceChecks.incrementAndGet();
+        throw denied();
+      }
+    };
+    host.grant = (operation, invocation) -> {
+      if (operation == UiLayoutLifecycleOperation.READ_HEAD && invocation.rootTarget().equals(original.target())) throw denied();
+    };
+    var dependencyChecks = new AtomicInteger();
+    host.metadataCallback = (invocation, target) -> dependencyChecks.incrementAndGet();
+    var catalog = host.runtime.catalog(host.alice, "c1", null, 50);
+    var direct = published(copied.pageId());
+    var menu = navigation(group.toString(), null, 50);
+    assertThat(catalog.items()).extracting(PageCatalogEntry::pageId).containsExactly(copied.pageId());
+    assertThat(direct.head()).isEqualTo(copiedHead);
+    assertThat(catalog.items().getFirst().head()).isEqualTo(direct.head());
+    assertThat(menu.headReceipts()).contains(direct.head());
+    assertThat(menu.headReceipts()).noneMatch(receipt -> receipt.rootTarget().equals(original.target()));
+    assertThat(menu.nodes()).extracting(EnterpriseRuntimeNavigationNode::route).containsExactly(direct.route());
+    assertThat(direct.document().at("/config/presentation/title").asText()).isEqualTo("Independent runtime copy");
+    assertThat(selectedSourceChecks).hasValue(0);
+    assertThat(dependencyChecks.get()).isPositive();
+    host.metadataCallback = (invocation, target) -> { throw denied(); };
+    assertThatThrownBy(() -> published(copied.pageId())).extracting("code")
+        .isEqualTo(UiLayoutLifecycleException.Code.SOURCE_UNAVAILABLE);
+    assertThat(headState(original.target())).isEqualTo(sourceAfter);
+    assertThat(headState(copied.target())).isEqualTo(copiedAfter);
+    assertThat(eventCount()).isEqualTo(events);
+    System.out.println("P3-B published-copy ownHead=true originWithdrawn=true ancestorReadCopyDenied=true"
+        + " currentDependenciesAdmitted=true revokedDependency503=true catalogUrlMenu=true freshHeadAuditUnchanged=true");
+  }
+
   private PageRuntimeReadService newReadOwner() {
     var application = host.application;
     return new PageRuntimeReadService(host.pages, application.getBean(PageCreationHost.class),

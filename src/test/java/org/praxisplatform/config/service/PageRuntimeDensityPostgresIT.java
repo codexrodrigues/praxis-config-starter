@@ -17,6 +17,8 @@ class PageRuntimeDensityPostgresIT extends PageRuntimePostgresFixture {
   @Test void diagnoseThirtyTwoAuthorizedPagesBeforeLargerCatalogs() throws Exception { diagnose(32); }
   @Test void diagnoseOneHundredTwentyNineAuthorizedPagesAcrossBatchBoundary() throws Exception { diagnose(129); }
 
+  @Test void demonstrateOneThousandAuthorizedPagesWithinExistingBudget() throws Exception { diagnose(1000, true); }
+
   @Test void mostlyPrivateCatalogDoesNotStopBeforeAuthorizedLastBatchOrLoseGlobalOrder() throws Exception {
     try (var host = new PageRuntimeHostFixture("p3b-private-density-" + UUID.randomUUID())) {
       UUID group = UUID.randomUUID();
@@ -75,7 +77,9 @@ class PageRuntimeDensityPostgresIT extends PageRuntimePostgresFixture {
     } finally { probe = null; }
   }
 
-  private void diagnose(int count) throws Exception {
+  private void diagnose(int count) throws Exception { diagnose(count, false); }
+
+  private void diagnose(int count, boolean requireCapacity) throws Exception {
     try (var host = new PageRuntimeHostFixture("p3b-density-" + UUID.randomUUID())) {
       UUID group = UUID.randomUUID();
       publishGroup(host, group);
@@ -90,11 +94,11 @@ class PageRuntimeDensityPostgresIT extends PageRuntimePostgresFixture {
       assertThat(jdbc.queryForObject("SELECT count(*) FROM ui_layout_release_head WHERE tenant_id=? AND root_component_id=?",
           Long.class, host.scope.tenant(), prototypePage.pageId().toString())).isZero();
       assertThat(TransactionSynchronizationManager.isActualTransactionActive()).isFalse();
-      measure(host, seed);
+      measure(host, seed, requireCapacity);
     } finally { probe = null; }
   }
 
-  private void measure(PageRuntimeHostFixture host, PageRuntimeDenseFixture seed) throws Exception {
+  private void measure(PageRuntimeHostFixture host, PageRuntimeDenseFixture seed, boolean requireCapacity) throws Exception {
     var headsBefore = headState(host);
     long eventsBefore = eventCount(host);
     var categories = new TreeMap<String, Long>();
@@ -115,10 +119,12 @@ class PageRuntimeDensityPostgresIT extends PageRuntimePostgresFixture {
     var metadataCalls = new AtomicInteger();
     var structureCalls = new AtomicInteger();
     var structurePageRoots = new HashSet<String>();
-    host.nativeCallback = context -> nativeCalls.incrementAndGet();
-    host.metadataCallback = (invocation, target) -> metadataCalls.incrementAndGet();
+    var retention = new ReadSetRetentionProbe();
+    host.nativeCallback = context -> { nativeCalls.incrementAndGet(); retention.sample(); };
+    host.metadataCallback = (invocation, target) -> { metadataCalls.incrementAndGet(); retention.sample(); };
     host.structureCallback = (invocation, target) -> {
       structureCalls.incrementAndGet();
+      retention.sample();
       if ("praxis-dynamic-page".equals(target.componentType())) structurePageRoots.add(target.componentId());
     };
     probe = new SqlProbe() {
@@ -139,6 +145,7 @@ class PageRuntimeDensityPostgresIT extends PageRuntimePostgresFixture {
       }
       @Override public void after(java.sql.Connection connection, String sql, Map<Integer, Object> binds, Object result) {
         categoryNanos.merge(category(sql), System.nanoTime() - startedSql.get(), Long::sum);
+        retention.sample();
       }
       @Override public void managed(int count) { peakManaged.accumulateAndGet(count, Math::max); }
       @Override public void loaded(Object entity) {
@@ -156,11 +163,15 @@ class PageRuntimeDensityPostgresIT extends PageRuntimePostgresFixture {
         }
       }
     };
+    var cpu = java.lang.management.ManagementFactory.getThreadMXBean();
+    boolean cpuAvailable = cpu.isCurrentThreadCpuTimeSupported() && cpu.isThreadCpuTimeEnabled();
+    long cpuStart = cpuAvailable ? cpu.getCurrentThreadCpuTime() : -1;
     long start = System.nanoTime(), sqlStart = sqlCalls.get(), sqlTime = sqlNanos.get();
     long isolationStart = isolationCalls.get(), isolationTime = isolationNanos.get();
     final PageCatalogResponse[] response = new PageCatalogResponse[1];
     Throwable failure = catchThrowable(() -> response[0] = host.runtime.catalog(host.alice, "c1", null, 1));
     long wallMs = (System.nanoTime() - start) / 1_000_000;
+    long threadCpuNanos = cpuAvailable ? cpu.getCurrentThreadCpuTime() - cpuStart : -1;
     long prepared = sqlCalls.get() - sqlStart, jdbcMs = (sqlNanos.get() - sqlTime) / 1_000_000;
     long isolationCount = isolationCalls.get() - isolationStart, isolationMs = (isolationNanos.get() - isolationTime) / 1_000_000;
     probe = null;
@@ -175,6 +186,9 @@ class PageRuntimeDensityPostgresIT extends PageRuntimePostgresFixture {
     report.put("budgetMs", host.budget.toMillis());
     report.put("acceptedWithinBudget", failure == null);
     report.put("wallMs", wallMs);
+    report.put("threadCpuTimeAvailable", cpuAvailable);
+    report.put("currentThreadCpuNanos", threadCpuNanos);
+    report.put("readSetRetentionObserved", retention.report());
     report.put("preparedStatementsCompleted", prepared);
     report.put("completedPreparedExecutionMs", jdbcMs);
     report.put("attemptedSqlCategories", categories);
@@ -206,6 +220,7 @@ class PageRuntimeDensityPostgresIT extends PageRuntimePostgresFixture {
     if (managedAtBatchStarts.size() > 1) {
       assertThat(managedAtBatchStarts.subList(1, managedAtBatchStarts.size())).allMatch(value -> value == baselineManaged.get());
     }
+    if (requireCapacity) assertThat(failure).describedAs("1000 pages must complete under the unchanged budget").isNull();
     if (failure != null) {
       assertThat(failure).isInstanceOf(UiLayoutLifecycleException.class).extracting("code")
           .isEqualTo(UiLayoutLifecycleException.Code.SOURCE_UNAVAILABLE);
@@ -225,12 +240,62 @@ class PageRuntimeDensityPostgresIT extends PageRuntimePostgresFixture {
     assertThat(peakManaged.get()).isLessThanOrEqualTo(baselineManaged.get() + 128 * 6 + 12);
   }
 
+  /** Test-only observation, not production telemetry or a global/heap memory bound. */
+  private static final class ReadSetRetentionProbe {
+    final IdentityHashMap<Object, String> names = new IdentityHashMap<>();
+    final Map<String, Long> peakBytes = new LinkedHashMap<>();
+    final Map<String, Integer> peakEntries = new LinkedHashMap<>();
+    final java.lang.reflect.Field ownerField;
+    final java.lang.reflect.Field bytesField;
+    final java.lang.reflect.Field valuesField;
+    ReadSetRetentionProbe() {
+      try {
+        ownerField = ConfigTransactionReadSet.class.getDeclaredField("owner");
+        bytesField = ConfigTransactionReadSet.class.getDeclaredField("bytes");
+        valuesField = ConfigTransactionReadSet.class.getDeclaredField("values");
+        ownerField.setAccessible(true); bytesField.setAccessible(true); valuesField.setAccessible(true);
+      } catch (ReflectiveOperationException exception) { throw new AssertionError(exception); }
+    }
+    long simultaneousBytes;
+    int simultaneousEntries;
+
+    void sample() {
+      if (!TransactionSynchronizationManager.isSynchronizationActive()) return;
+      long bytes = 0;
+      int entries = 0;
+      try {
+        for (var synchronization : TransactionSynchronizationManager.getSynchronizations()) {
+          if (!(synchronization instanceof ConfigTransactionReadSet)) continue;
+          Object owner = ownerField.get(synchronization);
+          String name = names.computeIfAbsent(owner, key -> key.getClass().getSimpleName() + "#" + names.size());
+          long retainedBytes = bytesField.getLong(synchronization);
+          int retainedEntries = ((Map<?, ?>) valuesField.get(synchronization)).size();
+          assertThat(retainedBytes).isBetween(0L, ConfigTransactionReadSet.MAX_BYTES);
+          assertThat(retainedEntries).isBetween(0, ConfigTransactionReadSet.MAX_ENTRIES);
+          peakBytes.merge(name, retainedBytes, Math::max);
+          peakEntries.merge(name, retainedEntries, Math::max);
+          bytes += retainedBytes; entries += retainedEntries;
+        }
+      } catch (ReflectiveOperationException exception) { throw new AssertionError(exception); }
+      simultaneousBytes = Math.max(simultaneousBytes, bytes);
+      simultaneousEntries = Math.max(simultaneousEntries, entries);
+    }
+
+    Map<String, Object> report() {
+      return Map.of("sampledAfterCompletedSqlAndCurrentCallbacks", true, "notHeapOrGlobalCap", true,
+          "peakBytesPerOwner", peakBytes, "peakEntriesPerOwner", peakEntries,
+          "maxSimultaneousBytesObserved", simultaneousBytes, "maxSimultaneousEntriesObserved", simultaneousEntries);
+    }
+  }
+
   private static String category(String sql) {
     String normalized = sql.toLowerCase(Locale.ROOT);
     if (normalized.contains("from ui_page_catalog c left join ui_layout_release_head h")) return "vector";
     if (normalized.contains("octet_length(d.draft_document::text)")) return "weights";
-    if (normalized.contains("ui_layout_baseline_metadata_evidence")) return "root-metadata";
-    if (normalized.contains("ui_page_creation_evidence")) return "creation-ledger";
+    String prefix = normalized.contains("requested.ordinal")
+        ? (normalized.contains("as weight") ? "-prefetch-weights" : "-prefetch-rows") : "-individual";
+    if (normalized.contains("ui_layout_baseline_metadata_evidence")) return "root-metadata" + prefix;
+    if (normalized.contains("ui_page_creation_evidence")) return "creation-ledger" + prefix;
     for (String table : List.of("ui_layout_release_member", "ui_layout_assignment_revision", "ui_layout_revision", "ui_layout_definition", "ui_layout_draft", "ui_layout_release"))
       if (normalized.contains(table)) return "frozen-" + table;
     return "other";

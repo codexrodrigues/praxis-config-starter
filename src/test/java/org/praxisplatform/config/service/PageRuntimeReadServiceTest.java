@@ -39,6 +39,8 @@ class PageRuntimeReadServiceTest {
   Duration budget = Duration.ofMinutes(1);
   String selectorOrganization;
   final Set<UUID> corruptMetadata = new HashSet<>();
+  final Map<UUID, String> rawMetadataOverrides = new HashMap<>();
+  final AtomicInteger metadataWeights = new AtomicInteger();
   final List<PageRuntimeStore.Head> heads = new ArrayList<>();
   final Set<UiLayoutTarget> denied = new HashSet<>();
   final AtomicInteger vectorReads = new AtomicInteger();
@@ -122,8 +124,11 @@ class PageRuntimeReadServiceTest {
             var capture = captures.get((UUID) parameters.getValue("draft" + index));
             rows.add(new AbstractMap.SimpleImmutableEntry<>(index, capture == null ? null : rawMetadata(capture)));
           }
-          if (sql.contains("AS weight")) return rows.stream().map(row -> Map.entry(row.getKey(),
-              row.getValue() == null ? 0L : (long) row.getValue().getBytes(java.nio.charset.StandardCharsets.UTF_8).length)).toList();
+          if (sql.contains("AS weight")) {
+            metadataWeights.incrementAndGet();
+            return rows.stream().map(row -> Map.entry(row.getKey(), row.getValue() == null ? 0L
+                : (long) row.getValue().getBytes(java.nio.charset.StandardCharsets.UTF_8).length)).toList();
+          }
           Collection<Integer> ordinals = (Collection<Integer>) parameters.getValue("retained_ordinals");
           return rows.stream().filter(row -> ordinals.contains(row.getKey())).toList();
         }
@@ -162,8 +167,9 @@ class PageRuntimeReadServiceTest {
   }
 
   private String rawMetadata(UiLayoutMetadataCapture capture) {
-    var row = json.createObjectNode();
     var binding = capture.binding();
+    if (rawMetadataOverrides.containsKey(binding.sourceDraftRef())) return rawMetadataOverrides.get(binding.sourceDraftRef());
+    var row = json.createObjectNode();
     var scope = binding.scope();
     var source = (UiLayoutBaselineMetadataSeed.NativeDocumentSource) capture.source();
     var observed = capture.observation();
@@ -317,6 +323,24 @@ class PageRuntimeReadServiceTest {
     admissionHook = () -> audience = new EffectiveUiAudience("tenant", "test", "actor", null, null, "changed", Set.of(), "c1");
     assertThatThrownBy(() -> service.published(() -> "actor", "c1", page.pageId())).extracting("code")
         .isEqualTo(UiLayoutResolutionException.Code.PUBLICATION_SNAPSHOT_CHANGED);
+  }
+
+  @Test void missingAndOversizedPrivatePrefixStillAdvancesAcrossEveryCandidate() {
+    var first = addPage("30000000-0000-4000-8000-000000000001", 1, "Oversized private");
+    var second = addPage("30000000-0000-4000-8000-000000000002", 2, "Missing private");
+    var third = addPage("30000000-0000-4000-8000-000000000003", 3, "Last private");
+    denied.addAll(List.of(first.root(), second.root(), third.root()));
+    rawMetadataOverrides.put(releaseRows.get(first.release()).getSourceDraftId(),
+        "x".repeat((int) ConfigTransactionReadSet.MAX_BYTES + 1));
+    captures.remove(releaseRows.get(second.release()).getSourceDraftId());
+    var result = service.catalog(() -> "actor", "c1", null, 50);
+    assertThat(result.items()).isEmpty();
+    assertThat(result.nextCursor()).isNull();
+    assertThat(metadataWeights).hasValue(2);
+    assertThat(vectorReads).hasValue(2);
+    for (var head : List.of(first, second, third)) verify(grants, times(2))
+        .require(UiLayoutLifecycleOperation.READ_HEAD, context.forTarget(head.root()));
+    verifyNoInteractions(structure);
   }
 
   @Test void deniedAndSelectorIncompatibleMetadataRemainUnconsumedUntilAdmitted() {
