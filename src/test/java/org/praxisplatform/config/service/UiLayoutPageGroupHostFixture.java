@@ -35,6 +35,7 @@ final class UiLayoutPageGroupHostFixture implements AutoCloseable {
   volatile BiConsumer<UiLayoutLifecycleOperation, UiLayoutLifecycleInvocation> grant = (operation, invocation) -> {};
   volatile BiConsumer<UiLayoutLifecycleInvocation, UiLayoutTarget> structureCallback = (invocation, target) -> {};
   volatile BiConsumer<UiLayoutLifecycleInvocation, UiLayoutTarget> metadataCallback = (invocation, target) -> {};
+  volatile BiConsumer<UiLayoutLifecycleOperation, UiLayoutLifecycleInvocation> budgetCallback = (operation, invocation) -> {};
   volatile Duration budget = Duration.ofSeconds(40);
 
   UiLayoutPageGroupHostFixture(String tenant) throws Exception {
@@ -73,6 +74,7 @@ final class UiLayoutPageGroupHostFixture implements AutoCloseable {
     UiLayoutDraftWorkspaceSource source = new UiLayoutDraftWorkspaceSource() {
       public UiLayoutDraftWorkspaceSeed capture(UiLayoutLifecycleInvocation invocation, UiLayoutValidationContext validation) {
         var authority = current(invocation);
+        if (invocation.rootTarget().equals(UiLayoutPageRevisionReproductionTest.PAGE)) return new UiLayoutDraftWorkspaceSeed(List.of(nativePageSeed(invocation)));
         if (!invocation.rootTarget().equals(groupRoots.get(authority.scope()))) throw denied();
         var baseline = groupsDocument();
         return new UiLayoutDraftWorkspaceSeed(List.of(new UiLayoutDraftWorkspaceSeed.TargetSeed(invocation.rootTarget(),
@@ -108,16 +110,7 @@ final class UiLayoutPageGroupHostFixture implements AutoCloseable {
       }
       public UiLayoutDraftWorkspaceSeed.TargetSeed captureNative(PageCreationContext context, PageSourceReference.Native reference) {
         assertThat(reference).isEqualTo(new PageSourceReference.Native("fixture:page", "r1"));
-        var invocation = context.invocation();
-        var children = new ArrayList<UiLayoutPageChildSeed>();
-        UiLayoutPageRevisionReproduction.children(sourcePage).forEach((key, child) -> children.add(
-            new UiLayoutPageChildSeed(new UiLayoutPageChildSource(key,
-                new UiLayoutPageChildSource.NativeSource("registered-native", "fixture:" + key, "r1")),
-                new UiLayoutAuthoringDocumentDescriptor(child.path("kind").asText(), "fixture:child", "1"),
-                UiLayoutPageRevisionReproductionTest.PATCH, "fixture:" + key, child, metadata(invocation, child))));
-        return new UiLayoutDraftWorkspaceSeed.TargetSeed(UiLayoutPageRevisionReproductionTest.PAGE,
-            UiLayoutPageRevisionReproductionTest.DESCRIPTOR, UiLayoutPageRevisionReproductionTest.PATCH,
-            "fixture:page", sourcePage, metadata(invocation, sourcePage), children);
+        return nativePageSeed(context.invocation());
       }
       public void requireNative(PageCreationContext context, PageSourceReference.Native reference,
           UiLayoutDraftWorkspaceSeed.TargetSeed captured) {
@@ -147,7 +140,7 @@ final class UiLayoutPageGroupHostFixture implements AutoCloseable {
     application.registerBean(UiLayoutBaselineMetadataAdmission.class, () -> (invocation, target, descriptor, reference, baseline, evidence) -> {
       current(invocation); metadataCallback.accept(invocation, target);
     });
-    application.registerBean(UiLayoutValidationBudgetPolicy.class, () -> (operation, invocation) -> budget);
+    application.registerBean(UiLayoutValidationBudgetPolicy.class, () -> (operation, invocation) -> { budgetCallback.accept(operation, invocation); return budget; });
     application.registerBean(UiLayoutReleaseValidator.class, () -> (release, members) -> {});
     application.registerBean(UiLayoutRevisionAllocationLock.class, () -> new JdbcUiLayoutRevisionAllocationLock(named));
     application.registerBean(UiLayoutDraftCreationLock.class, () -> new JdbcUiLayoutDraftCreationLock(named));
@@ -162,6 +155,18 @@ final class UiLayoutPageGroupHostFixture implements AutoCloseable {
     pages = application.getBean(PageCreationService.class);
     assertThat(application.getBeansOfType(PageCreationService.class)).hasSize(1);
     assertThat(application.getBeansOfType(UiLayoutLifecycleCommandService.class)).hasSize(1);
+  }
+
+  private UiLayoutDraftWorkspaceSeed.TargetSeed nativePageSeed(UiLayoutLifecycleInvocation invocation) {
+        var children = new ArrayList<UiLayoutPageChildSeed>();
+        UiLayoutPageRevisionReproduction.children(sourcePage).forEach((key, child) -> children.add(
+            new UiLayoutPageChildSeed(new UiLayoutPageChildSource(key,
+                new UiLayoutPageChildSource.NativeSource("registered-native", "fixture:" + key, "r1")),
+                new UiLayoutAuthoringDocumentDescriptor(child.path("kind").asText(), "fixture:child", "1"),
+                UiLayoutPageRevisionReproductionTest.PATCH, "fixture:" + key, child, metadata(invocation, child))));
+        return new UiLayoutDraftWorkspaceSeed.TargetSeed(UiLayoutPageRevisionReproductionTest.PAGE,
+            UiLayoutPageRevisionReproductionTest.DESCRIPTOR, UiLayoutPageRevisionReproductionTest.PATCH,
+            "fixture:page", sourcePage, metadata(invocation, sourcePage), children);
   }
 
   Actor addActor(String name, String unit, String version, Scope scope) {

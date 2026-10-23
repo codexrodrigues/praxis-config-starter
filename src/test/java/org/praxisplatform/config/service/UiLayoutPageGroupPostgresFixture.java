@@ -41,6 +41,7 @@ abstract class UiLayoutPageGroupPostgresFixture {
   static volatile SqlProbe probe;
 
   interface SqlProbe {
+    default void managed(int count) {}
     default void beforeCommit(Connection connection) throws Exception {}
     default void afterCommit(Connection connection, Throwable failure) throws Exception {}
     default void before(Connection connection, String sql, Map<Integer, Object> binds) throws Exception {}
@@ -105,6 +106,13 @@ abstract class UiLayoutPageGroupPostgresFixture {
     config.setProperty("hibernate.show_sql", "false");
     config.getProperties().put("hibernate.connection.datasource", dataSource);
     factory = config.buildSessionFactory();
+    factory.unwrap(org.hibernate.engine.spi.SessionFactoryImplementor.class).getServiceRegistry()
+        .getService(org.hibernate.event.service.spi.EventListenerRegistry.class)
+        .getEventListenerGroup(org.hibernate.event.spi.EventType.POST_LOAD)
+        .appendListener(event -> {
+          SqlProbe current = probe;
+          if (current != null) current.managed(event.getSession().getPersistenceContextInternal().getNumberOfManagedEntities());
+        });
     var manager = new JpaTransactionManager(factory);
     manager.setDataSource(dataSource);
     manager.setJpaDialect(new HibernateJpaDialect());
