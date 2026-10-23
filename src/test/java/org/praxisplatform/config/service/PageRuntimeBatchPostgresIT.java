@@ -119,6 +119,109 @@ class PageRuntimeBatchPostgresIT extends PageRuntimePostgresFixture {
     }
   }
 
+  @Test void privateCorruptEvidencePreservesPublicReceiptUntilItsExistingGateAdmitsIt() throws Exception {
+    try (var host = new PageRuntimeHostFixture("p3b-private-corrupt-" + UUID.randomUUID())) {
+      UUID group = UUID.randomUUID();
+      publishGroup(host, group);
+      var prototypePage = host.pages.create(host.alice, "c1", new PageCreationCommand(UUID.randomUUID(),
+          new PageSourceReference.Native("fixture:page", "r1"), "Private corruption prototype")).receipt();
+      var prototype = new PageCreationCodec().read(jdbc.queryForObject(
+          "SELECT evidence_text FROM ui_page_creation_evidence WHERE page_id=?", String.class, prototypePage.pageId()));
+      var publicSeed = new PageRuntimeDenseFixture(host, prototype, group, group, 2);
+      publicSeed.insert();
+      var beforeInsert = host.runtime.catalog(host.alice, "c1", null, 1);
+      var beforeContinuation = host.runtime.catalog(host.alice, "c1", beforeInsert.nextCursor(), 1);
+      var request = new EnterpriseRuntimeContextRequest(host.alice, null, null, null);
+      var beforeMenu = host.runtime.navigation(request, "c1", group.toString(), null, 1);
+      assertThat(beforeInsert.nextCursor()).isNotNull();
+      assertThat(beforeMenu.nextCursor()).isNotNull();
+      var publicHeadsBefore = headStates(host);
+
+      var badLedger = new PageRuntimeDenseFixture(host, prototype, group, group, 1);
+      badLedger.corruptCreationEvidenceHashForAdmissionProbe(0);
+      var bob = host.addActor("bob-private", "other-unit", "b1", host.scope);
+      var badCapture = new PageRuntimeDenseFixture(host, prototype, group, group, 1, bob.name());
+      badCapture.corruptRootMetadataRawHashForAdmissionProbe(0);
+      UUID ledgerPage = badLedger.pageIds().getFirst();
+      UUID capturePage = badCapture.pageIds().getFirst();
+      var deniedPages = new java.util.HashSet<>(List.of(ledgerPage.toString(), capturePage.toString()));
+      host.grant = (operation, invocation) -> {
+        if (operation == UiLayoutLifecycleOperation.READ_HEAD && deniedPages.contains(invocation.rootTarget().componentId()))
+          throw new UiLayoutLifecycleException(UiLayoutLifecycleException.Code.DENIED, "Private fixture policy");
+      };
+      badLedger.insert();
+      badCapture.insert();
+      var afterInsertHeads = headStates(host);
+      assertThat(afterInsertHeads).containsAll(publicHeadsBefore);
+      long eventsAfterInsert = events(host);
+      var metadataRoots = new java.util.HashSet<String>();
+      var structureRoots = new java.util.HashSet<String>();
+      host.metadataCallback = (invocation, target) -> metadataRoots.add(target.componentId());
+      host.structureCallback = (invocation, target) -> structureRoots.add(target.componentId());
+      var afterInsert = host.runtime.catalog(host.alice, "c1", null, 1);
+      assertThat(afterInsert.items()).isEqualTo(beforeInsert.items());
+      assertThat(afterInsert.receiptEtag()).isEqualTo(beforeInsert.receiptEtag());
+      assertThat(afterInsert.nextCursor()).isEqualTo(beforeInsert.nextCursor());
+      var afterContinuation = host.runtime.catalog(host.alice, "c1", beforeInsert.nextCursor(), 1);
+      assertThat(afterContinuation.items()).isEqualTo(beforeContinuation.items());
+      assertThat(afterContinuation.receiptEtag()).isEqualTo(beforeContinuation.receiptEtag());
+      var afterMenu = host.runtime.navigation(request, "c1", group.toString(), null, 1);
+      assertThat(afterMenu.nodes()).isEqualTo(beforeMenu.nodes());
+      assertThat(afterMenu.receiptEtag()).isEqualTo(beforeMenu.receiptEtag());
+      assertThat(afterMenu.nextCursor()).isEqualTo(beforeMenu.nextCursor());
+      assertThat(afterMenu.headReceipts()).noneMatch(head -> deniedPages.contains(head.rootTarget().componentId()));
+      assertThat(metadataRoots).doesNotContain(ledgerPage.toString(), capturePage.toString());
+      assertThat(structureRoots).doesNotContain(ledgerPage.toString(), capturePage.toString());
+
+      // READ_HEAD permits this ledger, but the correlated USER selector is for Bob, not Alice.
+      deniedPages.remove(capturePage.toString());
+      var incompatible = host.runtime.catalog(host.alice, "c1", null, 1);
+      assertThat(incompatible.items()).isEqualTo(beforeInsert.items());
+      assertThat(incompatible.receiptEtag()).isEqualTo(beforeInsert.receiptEtag());
+      assertThat(incompatible.nextCursor()).isEqualTo(beforeInsert.nextCursor());
+      assertThat(host.runtime.catalog(host.alice, "c1", beforeInsert.nextCursor(), 1).items())
+          .isEqualTo(beforeContinuation.items());
+      assertThat(metadataRoots).doesNotContain(capturePage.toString());
+      assertThat(structureRoots).doesNotContain(capturePage.toString());
+
+      var mapper = JSON.copy().addMixIn(org.springframework.http.ProblemDetail.class,
+          org.springframework.http.converter.json.ProblemDetailJacksonMixin.class);
+      var mvc = org.springframework.test.web.servlet.setup.MockMvcBuilders.standaloneSetup(
+          new org.praxisplatform.config.controller.PageRuntimeController(host.runtime))
+          .setControllerAdvice(new org.praxisplatform.config.controller.UiLayoutResolutionExceptionHandler())
+          .setMessageConverters(new org.springframework.http.converter.json.MappingJackson2HttpMessageConverter(mapper)).build();
+      deniedPages.remove(ledgerPage.toString());
+      for (String uri : List.of("/api/praxis/config/pages", "/api/praxis/config/pages/" + ledgerPage + "/published")) {
+        assertUnavailableWithoutPublishedBody(mvc, uri, host.alice, "c1", "W/\"" + beforeInsert.receiptEtag() + "\"");
+      }
+      deniedPages.add(ledgerPage.toString());
+      // Bob's real principal/context/selector now admits the same capture, so its corruption must fail.
+      for (String uri : List.of("/api/praxis/config/pages", "/api/praxis/config/pages/" + capturePage + "/published")) {
+        assertUnavailableWithoutPublishedBody(mvc, uri, bob, "b1", "*");
+      }
+      var restored = host.runtime.catalog(host.alice, "c1", null, 1);
+      assertThat(restored.receiptEtag()).isEqualTo(beforeInsert.receiptEtag());
+      assertThat(restored.nextCursor()).isEqualTo(beforeInsert.nextCursor());
+      assertThat(headStates(host)).isEqualTo(afterInsertHeads);
+      assertThat(events(host)).isEqualTo(eventsAfterInsert);
+      System.out.println("P3-B private corrupt SQL baselineBeforeNegativeInsert=true sameActorContext=true"
+          + " deniedLedgerAndCaptureIgnored=true selectorMismatchCaptureIgnored=true compatibleActor503=true"
+          + " publicReceiptCursorUnchanged=true partialOr304=false freshHeadsAuditUnchanged=true");
+    }
+  }
+
+  private static void assertUnavailableWithoutPublishedBody(org.springframework.test.web.servlet.MockMvc mvc,
+      String uri, java.security.Principal principal, String context, String condition) throws Exception {
+    mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get(uri).principal(principal)
+        .header("X-Praxis-Context-Version", context).header("If-None-Match", condition).param("limit", "1"))
+        .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.status().isServiceUnavailable())
+        .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.header().string("Cache-Control", "no-store"))
+        .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.header().doesNotExist("ETag"))
+        .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath("$.receiptEtag").doesNotExist())
+        .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath("$.items").doesNotExist())
+        .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath("$.document").doesNotExist());
+  }
+
   private List<java.util.Map<String, Object>> headStates(PageRuntimeHostFixture host) {
     return jdbc.queryForList("SELECT id,active_release_id,head_etag,row_version FROM ui_layout_release_head WHERE tenant_id=? AND environment=? ORDER BY id",
         host.scope.tenant(), host.scope.environment());

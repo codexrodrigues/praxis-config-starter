@@ -17,6 +17,7 @@ final class PageRuntimeDenseFixture {
       null, null, null, null, null, PageRuntimePostgresFixture.JSON, null);
   private final PageRuntimeHostFixture host;
   private final PageCreationEvidence prototype;
+  private final String selectorUser;
   private final NamedParameterJdbcTemplate jdbc = new NamedParameterJdbcTemplate(PageRuntimePostgresFixture.dataSource);
   private final List<UUID> pageIds;
   private final List<Rows> rows = new ArrayList<>();
@@ -26,8 +27,14 @@ final class PageRuntimeDenseFixture {
 
   PageRuntimeDenseFixture(PageRuntimeHostFixture host, PageCreationEvidence prototype,
       UUID keptGroup, UUID removedGroup, int count) throws Exception {
+    this(host, prototype, keptGroup, removedGroup, count, null);
+  }
+
+  PageRuntimeDenseFixture(PageRuntimeHostFixture host, PageCreationEvidence prototype,
+      UUID keptGroup, UUID removedGroup, int count, String selectorUser) throws Exception {
     this.host = host;
     this.prototype = prototype;
+    this.selectorUser = selectorUser;
     assertThat(prototype.observation()).isEqualTo(host.context(host.alice, prototype.observation().invocation().rootTarget()));
     assertThat(prototype.observation().invocation().tenantId()).isEqualTo(host.scope.tenant());
     assertThat(prototype.observation().invocation().environment()).isEqualTo(host.scope.environment());
@@ -58,6 +65,17 @@ final class PageRuntimeDenseFixture {
   /** Deliberate invalid metadata evidence; the workspace, ledger and frozen revision remain correlated. */
   void corruptRootMetadataRawHashForAdmissionProbe(int index) {
     rows.get(index).tables.get("ui_layout_baseline_metadata_evidence").put("raw_schema_hash", "0".repeat(64));
+  }
+
+  /** Test-only pre-INSERT mutation; the real runtime role, constraints and seals still apply. */
+  Map<String, Object> rawEvidenceRowForStorageProbe(int index, String table) {
+    if (!Set.of("ui_page_creation_evidence", "ui_layout_baseline_metadata_evidence").contains(table))
+      throw new IllegalArgumentException("Only evidence storage probes are supported");
+    return rows.get(index).tables.get(table);
+  }
+
+  void corruptCreationEvidenceHashForAdmissionProbe(int index) {
+    rows.get(index).tables.get("ui_page_creation_evidence").put("evidence_hash", "0".repeat(64));
   }
 
   void insert() {
@@ -138,12 +156,13 @@ final class PageRuntimeDenseFixture {
       var capture = seal(current, draftId, target, child.sourceRef(), child.authoring(), child.document(), child.metadata());
       children.add(new UiLayoutPageChildEvidence(child.request(), child.patch(), UiLayoutPageChildCaptures.evidenceMapper().writeValueAsString(capture)));
     }
-    var selector = new UiLayoutAudienceSelectorCommand(host.scope.tenant(), null, null, null, null, null);
+    var selector = new UiLayoutAudienceSelectorCommand(host.scope.tenant(), null, null, null, null, selectorUser);
+    String layer = selectorUser == null ? "TENANT" : "USER";
     var state = new UiLayoutDraftWorkspaceDocument.TargetState(seed.target(), seed.authoring(), seed.patch(),
         new UiLayoutDraftWorkspaceDocument.BaselineDocument(seed.sourceRef(), hashes.sha256Exact(baseline), baseline),
         new UiLayoutDraftWorkspaceDocument.WorkingDocument(hashes.sha256Exact(candidate), candidate),
         new UiLayoutDraftWorkspaceDocument.RevisionSelection(revisionId, 1, patchHash, seed.patch().schemaVersion(), UUID.randomUUID()),
-        new UiLayoutDraftWorkspaceDocument.AssignmentSelection(assignmentId, revisionId, "TENANT", selector, (short) 0, "synthetic", UUID.randomUUID()), children);
+        new UiLayoutDraftWorkspaceDocument.AssignmentSelection(assignmentId, revisionId, layer, selector, (short) 0, "synthetic", UUID.randomUUID()), children);
     var workspace = new UiLayoutDraftWorkspaceDocument(UiLayoutDraftWorkspaceDocument.SCHEMA_VERSION, List.of(state), UUID.randomUUID());
     String document = workspaces.encode(workspace);
     workspaceEncodedInputBytes += document.getBytes(java.nio.charset.StandardCharsets.UTF_8).length;
@@ -172,7 +191,7 @@ final class PageRuntimeDenseFixture {
     rows.put("ui_layout_revision", map("id", revisionId, "definition_id", definitionId, "revision_number", 1L, "patch_document", patch.toString(),
         "content_hash", patchHash, "schema_version", seed.patch().schemaVersion(), "created_by", host.alice.name(), "created_reason", "Synthetic density seed", "created_at", time));
     rows.put("ui_layout_assignment_revision", map("id", assignmentId, "tenant_id", host.scope.tenant(), "environment", host.scope.environment(), "revision_id", revisionId,
-        "layer_class", "TENANT", "selector_document", PageRuntimePostgresFixture.JSON.writeValueAsString(selector), "priority", (short)0,
+        "layer_class", layer, "selector_document", PageRuntimePostgresFixture.JSON.writeValueAsString(selector), "priority", (short)0,
         "contribution_key", "synthetic", "created_by", host.alice.name(), "created_at", time));
     rows.put("ui_layout_baseline_metadata_evidence", metadata(rootCapture));
     rows.put("ui_layout_release", root(pageId, "id", releaseId, "source_draft_id", draftId, "created_by", host.alice.name(), "created_at", time));
