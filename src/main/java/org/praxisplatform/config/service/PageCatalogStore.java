@@ -67,14 +67,17 @@ final class PageCatalogStore {
             context.applicationId(),
             context.invocation().tenantId(),
             context.invocation().environment(),
+            context.routeNamespace(),
             page);
     return immutableRead(
             key,
             () ->
                 read(
                         "e.application_id=:app AND e.tenant_id=:tenant AND e.environment=:env AND"
-                            + " e.page_id=:page",
-                        scope(context).addValue("page", page))
+                            + " c.route_namespace=:namespace AND e.page_id=:page",
+                        scope(context)
+                            .addValue("namespace", context.routeNamespace())
+                            .addValue("page", page))
                     .map(codec::write))
         .map(codec::read);
   }
@@ -83,7 +86,8 @@ final class PageCatalogStore {
     return ConfigTransactionReadSet.read(this, transactionGuard, key, loader);
   }
 
-  private record PageKey(String application, String tenant, String environment, UUID page) {}
+  private record PageKey(
+      String application, String tenant, String environment, String namespace, UUID page) {}
 
   boolean knownPage(UUID page) {
     return Boolean.TRUE.equals(

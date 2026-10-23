@@ -634,8 +634,33 @@ class UiLayoutPageGroupPostgresIT extends UiLayoutPageGroupPostgresFixture {
     UUID release = pageRelease(host.alice, page, "Scoped page");
     var pageHead = publish(host.alice, page.target(), release, null);
     var before = headState(page.target()); long events = eventCount();
+    var catalog = new PageCatalogStore(new org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate(dataSource),
+        transactions, new PageCreationCodec(), new CanonicalJsonHashService(JSON));
+    var otherNamespaceActor = actors.stream()
+        .filter(actor -> !actor.scope().namespace().equals(host.scope.namespace())).findFirst().orElseThrow();
+    var originalContext = pageHost.resolveLifecycle(host.context(host.alice, page.target()).invocation());
+    var otherNamespaceContext = pageHost.resolveLifecycle(host.context(otherNamespaceActor, page.target()).invocation());
+    var catalogReads = new java.util.concurrent.atomic.AtomicInteger();
+    probe = new SqlProbe() {
+      @Override public void before(java.sql.Connection connection, String sql, Map<Integer, Object> binds) {
+        if (sql.contains("select e.*,c.route_namespace from ui_page_creation_evidence")) catalogReads.incrementAndGet();
+      }
+    };
+    try {
+      transactions.executeWithoutResult(status -> {
+        assertThat(catalog.byPage(originalContext, page.pageId())).isPresent();
+        assertThat(catalog.byPage(otherNamespaceContext, page.pageId())).isEmpty();
+        assertThat(catalog.byPage(originalContext, page.pageId())).isPresent();
+      });
+    } finally { probe = null; }
+    assertThat(catalogReads).as("Original positive hit is reused; another namespace executes its own lookup").hasValue(2);
     for (Actor actor : actors.subList(2, actors.size())) {
       assertThatThrownBy(() -> publish(actor, page.target(), release, pageHead.headEtag()))
+          .as("Known page under %s", actor.scope())
+          .isInstanceOf(UiLayoutLifecycleException.class).extracting("code").isEqualTo(UiLayoutLifecycleException.Code.NOT_FOUND);
+      var unknown = new UiLayoutTarget("praxis-dynamic-page", UUID.randomUUID().toString());
+      assertThatThrownBy(() -> publish(actor, unknown, release, pageHead.headEtag()))
+          .as("Unknown page under %s", actor.scope())
           .isInstanceOf(UiLayoutLifecycleException.class).extracting("code").isEqualTo(UiLayoutLifecycleException.Code.NOT_FOUND);
       assertThat(headState(page.target())).isEqualTo(before); assertThat(eventCount()).isEqualTo(events);
     }
