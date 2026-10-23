@@ -1,6 +1,6 @@
 # P3-B — matriz de validação
 
-Estado: implementação em revisão e campanha Neon ainda não executada. Produção congelada em `d7b572ad369f24f74f3aeb59e47bbf540df2f24d`, após pareceres independentes do coordenador e peer. O SHA de cada ensaio incluirá as fixtures e testes executados; a referência de produção não substitui essa proveniência.
+Estado: lote Neon A concluído; lotes B/C compiláveis aguardam revisão e autorização de execução; diagnóstico D ainda em preparo. Produção congelada em `d7b572ad369f24f74f3aeb59e47bbf540df2f24d`, após pareceres independentes do coordenador e peer. O SHA de cada ensaio incluirá as fixtures e testes executados; a referência de produção não substitui essa proveniência.
 
 ## Recursos e fronteiras
 
@@ -8,7 +8,7 @@ Estado: implementação em revisão e campanha Neon ainda não executada. Produ�
 - Neon `ancient-leaf-72055027`, branch exclusiva `br-weathered-mountain-a48o0map`, endpoint direto `ep-floral-voice-a40bufyv.us-east-1.aws.neon.tech`.
 - Schema `p3b_runtime_512_20261023`, runtime `p3b_runtime_512_runtime`, somente V64–68/V70 atuais. Preparo separado dos testes, sem DDL automática nem reutilização de recursos P2/P3-A.
 - API confirmou ADMIN/PG17; SQL confirmou PG17.11 e owner `neondb_owner` não-superuser. Runtime não possui SUPERUSER, BYPASSRLS, CREATEDB, CREATEROLE, schema CREATE, evidence UPDATE ou catálogo DELETE. Permissões de authoring são restritas às tabelas e colunas existentes.
-- O primeiro preparo abortou antes de DDL ao exigir `pg_stat_ssl.ssl=true`. Esse dado descreve o backend e retornou false, enquanto libpq `verify-full` confirmou TLS do cliente. Segunda execução preserva ambos; handshake independente validou hostname/CA e certificado TLS1.3 do endpoint. A campanha exigirá também `SSLSocket`/peer real do JDBC, não apenas parâmetros da URL.
+- O primeiro preparo abortou antes de DDL ao exigir `pg_stat_ssl.ssl=true`. Esse dado descreve o backend e retornou false, enquanto libpq `verify-full` confirmou TLS do cliente. Segunda execução preserva ambos; handshake independente validou hostname/CA e certificado TLS1.3 do endpoint. O lote A confirmou também `SSLSocket`/peer real do JDBC com TLS1.3, não apenas parâmetros da URL.
 - Segredos ficam em arquivo temporário privado, fora de logs, fontes e manifests. Preparo concluído e conexões encerradas. A branch permanece preservada com autosuspend 300 segundos; nenhuma atribuição para outro trabalhador.
 
 ## Evidência local já obtida
@@ -22,7 +22,11 @@ O diretório temporário `/tmp/praxis-page-p3b-512-evidence` preserva os brutos,
 - Três adendos distintos de um caso verde: `focal-host-root.log`, `focal-node-boundary.log`, `focal-provider-wiring.log`. Host root inválido é 503; nodes inválidos não permitem 200/304; owner presente não substitui provider custom nem o default fechado.
 - Nenhuma soma das rodadas sobrepostas é apresentada como suite única. `checkpoint-70bfb856/manifest.json` distingue classes, árvore e limites. A prova final de pacote terá identidade privada coordenada e não sombreará o artefato público rc.166.
 
-## Campanha proposta
+## Resultado Neon A
+
+`neon-a-2b0/run.json` vincula fonte `2b0db3a5fd6a126ad21ceab73daade4e275ae509`, árvore `27cfacd1e27eb5787a305a69b24d5602be9392c5`, comando, hashes de fontes/log/XML e ausência de mudança durante execução. Resultado: **3 testes, zero falhas/erros/skips, 367.076s**. O log comprova JDBC TLS1.3, peer `*.us-east-1.aws.neon.tech`, PG17.11, runtime e schema atribuídos. A preparação e o lote não são um pacote Maven final. As três provas A abaixo foram executadas; os demais lotes continuam pendentes.
+
+## Campanha e critérios
 
 | Lote | Prova | Critério e instrumentação |
 |---|---|---|
@@ -39,4 +43,12 @@ O baseline de budget do host de ensaio permanece 40s por operação. Runtime rea
 
 ## Pendências e limites
 
-Revisar fixtures/barreiras A antes da primeira campanha; B/C/D ainda serão fechados em checkpoints próprios. Regressão P2 criação/publicação real, own-writes e runtime serão provadas no recurso novo, sem rodar suites antigas contra branches antigas. O merge mais recente de `origin/main` será confrontado antes da integração final. HTTP Quickstart operacional, renderer P4, browser/menu real e push invalidation não pertencem à evidência P3-B. Integração de guidance, artefato privado, consumidor Quickstart e Core são coordenados separadamente.
+Fixtures/barreiras A foram revisadas pelo coordenador e peer antes da execução. B/C/D exigem checkpoints próprios. Regressão P2 criação/publicação real, own-writes e runtime do lote A foram provadas no recurso novo, sem rodar suites antigas contra branches antigas. O merge mais recente de `origin/main` será confrontado antes da integração final. HTTP Quickstart operacional, renderer P4, browser/menu real e push invalidation não pertencem à evidência P3-B. Integração de guidance, artefato privado, consumidor Quickstart e Core são coordenados separadamente.
+
+## Checkpoint B2/C1 — compilado, ainda não executado
+
+- **B1:** três páginas realmente criadas/publicadas, `binding.id` igual entre páginas, ordem global e identidade global do node. Página privada não aparece em nodes/head receipts; revogação sem mudança de contexto invalida continuação. Alternância app A→B→A com versões diferentes, mais leituras isoladas por tenant/env/namespace, compara UUID conhecido e inexistente sem conteúdo. Não introduz segundo ponteiro de publicação.
+- **B2:** assignment USER admite Alice e exclui Bob de outra unidade antes de catálogo/menu/URL/receipts; último mapping revoga READ_HEAD sem mudar root/contextVersion e impede aceitação. Metadata e structure negadas com READ_HEAD permitido impedem 304 por MockMvc com owner/Neon reais; parent oculto/desconhecido têm o mesmo 404. Controle permissivo e head/event fresh demonstram ausência de mutação.
+- **C1:** probe conta UPDATE real de head e retorno bem-sucedido do JDBC COMMIT; só então injeta `SQLTransientConnectionException` de perda de acknowledgement. Uma conexão nova comprova release B/event +1; um novo owner sem cache de head reconcilia receipt. GET com validator A retorna 200/receipt B e com validator B retorna 304. `resolvedAt` avança enquanto receipt semântico permanece estável. É perda sintética de resposta **após COMMIT real**, não rejeição do COMMIT no servidor nem queda de processo.
+
+Seletores planejados: B usa apenas `continuationBindsTheAuthorizedProjectionAndRejectsContextAbaWithoutLeakingPrivateHeads` e `currentSelectorAndLastMappingExcludeContentBeforeReceiptsAndConditionalSuccess`; C usa apenas `aCommittedPublicationWithLostResponseReconcilesThroughANewReadOwner`. Não repetir A por esse adendo test-only. Compilação focal `neon-bc-compile.log` passou; produção permanece byte a byte em d7. Captura corrompida/prefixos/timeout/capacidade seguem no recorte D e não são reivindicados por B/C.
