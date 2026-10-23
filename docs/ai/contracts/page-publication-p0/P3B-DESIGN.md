@@ -26,6 +26,8 @@ P0 é a fonte de identidade, documento nativo, bindings, ordem, namespace e sepa
 
 Todos os GETs abaixo exigem Principal autenticado e `X-Praxis-Context-Version`. App/tenant/environment/namespace/ator são atestados no servidor; hints de módulo, locale e timezone não os definem. `If-None-Match` é avaliado somente depois da resolução e das verificações finais de autoridade. Sucesso usa `Cache-Control: private, no-cache`; erros usam `no-store` e payload sanitizado.
 
+`receiptEtag` é identidade semântica opaca e estável da projeção autorizada, não um validador forte dos bytes JSON. `resolvedAt` observa o relógio a cada leitura e fica fora desse hash. Portanto os GETs P3-B emitem `ETag: W/"<receiptEtag>"` e comparam If-None-Match pela função fraca, somente após autorização atual, inclusive para listas de tags e `*`. Isso segue [RFC 9110 §8.8.1](https://www.rfc-editor.org/rfc/rfc9110.html#section-8.8.1), [§8.8.3](https://www.rfc-editor.org/rfc/rfc9110.html#section-8.8.3) e [§13.1.2](https://www.rfc-editor.org/rfc/rfc9110.html#section-13.1.2): representações semanticamente equivalentes podem ter resolvedAt diferente sem alegar igualdade byte a byte. O `head.headEtag` persistido continua forte para If-Match nas mutações; receiptEtag de leitura não o substitui. Não alterar os endpoints Effective genéricos ou a semântica 412 do lifecycle neste incremento.
+
 | Endpoint | Semântica |
 |---|---|
 | `GET /api/praxis/config/pages?cursor=…&limit=…` | Catálogo operacional de páginas publicadas e autorizadas, ordenado por pageId UUID. `limit` padrão 50, intervalo 1–100. Sem corpo de workspace na listagem. |
@@ -41,6 +43,12 @@ DTOs novos no pacote `dto`, sem nova hierarquia de contexto:
 - `PublishedPageResponse`: `schemaVersion`, `pageId`, `route`, `document`, `contextVersion`, `receiptEtag`, `head` (`UiLayoutReleaseHeadReceipt`), `resolvedAt`. `document` é a árvore nativa de página validada; não inclui ledger, capturas, entitlements ou wrapper de workspace.
 - `EnterpriseRuntimeNavigationNode`: manter campos existentes e acrescentar `icon`, ID do catálogo admitido; sem SVG/URL de ícone. Não criar DTO paralelo de node.
 - `EnterpriseRuntimeNavigationResponse`: manter `schemaVersion`, `nodes`, `capabilities`, `resolvedAt`; acrescentar `contextVersion`, `receiptEtag`, `headReceipts`, `nextCursor` nullable. `headReceipts` contém somente o root de grupos autorizado e as páginas dos nodes retornados, sem vetor completo ou IDs de páginas privadas. Não incluir timestamp de resolução no hash estável da representação.
+
+Literais de schema deste corte: `PageCatalogResponse.schemaVersion = "praxis.page-catalog/v1"`, `PublishedPageResponse.schemaVersion = "praxis.published-page/v1"` e `EnterpriseRuntimeNavigationResponse.schemaVersion = "praxis-enterprise-runtime-navigation.v1"`. O DTO de navegação da base aceita String livre e não tem literal canônico fixado em provider funcional; este é o único literal admitido para a forma beta evoluída, sem caminho antigo ou alias simultâneo.
+
+Tipos/nullability: `pageId` é UUID (string UUID no JSON), `rootTarget` é UiLayoutTarget, `route`/`title`/`icon` são String, `document` é JsonNode objeto nativo, `head` é UiLayoutReleaseHeadReceipt e `resolvedAt` é Instant (string ISO-8601 no wire). Campos dessas novas respostas são obrigatórios e não nulos, salvo `nextCursor: String | null`. `items: List<PageCatalogEntry>`, `nodes: List<EnterpriseRuntimeNavigationNode>`, `capabilities: List<String>` e `headReceipts: List<UiLayoutReleaseHeadReceipt>` são não nulos, inclusive quando vazios, e sem elementos null. `schemaVersion`, `contextVersion` e `receiptEtag` são Strings obrigatórias não vazias. Head de uma página publicada tem activeReleaseRef não nulo; o tipo genérico do receipt continua admitindo null para retirada em seus outros usos.
+
+Node mantém campos opcionais do host genérico; `id` é obrigatório, e nodes Config têm label/type/icon admitidos e rota de página quando entrada. `children: List<EnterpriseRuntimeNavigationNode> | null` é nullable para grupo lazy; lista presente não contém null. `icon: String | null` só pode ser null em node genérico do host fora do perfil Page/Groups; dentro desse perfil vem obrigatoriamente de `presentation.icon` da página ou `icon` do grupo/vínculo conforme P0, com admissão de catálogo atual. Core TS referencia o `UiLayoutReleaseHeadReceipt` já existente em `ui-layout-lifecycle.model.ts`, sem duplicar o tipo.
 
 Assinatura beta do provider existente:
 
@@ -68,24 +76,28 @@ Esses métodos pertencem a `PageRuntimeReadService`; construtor/wiring usa os co
 
 O host que deseja páginas Config delega explicitamente seu `EnterpriseRuntimeNavigationProvider` ao serviço concreto e pode reduzir a projeção ou compor outros menus. Ele não concede acesso ao conteúdo da página por incluir um node. A presença de PageCreationHost não instala autoappend, não substitui custom provider e não abre a superfície por si só. Provider ausente permanece `503 RUNTIME_PROVIDER_UNAVAILABLE`, conforme implementação atual; corrigir a promessa documental de árvore vazia no README. Serviço de páginas exige grafo completo de dependências; host parcial não deve ativar controller utilizável apenas nominalmente.
 
+Delegação pura ao projector Config é o caminho recomendado. Se o provider host filtrar, alterar ou compor nodes, ele passa a responder pelo receipt, digest, ordenação e cursor da **projeção final** e por seus rechecks atuais. Não pode modificar nodes/capabilities/heads retornados mantendo receiptEtag/nextCursor do fragmento Config. O handler aplica o condicional apenas ao resultado final desse contrato; não autentica política arbitrária do host. Não criar SPI adicional de composição neste pacote. Fixture de custom provider deve demonstrar que conteúdo final alterado não produz 304 por reutilização de receipt antigo.
+
 ## Autoridade e visibilidade
 
 Resolver PageCreationHost e EffectiveUiAudienceProvider para o mesmo Principal e contexto esperado. Exigir correlação de `actorRef == audience.user`, tenant, environment e contextVersion; ambos representam a mesma identidade autenticada. Não equiparar administrativeUnit e organization: suas semânticas podem ser distintas. Audience é interna e nunca é serializada/logada.
 
 Cada página exige READ_HEAD próprio, selector da assignment publicada compatível por `UiLayoutAudienceSelector.matches`, identidade do catálogo no app/tenant/environment/namespace e admissão atual de produtor, metadata, filhos e estrutura. Proveniência ancestral continua íntegra sem instituir READ_SOURCE/COPY_SOURCE perpétuo de templates. Reutilizar o binder root→KIND e reprodução B0/patch fixado, sem duplicar schema nem recapturar origem histórica.
 
+Costura explícita da base: `PageCatalogLifecycleBridge.admission:109–124` exclui READ_HEAD da verificação de criação por desenho. Logo chamar somente esse wrapper não satisfaz a leitura runtime. O owner executa o helper frozen + producer/metadata + children + structure e rechecks atuais; `validation.require` sozinho verifica prazo/correlação, não reobtém grants ou audience. A extração preserva P3-A e separa somente sua regra autoral de grant do grupo dependente da autorização da URL runtime.
+
 URL direta não depende do grant do root app-shell. Navegação exige a interseção de visibilidade/admissão do root de grupos e da página. O contrato atual atesta visibilidade do root de grupos, não ACL nova por groupId. Group-root negado e página permitida: URL válida e menu ausente. Grupo permitido e página negada: nenhum binding dessa página é retornado. Grupo vazio válido pode ser node; não publicar `hasChildren` baseado em filhos privados.
 
-No fim da operação, após as extensões de produtor/metadata/estrutura, repetir contexto/audiência, grants pertinentes e mapping quando usado. Antes de retornar 304, essas verificações também são obrigatórias. Mudança de audiência/visibilidade durante a materialização não pode preservar um receipt previamente aceito. Mudança de contexto aborta a operação inteira; indisponibilidade de fonte ou integridade não vira lista vazia.
+No fim da operação, após as extensões de produtor/metadata/estrutura, repetir contexto/audiência, grants pertinentes e mapping quando usado. Antes de retornar 304, essas verificações também são obrigatórias. Mudança de audiência/visibilidade durante a materialização não pode preservar um receipt previamente aceito. READ_HEAD negado ou selector incompatível exclui o item antes de nodes e headReceipts; corrupção ou indisponibilidade nunca é tratada como esse tipo de exclusão. Mudança de contexto aborta a operação inteira; indisponibilidade de fonte ou integridade não vira lista vazia.
 
 O host deve atestar contextVersion corrente e monotônico para mudanças de contexto, incluindo A→B→A. O guard de geração Angular rejeita callback da primeira A mesmo que uma identidade de negócio volte a coincidir. Rechecks server não constituem fence atômico com autoridade externa ou outro banco; não há promessa de atomicidade entre sistemas. O digest da visão autorizada detecta mudança entre requests mesmo quando um grant mudou sem alteração de contextVersion; não substitui rechecks dentro da request.
 
 ## Coerência em READ COMMITTED
 
 1. Iniciar um attempt com deadline não renovável e resolver autoridade atual. Usar a transação/conexão Config canônica; manter participação REQUIRED e sua semântica de completion, sem REQUIRES_NEW ou troca silenciosa para REPEATABLE_READ.
-2. Coletar via uma consulta JDBC fresca o vetor completo do escopo consultado: catálogo app/tenant/environment/namespace, identidades e heads das páginas, mais root de grupos quando navegação o utiliza. Registrar presença/ausência, activeRelease, headETag e rowVersion. O vetor captura também inserções/remoções; não é uma lista apenas dos heads visíveis ao usuário.
+2. Fazer flush dos próprios writes JPA antes da primeira coleta, preservando as entidades managed e alterações legítimas do chamador. Para catálogo/navegação, coletar via uma consulta JDBC fresca o vetor completo do escopo consultado: TODO o catálogo app/tenant/environment/namespace, incluindo páginas sem head ou com head withdrawn, mais root de grupos quando navegação o utiliza. Registrar presença/ausência, activeRelease, headETag e rowVersion. A coleta não é `activePages`: captura inserções/remoções/phantoms do catálogo, não apenas heads ativos ou visíveis ao usuário. A URL individual fixa e revalida sua identidade/head específicos, sem depender do grupo nem varrer páginas alheias.
 3. Carregar registros imutáveis por releaseIds PINADOS da primeira coleta. Não reutilizar `activePages` para escolher outra release corrente durante a materialização. Reusar batching, frozen resolver, correlações e validação nativa; contexto e decisões de autoridade não entram no readset.
-4. Filtrar/admitir e projetar a visão autorizada. Fazer rechecks finais e recolher o vetor por JDBC fresco. Divergência retorna conflito explícito; não há retry interno, ampliação de escopo ou renovação do budget. ETag/rowVersion impedem aceitar A→B→A da publicação apenas porque releaseId voltou a coincidir.
+4. Filtrar/admitir e projetar a visão autorizada. Fazer rechecks finais, flush dos próprios writes JPA novamente e recolher o vetor por JDBC fresco. Ambas as coletas refletem ownwrites, sem limpar o EntityManager ou sobrescrever alterações pendentes por refresh. Divergência retorna conflito explícito; não há retry interno, ampliação de escopo ou renovação do budget. ETag/rowVersion impedem aceitar A→B→A da publicação apenas porque releaseId voltou a coincidir.
 5. Somente o resultado coerente e atualmente autorizado pode gerar 200/304. Deadline cooperativo inclui callbacks e conclusão da operação, sem alegar cancelamento de I/O bloqueado. Transação externa conserva as regras canônicas de lifetime; não confundir retorno participante com conclusão da transação.
 
 Vetor completo e seu hash permanecem internos: não serializar nem usar diretamente no receipt/cursor público. O receipt público deriva da representação autorizada e dos respectivos headETags, contexto e seleção da request. Timestamps de leitura não provocam invalidação artificial. A página URL consulta seu próprio head; menu/catalog usam o conjunto necessário à sua projeção, sempre sem segundo ponteiro de publicação.
@@ -108,8 +120,8 @@ Mudança de contexto, visibilidade ou publicação pertinente invalida continua�
 
 | Situação | Resultado |
 |---|---|
-| Representação válida/atual | 200; receiptEtag forte e privado. |
-| If-None-Match coincide depois de toda autorização atual | 304 com a mesma política private/no-cache. |
+| Representação válida/atual | 200; receiptEtag semântico estável, HTTP ETag fraco `W/"<receiptEtag>"` e private/no-cache. |
+| If-None-Match coincide pela comparação fraca depois de toda autorização atual | 304 com HTTP ETag fraco e a mesma política private/no-cache. |
 | Cursor malformado, parâmetros fora do perfil ou posição inválida no snapshot confirmado | 400, `INVALID_PUBLICATION_CURSOR`/erro de parâmetro sanitizado. |
 | Sessão ausente | 401, código de sessão existente. |
 | Contexto atual difere do esperado | 409, código de contexto existente da superfície; não reinterpretar contexto do cliente como grant. |
@@ -134,7 +146,7 @@ Escritor Config único: agente P2/P3 reaproveitado pela coordenação. Revisores
 
 Mapa Config: `PageCatalogStore`/helper de leitura fresca, novo `PageRuntimeReadService`, extração interna de snapshot/native admission de `UiLayoutPageGroupHeadIntegrity`, wiring em autoconfig/factory existente, `PageCreationController` ou controller de leitura no mesmo owner `/pages`, `EnterpriseRuntimeContextController`, Provider/default, Node/Response e DTOs de catálogo/publicação, handlers/allowlists, testes focais. Heads jamais entram no readset imutável. Constructor/factory beta muda uma vez se necessário; sem overload para mascarar wiring incompleto.
 
-Angular canônico de referência `f6769d3cab8ee4f8038a7871f9df81592eefc2ab`: atualizar somente o wire model e reutilizar contextRevision no retorno assíncrono de navigation. Renderer/menu/rota e adoção operacional são P4. As cópias primárias de model/service estão sujas e não são fonte para essa edição. Atribuição de writer/worktree Angular cabe à coordenação.
+Angular canônico de referência `f6769d3cab8ee4f8038a7871f9df81592eefc2ab`: atualizar somente o wire model e reutilizar contextRevision no retorno assíncrono de navigation. Não adicionar cache ou If-None-Match no cliente neste pacote. Backend conditional será provado por MockMvc/Neon; P4 poderá adotar cache explicitamente, incluindo tratamento correto de 304. Renderer/menu/rota e adoção operacional são P4. As cópias primárias de model/service estão sujas e não são fonte para essa edição. Atribuição de writer/worktree Angular cabe à coordenação.
 
 Quickstart canônico `64080d77986f567f2d9bc6b27b7c6e218dbd7834`: não contém os construtores antigos de NavigationNode nem implementação atual de NavigationProvider encontrados em checkout antigo. Não criar patch artificial ou ativar navegação automaticamente; compilar consumidor focal contra o JAR Config isolado. Isso não prova HTTP operacional P3-C.
 
@@ -148,13 +160,16 @@ Matriz mínima:
 
 - Mesmo head autorizado em catálogo, URL e menu; conteúdo completo/B0/patch/KIND, sem personal overlay. Baseline disponível com head ausente/withdrawn continua indisponível.
 - Page grant negado com grupos permitidos não expõe entry; group-root negado com page grant permitido mantém URL e oculta menu; parent oculto/desconhecido uniforme.
-- READ_HEAD/selector, produtor, metadata e estrutura atuais; revogação no último callback impede corpo/304. Sem COPY ancestral perpétuo; selector mismatch e correlação ator/user/scope falham fechados.
+- READ_HEAD/selector, produtor, metadata e estrutura atuais; último SPI que revoga grant ou altera audience impede corpo/304 mesmo sem mudar contextVersion. Sem COPY ancestral perpétuo; selector mismatch e correlação ator/user/scope falham fechados, sem headReceipts privados.
+- READ_HEAD permissivo com produtor, metadata ou estrutura negados ainda nega published/304; o teste não pode passar apenas pelo wrapper que exclui READ_HEAD de verify. Reobter grants/selector após último callback, sem confiar só no stamp ou validation.require.
 - A→B→A server context monotônico e geração Angular; callback antigo não atualiza estado. Mudança de audience sem contextVersion invalida continuação e rechecks finais negam representação antiga.
 - Barreiras determinísticas entre coletas: publicação, retirada, inserção e ABA de head; nenhuma mistura de releases/receipt. EntityManager stale não substitui JDBC fresco.
+- Outer REQUIRED: withdraw seguido de published retorna 404 após flush; publish/rollback seguido de leitura vê receipt atual da mesma transação. Rollback externo comprovado por conexão independente não deixa publicação/evento commitados; retorno participante não é confirmação de commit.
+- Relógio avança: resolvedAt muda, receiptEtag semântico permanece, HTTP ETag continua fraco e If-None-Match permite 304 somente após autoridade atual. Testar comparação fraca e separar receipt de leitura do head.headEtag forte; escrita/If-Match/412 continuam inalterados.
 - Cursor obsoleto, adulterado, cross-actor/app/tenant/env/namespace/parent/pageSize; nenhum grant por token, IDs/contagens privados ou reinício silencioso. Ordem global e tie-break entre páginas com bindingId repetido.
 - Ícones admitidos, grupos vazios, carga children sob demanda, paginação além de itens privados, fim somente após varredura suficiente; custo denso/bytes/managed/SQL e timeout sem resultado parcial.
 - Perda de resposta após commit e nova instância do reader: GET condicional reconcilia head persistido; clique de menu stale nega após retirada. Sem claim de outbox/push.
-- Autoconfig sem host, host parcial e custom provider; ausência fail-closed, delegação explícita, sem beans ambíguos/autoappend. MockMvc 200/304/400/404/409/503, headers e sanitização.
+- Autoconfig sem host, host parcial e custom provider; ausência fail-closed, delegação explícita, sem beans ambíguos/autoappend. Provider que compõe/filtra recalcula receipt/digest/cursor da projeção final; fixture comprova alteração sem 304 stale. MockMvc 200/304/400/404/409/503, headers e sanitização.
 - Regressões focais de P3-A apenas onde extração interna modificar execução; provas anteriores válidas permanecem identificadas, sem somar contagens de árvores distintas como suíte única.
 
 ## Recursos reservados e estado de execução
