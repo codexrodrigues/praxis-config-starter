@@ -331,7 +331,7 @@ class PageRuntimePostgresIT extends PageRuntimePostgresFixture {
 
   private PageRuntimeReadService newReadOwner() {
     var application = host.application;
-    return new PageRuntimeReadService(application.getBean(PageCreationHost.class),
+    return new PageRuntimeReadService(host.pages, application.getBean(PageCreationHost.class),
         application.getBean(EffectiveUiAudienceProvider.class),
         host.pages.lifecycleAdmission(application.getBean(UiLayoutLifecycleAdmission.class)),
         application.getBean(UiLayoutLifecycleStructureValidator.class), host.pages.workspaceSource(), host.pages.metadataAdmission(),

@@ -30,6 +30,8 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
  * No baseline fallback, personal overlay, cached head/grant or publication writer lives here.
  */
 public final class PageRuntimeReadService {
+  private final PageCreationService pages;
+  private final JdbcUiLayoutMetadataCaptureStore rootMetadata;
   private final PageCreationHost host;
   private final EffectiveUiAudienceProvider audiences;
   private final UiLayoutLifecycleAdmission admission;
@@ -46,7 +48,7 @@ public final class PageRuntimeReadService {
   private final UiLayoutDefinitionRepository definitions;
   private final UiLayoutAssignmentRevisionRepository assignments;
 
-  public PageRuntimeReadService(PageCreationHost host, EffectiveUiAudienceProvider audiences,
+  public PageRuntimeReadService(PageCreationService pages, PageCreationHost host, EffectiveUiAudienceProvider audiences,
       UiLayoutLifecycleAdmission admission, UiLayoutLifecycleStructureValidator structure,
       UiLayoutDraftWorkspaceSource source, UiLayoutBaselineMetadataAdmission metadataAdmission,
       NamedParameterJdbcTemplate jdbc, TransactionOperations transactions,
@@ -55,6 +57,7 @@ public final class PageRuntimeReadService {
       UiLayoutRevisionRepository revisions, UiLayoutDefinitionRepository definitions,
       UiLayoutAssignmentRevisionRepository assignments, ObjectMapper mapper,
       CanonicalJsonHashService hashes, Clock clock) {
+    this.pages = Objects.requireNonNull(pages);
     this.host = Objects.requireNonNull(host);
     this.audiences = Objects.requireNonNull(audiences);
     this.admission = Objects.requireNonNull(admission);
@@ -69,8 +72,9 @@ public final class PageRuntimeReadService {
     this.definitions = definitions;
     this.assignments = assignments;
     this.store = new PageRuntimeStore(jdbc, transactions);
+    this.rootMetadata = new JdbcUiLayoutMetadataCaptureStore(jdbc, mapper, hashes, transactions);
     this.nativeSnapshots = new UiLayoutNativeSnapshotReader(structure,
-        new JdbcUiLayoutMetadataCaptureStore(jdbc, mapper, hashes, transactions), metadataAdmission,
+        rootMetadata, metadataAdmission,
         source, releases, drafts, members, revisions, definitions, assignments, mapper, hashes);
   }
 
@@ -354,9 +358,32 @@ public final class PageRuntimeReadService {
         var batch = UiLayoutFrozenRecordBatch.load(heads.stream().map(PageRuntimeStore.Head::release).toList(),
             releases, drafts, members, revisions, definitions, assignments);
         try {
-          for (var head : heads) {
-            var snapshot = visible(head, batch);
-            if (snapshot != null) consumer.accept(head, snapshot);
+          int position = 0;
+          int ledgerEnd = 0;
+          int metadataEnd = 0;
+          while (position < heads.size()) {
+            validation.require(context.invocation());
+            var remaining = heads.subList(position, heads.size());
+            if (position == ledgerEnd) {
+              ledgerEnd = position + pages.prefetchRuntimeEvidence(context,
+                  remaining.stream().map(PageRuntimeStore.Head::pageId).toList());
+            }
+            if (position == metadataEnd) {
+              var keys = remaining.stream().map(head -> {
+                var release = batch.releases().get(head.release());
+                return new JdbcUiLayoutMetadataCaptureStore.RowKey(
+                    release == null ? null : release.getSourceDraftId(), context.invocation().tenantId(),
+                    context.invocation().environment(), head.root(), head.root());
+              }).toList();
+              metadataEnd = position + rootMetadata.prefetch(keys);
+            }
+            int end = Math.min(ledgerEnd, metadataEnd);
+            // Each owner's retained prefix is fully consumed before that owner is refilled.
+            while (position < end) {
+              var head = heads.get(position++);
+              var snapshot = visible(head, batch);
+              if (snapshot != null) consumer.accept(head, snapshot);
+            }
           }
         } finally { store.detach(batch, prior); }
         offset += heads.size();
@@ -375,10 +402,24 @@ public final class PageRuntimeReadService {
         requireTarget(groupsRoot);
       }
       for (var decision : visibility) requireTarget(decision.root());
-      for (var decision : visibility) {
-        if (decision.granted() != currentGrant(decision.root())) throw snapshotChanged();
-        if (decision.selector() != null
-            && decision.selector().matches(audience) != decision.selector().matches(currentAudience)) throw snapshotChanged();
+      int position = 0;
+      while (position < visibility.size()) {
+        var window = visibility.subList(position, Math.min(visibility.size(), position + 128));
+        // All mapping callbacks above precede all current grants below. Prefetch has no policy callback.
+        var pageIds = window.stream().filter(decision ->
+            UiLayoutPageRevisionReproduction.TYPE.equals(decision.root().componentType()))
+            .map(decision -> UUID.fromString(decision.root().componentId())).toList();
+        int pageCount = pageIds.isEmpty() ? 0 : pages.prefetchRuntimeEvidence(context, pageIds);
+        int consumedPages = 0;
+        for (var decision : window) {
+          boolean pageRoot = UiLayoutPageRevisionReproduction.TYPE.equals(decision.root().componentType());
+          if (pageRoot && consumedPages == pageCount) break;
+          if (pageRoot) consumedPages++;
+          if (decision.granted() != currentGrant(decision.root())) throw snapshotChanged();
+          if (decision.selector() != null
+              && decision.selector().matches(audience) != decision.selector().matches(currentAudience)) throw snapshotChanged();
+          position++;
+        }
       }
       // The last extension may change identity/audience. These are current attestations, not cached grants.
       requireContext();

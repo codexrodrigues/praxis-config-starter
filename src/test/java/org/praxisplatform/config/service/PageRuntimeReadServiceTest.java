@@ -67,6 +67,11 @@ class PageRuntimeReadServiceTest {
     when(connection.getAutoCommit()).thenAnswer(call -> autoCommit.get());
     doAnswer(call -> { autoCommit.set(call.getArgument(0)); return null; }).when(connection).setAutoCommit(anyBoolean());
     when(connection.getTransactionIsolation()).thenReturn(Connection.TRANSACTION_READ_COMMITTED);
+    var statement = mock(java.sql.PreparedStatement.class);
+    var isolation = mock(java.sql.ResultSet.class);
+    when(connection.prepareStatement("SELECT current_setting('transaction_isolation')")).thenReturn(statement);
+    when(statement.executeQuery()).thenAnswer(call -> { when(isolation.next()).thenReturn(true, false); return isolation; });
+    when(isolation.getString(1)).thenReturn("read committed");
     var dataSource = mock(DataSource.class);
     when(dataSource.getConnection()).thenReturn(connection);
     var jdbcTransactions = new TransactionTemplate(new DataSourceTransactionManager(dataSource));
@@ -104,12 +109,24 @@ class PageRuntimeReadServiceTest {
         boolean groups = parameters.hasValue("groupRoot");
         return heads.stream().filter(head -> page == null ? head.pageId() != null || groups : page.equals(head.pageId())).toList();
       }
-      if (sql.contains("AS weight")) {
+      if (sql.contains("AS weight") && !sql.contains("ui_layout_baseline_metadata_evidence")) {
         Collection<UUID> ids = (Collection<UUID>) parameters.getValue("ids");
         return ids.stream().map(id -> Map.entry(id, 1024L)).toList();
       }
       if (sql.contains("ui_layout_baseline_metadata_evidence")) {
-        return List.of(captures.get((UUID) parameters.getValue("source_draft_ref")));
+        if (parameters.hasValue("draft0")) {
+          var rows = new ArrayList<Map.Entry<Integer, String>>();
+          for (int index = 0; parameters.hasValue("draft" + index); index++) {
+            var capture = captures.get((UUID) parameters.getValue("draft" + index));
+            rows.add(new AbstractMap.SimpleImmutableEntry<>(index, capture == null ? null : rawMetadata(capture)));
+          }
+          if (sql.contains("AS weight")) return rows.stream().map(row -> Map.entry(row.getKey(),
+              row.getValue() == null ? 0L : (long) row.getValue().getBytes(java.nio.charset.StandardCharsets.UTF_8).length)).toList();
+          Collection<Integer> ordinals = (Collection<Integer>) parameters.getValue("retained_ordinals");
+          return rows.stream().filter(row -> ordinals.contains(row.getKey())).toList();
+        }
+        var capture = captures.get((UUID) parameters.getValue("source_draft_ref"));
+        return capture == null ? List.of() : List.of(rawMetadata(capture));
       }
       throw new AssertionError("Unexpected fixture SQL");
     }).when(jdbc).query(anyString(), any(MapSqlParameterSource.class), any(RowMapper.class));
@@ -134,10 +151,37 @@ class PageRuntimeReadServiceTest {
       }
       return null;
     }).when(grants).require(eq(UiLayoutLifecycleOperation.READ_HEAD), any());
-    service = new PageRuntimeReadService(host, audiences, grants, structure,
+    var pages = mock(PageCreationService.class, withSettings().mockMaker(org.mockito.MockMakers.INLINE));
+    when(pages.prefetchRuntimeEvidence(any(), anyList())).thenAnswer(call -> ((List<?>) call.getArgument(1)).size());
+    service = new PageRuntimeReadService(pages, host, audiences, grants, structure,
         mock(UiLayoutDraftWorkspaceSource.class), metadata, jdbc, transactions,
         (op, inv) -> budget, releases, drafts, members, revisions, definitions, assignments,
         json, hashes, Clock.fixed(Instant.EPOCH, ZoneOffset.UTC));
+  }
+
+  private String rawMetadata(UiLayoutMetadataCapture capture) {
+    var row = json.createObjectNode();
+    var binding = capture.binding();
+    var scope = binding.scope();
+    var source = (UiLayoutBaselineMetadataSeed.NativeDocumentSource) capture.source();
+    var observed = capture.observation();
+    row.put("source_draft_ref", binding.sourceDraftRef().toString()).put("tenant_id", scope.tenantId())
+        .put("environment", scope.environment()).put("root_component_type", scope.root().componentType())
+        .put("root_component_id", scope.root().componentId()).put("component_type", scope.target().componentType())
+        .put("component_id", scope.target().componentId()).put("capture_ref", capture.captureRef().toString())
+        .put("baseline_source_ref", binding.baselineSourceRef()).put("document_type", binding.authoring().documentType())
+        .put("authoring_schema_ref", binding.authoring().schemaRef()).put("authoring_schema_version", binding.authoring().schemaVersion())
+        .put("baseline_content_hash", binding.baselineContentHash()).put("baseline_document_text", capture.baselineDocument().toString())
+        .put("service_key", source.serviceKey()).put("producer_ref", source.producerRef()).put("publication_ref", source.publicationRef())
+        .put("actor_ref", observed.actorRef()).put("administrative_unit", observed.administrativeUnit())
+        .put("context_version", observed.contextVersion()).put("policy_ref", observed.policyRef()).put("policy_revision", observed.policyRevision())
+        .put("captured_at_text", observed.capturedAt().toString()).put("raw_schema_text", capture.rawInputText())
+        .put("raw_schema_hash", capture.rawInputHash()).put("origin_kind", "NATIVE_DOCUMENT")
+        .put("native_document_ref", source.documentRef()).put("native_document_revision", source.documentRevision());
+    for (String column : List.of("assembly_input_hash", "resource_ref", "operation_path", "operation_method",
+        "schema_type", "source_schema_ref", "normalizer_ref", "projector_ref", "assembly_input_version",
+        "assembler_ref", "assembly_input_text")) row.putNull(column);
+    return row.toString();
   }
 
   @AfterEach void close() { TransactionSynchronizationManager.unbindResourceIfPossible(factory); }

@@ -85,6 +85,10 @@ public final class PageCreationService {
     return bridge.workspaceSource();
   }
 
+  int prefetchRuntimeEvidence(PageCreationContext context, java.util.List<UUID> pages) {
+    return store.prefetch(context, pages);
+  }
+
   public UiLayoutBaselineMetadataAdmission metadataAdmission() {
     return bridge.metadataAdmission();
   }

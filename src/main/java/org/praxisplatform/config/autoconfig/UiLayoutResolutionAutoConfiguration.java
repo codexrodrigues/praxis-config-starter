@@ -270,7 +270,7 @@ public class UiLayoutResolutionAutoConfiguration {
             UiLayoutDraftRepository drafts, UiLayoutReleaseMemberRepository members,
             UiLayoutRevisionRepository revisions, UiLayoutDefinitionRepository definitions,
             UiLayoutAssignmentRevisionRepository assignments, ObjectMapper mapper, CanonicalJsonHashService hashes) {
-        return new org.praxisplatform.config.service.PageRuntimeReadService(host, audiences,
+        return new org.praxisplatform.config.service.PageRuntimeReadService(pages, host, audiences,
                 pages.lifecycleAdmission(admission), structure, pages.workspaceSource(), pages.metadataAdmission(),
                 jdbc, transactions, budgets, releases, drafts, members, revisions, definitions, assignments,
                 mapper, hashes, Clock.systemUTC());
