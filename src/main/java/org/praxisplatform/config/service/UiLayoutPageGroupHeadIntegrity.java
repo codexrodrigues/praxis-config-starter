@@ -180,10 +180,18 @@ final class UiLayoutPageGroupHeadIntegrity {
     if (snapshot.document().targets().size() != 1) throw invalid();
     var state = snapshot.document().targets().getFirst();
     var patch = snapshot.patches().getFirst();
-    UiLayoutPageRevisionReproduction.require(state.target(), state.authoring(), state.baseline().document(),
-        state.working().document(), state.patch(), patch);
-    UiLayoutNavigationGroupsRevisionReproduction.require(state.target(), state.authoring(), state.baseline().document(),
-        state.working().document(), state.patch(), patch);
+    boolean page = isPage(state.target());
+    String expectedKind = page ? UiLayoutPageRevisionReproduction.KIND
+        : UiLayoutNavigationGroupsRevisionReproduction.KIND;
+    // Bind dispatch to the governed root; an unrelated descriptor must not skip its verifier.
+    if (state.authoring() == null || !expectedKind.equals(state.authoring().documentType())) throw invalid();
+    if (page) {
+      UiLayoutPageRevisionReproduction.require(state.target(), state.authoring(), state.baseline().document(),
+          state.working().document(), state.patch(), patch);
+    } else {
+      UiLayoutNavigationGroupsRevisionReproduction.require(state.target(), state.authoring(), state.baseline().document(),
+          state.working().document(), state.patch(), patch);
+    }
     outer.attempt().requireActive();
     return snapshot;
   }
