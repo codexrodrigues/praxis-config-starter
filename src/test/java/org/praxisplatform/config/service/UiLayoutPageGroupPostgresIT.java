@@ -68,8 +68,8 @@ class UiLayoutPageGroupPostgresIT extends UiLayoutPageGroupPostgresFixture {
     probe = new SqlProbe() {
       @Override public void after(java.sql.Connection connection, String sql, Map<Integer, Object> binds, Object result) {
         String normalized = sql.toLowerCase(Locale.ROOT);
-        if (normalized.startsWith("insert into ui_layout_release_head")) headWrites.incrementAndGet();
-        if (normalized.startsWith("insert into ui_layout_release_event")) eventWrites.incrementAndGet();
+        if (normalized.startsWith("insert into ") && normalized.contains("ui_layout_release_head")) headWrites.incrementAndGet();
+        if (normalized.startsWith("insert into ") && normalized.contains("ui_layout_release_event")) eventWrites.incrementAndGet();
       }
       @Override public void beforeCommit(java.sql.Connection connection) {
         assertThat(orphanInserted.get()).isEqualTo(1);
@@ -95,7 +95,7 @@ class UiLayoutPageGroupPostgresIT extends UiLayoutPageGroupPostgresFixture {
     }));
     probe = null;
     assertThat(failure).isNotNull();
-    assertThat(sqlState(failure)).isEqualTo("23503");
+    assertThat(sqlState(failure)).describedAs("Failure after commit entry: %s; head=%d event=%d orphan=%d", failure, headWrites.get(), eventWrites.get(), orphanInserted.get()).isEqualTo("23503");
     assertThat(commitFailures.get()).isEqualTo(1);
     assertThat(headState(host.groups)).isEmpty();
     assertThat(eventCount()).isEqualTo(events);
@@ -136,7 +136,7 @@ class UiLayoutPageGroupPostgresIT extends UiLayoutPageGroupPostgresFixture {
     var inCommit = new java.util.concurrent.atomic.AtomicBoolean();
     var revoked = new java.util.concurrent.atomic.AtomicBoolean();
     host.metadataCallback = (invocation, target) -> {
-      if (inCommit.get() && invocation.rootTarget().equals(page.target())) revoked.set(true);
+      if (inCommit.get() && target.componentType().equals("praxis-dynamic-page")) revoked.set(true);
     };
     host.structureCallback = (invocation, target) -> {
       if (revoked.get() && target.equals(page.target())) throw denied();
@@ -237,6 +237,9 @@ class UiLayoutPageGroupPostgresIT extends UiLayoutPageGroupPostgresFixture {
     var losingConnection = new java.util.concurrent.atomic.AtomicReference<java.sql.Connection>();
     var key = new java.util.concurrent.atomic.AtomicReference<Map<Integer, Object>>();
     var loserAttempts = new java.util.concurrent.atomic.AtomicInteger();
+    long eventsBeforeRace = eventCount();
+    var groupBeforeRace = headState(host.groups);
+    var pageBeforeRace = headState(page.target());
     probe = new SqlProbe() {
       @Override public void before(java.sql.Connection connection, String sql, Map<Integer, Object> binds) {
         if (!sql.contains("pg_try_advisory_xact_lock") || !Thread.currentThread().getName().equals("p3-loser")) return;
@@ -278,10 +281,18 @@ class UiLayoutPageGroupPostgresIT extends UiLayoutPageGroupPostgresFixture {
       probe = null;
     }
     assertNoOrphans();
+    assertThat(eventCount()).isEqualTo(eventsBeforeRace + 1);
+    var groupsAfterRace = headState(host.groups);
+    var pageAfterRace = headState(page.target());
+    if (groupsWin) assertThat(pageAfterRace).isEqualTo(pageBeforeRace);
+    else assertThat(groupsAfterRace).isEqualTo(groupBeforeRace);
     assertThatThrownBy(() -> (groupsWin ? pageAction : groupAction).call())
         .isInstanceOf(UiLayoutLifecycleException.class).extracting("code")
         .isEqualTo(UiLayoutLifecycleException.Code.INVALID_RELEASE);
     assertNoOrphans();
+    assertThat(eventCount()).isEqualTo(eventsBeforeRace + 1);
+    assertThat(headState(host.groups)).isEqualTo(groupsAfterRace);
+    assertThat(headState(page.target())).isEqualTo(pageAfterRace);
     if (groupsWin) assertThat(headState(page.target())).isEmpty();
     else assertThat(headState(host.groups).get("active_release_id")).isEqualTo(withGroup);
   }

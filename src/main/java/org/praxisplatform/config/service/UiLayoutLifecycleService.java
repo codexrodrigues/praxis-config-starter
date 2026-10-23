@@ -313,10 +313,7 @@ class UiLayoutLifecycleService {
     append(eventType, release, null, releaseId, null, actor, reason);
   }
 
-  private UiLayoutReleaseHead head(Scope scope) {
-    return heads.findForUpdate(scope.tenantId(), scope.environment(), scope.rootTarget().componentType(), scope.rootTarget().componentId())
-        .orElseThrow(() -> failure(UiLayoutLifecycleException.Code.NOT_FOUND, "Release head was not found for the requested composition."));
-  }
+
   private UiLayoutRelease release(Scope scope, UUID id) { return releases.findByIdAndTenantIdAndEnvironment(id, scope.tenantId(), scope.environment())
       .filter(value -> scope.rootTarget().componentType().equals(value.getRootComponentType()) && scope.rootTarget().componentId().equals(value.getRootComponentId()))
       .orElseThrow(() -> failure(UiLayoutLifecycleException.Code.NOT_FOUND, "Release was not found in the requested scope.")); }

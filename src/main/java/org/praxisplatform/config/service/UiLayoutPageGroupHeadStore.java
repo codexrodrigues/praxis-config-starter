@@ -46,9 +46,12 @@ final class UiLayoutPageGroupHeadStore {
 
   void lockAndRefreshHead(UiLayoutLifecycleInvocation invocation) {
     transactions.require();
-    var root = invocation.rootTarget();
-    heads.findForUpdate(invocation.tenantId(), invocation.environment(), root.componentType(), root.componentId())
-        .ifPresent(transactions::refresh);
+    var current = head(invocation, invocation.rootTarget());
+    if (current == null) return;
+    // A locking entity query upgrades a stale managed instance before refresh and may reject its
+    // old version. Resolve the authoritative identity without a lock, then refresh under row lock.
+    var managed = heads.findById(current.id()).orElseThrow(this::unavailable);
+    transactions.refresh(managed);
   }
 
   void requireCatalog(PageCreationContext context) {
