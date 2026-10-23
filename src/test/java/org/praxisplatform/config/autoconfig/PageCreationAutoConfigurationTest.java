@@ -26,6 +26,8 @@ class PageCreationAutoConfigurationTest {
             context -> {
               assertThat(context)
                   .hasNotFailed()
+                  .hasSingleBean(PageRuntimeReadService.class)
+                  .hasSingleBean(org.praxisplatform.config.controller.PageRuntimeController.class)
                   .hasSingleBean(PageCreationService.class)
                   .hasSingleBean(PageCreationController.class)
                   .hasSingleBean(UiLayoutLifecycleCommandService.class)
@@ -48,6 +50,8 @@ class PageCreationAutoConfigurationTest {
             context ->
                 assertThat(context)
                     .hasNotFailed()
+                    .doesNotHaveBean(PageRuntimeReadService.class)
+                    .doesNotHaveBean(org.praxisplatform.config.controller.PageRuntimeController.class)
                     .doesNotHaveBean(PageCreationService.class)
                     .doesNotHaveBean(PageCreationController.class)
                     .hasSingleBean(UiLayoutLifecycleCommandService.class));
@@ -66,7 +70,9 @@ class PageCreationAutoConfigurationTest {
               context ->
                   assertThat(context)
                       .hasNotFailed()
-                      .doesNotHaveBean(PageCreationService.class)
+                      .doesNotHaveBean(PageRuntimeReadService.class)
+                    .doesNotHaveBean(org.praxisplatform.config.controller.PageRuntimeController.class)
+                    .doesNotHaveBean(PageCreationService.class)
                       .doesNotHaveBean(PageCreationController.class)
                       .doesNotHaveBean(UiLayoutLifecycleCommandService.class)
                       .doesNotHaveBean(UiLayoutRevisionRequestBodyAdvice.class));

@@ -17,13 +17,7 @@ final class UiLayoutPageGroupHeadIntegrity {
   private final PageCreationHost host;
   private final UiLayoutPageGroupHeadStore store;
   private final UiLayoutLifecycleAdmission admission;
-  private final UiLayoutLifecycleStructureValidator structure;
-  private final UiLayoutMetadataCapturePersistence metadata;
-  private final UiLayoutBaselineMetadataAdmission metadataAdmission;
-  private final UiLayoutMetadataCaptureCodec metadataCodec;
-  private final UiLayoutDraftWorkspaceSource workspaceSource;
-  private final UiLayoutPageChildCaptures pageChildren;
-  private final UiLayoutFrozenWorkspaceResolver frozen;
+  private final UiLayoutNativeSnapshotReader nativeSnapshots;
   private final UiLayoutReleaseRepository releases;
   private final UiLayoutDraftRepository drafts;
   private final UiLayoutReleaseMemberRepository members;
@@ -42,20 +36,14 @@ final class UiLayoutPageGroupHeadIntegrity {
     this.host = Objects.requireNonNull(host);
     this.store = store;
     this.admission = admission;
-    this.structure = new UiLayoutBoundedStructureValidator(structure);
-    this.metadata = metadata;
-    this.metadataAdmission = metadataAdmission;
-    this.workspaceSource = Objects.requireNonNull(workspaceSource);
-    this.pageChildren = new UiLayoutPageChildCaptures(hashes);
-    this.metadataCodec = new UiLayoutMetadataCaptureCodec(mapper, hashes);
     this.releases = releases;
     this.drafts = drafts;
     this.members = members;
     this.revisions = revisions;
     this.definitions = definitions;
     this.assignments = assignments;
-    this.frozen = new UiLayoutFrozenWorkspaceResolver(releases, drafts, members, definitions,
-        revisions, assignments, mapper, hashes);
+    this.nativeSnapshots = new UiLayoutNativeSnapshotReader(structure, metadata, metadataAdmission,
+        workspaceSource, releases, drafts, members, revisions, definitions, assignments, mapper, hashes);
   }
 
   static boolean governs(UiLayoutTarget root) {
@@ -173,67 +161,18 @@ final class UiLayoutPageGroupHeadIntegrity {
 
   private UiLayoutFrozenWorkspaceResolver.Snapshot snapshot(UiLayoutLifecycleInvocation invocation,
       UUID release, UiLayoutFrozenRecordBatch batch, UiLayoutValidationContext outer) {
-    outer.attempt().requireActive();
-    var snapshot = frozen.resolve(invocation, release, target -> {
-      if (!invocation.rootTarget().equals(target)) throw invalid();
-    }, batch);
-    if (snapshot.document().targets().size() != 1) throw invalid();
-    var state = snapshot.document().targets().getFirst();
-    var patch = snapshot.patches().getFirst();
-    boolean page = isPage(state.target());
-    String expectedKind = page ? UiLayoutPageRevisionReproduction.KIND
-        : UiLayoutNavigationGroupsRevisionReproduction.KIND;
-    // Bind dispatch to the governed root; an unrelated descriptor must not skip its verifier.
-    if (state.authoring() == null || !expectedKind.equals(state.authoring().documentType())) throw invalid();
-    if (page) {
-      UiLayoutPageRevisionReproduction.require(state.target(), state.authoring(), state.baseline().document(),
-          state.working().document(), state.patch(), patch);
-    } else {
-      UiLayoutNavigationGroupsRevisionReproduction.require(state.target(), state.authoring(), state.baseline().document(),
-          state.working().document(), state.patch(), patch);
-    }
-    outer.attempt().requireActive();
-    return snapshot;
+    return nativeSnapshots.read(invocation, release, batch, outer);
   }
 
   private void admitFrozen(UiLayoutLifecycleInvocation invocation,
       UiLayoutFrozenWorkspaceResolver.Snapshot snapshot, UiLayoutValidationContext outer) {
-    outer.attempt().requireActive();
-    try (var attempt = UiLayoutValidationAttempt.start(invocation, outer.attempt().operation(),
-        outer.attempt().remainingBudget())) {
-      var validation = new UiLayoutValidationContext(attempt, UiLayoutValidationPurpose.FROZEN_RELEASE);
-      boolean dependency = !invocation.rootTarget().equals(outer.attempt().invocation().rootTarget());
-      if (dependency) validation.run(invocation, () -> admission.require(UiLayoutLifecycleOperation.READ_HEAD, invocation));
-      var state = snapshot.document().targets().getFirst();
-      var assignment = state.selectedAssignment();
-      var revision = state.selectedRevision();
-      var selector = assignment.selector();
-      var contribution = new UiLayoutLifecycleFrozenContribution(state.target(), assignment.contributionKey(),
-          new UiLayoutResolutionCandidate(state.target(), revision.revisionRef().toString(), revision.contentHash(),
-              UiLayoutResolutionCandidate.LayerClass.valueOf(assignment.layerClass()), assignment.priority(),
-              new UiLayoutAudienceSelector(selector.tenant(), selector.organization(), selector.sector(),
-                  selector.group(), selector.profile(), selector.user()), snapshot.patches().getFirst(), null),
-          new UiLayoutLifecycleFrozenContribution.NativeAuthoring(snapshot.releaseId(), snapshot.draftId(),
-              snapshot.document().freezeCommandRef(), state.authoring(), state.patch(), state.baseline().sourceRef(),
-              state.baseline().contentHash(), state.baseline().document(), state.working().contentHash(), state.working().document()));
-      var binding = new UiLayoutMetadataCapture.Binding(snapshot.draftId(),
-          new UiLayoutMetadataCapture.Scope(invocation.tenantId(), invocation.environment(), invocation.rootTarget(), state.target()),
-          state.baseline().sourceRef(), state.authoring(), state.baseline().contentHash());
-      UiLayoutMetadataCaptureAccess access = (current, capture) -> validation.run(current, () ->
-          metadataAdmission.require(current, state.target(), state.authoring(), state.baseline().sourceRef(),
-              capture.baselineDocument(), new UiLayoutBaselineMetadataSeed(capture.source(), capture.reproduction(),
-                  capture.observation(), capture.rawInputText())));
-      var capture = validation.call(invocation, () -> metadata.read(invocation, binding, access));
-      metadataCodec.verifyAndRead(invocation, binding, capture, access);
-      pageChildren.verify(invocation, snapshot.draftId(), state.target(), state.baseline().document(),
-          state.working().document(), state.pageChildren(), workspaceSource, metadataAdmission, validation);
-      // Current metadata and producer callbacks run before the final structural policy check.
-      validation.run(invocation, () -> structure.validateFrozenRelease(invocation, List.of(contribution), validation));
-      if (dependency) validation.run(invocation, () -> admission.require(UiLayoutLifecycleOperation.READ_HEAD, invocation));
-      validation.require(invocation);
-    } finally {
-      outer.attempt().requireActive();
-    }
+    // Authoring dependency policy belongs here, never to the shared runtime native reader.
+    boolean dependency = !invocation.rootTarget().equals(outer.attempt().invocation().rootTarget());
+    if (dependency) outer.run(outer.attempt().invocation(),
+        () -> admission.require(UiLayoutLifecycleOperation.READ_HEAD, invocation));
+    nativeSnapshots.admit(invocation, snapshot, outer);
+    if (dependency) outer.run(outer.attempt().invocation(),
+        () -> admission.require(UiLayoutLifecycleOperation.READ_HEAD, invocation));
   }
 
   private PageCreationContext context(UiLayoutLifecycleInvocation invocation, UiLayoutValidationContext validation) {

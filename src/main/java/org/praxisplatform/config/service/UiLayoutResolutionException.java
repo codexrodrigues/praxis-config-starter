@@ -19,6 +19,9 @@ public final class UiLayoutResolutionException extends RuntimeException {
     }
 
     public enum Code {
+        INVALID_PUBLICATION_CURSOR,
+        PUBLICATION_CONTINUATION_STALE,
+        PUBLICATION_SNAPSHOT_CHANGED,
         SESSION_REQUIRED,
         CONTEXT_ACCESS_DENIED,
         LAYOUT_ACCESS_DENIED,

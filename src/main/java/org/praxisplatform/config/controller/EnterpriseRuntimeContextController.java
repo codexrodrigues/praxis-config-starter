@@ -59,10 +59,12 @@ import org.springframework.web.server.ResponseStatusException;
 public class EnterpriseRuntimeContextController {
 
     private static final Map<Integer, Set<String>> SAFE_CODES = Map.of(
-            400, Set.of("INVALID_CONTEXT_COMMAND", "INVALID_CONTEXT_CURSOR"),
+            400, Set.of("INVALID_CONTEXT_COMMAND", "INVALID_CONTEXT_CURSOR", "INVALID_PUBLICATION_CURSOR"),
+            404, Set.of("NOT_FOUND"),
             401, Set.of("SESSION_REQUIRED"),
             403, Set.of("CONTEXT_CHOICE_DENIED", "CONTEXT_CHOICE_EXPIRED"),
-            409, Set.of("CONTEXT_SELECTION_CONFLICT", "CONTEXT_VERSION_CONFLICT", "CONTEXT_NOT_READY"),
+            409, Set.of("CONTEXT_SELECTION_CONFLICT", "CONTEXT_VERSION_CONFLICT", "CONTEXT_NOT_READY",
+                    "PUBLICATION_CONTINUATION_STALE", "PUBLICATION_SNAPSHOT_CHANGED"),
             503, Set.of("RUNTIME_PROVIDER_UNAVAILABLE", "RUNTIME_SOURCE_UNAVAILABLE"));
 
     private final EnterpriseRuntimeContextProvider runtimeContextProvider;
@@ -151,10 +153,53 @@ public class EnterpriseRuntimeContextController {
     @GetMapping("/navigation")
     public ResponseEntity<EnterpriseRuntimeNavigationResponse> getNavigation(
             HttpServletRequest request,
+            @RequestHeader(value = "X-Praxis-Context-Version", required = false) String expectedContextVersion,
+            @RequestHeader(value = HttpHeaders.IF_NONE_MATCH, required = false) String condition,
+            @RequestParam(required = false) String parentRef,
+            @RequestParam(required = false) String cursor,
+            @RequestParam(defaultValue = "50") int pageSize,
             @RequestHeader(value = HttpHeaders.ACCEPT_LANGUAGE, required = false) String acceptLanguage,
             @RequestHeader(value = "X-Timezone", required = false) String timezone,
             @RequestHeader(value = "X-Praxis-Module-Key", required = false) String activeModuleKey) {
-        return noStore(runtimeNavigationProvider.getNavigation(runtimeRequest(request, acceptLanguage, timezone, activeModuleKey)));
+        var input = runtimeRequest(request, acceptLanguage, timezone, activeModuleKey);
+        if (expectedContextVersion == null || expectedContextVersion.isBlank()
+                || pageSize < 1 || pageSize > 100) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "INVALID_PUBLICATION_CURSOR");
+        }
+        try {
+            var result = runtimeNavigationProvider.getNavigation(input, expectedContextVersion, parentRef, cursor, pageSize);
+            if (result == null) throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "RUNTIME_PROVIDER_UNAVAILABLE");
+            if (!expectedContextVersion.equals(result.contextVersion())) {
+                throw new ResponseStatusException(HttpStatus.CONFLICT, "CONTEXT_VERSION_CONFLICT");
+            }
+            return PublishedReadHttp.response(result, result.receiptEtag(), condition);
+        } catch (org.praxisplatform.config.service.UiLayoutResolutionException failure) {
+            throw navigationFailure(failure);
+        } catch (org.praxisplatform.config.service.UiLayoutLifecycleException failure) {
+            throw switch (failure.getCode()) {
+                case SESSION_REQUIRED -> new ResponseStatusException(HttpStatus.UNAUTHORIZED, "SESSION_REQUIRED");
+                case CONTEXT_STALE -> new ResponseStatusException(HttpStatus.CONFLICT, "CONTEXT_VERSION_CONFLICT");
+                case DENIED, NOT_FOUND -> new ResponseStatusException(HttpStatus.NOT_FOUND, "NOT_FOUND");
+                case INVALID_REQUEST -> new ResponseStatusException(HttpStatus.BAD_REQUEST, "INVALID_PUBLICATION_CURSOR");
+                default -> new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "RUNTIME_SOURCE_UNAVAILABLE");
+            };
+        } catch (ResponseStatusException failure) {
+            throw failure;
+        } catch (RuntimeException failure) {
+            throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "RUNTIME_SOURCE_UNAVAILABLE");
+        }
+    }
+
+    private ResponseStatusException navigationFailure(org.praxisplatform.config.service.UiLayoutResolutionException failure) {
+        return switch (failure.code()) {
+            case SESSION_REQUIRED -> new ResponseStatusException(HttpStatus.UNAUTHORIZED, "SESSION_REQUIRED");
+            case CONTEXT_STALE -> new ResponseStatusException(HttpStatus.CONFLICT, "CONTEXT_VERSION_CONFLICT");
+            case INVALID_PUBLICATION_CURSOR -> new ResponseStatusException(HttpStatus.BAD_REQUEST, failure.code().name());
+            case PUBLICATION_CONTINUATION_STALE, PUBLICATION_SNAPSHOT_CHANGED ->
+                    new ResponseStatusException(HttpStatus.CONFLICT, failure.code().name());
+            case CONTEXT_ACCESS_DENIED, LAYOUT_ACCESS_DENIED -> new ResponseStatusException(HttpStatus.NOT_FOUND, "NOT_FOUND");
+            default -> new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "RUNTIME_SOURCE_UNAVAILABLE");
+        };
     }
 
     @GetMapping("/security-events")

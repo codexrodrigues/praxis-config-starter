@@ -5,6 +5,7 @@ import java.util.List;
 public record EnterpriseRuntimeNavigationNode(
         String id,
         String label,
+        String icon,
         String type,
         String href,
         String route,
