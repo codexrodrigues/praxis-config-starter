@@ -1,0 +1,9 @@
+Owner preflight (before mutation): {"endpoint": "ep-floral-voice-a40bufyv.us-east-1.aws.neon.tech", "identity": ["neondb_owner", "neondb", "17.11 (11592b3)", false, true, true, true], "tls": [false, null, null, null], "verifyFull": true}
+Applied V64__create_ui_layout_lifecycle.sql
+Applied V65__add_ui_layout_workspace_idempotency.sql
+Applied V66__create_ui_layout_baseline_metadata_evidence.sql
+Applied V67__extend_ui_layout_evidence_native_origin.sql
+Applied V68__capture_ui_layout_document_assembly.sql
+Applied V70__create_page_catalog_and_creation_evidence.sql
+Runtime preflight: {"endpoint": "ep-floral-voice-a40bufyv.us-east-1.aws.neon.tech", "identity": ["p3b_runtime_512_runtime", "p3b_runtime_512_20261023", false, false, false, false, false, false, false, true], "tls": [false, null, null, null], "verifyFull": true}
+Assigned schema prepared; all owner/runtime connections closed. No campaign executed.

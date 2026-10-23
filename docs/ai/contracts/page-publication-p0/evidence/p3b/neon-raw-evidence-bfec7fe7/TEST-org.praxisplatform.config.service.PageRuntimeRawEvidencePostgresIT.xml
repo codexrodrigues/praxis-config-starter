@@ -1,0 +1,35 @@
+<testsuite xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="https://maven.apache.org/surefire/maven-surefire-plugin/xsd/surefire-test-report.xsd" version="3.0.2" name="org.praxisplatform.config.service.PageRuntimeRawEvidencePostgresIT" time="659.143" tests="4" errors="0" skipped="0" failures="0" flakes="0">
+  <testcase name="ledgerRawPrefixUsesExactPostgresEnvelopeAndConsumesOnlyItsBoundedPrefix" classname="org.praxisplatform.config.service.PageRuntimeRawEvidencePostgresIT" time="293.351">
+    <system-out>Standard Commons Logging discovery in action with spring-jcl: please remove commons-logging.jar from classpath in order to avoid potential conflicts
+P3-B Neon project=ancient-leaf-72055027 branch=br-weathered-mountain-a48o0map endpoint=ep-floral-voice-a40bufyv.us-east-1.aws.neon.tech role=p3b_runtime_512_runtime schema=p3b_runtime_512_20261023 PostgreSQL=17.11 (11592b3) TLS=TLSv1.3 peer=CN=*.us-east-1.aws.neon.tech
+10:58:25.742 [main] INFO org.hibernate.Version -- HHH000412: Hibernate ORM core version 6.6.53.Final
+10:58:25.760 [main] INFO org.hibernate.cache.internal.RegionFactoryInitiator -- HHH000026: Second-level cache disabled
+10:58:28.066 [main] INFO org.hibernate.orm.connections.pooling -- HHH10001005: Database info:
+	Database JDBC URL [Connecting through datasource 'org.praxisplatform.config.service.PageRuntimePostgresFixture$1@733aa9d8']
+	Database driver: undefined/unknown
+	Database version: 17.11
+	Autocommit mode: undefined/unknown
+	Isolation level: undefined/unknown
+	Minimum pool size: undefined/unknown
+	Maximum pool size: undefined/unknown
+10:58:28.241 [main] INFO org.hibernate.validator.internal.util.Version -- HV000001: Hibernate Validator 8.0.3.Final
+10:58:28.507 [main] INFO org.hibernate.engine.transaction.jta.platform.internal.JtaPlatformInitiator -- HHH000489: No JTA platform available (set 'hibernate.transaction.jta.platform' to enable JTA platform integration)
+10:58:31.046 [main] INFO org.springframework.data.jpa.repository.query.QueryEnhancerFactory -- Hibernate is in classpath; If applicable, HQL parser will be used.
+P3-B synthetic seed pages=138 workspaceEncodedInputBytes=990150 ledgerStoredBytes=815856 rootMetadataBytes=68172 wallMs=19470 runtime=true triggers=true
+P3-B raw prefix owner=PageCatalogStore entryWindows=128,1 exactAggregateBytes=8388608 missingFirstAndInterleavedProgress=true payloadOnlyPrefix=true escapingAndNulls=true negativeStorageRows=true admittedPublication=false freshHeadsAuditUnchanged=true
+</system-out>
+  </testcase>
+  <testcase name="rawPageKeysKeepScopeAcrossPrefetchAndHitsInOneConfigTransaction" classname="org.praxisplatform.config.service.PageRuntimeRawEvidencePostgresIT" time="8.259">
+    <system-out>P3-B RawPageKey sameOwnerSameTransaction=true dimensions=app,namespace,tenant,environment originalPositiveHit=true foreignMissesUncached=true
+</system-out>
+  </testcase>
+  <testcase name="syntheticOversizedRawSqlRowAdvancesWithoutReturningItsPayload" classname="org.praxisplatform.config.service.PageRuntimeRawEvidencePostgresIT" time="6.015">
+    <system-out>P3-B synthetic raw oversized helper progress=1,2 firstRawReturned=0 tableInsertion=false largeParameterSentToPostgres=true
+</system-out>
+  </testcase>
+  <testcase name="metadataRawPrefixUsesExactPostgresEnvelopeAndConsumesOnlyItsBoundedPrefix" classname="org.praxisplatform.config.service.PageRuntimeRawEvidencePostgresIT" time="338.774">
+    <system-out>P3-B synthetic seed pages=146 workspaceEncodedInputBytes=1047547 ledgerStoredBytes=863149 rootMetadataBytes=72124 wallMs=19449 runtime=true triggers=true
+P3-B raw prefix owner=JdbcUiLayoutMetadataCaptureStore entryWindows=128,1 exactAggregateBytes=8388608 missingFirstAndInterleavedProgress=true payloadOnlyPrefix=true escapingAndNulls=true negativeStorageRows=true admittedPublication=false freshHeadsAuditUnchanged=true
+</system-out>
+  </testcase>
+</testsuite>

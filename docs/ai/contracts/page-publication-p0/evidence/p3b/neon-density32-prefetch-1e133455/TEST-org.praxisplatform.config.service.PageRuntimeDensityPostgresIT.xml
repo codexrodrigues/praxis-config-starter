@@ -1,0 +1,22 @@
+<testsuite xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="https://maven.apache.org/surefire/maven-surefire-plugin/xsd/surefire-test-report.xsd" version="3.0.2" name="org.praxisplatform.config.service.PageRuntimeDensityPostgresIT" time="78.404" tests="1" errors="0" skipped="0" failures="0" flakes="0">
+  <testcase name="diagnoseThirtyTwoAuthorizedPagesBeforeLargerCatalogs" classname="org.praxisplatform.config.service.PageRuntimeDensityPostgresIT" time="65.521">
+    <system-out>Standard Commons Logging discovery in action with spring-jcl: please remove commons-logging.jar from classpath in order to avoid potential conflicts
+P3-B Neon project=ancient-leaf-72055027 branch=br-weathered-mountain-a48o0map endpoint=ep-floral-voice-a40bufyv.us-east-1.aws.neon.tech role=p3b_runtime_512_runtime schema=p3b_runtime_512_20261023 PostgreSQL=17.11 (11592b3) TLS=TLSv1.3 peer=CN=*.us-east-1.aws.neon.tech
+10:20:49.636 [main] INFO org.hibernate.Version -- HHH000412: Hibernate ORM core version 6.6.53.Final
+10:20:49.658 [main] INFO org.hibernate.cache.internal.RegionFactoryInitiator -- HHH000026: Second-level cache disabled
+10:20:51.969 [main] INFO org.hibernate.orm.connections.pooling -- HHH10001005: Database info:
+	Database JDBC URL [Connecting through datasource 'org.praxisplatform.config.service.PageRuntimePostgresFixture$1@12e0f1cb']
+	Database driver: undefined/unknown
+	Database version: 17.11
+	Autocommit mode: undefined/unknown
+	Isolation level: undefined/unknown
+	Minimum pool size: undefined/unknown
+	Maximum pool size: undefined/unknown
+10:20:52.146 [main] INFO org.hibernate.validator.internal.util.Version -- HV000001: Hibernate Validator 8.0.3.Final
+10:20:52.421 [main] INFO org.hibernate.engine.transaction.jta.platform.internal.JtaPlatformInitiator -- HHH000489: No JTA platform available (set 'hibernate.transaction.jta.platform' to enable JTA platform integration)
+10:20:55.144 [main] INFO org.springframework.data.jpa.repository.query.QueryEnhancerFactory -- Hibernate is in classpath; If applicable, HQL parser will be used.
+P3-B synthetic seed pages=32 workspaceEncodedInputBytes=230240 ledgerStoredBytes=189824 rootMetadataBytes=15808 wallMs=9434 runtime=true triggers=true
+P3-B runtime density diagnosis {"catalogPages":32,"expectedFullVectorIdentitiesIncludingUnpublishedPrototype":33,"fixturePolicyCallbacksHaveNoRemoteExternalIO":true,"budgetMs":40000,"acceptedWithinBudget":true,"wallMs":6126,"threadCpuTimeAvailable":true,"currentThreadCpuNanos":638351000,"readSetRetentionObserved":{"notHeapOrGlobalCap":true,"peakBytesPerOwner":{"PageCatalogStore#0":234240,"JdbcUiLayoutMetadataCaptureStore#1":91456},"maxSimultaneousEntriesObserved":64,"peakEntriesPerOwner":{"PageCatalogStore#0":32,"JdbcUiLayoutMetadataCaptureStore#1":32},"maxSimultaneousBytesObserved":325696,"sampledAfterCompletedSqlAndCurrentCallbacks":true},"preparedStatementsCompleted":17,"completedPreparedExecutionMs":3007,"attemptedSqlCategories":{"creation-ledger-prefetch-rows":2,"creation-ledger-prefetch-weights":2,"frozen-ui_layout_assignment_revision":1,"frozen-ui_layout_definition":1,"frozen-ui_layout_draft":1,"frozen-ui_layout_release":1,"frozen-ui_layout_release_member":1,"frozen-ui_layout_revision":1,"other":2,"root-metadata-prefetch-rows":1,"root-metadata-prefetch-weights":1,"vector":2,"weights":1},"completedSqlCategoryMs":{"creation-ledger-prefetch-rows":316,"creation-ledger-prefetch-weights":299,"frozen-ui_layout_assignment_revision":149,"frozen-ui_layout_definition":147,"frozen-ui_layout_draft":582,"frozen-ui_layout_release":147,"frozen-ui_layout_release_member":152,"frozen-ui_layout_revision":160,"other":287,"root-metadata-prefetch-rows":153,"root-metadata-prefetch-weights":161,"vector":299,"weights":150},"successfulIsolationGetterCalls":6,"successfulIsolationGetterMs":873,"nativeCallbacks":512,"metadataCallbacks":1536,"structureCallbacks":544,"pageRootsObservedByStructureCallback":33,"seededPageRootsObservedByStructureCallback":32,"otherPageRootsObservedByStructureCallback":1,"loadedIdentitiesDoNotProveAdmission":true,"failedSqlExecutionTimeExcluded":true,"loadedWorkspaceIdentities":32,"loadedWorkspaceTextBytes":236192,"loadedRevisionPatchTextBytes":19872,"maxBatchLoadedWorkspaceTextBytes":236192,"maxBatchLoadedPatchTextBytes":19872,"workspaceEncodedSeedInputBytes":230240,"managedBaseline":0,"managedPeak":192,"managedAtLastBatchStart":0,"managedAtBatchStarts":[0],"returnedItems":1,"freshHeadAndAuditUnchanged":true,"outcome":"accepted"}
+</system-out>
+  </testcase>
+</testsuite>

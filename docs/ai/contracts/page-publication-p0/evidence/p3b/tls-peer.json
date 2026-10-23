@@ -1,0 +1,49 @@
+{
+  "host": "ep-floral-voice-a40bufyv.us-east-1.aws.neon.tech",
+  "port": 5432,
+  "verifyHostname": true,
+  "verifyMode": "CERT_REQUIRED",
+  "tlsVersion": "TLSv1.3",
+  "cipher": [
+    "TLS_AES_256_GCM_SHA384",
+    "TLSv1.3",
+    256
+  ],
+  "certificateSha256": "be449f50f6f8aafae6ebd83a02e0b88ca20c73d3570f6e72fcffcc026f8d4225",
+  "subject": [
+    [
+      [
+        "commonName",
+        "*.us-east-1.aws.neon.tech"
+      ]
+    ]
+  ],
+  "issuer": [
+    [
+      [
+        "countryName",
+        "US"
+      ]
+    ],
+    [
+      [
+        "organizationName",
+        "Let's Encrypt"
+      ]
+    ],
+    [
+      [
+        "commonName",
+        "YR1"
+      ]
+    ]
+  ],
+  "subjectAltName": [
+    [
+      "DNS",
+      "*.us-east-1.aws.neon.tech"
+    ]
+  ],
+  "notBefore": "Sep 29 16:32:13 2026 GMT",
+  "notAfter": "Dec 28 16:32:12 2026 GMT"
+}

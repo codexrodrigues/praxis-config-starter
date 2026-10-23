@@ -1,0 +1,191 @@
+{
+  "projectId": "ancient-leaf-72055027",
+  "branchId": "br-weathered-mountain-a48o0map",
+  "endpoint": "ep-floral-voice-a40bufyv.us-east-1.aws.neon.tech",
+  "schema": "p3b_runtime_512_20261023",
+  "runtime": "p3b_runtime_512_runtime",
+  "tlsMode": "verify-full",
+  "caBundleSha256": "2ef52ad56b4803e264045c915e55c236cbfa045b84b81efefc218a19eb44bd2b",
+  "migrations": [
+    {
+      "file": "src/main/resources/db/migration/V64__create_ui_layout_lifecycle.sql",
+      "sha256": "258c5e0d70395c9126bb37ff839efbf6537d3e09a376c6b4e0228d0b41948dc8"
+    },
+    {
+      "file": "src/main/resources/db/migration/V65__add_ui_layout_workspace_idempotency.sql",
+      "sha256": "713733e8461c531437e2e13c38fd2a077efb0465c734c2f7188032fcf281b356"
+    },
+    {
+      "file": "src/main/resources/db/migration/V66__create_ui_layout_baseline_metadata_evidence.sql",
+      "sha256": "0ed19446955baa0923c25deed10d95060f21165af0185d16a1b466f89fca5b80"
+    },
+    {
+      "file": "src/main/resources/db/migration/V67__extend_ui_layout_evidence_native_origin.sql",
+      "sha256": "ec9d3e10ddf20322285ca09c510a2d5c91b3627d6558b92d39571c37d0428600"
+    },
+    {
+      "file": "src/main/resources/db/migration/V68__capture_ui_layout_document_assembly.sql",
+      "sha256": "b3b5959cf92cbd9416b2ee0f97054de1623f78624f502909160d7eb8a9ae8fbd"
+    },
+    {
+      "file": "src/main/resources/db/migration/V70__create_page_catalog_and_creation_evidence.sql",
+      "sha256": "f49cc29c52059996e45f74b534cc464b1535249abc2ce3d9dad5d427afbff9b0"
+    }
+  ],
+  "ownerClientSsl": true,
+  "backendTlsNote": "pg_stat_ssl describes backend link; it is not the client TLS gate.",
+  "ownerIdentity": [
+    "neondb_owner",
+    "neondb",
+    "17.11 (11592b3)",
+    false,
+    true,
+    true,
+    true
+  ],
+  "ownerTls": [
+    false,
+    null,
+    null,
+    null
+  ],
+  "runtimeIdentity": [
+    "p3b_runtime_512_runtime",
+    "p3b_runtime_512_20261023",
+    false,
+    false,
+    false,
+    false,
+    false,
+    false,
+    false,
+    true
+  ],
+  "runtimeTls": [
+    false,
+    null,
+    null,
+    null
+  ],
+  "runtimeClientSsl": true,
+  "tableCount": 13,
+  "runtimeGrants": [
+    [
+      "ui_layout_assignment_revision",
+      "INSERT"
+    ],
+    [
+      "ui_layout_assignment_revision",
+      "SELECT"
+    ],
+    [
+      "ui_layout_baseline_metadata_evidence",
+      "INSERT"
+    ],
+    [
+      "ui_layout_baseline_metadata_evidence",
+      "SELECT"
+    ],
+    [
+      "ui_layout_definition",
+      "INSERT"
+    ],
+    [
+      "ui_layout_definition",
+      "SELECT"
+    ],
+    [
+      "ui_layout_draft",
+      "INSERT"
+    ],
+    [
+      "ui_layout_draft",
+      "SELECT"
+    ],
+    [
+      "ui_layout_draft",
+      "UPDATE"
+    ],
+    [
+      "ui_layout_release",
+      "INSERT"
+    ],
+    [
+      "ui_layout_release",
+      "SELECT"
+    ],
+    [
+      "ui_layout_release_approval",
+      "INSERT"
+    ],
+    [
+      "ui_layout_release_approval",
+      "SELECT"
+    ],
+    [
+      "ui_layout_release_event",
+      "INSERT"
+    ],
+    [
+      "ui_layout_release_event",
+      "SELECT"
+    ],
+    [
+      "ui_layout_release_head",
+      "INSERT"
+    ],
+    [
+      "ui_layout_release_head",
+      "SELECT"
+    ],
+    [
+      "ui_layout_release_head",
+      "UPDATE"
+    ],
+    [
+      "ui_layout_release_member",
+      "INSERT"
+    ],
+    [
+      "ui_layout_release_member",
+      "SELECT"
+    ],
+    [
+      "ui_layout_release_review",
+      "INSERT"
+    ],
+    [
+      "ui_layout_release_review",
+      "SELECT"
+    ],
+    [
+      "ui_layout_release_review",
+      "UPDATE"
+    ],
+    [
+      "ui_layout_revision",
+      "INSERT"
+    ],
+    [
+      "ui_layout_revision",
+      "SELECT"
+    ],
+    [
+      "ui_page_catalog",
+      "INSERT"
+    ],
+    [
+      "ui_page_catalog",
+      "SELECT"
+    ],
+    [
+      "ui_page_creation_evidence",
+      "INSERT"
+    ],
+    [
+      "ui_page_creation_evidence",
+      "SELECT"
+    ]
+  ],
+  "prepareScriptSha256": "4147465550693e916f36d2d84dd63b391ae0ce3945992a4d0f7b40dcfc587e65"
+}

@@ -11,7 +11,7 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 
 /** Positive immutable bytes only; never retains an authority context or admission decision. */
 final class ConfigTransactionReadSet implements TransactionSynchronization {
-  static final int MAX_ENTRIES = 16;
+  static final int MAX_ENTRIES = 128;
   static final long MAX_BYTES = 8L * 1024 * 1024;
   private final Object owner;
   private final ConnectionHolder holder;
@@ -34,19 +34,7 @@ final class ConfigTransactionReadSet implements TransactionSynchronization {
         || !TransactionSynchronizationManager.isSynchronizationActive()) {
       return loader.get();
     }
-    ConfigTransactionReadSet readSet = null;
-    // Spring suspends this list with the transaction and restores it on resume. No global
-    // registry or separately bound resource can leak into REQUIRES_NEW.
-    for (var synchronization : TransactionSynchronizationManager.getSynchronizations()) {
-      if (synchronization instanceof ConfigTransactionReadSet existing && existing.owner == owner) {
-        readSet = existing;
-        break;
-      }
-    }
-    if (readSet == null) {
-      readSet = new ConfigTransactionReadSet(owner, guard.admitImmutableReadTransaction());
-      TransactionSynchronizationManager.registerSynchronization(readSet);
-    }
+    ConfigTransactionReadSet readSet = admitted(owner, guard);
     guard.requireImmutableReadTransaction(readSet.holder, readSet.connection);
     String cached = readSet.values.get(key);
     if (cached != null) return Optional.of(cached);
@@ -56,9 +44,48 @@ final class ConfigTransactionReadSet implements TransactionSynchronization {
     return loaded;
   }
 
+  /** SQL is executed only inside the admitted transaction; no caller-loaded map is accepted. */
+  static int prefetch(Object owner, ConfigJdbcTransactionGuard guard,
+      Supplier<Prefetched> loader) {
+    ConfigTransactionReadSet readSet = admitted(owner, guard);
+    guard.requireImmutableReadTransaction(readSet.holder, readSet.connection);
+    Prefetched loaded = loader.get();
+    guard.requireImmutableReadTransaction(readSet.holder, readSet.connection);
+    long total = loaded.values().values().stream().mapToLong(ConfigTransactionReadSet::size).sum();
+    if (loaded.consumed() < 1 || loaded.consumed() > MAX_ENTRIES
+        || loaded.values().size() > loaded.consumed() || total > MAX_BYTES) {
+      throw new IllegalStateException("Immutable evidence prefix exceeds its bounds.");
+    }
+    // The entire prefix fits: retaining it cannot evict an earlier entry of this prefix.
+    loaded.values().forEach(readSet::retain);
+    return loaded.consumed();
+  }
+
+  record Prefetched(int consumed, java.util.Map<Object, String> values) {
+    Prefetched { values = java.util.Collections.unmodifiableMap(new LinkedHashMap<>(values)); }
+  }
+
+  private static ConfigTransactionReadSet admitted(Object owner, ConfigJdbcTransactionGuard guard) {
+    if (!TransactionSynchronizationManager.isActualTransactionActive()
+        || !TransactionSynchronizationManager.isSynchronizationActive()) {
+      throw new IllegalStateException("Immutable prefetch requires a Config transaction.");
+    }
+    for (var synchronization : TransactionSynchronizationManager.getSynchronizations()) {
+      if (synchronization instanceof ConfigTransactionReadSet existing && existing.owner == owner) {
+        return existing;
+      }
+    }
+    // Spring suspends this list for REQUIRES_NEW; the proof is never a global resource.
+    var created = new ConfigTransactionReadSet(owner, guard.admitImmutableReadTransaction());
+    TransactionSynchronizationManager.registerSynchronization(created);
+    return created;
+  }
+
   private void retain(Object key, String value) {
     long size = size(value);
     if (size > MAX_BYTES) return;
+    String previous = values.remove(key);
+    if (previous != null) bytes -= size(previous);
     while (!values.isEmpty() && (values.size() >= MAX_ENTRIES || bytes + size > MAX_BYTES)) {
       var iterator = values.entrySet().iterator();
       bytes -= size(iterator.next().getValue());

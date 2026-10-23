@@ -6,7 +6,8 @@ import org.praxisplatform.config.dto.EnterpriseRuntimeNavigationResponse;
 /** No host authority is installed: never synthesize navigation or successful emptiness. */
 public class DefaultEnterpriseRuntimeNavigationProvider implements EnterpriseRuntimeNavigationProvider {
     @Override
-    public EnterpriseRuntimeNavigationResponse getNavigation(EnterpriseRuntimeContextRequest request) {
+    public EnterpriseRuntimeNavigationResponse getNavigation(EnterpriseRuntimeContextRequest request,
+            String expectedContextVersion, String parentRef, String cursor, int pageSize) {
         throw EnterpriseRuntimeProviderUnavailable.failure(request);
     }
 }

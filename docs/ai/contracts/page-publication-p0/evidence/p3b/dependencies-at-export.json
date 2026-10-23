@@ -1,0 +1,834 @@
+{
+  "${P3B_M2}/io/swagger/core/v3/swagger-core-jakarta/2.2.22/swagger-core-jakarta-2.2.22.jar": {
+    "sha256AtExport": "92d51dfa23ec0990cd1f745b0fb0dc15e31ffd294167a19ea8913d3b187e6dc6",
+    "bytes": 229928
+  },
+  "${P3B_M2}/org/apache/commons/commons-lang3/3.17.0/commons-lang3-3.17.0.jar": {
+    "sha256AtExport": "6ee731df5c8e5a2976a1ca023b6bb320ea8d3539fbe64c8a1d5cb765127c33b4",
+    "bytes": 673587
+  },
+  "${P3B_M2}/org/slf4j/slf4j-api/2.0.18/slf4j-api-2.0.18.jar": {
+    "sha256AtExport": "44508fd1576500688c790b190acdd16fec4f8c79a3e0b900afd70503cf055f55",
+    "bytes": 69982
+  },
+  "${P3B_M2}/io/swagger/core/v3/swagger-models-jakarta/2.2.22/swagger-models-jakarta-2.2.22.jar": {
+    "sha256AtExport": "3d820ad2e49c158b5d9787c5928bb4855a391dbff675a9a57bd978e76e98f089",
+    "bytes": 136369
+  },
+  "${P3B_M2}/org/yaml/snakeyaml/2.4/snakeyaml-2.4.jar": {
+    "sha256AtExport": "ef779af5d29a9dde8cc70ce0341f5c6f7735e23edff9685ceaa9d35359b7bb7f",
+    "bytes": 339825
+  },
+  "${P3B_M2}/jakarta/xml/bind/jakarta.xml.bind-api/4.0.5/jakarta.xml.bind-api-4.0.5.jar": {
+    "sha256AtExport": "5e489b6c874c4119e003ff1403db523ee3a8959ec499f3de29e77245efccf216",
+    "bytes": 131219
+  },
+  "${P3B_M2}/jakarta/activation/jakarta.activation-api/2.1.4/jakarta.activation-api-2.1.4.jar": {
+    "sha256AtExport": "c9db52100ce6c8aac95cc39075f95720d2e561b11f8051b81c121ad4effd7004",
+    "bytes": 67380
+  },
+  "${P3B_M2}/jakarta/validation/jakarta.validation-api/3.0.2/jakarta.validation-api-3.0.2.jar": {
+    "sha256AtExport": "291c25e6910cc6a7ebd96d4c6baebf6d7c37676c5482c2d96146e901b62c1fc9",
+    "bytes": 93298
+  },
+  "${P3B_M2}/com/fasterxml/jackson/core/jackson-annotations/2.21/jackson-annotations-2.21.jar": {
+    "sha256AtExport": "53ca085f4a150f703f49e1aabd935bd03b43e1ea3d55d135438292af22cef56b",
+    "bytes": 82104
+  },
+  "${P3B_M2}/com/fasterxml/jackson/dataformat/jackson-dataformat-yaml/2.21.4/jackson-dataformat-yaml-2.21.4.jar": {
+    "sha256AtExport": "055eb4c008ab12f0cb63e93a6454463d032fde0fca85943d69f8dc7469489e4b",
+    "bytes": 60606
+  },
+  "${P3B_M2}/com/fasterxml/jackson/datatype/jackson-datatype-jsr310/2.21.4/jackson-datatype-jsr310-2.21.4.jar": {
+    "sha256AtExport": "d1ac4b98b70304e56448423589fde5e775b100889643ad1ead62cc7811633684",
+    "bytes": 136585
+  },
+  "${P3B_M2}/io/github/codexrodrigues/praxis-config-contracts/0.1.0-beta.5/praxis-config-contracts-0.1.0-beta.5.jar": {
+    "sha256AtExport": "b50971ae80f47fd5ddcb69ed775a422b35b58a546bffd71c5f7993ab2ff44057",
+    "bytes": 29040
+  },
+  "${P3B_M2}/io/github/codexrodrigues/praxis-rules-engine/0.1.0-beta.17/praxis-rules-engine-0.1.0-beta.17.jar": {
+    "sha256AtExport": "2ca78cc7fe1abcf63b36df0259ccf41491acf6056eb4fd837ea334229c61ea52",
+    "bytes": 169874
+  },
+  "${P3B_M2}/io/swagger/core/v3/swagger-annotations-jakarta/2.2.47/swagger-annotations-jakarta-2.2.47.jar": {
+    "sha256AtExport": "9b30b319f1c31993e6128d22e12652be9a688589e30c67819ed84e95b96e7f88",
+    "bytes": 51227
+  },
+  "${P3B_M2}/org/springframework/boot/spring-boot-starter-data-jpa/3.5.15/spring-boot-starter-data-jpa-3.5.15.jar": {
+    "sha256AtExport": "bb58be26e305c4b0e62632840ac9bbcd0282494854a2187064d1ca1b942092d0",
+    "bytes": 4763
+  },
+  "${P3B_M2}/org/springframework/boot/spring-boot-starter/3.5.15/spring-boot-starter-3.5.15.jar": {
+    "sha256AtExport": "3e524173b6507e6b93bd72e694d90d5b0e2b8b15383a506eb10861a123728781",
+    "bytes": 4770
+  },
+  "${P3B_M2}/org/springframework/boot/spring-boot/3.5.15/spring-boot-3.5.15.jar": {
+    "sha256AtExport": "1d3ea175f61f492d95cbca457d6cc9cf1b696b550422c1b424d50dfa58f7da15",
+    "bytes": 1904512
+  },
+  "${P3B_M2}/org/springframework/boot/spring-boot-autoconfigure/3.5.15/spring-boot-autoconfigure-3.5.15.jar": {
+    "sha256AtExport": "180af16bbaa61ae70b3d8c533fe36264b1305d4a6916965ed86d0f4e47b73b3b",
+    "bytes": 2088460
+  },
+  "${P3B_M2}/org/springframework/boot/spring-boot-starter-logging/3.5.15/spring-boot-starter-logging-3.5.15.jar": {
+    "sha256AtExport": "ab958001faad88016b5cef9a78c6f455e487df288a735d2e458366c78b97ff9c",
+    "bytes": 4761
+  },
+  "${P3B_M2}/ch/qos/logback/logback-classic/1.5.34/logback-classic-1.5.34.jar": {
+    "sha256AtExport": "b65e05076a5c1aadb659b4fe4bc5fee31cb26cd70390292eb03e4a7a24cff10f",
+    "bytes": 286757
+  },
+  "${P3B_M2}/ch/qos/logback/logback-core/1.5.34/logback-core-1.5.34.jar": {
+    "sha256AtExport": "42eda264c0c650c2bec59e66151a88b708a8663dc1b49d788202d53e78b8caae",
+    "bytes": 645490
+  },
+  "${P3B_M2}/org/apache/logging/log4j/log4j-to-slf4j/2.24.3/log4j-to-slf4j-2.24.3.jar": {
+    "sha256AtExport": "c7f2b0c612a4eb05b1587d1c880eb4cf5f4f53850676a8ede8da2b8fabb4f73f",
+    "bytes": 23834
+  },
+  "${P3B_M2}/org/apache/logging/log4j/log4j-api/2.24.3/log4j-api-2.24.3.jar": {
+    "sha256AtExport": "5b4a0a0cd0e751ded431c162442bdbdd53328d1f8bb2bae5fc1bbeee0f66d80f",
+    "bytes": 348513
+  },
+  "${P3B_M2}/org/slf4j/jul-to-slf4j/2.0.18/jul-to-slf4j-2.0.18.jar": {
+    "sha256AtExport": "cbb7d1aaaa9e871eb1a06594abd911bf97027152976edf1edc315be75239204e",
+    "bytes": 6347
+  },
+  "${P3B_M2}/jakarta/annotation/jakarta.annotation-api/2.1.1/jakarta.annotation-api-2.1.1.jar": {
+    "sha256AtExport": "5f65fdaf424eee2b55e1d882ba9bb376be93fb09b37b808be6e22e8851c909fe",
+    "bytes": 26141
+  },
+  "${P3B_M2}/org/springframework/boot/spring-boot-starter-jdbc/3.5.15/spring-boot-starter-jdbc-3.5.15.jar": {
+    "sha256AtExport": "1d79bee20bac9901b760d5190d8fa84ef6824888b9108805600c65f477f56cb4",
+    "bytes": 4771
+  },
+  "${P3B_M2}/org/hibernate/orm/hibernate-core/6.6.53.Final/hibernate-core-6.6.53.Final.jar": {
+    "sha256AtExport": "8df110bacf8f4fe72be585cc7fa0a1687c8d360210826bdd35b0fbcaa3e9c09a",
+    "bytes": 12093295
+  },
+  "${P3B_M2}/jakarta/persistence/jakarta.persistence-api/3.1.0/jakarta.persistence-api-3.1.0.jar": {
+    "sha256AtExport": "475389446d35c6f46c565728b756dc508c284644ea2690644e0d8e7e339d42fd",
+    "bytes": 165250
+  },
+  "${P3B_M2}/jakarta/transaction/jakarta.transaction-api/2.0.1/jakarta.transaction-api-2.0.1.jar": {
+    "sha256AtExport": "50c0a7c760c13ae6c042acf182b28f0047413db95b4636fb8879bcffab5ba875",
+    "bytes": 28607
+  },
+  "${P3B_M2}/org/jboss/logging/jboss-logging/3.6.3.Final/jboss-logging-3.6.3.Final.jar": {
+    "sha256AtExport": "7c12ee575508f81e22b1db9334b969d0ec54ef0fd1dcba24eeab1a44235fc366",
+    "bytes": 62672
+  },
+  "${P3B_M2}/org/hibernate/common/hibernate-commons-annotations/7.0.3.Final/hibernate-commons-annotations-7.0.3.Final.jar": {
+    "sha256AtExport": "0db2fd57d5e43688ac6ed5cdf36deaf05d84340dcc24c2dd2a2114de38e5175d",
+    "bytes": 67979
+  },
+  "${P3B_M2}/io/smallrye/jandex/3.2.0/jandex-3.2.0.jar": {
+    "sha256AtExport": "6da3e9ce8d0c0a433f3e7ce610a3c66accb00c71fee67aa0ff3e5a841395ac15",
+    "bytes": 374726
+  },
+  "${P3B_M2}/com/fasterxml/classmate/1.7.3/classmate-1.7.3.jar": {
+    "sha256AtExport": "75fbda45456f123fb6e2028a6189442d8d0730b357adce4c0a6d7e789f70669b",
+    "bytes": 68249
+  },
+  "${P3B_M2}/net/bytebuddy/byte-buddy/1.17.8/byte-buddy-1.17.8.jar": {
+    "sha256AtExport": "2b5ddc8c1f4234bdb7cb45338a8e10a13e0e3ca473e91d5d821d681127ea8ba1",
+    "bytes": 9018553
+  },
+  "${P3B_M2}/org/glassfish/jaxb/jaxb-runtime/4.0.9/jaxb-runtime-4.0.9.jar": {
+    "sha256AtExport": "93e09b7316b6af68d6e2083e4c297daf28e8957f45d725077af812c0b12c39ab",
+    "bytes": 922445
+  },
+  "${P3B_M2}/org/glassfish/jaxb/jaxb-core/4.0.9/jaxb-core-4.0.9.jar": {
+    "sha256AtExport": "6b014df25d22c8446cc2df0a378c5b2137747f197a731d99eb24c756b26f7e8d",
+    "bytes": 139417
+  },
+  "${P3B_M2}/org/eclipse/angus/angus-activation/2.0.3/angus-activation-2.0.3.jar": {
+    "sha256AtExport": "a6bd35c538cf90fff941ad6258c40c08fca0b5c9c3f536c657114f27ce0527a7",
+    "bytes": 26729
+  },
+  "${P3B_M2}/org/glassfish/jaxb/txw2/4.0.9/txw2-4.0.9.jar": {
+    "sha256AtExport": "d6343e5945d87266ca4e8974a0a2a876e1bd147a00fb65ed3f2e1a3a00f3a82a",
+    "bytes": 73276
+  },
+  "${P3B_M2}/com/sun/istack/istack-commons-runtime/4.1.2/istack-commons-runtime-4.1.2.jar": {
+    "sha256AtExport": "7fd6792361f4dd00f8c56af4a20cecc0066deea4a8f3dec38348af23fc2296ee",
+    "bytes": 25788
+  },
+  "${P3B_M2}/jakarta/inject/jakarta.inject-api/2.0.1/jakarta.inject-api-2.0.1.jar": {
+    "sha256AtExport": "f7dc98062fccf14126abb751b64fab12c312566e8cbdc8483598bffcea93af7c",
+    "bytes": 10681
+  },
+  "${P3B_M2}/org/antlr/antlr4-runtime/4.13.2/antlr4-runtime-4.13.2.jar": {
+    "sha256AtExport": "dd3e8a13a2d669bf84fb8d834de35ce4875f27157698d206241ec8488aadcaf7",
+    "bytes": 326307
+  },
+  "${P3B_M2}/org/springframework/data/spring-data-jpa/3.5.12/spring-data-jpa-3.5.12.jar": {
+    "sha256AtExport": "5683f9b6d3540d92845867a9616b21e7aed61795d01089fb681a94d8c10e9f25",
+    "bytes": 1837214
+  },
+  "${P3B_M2}/org/springframework/data/spring-data-commons/3.5.12/spring-data-commons-3.5.12.jar": {
+    "sha256AtExport": "eb591cf120bc54aa952b980110efe5e4b914b1cc583ac6244ead7fe7df519b4b",
+    "bytes": 1527446
+  },
+  "${P3B_M2}/org/springframework/spring-orm/6.2.19/spring-orm-6.2.19.jar": {
+    "sha256AtExport": "32c1221bfb2eac7a73beee46da4150a6d941aa90f00228d0a2c80a5772c5c03d",
+    "bytes": 235232
+  },
+  "${P3B_M2}/org/springframework/spring-tx/6.2.19/spring-tx-6.2.19.jar": {
+    "sha256AtExport": "34a1b6f5d87ef4cca6849e1bc70a0f965eec6476737b3cae73ff2561a266ef73",
+    "bytes": 289958
+  },
+  "${P3B_M2}/org/springframework/spring-aspects/6.2.19/spring-aspects-6.2.19.jar": {
+    "sha256AtExport": "4b323ae36dd6d5a7c0ca2f134ac83fa2d16628ee8205e96ff6965ec0f35ea142",
+    "bytes": 49790
+  },
+  "${P3B_M2}/org/aspectj/aspectjweaver/1.9.25.1/aspectjweaver-1.9.25.1.jar": {
+    "sha256AtExport": "4fe86fdc18faea571f29129c70eaad5d121363504a06d7907be88f6c60ba3116",
+    "bytes": 2190661
+  },
+  "${P3B_M2}/org/springframework/boot/spring-boot-starter-validation/3.5.15/spring-boot-starter-validation-3.5.15.jar": {
+    "sha256AtExport": "4e909cb690bfa087210f875b7a507fd24f821a4d630ccdf320c0b55e45860500",
+    "bytes": 4769
+  },
+  "${P3B_M2}/org/apache/tomcat/embed/tomcat-embed-el/10.1.55/tomcat-embed-el-10.1.55.jar": {
+    "sha256AtExport": "a527fe51c6f9428c5116f78fe28588e55357b4492309b51fb0453372da16fa5f",
+    "bytes": 264325
+  },
+  "${P3B_M2}/org/hibernate/validator/hibernate-validator/8.0.3.Final/hibernate-validator-8.0.3.Final.jar": {
+    "sha256AtExport": "2ad24670fd08e21d3f43d3105d5326bd5ef6b01e819c5cd103823866b954517e",
+    "bytes": 1330712
+  },
+  "${P3B_M2}/org/springframework/boot/spring-boot-starter-web/3.5.15/spring-boot-starter-web-3.5.15.jar": {
+    "sha256AtExport": "242bb6ed018cfbb716315be5195b238add25ead27ee8eb1009c23bbfe2b84dd5",
+    "bytes": 4805
+  },
+  "${P3B_M2}/org/springframework/boot/spring-boot-starter-json/3.5.15/spring-boot-starter-json-3.5.15.jar": {
+    "sha256AtExport": "786b41d758237ed2c2f0a5b8109d2d965c33192b74ba2c6c4f995ea86d739282",
+    "bytes": 4749
+  },
+  "${P3B_M2}/com/fasterxml/jackson/datatype/jackson-datatype-jdk8/2.21.4/jackson-datatype-jdk8-2.21.4.jar": {
+    "sha256AtExport": "2dde4a8f1aad3306c040f56ff40da81c6d58dcef3434c00849c9bce09f56a074",
+    "bytes": 36040
+  },
+  "${P3B_M2}/com/fasterxml/jackson/module/jackson-module-parameter-names/2.21.4/jackson-module-parameter-names-2.21.4.jar": {
+    "sha256AtExport": "9510f91a4be2c700753ad244596b67424cb32c23659db1dc534219226e5df3a3",
+    "bytes": 10187
+  },
+  "${P3B_M2}/org/springframework/boot/spring-boot-starter-tomcat/3.5.15/spring-boot-starter-tomcat-3.5.15.jar": {
+    "sha256AtExport": "49b66d50ec005658752ed3eea372e15ab4c2df407cb29ccd568536af090ef390",
+    "bytes": 4794
+  },
+  "${P3B_M2}/org/apache/tomcat/embed/tomcat-embed-core/10.1.55/tomcat-embed-core-10.1.55.jar": {
+    "sha256AtExport": "82473f841824095e03f2c938c18707e44e388e34fb1735b2b338bb4f22fd54f0",
+    "bytes": 3673934
+  },
+  "${P3B_M2}/org/apache/tomcat/embed/tomcat-embed-websocket/10.1.55/tomcat-embed-websocket-10.1.55.jar": {
+    "sha256AtExport": "81800431395fe2ef317fc14075ed49faaa64679a3458ee8791159111a1aa1b37",
+    "bytes": 284383
+  },
+  "${P3B_M2}/org/springframework/spring-web/6.2.19/spring-web-6.2.19.jar": {
+    "sha256AtExport": "ca88e364ecebee61163e2260e8a20584138eca74e28a050d6a2ef6302bad2f2d",
+    "bytes": 2096068
+  },
+  "${P3B_M2}/org/springframework/spring-webmvc/6.2.19/spring-webmvc-6.2.19.jar": {
+    "sha256AtExport": "134f42320cedd31f54f683d2ca9936a4e015c011fb1882a31fa7213e2d8c7e94",
+    "bytes": 1095229
+  },
+  "${P3B_M2}/org/springframework/boot/spring-boot-starter-actuator/3.5.15/spring-boot-starter-actuator-3.5.15.jar": {
+    "sha256AtExport": "78217f3ba6bd9960585a5dde9444291a274cf8e0f05875898a4c503f0db2c53b",
+    "bytes": 4807
+  },
+  "${P3B_M2}/org/springframework/boot/spring-boot-actuator-autoconfigure/3.5.15/spring-boot-actuator-autoconfigure-3.5.15.jar": {
+    "sha256AtExport": "02e1960a02ccdf22c16d19aebe1ccd2ec68a151b1f388bf0b3fb2705e6e2b62d",
+    "bytes": 842765
+  },
+  "${P3B_M2}/org/springframework/boot/spring-boot-actuator/3.5.15/spring-boot-actuator-3.5.15.jar": {
+    "sha256AtExport": "615016c0c6275e0c8a598857acf06ac3d7f26d680cfd5f215467e82093c4e86b",
+    "bytes": 707751
+  },
+  "${P3B_M2}/io/micrometer/micrometer-observation/1.15.12/micrometer-observation-1.15.12.jar": {
+    "sha256AtExport": "54483e68ed44af1bb0c36d1df2235d36f233e459d52f5a3be3e69813827a6300",
+    "bytes": 76264
+  },
+  "${P3B_M2}/io/micrometer/micrometer-commons/1.15.12/micrometer-commons-1.15.12.jar": {
+    "sha256AtExport": "4b779cf7acb0534bb1f8e964f25200037ecb3944368f859a630fa637d6d5d7c0",
+    "bytes": 49155
+  },
+  "${P3B_M2}/io/micrometer/micrometer-jakarta9/1.15.12/micrometer-jakarta9-1.15.12.jar": {
+    "sha256AtExport": "08bfce8241e9de35906a24afd9ee942e0c71784231762dc3984bf794ba269251",
+    "bytes": 32795
+  },
+  "${P3B_M2}/io/micrometer/micrometer-core/1.15.12/micrometer-core-1.15.12.jar": {
+    "sha256AtExport": "30f6136353e39bc067b26745a6c31b0b6e419d8ff59c05b5364d7c1d4b78083e",
+    "bytes": 866856
+  },
+  "${P3B_M2}/org/hdrhistogram/HdrHistogram/2.2.2/HdrHistogram-2.2.2.jar": {
+    "sha256AtExport": "22d1d4316c4ec13a68b559e98c8256d69071593731da96136640f864fa14fad8",
+    "bytes": 177206
+  },
+  "${P3B_M2}/org/latencyutils/LatencyUtils/2.0.3/LatencyUtils-2.0.3.jar": {
+    "sha256AtExport": "a32a9ffa06b2f4e01c5360f8f9df7bc5d9454a5d373cd8f361347fa5a57165ec",
+    "bytes": 29779
+  },
+  "${P3B_M2}/com/fasterxml/jackson/core/jackson-databind/2.21.4/jackson-databind-2.21.4.jar": {
+    "sha256AtExport": "3888e9e69ab66fbacaacc9aea0e9ffbf15368288e4aca468b024dba11c09fbf9",
+    "bytes": 1702879
+  },
+  "${P3B_M2}/com/fasterxml/jackson/core/jackson-core/2.21.4/jackson-core-2.21.4.jar": {
+    "sha256AtExport": "4b40a06396f239f8de2da57419adde6e94e5edc18a2171d471ea05eeed4e5c2d",
+    "bytes": 594183
+  },
+  "${P3B_M2}/org/springframework/ai/spring-ai-starter-model-openai/1.1.8/spring-ai-starter-model-openai-1.1.8.jar": {
+    "sha256AtExport": "9066f6f1ef65d8c4115833a75ded0bafdcfc98897da548d20aede2bc8fc48848",
+    "bytes": 2450
+  },
+  "${P3B_M2}/org/springframework/ai/spring-ai-autoconfigure-model-openai/1.1.8/spring-ai-autoconfigure-model-openai-1.1.8.jar": {
+    "sha256AtExport": "2e6e73148c7be1d345ad829b3ae81eaa4d0098c7828857f4564fac949c71d6f4",
+    "bytes": 33569
+  },
+  "${P3B_M2}/org/springframework/ai/spring-ai-autoconfigure-model-tool/1.1.8/spring-ai-autoconfigure-model-tool-1.1.8.jar": {
+    "sha256AtExport": "76ad8fe34aad269566e7b233f292cec31f577ed0344ab98b28b565f1a69e22ec",
+    "bytes": 10389
+  },
+  "${P3B_M2}/org/springframework/ai/spring-ai-autoconfigure-retry/1.1.8/spring-ai-autoconfigure-retry-1.1.8.jar": {
+    "sha256AtExport": "46dbcf5ae618fc7a094e69378d47db2b05ada8fd2f74f2cf710642bb5c666a73",
+    "bytes": 10892
+  },
+  "${P3B_M2}/org/springframework/ai/spring-ai-autoconfigure-model-chat-observation/1.1.8/spring-ai-autoconfigure-model-chat-observation-1.1.8.jar": {
+    "sha256AtExport": "67f81e730f1eadee922772bd059cfd6d56e9dad17fe00325ad157629e1995dfd",
+    "bytes": 10077
+  },
+  "${P3B_M2}/org/springframework/ai/spring-ai-autoconfigure-model-embedding-observation/1.1.8/spring-ai-autoconfigure-model-embedding-observation-1.1.8.jar": {
+    "sha256AtExport": "c7b3731d3fb0a9bbfecc357d00bb70af2fd0a9d044ddab1cc2bfd1eb2db42abe",
+    "bytes": 5784
+  },
+  "${P3B_M2}/org/springframework/ai/spring-ai-autoconfigure-model-image-observation/1.1.8/spring-ai-autoconfigure-model-image-observation-1.1.8.jar": {
+    "sha256AtExport": "9495f6e43e8cb3c92b380c472a6864c08d30d9a125821bbdfa1fb31621f08837",
+    "bytes": 9164
+  },
+  "${P3B_M2}/org/springframework/ai/spring-ai-openai/1.1.8/spring-ai-openai-1.1.8.jar": {
+    "sha256AtExport": "17705f1bddead09d7e546ab32249e18c7a3f89c2895aa5e48da0365e067680b9",
+    "bytes": 234258
+  },
+  "${P3B_M2}/org/springframework/ai/spring-ai-model/1.1.8/spring-ai-model-1.1.8.jar": {
+    "sha256AtExport": "98c2c6d58fb9d52f7a451bac17512d8d410034ac5d47457aafb15f53d2ec456a",
+    "bytes": 405059
+  },
+  "${P3B_M2}/org/springframework/ai/spring-ai-commons/1.1.8/spring-ai-commons-1.1.8.jar": {
+    "sha256AtExport": "3aa084fbb5676af48312feb88f2fe565175e84b5074cae37ed2834662a365258",
+    "bytes": 80861
+  },
+  "${P3B_M2}/io/micrometer/context-propagation/1.1.4/context-propagation-1.1.4.jar": {
+    "sha256AtExport": "d9878c7286014663ff6b33321eb21197a9d1d75e5c8ddbe1e9e1823c17a4e8cf",
+    "bytes": 35697
+  },
+  "${P3B_M2}/org/springframework/ai/spring-ai-template-st/1.1.8/spring-ai-template-st-1.1.8.jar": {
+    "sha256AtExport": "873c8ceee840d5a354d018994ceacaa29df44adeafd360349a6c645c7508f0ca",
+    "bytes": 8462
+  },
+  "${P3B_M2}/org/antlr/ST4/4.3.4/ST4-4.3.4.jar": {
+    "sha256AtExport": "f927ac384c46d749f8b5ec68972a53aed21e00313509299616edb73bfa15ff33",
+    "bytes": 251081
+  },
+  "${P3B_M2}/org/antlr/antlr-runtime/3.5.3/antlr-runtime-3.5.3.jar": {
+    "sha256AtExport": "68bf9f5a33dfcb34033495c587e6236bef4e37aa6612919f5b1e843b90669fb9",
+    "bytes": 173220
+  },
+  "${P3B_M2}/org/springframework/spring-messaging/6.2.19/spring-messaging-6.2.19.jar": {
+    "sha256AtExport": "9b063aad34a6876a640976c6657ab25cb2bf6c41e2eafaa5a7e50ccf3234390c",
+    "bytes": 618779
+  },
+  "${P3B_M2}/org/springframework/ai/spring-ai-retry/1.1.8/spring-ai-retry-1.1.8.jar": {
+    "sha256AtExport": "145ddf98f95a68845c95615a74d2faec627bf3aac3a03fd027e9194517617a7b",
+    "bytes": 7918
+  },
+  "${P3B_M2}/org/springframework/retry/spring-retry/2.0.13/spring-retry-2.0.13.jar": {
+    "sha256AtExport": "213785750007f90b067ba43036cbffdad2890f6bb98917e199f6b049cf810040",
+    "bytes": 161244
+  },
+  "${P3B_M2}/com/github/victools/jsonschema-generator/4.38.0/jsonschema-generator-4.38.0.jar": {
+    "sha256AtExport": "ade4aeb301db4028ac6bcba016c31405677e37aae6eebaf13c99de3fdb3531b4",
+    "bytes": 163594
+  },
+  "${P3B_M2}/com/github/victools/jsonschema-module-jackson/4.38.0/jsonschema-module-jackson-4.38.0.jar": {
+    "sha256AtExport": "36fbd3f1c27379c3ba8420ac2cb0b42411f7bc3b3df8bdd11d8d7e024a1c28ca",
+    "bytes": 33871
+  },
+  "${P3B_M2}/org/springframework/spring-context-support/6.2.19/spring-context-support-6.2.19.jar": {
+    "sha256AtExport": "f99b9158ca52c8c2309663ae112f2c7ae10b1696b2350f401ee771a22722f7cc",
+    "bytes": 175412
+  },
+  "${P3B_M2}/org/springframework/spring-webflux/6.2.19/spring-webflux-6.2.19.jar": {
+    "sha256AtExport": "9d04cc10a6fda80eff1fa0b7aebdc47995dfea8968eb4be428fb03b03933a510",
+    "bytes": 1019389
+  },
+  "${P3B_M2}/org/springframework/ai/spring-ai-autoconfigure-model-chat-client/1.1.8/spring-ai-autoconfigure-model-chat-client-1.1.8.jar": {
+    "sha256AtExport": "b7967ac14c6794e48d1a4592fed9612e4d9a5c37bef829b4e76f0194d82c693d",
+    "bytes": 12778
+  },
+  "${P3B_M2}/org/springframework/ai/spring-ai-autoconfigure-model-chat-memory/1.1.8/spring-ai-autoconfigure-model-chat-memory-1.1.8.jar": {
+    "sha256AtExport": "d897d24a556b8072adf9d43d9f748745ca9895a7ca6214f293fcf25600a327fd",
+    "bytes": 4717
+  },
+  "${P3B_M2}/com/openai/openai-java/4.43.0/openai-java-4.43.0.jar": {
+    "sha256AtExport": "82d35e8d467ed1852e3dc095ef065c6fa87cb7eac0b4b827f8552f24f580c840",
+    "bytes": 343
+  },
+  "${P3B_M2}/com/openai/openai-java-client-okhttp/4.43.0/openai-java-client-okhttp-4.43.0.jar": {
+    "sha256AtExport": "7d37fc5de9920a0fc2a071b58baae5eac8981e784ede9612589dfbd194dda715",
+    "bytes": 40109
+  },
+  "${P3B_M2}/com/openai/openai-java-core/4.43.0/openai-java-core-4.43.0.jar": {
+    "sha256AtExport": "6a887db44f77ce14fa9a6488949d9a74fb823cc3f10ee00008e440cd8fa334dc",
+    "bytes": 52166008
+  },
+  "${P3B_M2}/com/google/errorprone/error_prone_annotations/2.33.0/error_prone_annotations-2.33.0.jar": {
+    "sha256AtExport": "d9f3af3974fa64cd0f0f34238f40d9898abf7df19ca15849e1978f5beb818cb6",
+    "bytes": 19398
+  },
+  "${P3B_M2}/com/fasterxml/jackson/module/jackson-module-kotlin/2.21.4/jackson-module-kotlin-2.21.4.jar": {
+    "sha256AtExport": "f9fe2ad3927dbff6c604b122977302fd83f9c3d52d48381db0f40560dec516ca",
+    "bytes": 253162
+  },
+  "${P3B_M2}/org/jetbrains/kotlin/kotlin-reflect/1.9.25/kotlin-reflect-1.9.25.jar": {
+    "sha256AtExport": "0f8386ddfd69e7f454a1e6b90b271dccd901d96a257fdf633ecf052fb8951d9f",
+    "bytes": 3222101
+  },
+  "${P3B_M2}/com/squareup/okhttp3/okhttp/4.12.0/okhttp-4.12.0.jar": {
+    "sha256AtExport": "b1050081b14bb7a3a7e55a4d3ef01b5dcfabc453b4573a4fc019767191d5f4e0",
+    "bytes": 789531
+  },
+  "${P3B_M2}/com/squareup/okio/okio/3.6.0/okio-3.6.0.jar": {
+    "sha256AtExport": "8e63292e5c53bb93c4a6b0c213e79f15990fed250c1340f1c343880e1c9c39b5",
+    "bytes": 25744
+  },
+  "${P3B_M2}/com/squareup/okio/okio-jvm/3.6.0/okio-jvm-3.6.0.jar": {
+    "sha256AtExport": "67543f0736fc422ae927ed0e504b98bc5e269fda0d3500579337cb713da28412",
+    "bytes": 359580
+  },
+  "${P3B_M2}/org/jetbrains/kotlin/kotlin-stdlib-common/1.9.25/kotlin-stdlib-common-1.9.25.jar": {
+    "sha256AtExport": "8202e7f032c8dc6698d00c62867701546a7c12c4731ebddfb8eec0788e2eeee4",
+    "bytes": 227489
+  },
+  "${P3B_M2}/org/jetbrains/kotlin/kotlin-stdlib-jdk8/1.9.25/kotlin-stdlib-jdk8-1.9.25.jar": {
+    "sha256AtExport": "f94fdf78390ce9be30383bf039c5a935caea33b11f037fc7f86bbcee19287e5a",
+    "bytes": 967
+  },
+  "${P3B_M2}/org/jetbrains/kotlin/kotlin-stdlib/1.9.25/kotlin-stdlib-1.9.25.jar": {
+    "sha256AtExport": "f9cdcdbff1f5de85380ae526977e683726c2aa42db1ed6e6e50ae89e496e95fd",
+    "bytes": 1718956
+  },
+  "${P3B_M2}/org/jetbrains/annotations/13.0/annotations-13.0.jar": {
+    "sha256AtExport": "ace2a10dc8e2d5fd34925ecac03e4988b2c0f851650c94b8cef49ba1bd111478",
+    "bytes": 17536
+  },
+  "${P3B_M2}/org/jetbrains/kotlin/kotlin-stdlib-jdk7/1.9.25/kotlin-stdlib-jdk7-1.9.25.jar": {
+    "sha256AtExport": "fb5373dd761b4e93e3f538c5e853bba38a71143a181536e8f193ed6e4eddb3b8",
+    "bytes": 961
+  },
+  "${P3B_M2}/org/springframework/ai/spring-ai-starter-model-google-genai/1.1.8/spring-ai-starter-model-google-genai-1.1.8.jar": {
+    "sha256AtExport": "d7d85dddd3ac6f697eb04a0d17fc1503be4a88b6fc82f58873a52132bb391295",
+    "bytes": 2498
+  },
+  "${P3B_M2}/org/springframework/ai/spring-ai-autoconfigure-model-google-genai/1.1.8/spring-ai-autoconfigure-model-google-genai-1.1.8.jar": {
+    "sha256AtExport": "fcf6624ca3681c13113cb17c8df3f22e195a9b9751065836e8b7fb0f97ec155d",
+    "bytes": 19072
+  },
+  "${P3B_M2}/org/springframework/ai/spring-ai-google-genai/1.1.8/spring-ai-google-genai-1.1.8.jar": {
+    "sha256AtExport": "b5def9e882a86c5c8ddffc3ec9661a09095d249a1fbb2f33e751292611460b16",
+    "bytes": 75995
+  },
+  "${P3B_M2}/com/google/genai/google-genai/1.37.0/google-genai-1.37.0.jar": {
+    "sha256AtExport": "253344f46e2645a55d9ff0b0d0d339c8b95b8169ce1b1863d078b6875595ff5a",
+    "bytes": 2582778
+  },
+  "${P3B_M2}/com/google/auth/google-auth-library-oauth2-http/1.33.0/google-auth-library-oauth2-http-1.33.0.jar": {
+    "sha256AtExport": "6ef8d2cfad3396d8bda0178dbde06cb162c1f27665a28e1202f4058b49db5438",
+    "bytes": 301281
+  },
+  "${P3B_M2}/com/google/auto/value/auto-value-annotations/1.11.0/auto-value-annotations-1.11.0.jar": {
+    "sha256AtExport": "5a055ce4255333b3346e1a8703da5bf8ff049532286fdcd31712d624abe111dd",
+    "bytes": 7491
+  },
+  "${P3B_M2}/com/google/code/findbugs/jsr305/3.0.2/jsr305-3.0.2.jar": {
+    "sha256AtExport": "766ad2a0783f2687962c8ad74ceecc38a28b9f72a2d085ee438b7813e928d0c7",
+    "bytes": 19936
+  },
+  "${P3B_M2}/com/google/auth/google-auth-library-credentials/1.33.0/google-auth-library-credentials-1.33.0.jar": {
+    "sha256AtExport": "96085f0600537e7d91c2eba9dfe2cc0b171031f8ae821027e3713d32074ccbe8",
+    "bytes": 8409
+  },
+  "${P3B_M2}/com/google/http-client/google-http-client/1.46.2/google-http-client-1.46.2.jar": {
+    "sha256AtExport": "850e0b401961fd047a7cab760d25cbb01bbee4d0c69a8a4817d4ac732d0c335b",
+    "bytes": 295841
+  },
+  "${P3B_M2}/io/grpc/grpc-context/1.70.0/grpc-context-1.70.0.jar": {
+    "sha256AtExport": "eb2824831c0ac03e741efda86b141aa863a481ebc4aaf5a5c1f13a481dbb40ff",
+    "bytes": 293
+  },
+  "${P3B_M2}/io/grpc/grpc-api/1.70.0/grpc-api-1.70.0.jar": {
+    "sha256AtExport": "45faf2ac1bf2791e8fdabce53684a86b62c99b84cba26fb13a5ba3f4abf80d6c",
+    "bytes": 323078
+  },
+  "${P3B_M2}/io/opencensus/opencensus-api/0.31.1/opencensus-api-0.31.1.jar": {
+    "sha256AtExport": "f1474d47f4b6b001558ad27b952e35eda5cc7146788877fc52938c6eba24b382",
+    "bytes": 355405
+  },
+  "${P3B_M2}/io/opencensus/opencensus-contrib-http-util/0.31.1/opencensus-contrib-http-util-0.31.1.jar": {
+    "sha256AtExport": "3ea995b55a4068be22989b70cc29a4d788c2d328d1d50613a7a9afd13fdd2d0a",
+    "bytes": 23415
+  },
+  "${P3B_M2}/com/google/http-client/google-http-client-gson/1.46.2/google-http-client-gson-1.46.2.jar": {
+    "sha256AtExport": "15fcfb1d628a27d0a2ac648ae99320fd8e698ec47c1af750ea6f6e078e682726",
+    "bytes": 12835
+  },
+  "${P3B_M2}/com/google/guava/guava/33.4.0-android/guava-33.4.0-android.jar": {
+    "sha256AtExport": "e335cd1678426f15e04ae4f623c58b4c176572d7258c6ea64e3437cdc01e5707",
+    "bytes": 2987257
+  },
+  "${P3B_M2}/com/google/guava/failureaccess/1.0.2/failureaccess-1.0.2.jar": {
+    "sha256AtExport": "8a8f81cf9b359e3f6dfa691a1e776985c061ef2f223c9b2c80753e1b458e8064",
+    "bytes": 4740
+  },
+  "${P3B_M2}/com/google/guava/listenablefuture/9999.0-empty-to-avoid-conflict-with-guava/listenablefuture-9999.0-empty-to-avoid-conflict-with-guava.jar": {
+    "sha256AtExport": "b372a037d4230aa57fbeffdef30fd6123f9c0c2db85d0aced00c91b974f33f99",
+    "bytes": 2199
+  },
+  "${P3B_M2}/org/checkerframework/checker-qual/3.43.0/checker-qual-3.43.0.jar": {
+    "sha256AtExport": "3fbc2e98f05854c3df16df9abaa955b91b15b3ecac33623208ed6424640ef0f6",
+    "bytes": 231525
+  },
+  "${P3B_M2}/com/google/code/gson/gson/2.13.2/gson-2.13.2.jar": {
+    "sha256AtExport": "dd0ce1b55a3ed2080cb70f9c655850cda86c206862310009dcb5e5c95265a5e0",
+    "bytes": 289901
+  },
+  "${P3B_M2}/org/apache/httpcomponents/httpclient/4.5.14/httpclient-4.5.14.jar": {
+    "sha256AtExport": "c8bc7e1c51a6d4ce72f40d2ebbabf1c4b68bfe76e732104b04381b493478e9d6",
+    "bytes": 785639
+  },
+  "${P3B_M2}/org/apache/httpcomponents/httpcore/4.4.16/httpcore-4.4.16.jar": {
+    "sha256AtExport": "6c9b3dd142a09dc468e23ad39aad6f75a0f2b85125104469f026e52a474e464f",
+    "bytes": 327891
+  },
+  "${P3B_M2}/commons-logging/commons-logging/1.2/commons-logging-1.2.jar": {
+    "sha256AtExport": "daddea1ea0be0f56978ab3006b8ac92834afeefbd9b7e4e6316fca57df0fa636",
+    "bytes": 61829
+  },
+  "${P3B_M2}/com/google/api/api-common/2.45.0/api-common-2.45.0.jar": {
+    "sha256AtExport": "335933f1043d3b4022e301a7bba2a5614bbd59df88e6eb7e311d780669d55c20",
+    "bytes": 50441
+  },
+  "${P3B_M2}/javax/annotation/javax.annotation-api/1.3.2/javax.annotation-api-1.3.2.jar": {
+    "sha256AtExport": "e04ba5195bcd555dc95650f7cc614d151e4bcd52d29a10b8aa2197f3ab89ab9b",
+    "bytes": 26586
+  },
+  "${P3B_M2}/com/google/j2objc/j2objc-annotations/3.0.0/j2objc-annotations-3.0.0.jar": {
+    "sha256AtExport": "88241573467ddca44ffd4d74aa04c2bbfd11bf7c17e0c342c94c9de7a70a7c64",
+    "bytes": 12467
+  },
+  "${P3B_M2}/org/java-websocket/Java-WebSocket/1.6.0/Java-WebSocket-1.6.0.jar": {
+    "sha256AtExport": "eae29213e4f16515639c28957200f011b3967fffcada1962cf0255d24919c22f",
+    "bytes": 140686
+  },
+  "${P3B_M2}/com/google/protobuf/protobuf-java/3.25.5/protobuf-java-3.25.5.jar": {
+    "sha256AtExport": "8540247fad9e06baefa8fb45eb313802d019f485f14300e0f9d6b556ed88e753",
+    "bytes": 1875414
+  },
+  "${P3B_M2}/org/jspecify/jspecify/1.0.0/jspecify-1.0.0.jar": {
+    "sha256AtExport": "1fad6e6be7557781e4d33729d49ae1cdc8fdda6fe477bb0cc68ce351eafdfbab",
+    "bytes": 3819
+  },
+  "${P3B_M2}/org/springframework/ai/spring-ai-starter-model-google-genai-embedding/1.1.8/spring-ai-starter-model-google-genai-embedding-1.1.8.jar": {
+    "sha256AtExport": "bcd423837ca88099d45caab70a7d5af395e7b7eb1408d2c37470438917f6901e",
+    "bytes": 2563
+  },
+  "${P3B_M2}/org/springframework/ai/spring-ai-google-genai-embedding/1.1.8/spring-ai-google-genai-embedding-1.1.8.jar": {
+    "sha256AtExport": "e4990995b1d71f241c3b95feca926c8c338563feb398f1911cfc43156a67f71f",
+    "bytes": 16480
+  },
+  "${P3B_M2}/org/springframework/ai/spring-ai-advisors-vector-store/1.1.8/spring-ai-advisors-vector-store-1.1.8.jar": {
+    "sha256AtExport": "69b5af79175ecada57b8d13047dcd601849e8354ced042b0619a751e71a4b1d7",
+    "bytes": 15938
+  },
+  "${P3B_M2}/org/springframework/ai/spring-ai-client-chat/1.1.8/spring-ai-client-chat-1.1.8.jar": {
+    "sha256AtExport": "37bd261a6fc4791fb671d20a0a296f7da0490eb0d128194a41c475f063838881",
+    "bytes": 143127
+  },
+  "${P3B_M2}/io/modelcontextprotocol/sdk/mcp-json-jackson2/0.18.3/mcp-json-jackson2-0.18.3.jar": {
+    "sha256AtExport": "d1e118f4457b8e4649031e90b1ffd41ffee4f88258411860fbf40df9ac1b794f",
+    "bytes": 18026
+  },
+  "${P3B_M2}/io/modelcontextprotocol/sdk/mcp-core/0.18.3/mcp-core-0.18.3.jar": {
+    "sha256AtExport": "eef058d9a23cd921be08503f38cbd6997407c313bc68a5f8fc4f6a6001845e27",
+    "bytes": 508609
+  },
+  "${P3B_M2}/com/fasterxml/jackson/module/jackson-module-jsonSchema/2.21.4/jackson-module-jsonSchema-2.21.4.jar": {
+    "sha256AtExport": "0423daa4dfa3cf8a930a610dfb16a67614426efcde27cbdd72ca18cc2f332077",
+    "bytes": 78726
+  },
+  "${P3B_M2}/javax/validation/validation-api/1.1.0.Final/validation-api-1.1.0.Final.jar": {
+    "sha256AtExport": "f39d7ba7253e35f5ac48081ec1bc28c5df9b32ac4b7db20853e5a8e76bf7b0ed",
+    "bytes": 63777
+  },
+  "${P3B_M2}/com/github/victools/jsonschema-module-swagger-2/4.38.0/jsonschema-module-swagger-2-4.38.0.jar": {
+    "sha256AtExport": "b76c0df657bcf88cca46d7ad540938552e10127a7c28d2136f62b631666997c1",
+    "bytes": 18918
+  },
+  "${P3B_M2}/io/projectreactor/reactor-core/3.7.19/reactor-core-3.7.19.jar": {
+    "sha256AtExport": "50390c15320c578784f60ea9d4d3f7a3eff9ba90c6567f38c6cce5c9f1f69faa",
+    "bytes": 1899418
+  },
+  "${P3B_M2}/org/reactivestreams/reactive-streams/1.0.4/reactive-streams-1.0.4.jar": {
+    "sha256AtExport": "f75ca597789b3dac58f61857b9ac2e1034a68fa672db35055a8fb4509e325f28",
+    "bytes": 11640
+  },
+  "${P3B_M2}/com/knuddels/jtokkit/1.1.0/jtokkit-1.1.0.jar": {
+    "sha256AtExport": "1501ce0259ab897c6746ccfafa1d208acd404fb17e1ac62e157172f2678b1183",
+    "bytes": 3246331
+  },
+  "${P3B_M2}/org/springframework/ai/spring-ai-vector-store/1.1.8/spring-ai-vector-store-1.1.8.jar": {
+    "sha256AtExport": "6222b2cd75d4f537715649316c2bb1340663dcacef6ab611c0317862b7d2e21d",
+    "bytes": 135757
+  },
+  "${P3B_M2}/org/springframework/ai/spring-ai-rag/1.1.8/spring-ai-rag-1.1.8.jar": {
+    "sha256AtExport": "8529e8d6fdf546e3a0557782fc985f279a1591ed77b1d9fe46e1e7595111c3fc",
+    "bytes": 47780
+  },
+  "${P3B_M2}/org/springframework/ai/spring-ai-pgvector-store/1.1.8/spring-ai-pgvector-store-1.1.8.jar": {
+    "sha256AtExport": "76fe87e5a9e45847382aa2bed7e27bf53aba63a3c464a953bd2221a99290caf0",
+    "bytes": 29173
+  },
+  "${P3B_M2}/com/zaxxer/HikariCP/6.3.3/HikariCP-6.3.3.jar": {
+    "sha256AtExport": "709f378c05756280939ce50fc1b1f1a53bb8e1899dc1b249f21f12703640b48b",
+    "bytes": 171931
+  },
+  "${P3B_M2}/org/springframework/spring-jdbc/6.2.19/spring-jdbc-6.2.19.jar": {
+    "sha256AtExport": "c81fd8aca952aac243d9327af12596c2058012c9d3784f1313477a6d2cc56306",
+    "bytes": 475809
+  },
+  "${P3B_M2}/com/pgvector/pgvector/0.1.6/pgvector-0.1.6.jar": {
+    "sha256AtExport": "3ccd6a4114e9cbc9f811419bebf41df51d8963a742b7e495d51a7afc6c795504",
+    "bytes": 11768
+  },
+  "${P3B_M2}/org/projectlombok/lombok/1.18.30/lombok-1.18.30.jar": {
+    "sha256AtExport": "14151b47582d570b4de16a147ece3bdbd19ace4aee5bde3a5578c87db9ecb998",
+    "bytes": 2011339
+  },
+  "${P3B_M2}/org/springframework/boot/spring-boot-starter-test/3.5.15/spring-boot-starter-test-3.5.15.jar": {
+    "sha256AtExport": "1600ea0d021002a194433b03427a274c9ea617fa7f6c28dcc11b2f84473cd8a1",
+    "bytes": 4792
+  },
+  "${P3B_M2}/org/springframework/boot/spring-boot-test/3.5.15/spring-boot-test-3.5.15.jar": {
+    "sha256AtExport": "ebe6f0eae112d1ac312e357a12d3d3994d5a1b02dea50efc6c18078677084f2d",
+    "bytes": 257718
+  },
+  "${P3B_M2}/org/springframework/boot/spring-boot-test-autoconfigure/3.5.15/spring-boot-test-autoconfigure-3.5.15.jar": {
+    "sha256AtExport": "06cdd33eec080c04fa71ecbee512c7442ff2272bbf6483ffff7572d066e7c113",
+    "bytes": 229964
+  },
+  "${P3B_M2}/com/jayway/jsonpath/json-path/2.9.0/json-path-2.9.0.jar": {
+    "sha256AtExport": "11a9ee6f88bb31f1450108d1cf6441377dec84aca075eb6bb2343be157575bea",
+    "bytes": 276633
+  },
+  "${P3B_M2}/net/minidev/json-smart/2.5.2/json-smart-2.5.2.jar": {
+    "sha256AtExport": "4fbdedb0105cedc7f766b95c297d2e88fb6a560da48f3bbaa0cc538ea8b7bf71",
+    "bytes": 122358
+  },
+  "${P3B_M2}/net/minidev/accessors-smart/2.5.2/accessors-smart-2.5.2.jar": {
+    "sha256AtExport": "9b8a7bc43861d6156c021166d941fb7dddbe4463e2fa5ee88077e4b01452a836",
+    "bytes": 30358
+  },
+  "${P3B_M2}/org/ow2/asm/asm/9.7.1/asm-9.7.1.jar": {
+    "sha256AtExport": "8cadd43ac5eb6d09de05faecca38b917a040bb9139c7edeb4cc81c740b713281",
+    "bytes": 126093
+  },
+  "${P3B_M2}/org/assertj/assertj-core/3.27.7/assertj-core-3.27.7.jar": {
+    "sha256AtExport": "c4a445426c3c2861666863b842cc4ec7bbb1c4226fefd370b6d2fe83d6c4ff0f",
+    "bytes": 1399383
+  },
+  "${P3B_M2}/org/awaitility/awaitility/4.2.2/awaitility-4.2.2.jar": {
+    "sha256AtExport": "e831fee30ed401e2208f1bd5a0ef9add538d9cb1103c0e43216691b647bde9c6",
+    "bytes": 97249
+  },
+  "${P3B_M2}/org/hamcrest/hamcrest/3.0/hamcrest-3.0.jar": {
+    "sha256AtExport": "5d66b6a4a680755cb6ed7cb104fa7835ef644667586ff0737adeb977c39ecdbc",
+    "bytes": 126373
+  },
+  "${P3B_M2}/org/junit/jupiter/junit-jupiter/5.12.2/junit-jupiter-5.12.2.jar": {
+    "sha256AtExport": "3854b3ad434906b827fec474aa0d8da8b56e9e56d5fc7f2e20fc3f12ec4be894",
+    "bytes": 6366
+  },
+  "${P3B_M2}/org/junit/jupiter/junit-jupiter-api/5.12.2/junit-jupiter-api-5.12.2.jar": {
+    "sha256AtExport": "0b9ca728e4bcd9adc57f29deb9556ff9ed5e08b4e8843b875aba4e4e3e04f092",
+    "bytes": 233372
+  },
+  "${P3B_M2}/org/opentest4j/opentest4j/1.3.0/opentest4j-1.3.0.jar": {
+    "sha256AtExport": "48e2df636cab6563ced64dcdff8abb2355627cb236ef0bf37598682ddf742f1b",
+    "bytes": 14304
+  },
+  "${P3B_M2}/org/junit/platform/junit-platform-commons/1.12.2/junit-platform-commons-1.12.2.jar": {
+    "sha256AtExport": "e683a01e85dfabea520c056ac6015a6162756e602ec653c0da85e233f0afbc18",
+    "bytes": 151859
+  },
+  "${P3B_M2}/org/apiguardian/apiguardian-api/1.1.2/apiguardian-api-1.1.2.jar": {
+    "sha256AtExport": "b509448ac506d607319f182537f0b35d71007582ec741832a1f111e5b5b70b38",
+    "bytes": 6806
+  },
+  "${P3B_M2}/org/junit/jupiter/junit-jupiter-params/5.12.2/junit-jupiter-params-5.12.2.jar": {
+    "sha256AtExport": "b219ffa949b90a71aa3b6c2b606456b82bca0b2089b7459c8ff461156ff59b0f",
+    "bytes": 601719
+  },
+  "${P3B_M2}/org/junit/jupiter/junit-jupiter-engine/5.12.2/junit-jupiter-engine-5.12.2.jar": {
+    "sha256AtExport": "f576c06b8accde9985063b8bc80526cb980eec24dee0b7221fc8ddd7ace65800",
+    "bytes": 292002
+  },
+  "${P3B_M2}/org/junit/platform/junit-platform-engine/1.12.2/junit-platform-engine-1.12.2.jar": {
+    "sha256AtExport": "cef0efcb5bd2e05e2b808d38bab5c655089c0c3001527376e74cb606a7911ec8",
+    "bytes": 255799
+  },
+  "${P3B_M2}/org/mockito/mockito-core/5.17.0/mockito-core-5.17.0.jar": {
+    "sha256AtExport": "dff59ad8c61b026ef86cc113f94f2301eb06caaf81dec30c78a96a1a65595c5e",
+    "bytes": 709090
+  },
+  "${P3B_M2}/net/bytebuddy/byte-buddy-agent/1.17.8/byte-buddy-agent-1.17.8.jar": {
+    "sha256AtExport": "5b17113e66e77ca6f8af07ff367c216df964a980f0e9f11e3b1aa793253aa64f",
+    "bytes": 366535
+  },
+  "${P3B_M2}/org/objenesis/objenesis/3.3/objenesis-3.3.jar": {
+    "sha256AtExport": "02dfd0b0439a5591e35b708ed2f5474eb0948f53abf74637e959b8e4ef69bfeb",
+    "bytes": 49423
+  },
+  "${P3B_M2}/org/mockito/mockito-junit-jupiter/5.17.0/mockito-junit-jupiter-5.17.0.jar": {
+    "sha256AtExport": "5c5442f8aaaa8f03df03e4862a0d69205d1b41f5edbf7d5aa7a2486a61de49b7",
+    "bytes": 9395
+  },
+  "${P3B_M2}/org/skyscreamer/jsonassert/1.5.3/jsonassert-1.5.3.jar": {
+    "sha256AtExport": "719095c07d4203961320da593441d8b3b643c18eb1d81aa98ea933bb7eb351ba",
+    "bytes": 31077
+  },
+  "${P3B_M2}/com/vaadin/external/google/android-json/0.0.20131108.vaadin1/android-json-0.0.20131108.vaadin1.jar": {
+    "sha256AtExport": "dfb7bae2f404cfe0b72b4d23944698cb716b7665171812a0a4d0f5926c0fac79",
+    "bytes": 18279
+  },
+  "${P3B_M2}/org/springframework/spring-core/6.2.19/spring-core-6.2.19.jar": {
+    "sha256AtExport": "52146689e71a911c92bac26677d73c692512a739893a57710cc233591756bff6",
+    "bytes": 1983775
+  },
+  "${P3B_M2}/org/springframework/spring-jcl/6.2.19/spring-jcl-6.2.19.jar": {
+    "sha256AtExport": "9994478bcea1423b8892d4eb0db942c94da0090167c3c684050c1eaef04491d0",
+    "bytes": 24495
+  },
+  "${P3B_M2}/org/springframework/spring-test/6.2.19/spring-test-6.2.19.jar": {
+    "sha256AtExport": "f1cb8549021f50630b4152291fdcde56786421b8448a5ab8bef9befe2ac86b37",
+    "bytes": 1025409
+  },
+  "${P3B_M2}/org/xmlunit/xmlunit-core/2.10.4/xmlunit-core-2.10.4.jar": {
+    "sha256AtExport": "208e0cee82aedd9183937e4b9ae44b83884179f724a706bef5795477acfcca91",
+    "bytes": 177639
+  },
+  "${P3B_M2}/io/zonky/test/embedded-postgres/2.2.2/embedded-postgres-2.2.2.jar": {
+    "sha256AtExport": "9b1722ccfbfb441b7b1440edd35c1a229b173d82ab25d6111dd8642b48ba66fa",
+    "bytes": 60501
+  },
+  "${P3B_M2}/io/zonky/test/postgres/embedded-postgres-binaries-windows-amd64/14.22.0/embedded-postgres-binaries-windows-amd64-14.22.0.jar": {
+    "sha256AtExport": "badc584f9598557e91f4c95d811c277207cd9dac94c7cc5da4ed70dd4e64b307",
+    "bytes": 21158598
+  },
+  "${P3B_M2}/io/zonky/test/postgres/embedded-postgres-binaries-darwin-amd64/14.22.0/embedded-postgres-binaries-darwin-amd64-14.22.0.jar": {
+    "sha256AtExport": "846e5bb797f372c8e370df51e4151f4e4237058e8c27cfcaf62aa93203a4c5b0",
+    "bytes": 28212448
+  },
+  "${P3B_M2}/io/zonky/test/postgres/embedded-postgres-binaries-linux-amd64/14.22.0/embedded-postgres-binaries-linux-amd64-14.22.0.jar": {
+    "sha256AtExport": "c7454ba6125d7c1fd3fa09aefe3a7bca7435c6b7caaf0252d3544b36a6df08ad",
+    "bytes": 14415851
+  },
+  "${P3B_M2}/io/zonky/test/postgres/embedded-postgres-binaries-linux-amd64-alpine/14.22.0/embedded-postgres-binaries-linux-amd64-alpine-14.22.0.jar": {
+    "sha256AtExport": "e949c495cb77636f8d6097ecaa3397b02f3148e24efa73851801f76b53fc1eff",
+    "bytes": 14207880
+  },
+  "${P3B_M2}/org/apache/commons/commons-compress/1.28.0/commons-compress-1.28.0.jar": {
+    "sha256AtExport": "e1522945218456f3649a39bc4afd70ce4bd466221519dba7d378f2141a4642ca",
+    "bytes": 1117221
+  },
+  "${P3B_M2}/org/tukaani/xz/1.11/xz-1.11.jar": {
+    "sha256AtExport": "0a4077f6aeae2865532a564807af8d30c26acc6f63b7928d93bd7ab1f2190449",
+    "bytes": 168803
+  },
+  "${P3B_M2}/commons-io/commons-io/2.21.0/commons-io-2.21.0.jar": {
+    "sha256AtExport": "7d643a2afea8b058b762aa6fb90e5b256f6c729739f8b3784c3370ddc609e88d",
+    "bytes": 585274
+  },
+  "${P3B_M2}/commons-codec/commons-codec/1.18.0/commons-codec-1.18.0.jar": {
+    "sha256AtExport": "ba005f304cef92a3dede24a38ad5ac9b8afccf0d8f75839d6c1338634cf7f6e4",
+    "bytes": 373045
+  },
+  "${P3B_M2}/io/zonky/test/postgres/embedded-postgres-binaries-darwin-arm64v8/14.22.0/embedded-postgres-binaries-darwin-arm64v8-14.22.0.jar": {
+    "sha256AtExport": "a5a4998de52825a83ec4943837eb6ef87d5e4a96c21ca8ec000ddfe454628f36",
+    "bytes": 28219325
+  },
+  "${P3B_M2}/org/springframework/boot/spring-boot-starter-security/3.5.15/spring-boot-starter-security-3.5.15.jar": {
+    "sha256AtExport": "682ba5ccf29ae6c9242724a84700177e2e3c20aa366c260908b4ca6e106e302f",
+    "bytes": 4743
+  },
+  "${P3B_M2}/org/springframework/spring-aop/6.2.19/spring-aop-6.2.19.jar": {
+    "sha256AtExport": "a11b93539d80b02caf76171db2da96df39abebbfef49a2fadd6dda0779f2e20b",
+    "bytes": 420259
+  },
+  "${P3B_M2}/org/springframework/security/spring-security-config/6.5.11/spring-security-config-6.5.11.jar": {
+    "sha256AtExport": "218685930013a2d1c126a896490ac3c44cf6fe90cf3d0286f2266bb877f916f7",
+    "bytes": 2108541
+  },
+  "${P3B_M2}/com/networknt/json-schema-validator/1.5.6/json-schema-validator-1.5.6.jar": {
+    "sha256AtExport": "5531436b97dfa90d34bb2acbbe65e054a0a24ded1576032b684ee179728f86d4",
+    "bytes": 576194
+  },
+  "${P3B_M2}/com/ethlo/time/itu/1.10.3/itu-1.10.3.jar": {
+    "sha256AtExport": "23d3ba84095d489a595240f89045085ea5066fb6fc1dc091258d577df9d74abc",
+    "bytes": 52056
+  },
+  "${P3B_M2}/com/h2database/h2/2.3.232/h2-2.3.232.jar": {
+    "sha256AtExport": "8dae62d22db8982c3dcb3826edb9c727c5d302063a67eef7d63d82de401f07d3",
+    "bytes": 2651157
+  },
+  "${P3B_M2}/org/postgresql/postgresql/42.7.11/postgresql-42.7.11.jar": {
+    "sha256AtExport": "1981b31d3993c58702783c1cddf10a34e48c1f413d70ff1cb6def0a143484647",
+    "bytes": 1142677
+  },
+  "${P3B_M2}/org/flywaydb/flyway-core/11.7.2/flyway-core-11.7.2.jar": {
+    "sha256AtExport": "ff01fab3bcfd79e9345df191ecf82cbe1f9f65a757266158bd691564b1c1282c",
+    "bytes": 698198
+  },
+  "${P3B_M2}/com/fasterxml/jackson/dataformat/jackson-dataformat-toml/2.21.4/jackson-dataformat-toml-2.21.4.jar": {
+    "sha256AtExport": "c22e9f650a45d5697116e9beb85cb218792f03d19cf79134e692fe1a65f50cc6",
+    "bytes": 57575
+  },
+  "${P3B_M2}/org/flywaydb/flyway-database-postgresql/11.7.2/flyway-database-postgresql-11.7.2.jar": {
+    "sha256AtExport": "1d586e14ea772c75613df2c27ddc20f5c065e8a32283815338611af82e48f9a2",
+    "bytes": 47854
+  },
+  "${P3B_M2}/org/springframework/security/spring-security-web/6.5.11/spring-security-web-6.5.11.jar": {
+    "sha256AtExport": "50df9fc76162d33cf8b5410cf7a7a969abd42a5ecddb284aab4f453cb5512306",
+    "bytes": 1058459
+  },
+  "${P3B_M2}/org/springframework/security/spring-security-core/6.5.11/spring-security-core-6.5.11.jar": {
+    "sha256AtExport": "26ac26527cc015c5c71f3832add705a2410129a8f8de847054f2bc3b1d2e4465",
+    "bytes": 623144
+  },
+  "${P3B_M2}/org/springframework/security/spring-security-crypto/6.5.11/spring-security-crypto-6.5.11.jar": {
+    "sha256AtExport": "dcdd2f3b2d5d2bb1531986b5cc1737b464a76d8b5831f93fc8da9cdd67e6797f",
+    "bytes": 104854
+  },
+  "${P3B_M2}/org/springframework/spring-beans/6.2.19/spring-beans-6.2.19.jar": {
+    "sha256AtExport": "846dc8f30a639a36eb551ee99a30469be4d11bd285ca9daf164d98321571b404",
+    "bytes": 891594
+  },
+  "${P3B_M2}/org/springframework/spring-context/6.2.19/spring-context-6.2.19.jar": {
+    "sha256AtExport": "ead4b645f94a7f665f00093eaafde634e97b34524294de653b51e43e0b3fc4a4",
+    "bytes": 1359997
+  },
+  "${P3B_M2}/org/springframework/spring-expression/6.2.19/spring-expression-6.2.19.jar": {
+    "sha256AtExport": "d710a44417d890353895b341a722d7d08199e2b7da52f0a11c0e92571e1d6e19",
+    "bytes": 321254
+  }
+}

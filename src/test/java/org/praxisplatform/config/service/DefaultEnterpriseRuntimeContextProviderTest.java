@@ -21,7 +21,7 @@ class DefaultEnterpriseRuntimeContextProviderTest {
                 SESSION, new EnterpriseRuntimeContextSwitchCommand("choice", "selection")));
         assertUnavailable(() -> new DefaultEnterpriseRuntimeContextChoiceProvider().getChoices(SESSION, null, 50));
         assertUnavailable(() -> new DefaultEnterpriseRuntimeTenantProvider().getTenants(SESSION));
-        assertUnavailable(() -> new DefaultEnterpriseRuntimeNavigationProvider().getNavigation(SESSION));
+        assertUnavailable(() -> new DefaultEnterpriseRuntimeNavigationProvider().getNavigation(SESSION, "context", null, null, 50));
         assertUnavailable(() -> new DefaultEnterpriseRuntimeSecurityEventProvider().getSecurityEvents(SESSION));
     }
 

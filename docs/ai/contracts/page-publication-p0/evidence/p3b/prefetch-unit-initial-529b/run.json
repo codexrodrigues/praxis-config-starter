@@ -1,0 +1,84 @@
+{
+  "sourceCommit": "529b7484bebdc856ba51a048ff0dad10ba10a515",
+  "sourceTree": "b3ec17bd29681cd73ad02a3598bc73b1c4765998",
+  "startUtc": "2026-10-23T13:04:26.256186+00:00",
+  "sourceFiles": {
+    "docs/ai/contracts/page-publication-p0/P3B-DESIGN.md": "ace4ec701d39e4a4303cf38e66b6c5f8696e0301acae8d2c88ff205fa3fa6281",
+    "docs/ai/contracts/page-publication-p0/P3B-VALIDATION.md": "0430b9dc69082af23ca415c34533f707ff84da8ffd1c958af8da68e489aafc1d",
+    "src/main/java/org/praxisplatform/config/autoconfig/UiLayoutResolutionAutoConfiguration.java": "315ec5fedcf662754f75a10cdd22b3989157ba2638a5bf31c67572620a02bb83",
+    "src/main/java/org/praxisplatform/config/service/ConfigImmutableSqlRow.java": "48b9afd675584d7c00ac8c9b7670a487a516f8f1228991776f0bc2f1b99f54e2",
+    "src/main/java/org/praxisplatform/config/service/ConfigTransactionReadSet.java": "c0e62ddf043b4e34135030b98e616f1f6b5c161db4162b595917a77c6e323394",
+    "src/main/java/org/praxisplatform/config/service/JdbcUiLayoutMetadataCaptureStore.java": "fa18c67493eff56dfec885752b116ed60e3b1b79544779263510fa52b445217a",
+    "src/main/java/org/praxisplatform/config/service/PageCatalogStore.java": "98b363e6e5eb6750086ce6256e4704ce8daf0f8541503ce74681ea53e88e312c",
+    "src/main/java/org/praxisplatform/config/service/PageCreationService.java": "420793b0a6a1d9834e3060b2172a90868fa2c5a6134385097ed6316601864e35",
+    "src/main/java/org/praxisplatform/config/service/PageRuntimeReadService.java": "ca3329317ce19adff14a6a1d56d4aba00f97ebf744c87668aa087b660e9656a8",
+    "src/test/java/org/praxisplatform/config/service/ConfigImmutableSqlRowTest.java": "b04c44e5e254c550ad5fda95aea76584939e8857d4ea7bcbe14363132a546173",
+    "src/test/java/org/praxisplatform/config/service/ConfigTransactionReadSetTest.java": "d55cc177faf791b6d5afa4428df34e4f6b0eab1018dd36b4a1e8170ccf3e21af",
+    "src/test/java/org/praxisplatform/config/service/PageRuntimePostgresIT.java": "804a1f71e1d42b985283d8b37e94bc57d5331094dbac71fb2fd2384205de491b",
+    "src/test/java/org/praxisplatform/config/service/PageRuntimeReadServiceTest.java": "9f86ef5b73523d6f94e5818bb83d5d8cd5fb0a7d16ca26ec20f47de0774517c8"
+  },
+  "command": [
+    "${MAVEN_HOME}/bin/mvn",
+    "-B",
+    "-Dmaven.repo.local=${P3B_M2}",
+    "-DfailIfNoTests=true",
+    "-Dtest=ConfigTransactionReadSetTest,ConfigImmutableSqlRowTest,JdbcUiLayoutMetadataCaptureStoreTest,PageRuntimeReadServiceTest,PageCatalogLifecycleBridgeTest,UiLayoutPageGroupSnapshotContractTest",
+    "test"
+  ],
+  "exitCode": 0,
+  "finishUtc": "2026-10-23T13:04:41.798879+00:00",
+  "sourceUnchanged": true,
+  "files": {
+    "maven.log": "8ac5e727ed96fccd54337bd7eb822473591339dea28fa8652556efe3ab87bd3e",
+    "TEST-org.praxisplatform.config.service.ConfigTransactionReadSetTest.xml": "5fc8a35c8a7497b26a3e15e1a847c550aa9ccfae33a31c7b13c1a50d5368a214",
+    "TEST-org.praxisplatform.config.service.ConfigImmutableSqlRowTest.xml": "abc2cf5d5a2ce867149445bba58291e5732cbb9730ce74e8c964e2aca86248b6",
+    "TEST-org.praxisplatform.config.service.JdbcUiLayoutMetadataCaptureStoreTest.xml": "52361101ff4a2811562c48ff4dc42308e0375bc2192df7215430bac6faef6ec9",
+    "TEST-org.praxisplatform.config.service.PageRuntimeReadServiceTest.xml": "51996e10b540622f04c63b9ca60dcfd444972cee9b26a96d0581f5fb0fdbe2b2",
+    "TEST-org.praxisplatform.config.service.PageCatalogLifecycleBridgeTest.xml": "1c4c5b438189a72bdcc3a1f446cc3cfe20eb096510143eb2a9fea97b3ad34ad5",
+    "TEST-org.praxisplatform.config.service.UiLayoutPageGroupSnapshotContractTest.xml": "9415fd15887189cc0b152824f4cde6298b9e1580ea16f1f39094a1e0fb413249"
+  },
+  "suites": [
+    {
+      "name": "org.praxisplatform.config.service.ConfigTransactionReadSetTest",
+      "tests": "11",
+      "errors": "0",
+      "failures": "0",
+      "skipped": "0"
+    },
+    {
+      "name": "org.praxisplatform.config.service.ConfigImmutableSqlRowTest",
+      "tests": "2",
+      "errors": "0",
+      "failures": "0",
+      "skipped": "0"
+    },
+    {
+      "name": "org.praxisplatform.config.service.JdbcUiLayoutMetadataCaptureStoreTest",
+      "tests": "47",
+      "errors": "0",
+      "failures": "0",
+      "skipped": "0"
+    },
+    {
+      "name": "org.praxisplatform.config.service.PageRuntimeReadServiceTest",
+      "tests": "10",
+      "errors": "0",
+      "failures": "0",
+      "skipped": "0"
+    },
+    {
+      "name": "org.praxisplatform.config.service.PageCatalogLifecycleBridgeTest",
+      "tests": "10",
+      "errors": "0",
+      "failures": "0",
+      "skipped": "0"
+    },
+    {
+      "name": "org.praxisplatform.config.service.UiLayoutPageGroupSnapshotContractTest",
+      "tests": "6",
+      "errors": "0",
+      "failures": "0",
+      "skipped": "0"
+    }
+  ]
+}

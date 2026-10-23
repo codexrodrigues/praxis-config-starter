@@ -1,13 +1,11 @@
 package org.praxisplatform.config.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import java.sql.ResultSet;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 import org.praxisplatform.config.dto.UiLayoutTarget;
-import org.springframework.jdbc.core.RowMapper;
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.jdbc.datasource.ConnectionHolder;
@@ -19,6 +17,46 @@ final class JdbcUiLayoutMetadataCaptureStore implements UiLayoutMetadataCaptureP
   private static final String SCOPE = "source_draft_ref=:source_draft_ref AND tenant_id=:tenant_id"
       + " AND environment=:environment AND root_component_type=:root_component_type"
       + " AND root_component_id=:root_component_id";
+  private static final List<String> ROW_COLUMNS = List.of(
+      "source_draft_ref",
+      "tenant_id",
+      "environment",
+      "root_component_type",
+      "root_component_id",
+      "component_type",
+      "component_id",
+      "capture_ref",
+      "baseline_source_ref",
+      "document_type",
+      "authoring_schema_ref",
+      "authoring_schema_version",
+      "baseline_content_hash",
+      "baseline_document_text",
+      "service_key",
+      "producer_ref",
+      "publication_ref",
+      "actor_ref",
+      "administrative_unit",
+      "context_version",
+      "policy_ref",
+      "policy_revision",
+      "captured_at_text",
+      "raw_schema_text",
+      "raw_schema_hash",
+      "assembly_input_hash",
+      "origin_kind",
+      "resource_ref",
+      "operation_path",
+      "operation_method",
+      "schema_type",
+      "source_schema_ref",
+      "normalizer_ref",
+      "projector_ref",
+      "assembly_input_version",
+      "assembler_ref",
+      "assembly_input_text",
+      "native_document_ref",
+      "native_document_revision");
   private final NamedParameterJdbcTemplate jdbc;
   private final ConfigJdbcTransactionGuard transactionGuard;
   private final ObjectMapper mapper;
@@ -95,16 +133,56 @@ final class JdbcUiLayoutMetadataCaptureStore implements UiLayoutMetadataCaptureP
   /** Exact historical read; no current api_metadata lookup, upsert, backfill or recapture. */
   @Override public UiLayoutMetadataCapture read(UiLayoutLifecycleInvocation invocation,
       UiLayoutMetadataCapture.Binding expected, UiLayoutMetadataCaptureAccess access) {
-    transaction();
     try {
       requireScope(invocation, expected);
-      var parameters = scopeParameters(expected);
-      var stored = jdbc.query("SELECT * FROM " + TABLE + " WHERE " + SCOPE
-          + " AND component_type=:component_type AND component_id=:component_id", parameters, rowMapper());
-      if (stored.size() != 1) throw failure(UiLayoutLifecycleException.Code.INVALID_STATE);
-      return captures.verifyAndRead(invocation, expected, stored.getFirst(), access);
+      var key = RowKey.of(expected);
+      String raw = ConfigTransactionReadSet.read(this, transactionGuard, key, () -> {
+        // Without a synchronization there is no retained proof, so the existing full guard applies.
+        if (!org.springframework.transaction.support.TransactionSynchronizationManager.isActualTransactionActive()
+            || !org.springframework.transaction.support.TransactionSynchronizationManager.isSynchronizationActive()) transaction();
+        var stored = jdbc.query("SELECT * FROM " + TABLE + " WHERE " + SCOPE
+            + " AND component_type=:component_type AND component_id=:component_id", scopeParameters(expected),
+            (row, index) -> ConfigImmutableSqlRow.capture(row, ROW_COLUMNS));
+        if (stored.size() != 1) throw failure(UiLayoutLifecycleException.Code.INVALID_STATE);
+        return java.util.Optional.of(stored.getFirst());
+      }).orElseThrow(() -> failure(UiLayoutLifecycleException.Code.INVALID_STATE));
+      return captures.verifyAndRead(invocation, expected, decode(ConfigImmutableSqlRow.parse(raw)), access);
     } catch (UiLayoutLifecycleException exception) { throw exception; }
     catch (RuntimeException exception) { throw failure(UiLayoutLifecycleException.Code.SOURCE_UNAVAILABLE); }
+  }
+
+  /** Physical immutable identity, not the semantic binding validated only after current admission. */
+  record RowKey(UUID draft, String tenant, String environment, UiLayoutTarget root, UiLayoutTarget target) {
+    static RowKey of(UiLayoutMetadataCapture.Binding binding) {
+      var scope = binding.scope();
+      return new RowKey(binding.sourceDraftRef(), scope.tenantId(), scope.environment(), scope.root(), scope.target());
+    }
+  }
+
+  int prefetch(List<RowKey> keys) {
+    return ConfigTransactionReadSet.prefetch(this, transactionGuard, () -> {
+      var parameters = new MapSqlParameterSource();
+      var requested = new ArrayList<String>();
+      for (int index = 0; index < keys.size(); index++) {
+        var key = keys.get(index);
+        requested.add("(" + index + ",CAST(:draft" + index + " AS uuid),CAST(:tenant" + index
+            + " AS text),CAST(:env" + index + " AS text),CAST(:rootType" + index
+            + " AS text),CAST(:rootId" + index + " AS text),CAST(:type" + index
+            + " AS text),CAST(:id" + index + " AS text))");
+        parameters.addValue("draft" + index, key.draft()).addValue("tenant" + index, key.tenant())
+            .addValue("env" + index, key.environment()).addValue("rootType" + index, key.root().componentType())
+            .addValue("rootId" + index, key.root().componentId()).addValue("type" + index, key.target().componentType())
+            .addValue("id" + index, key.target().componentId());
+      }
+      String raw = "SELECT requested.ordinal, CASE WHEN evidence.capture_ref IS NULL THEN NULL ELSE "
+          + ConfigImmutableSqlRow.projection("evidence", ROW_COLUMNS) + " END AS raw FROM (VALUES "
+          + String.join(",", requested) + ") requested(ordinal,draft,tenant,env,root_type,root_id,type,id)"
+          + " LEFT JOIN " + TABLE + " evidence ON evidence.source_draft_ref=requested.draft"
+          + " AND evidence.tenant_id=requested.tenant AND evidence.environment=requested.env"
+          + " AND evidence.root_component_type=requested.root_type AND evidence.root_component_id=requested.root_id"
+          + " AND evidence.component_type=requested.type AND evidence.component_id=requested.id";
+      return ConfigImmutableSqlRow.prefix(jdbc, keys, raw, parameters);
+    });
   }
 
   private ConnectionHolder transaction() {
@@ -173,8 +251,7 @@ final class JdbcUiLayoutMetadataCaptureStore implements UiLayoutMetadataCaptureP
     } catch (Exception exception) { throw failure(UiLayoutLifecycleException.Code.INVALID_STATE); }
   }
 
-  private RowMapper<UiLayoutMetadataCapture> rowMapper() {
-    return (row, index) -> {
+  private UiLayoutMetadataCapture decode(ConfigImmutableSqlRow row) {
       try {
         String raw = row.getString("raw_schema_text");
         String baseline = row.getString("baseline_document_text");
@@ -192,10 +269,9 @@ final class JdbcUiLayoutMetadataCaptureStore implements UiLayoutMetadataCaptureP
                 row.getString("context_version"), row.getString("policy_ref"), row.getString("policy_revision"),
                 Instant.parse(row.getString("captured_at_text"))), raw, row.getString("raw_schema_hash"), row.getString("assembly_input_hash"));
       } catch (Exception exception) { throw failure(UiLayoutLifecycleException.Code.INVALID_STATE); }
-    };
   }
 
-  private static UiLayoutBaselineMetadataSeed.Source origin(ResultSet row) throws java.sql.SQLException {
+  private static UiLayoutBaselineMetadataSeed.Source origin(ConfigImmutableSqlRow row) throws java.sql.SQLException {
     if ("OPERATION_SCHEMA".equals(row.getString("origin_kind"))) {
       requireNull(row, "native_document_ref", "native_document_revision");
       return new UiLayoutBaselineMetadataSeed.OperationSource(row.getString("service_key"), row.getString("resource_ref"),
@@ -211,7 +287,7 @@ final class JdbcUiLayoutMetadataCaptureStore implements UiLayoutMetadataCaptureP
     throw failure(UiLayoutLifecycleException.Code.INVALID_STATE);
   }
 
-  private static UiLayoutBaselineMetadataSeed.Reproduction reproduction(ResultSet row) throws java.sql.SQLException {
+  private static UiLayoutBaselineMetadataSeed.Reproduction reproduction(ConfigImmutableSqlRow row) throws java.sql.SQLException {
     return switch (row.getString("origin_kind")) {
       case "OPERATION_SCHEMA" -> new UiLayoutBaselineMetadataSeed.SchemaProjection(row.getString("normalizer_ref"), row.getString("projector_ref"),
           new UiLayoutBaselineMetadataSeed.DocumentAssembly(row.getInt("assembly_input_version"), row.getString("assembler_ref"), row.getString("assembly_input_text")));
@@ -220,11 +296,11 @@ final class JdbcUiLayoutMetadataCaptureStore implements UiLayoutMetadataCaptureP
     };
   }
 
-  private static void requireNull(ResultSet row, String... columns) throws java.sql.SQLException {
+  private static void requireNull(ConfigImmutableSqlRow row, String... columns) throws java.sql.SQLException {
     for (String column : columns) if (row.getString(column) != null) throw failure(UiLayoutLifecycleException.Code.INVALID_STATE);
   }
 
-  private static UiLayoutTarget target(ResultSet row, String type, String id) throws java.sql.SQLException {
+  private static UiLayoutTarget target(ConfigImmutableSqlRow row, String type, String id) throws java.sql.SQLException {
     return new UiLayoutTarget(exact(row.getString(type)), exact(row.getString(id)));
   }
 

@@ -14,7 +14,7 @@ import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.MissingRequestHeaderException;
 
 /** Maps resolution failures to stable sanitized HTTP outcomes. */
-@RestControllerAdvice(assignableTypes = {EffectiveUiLayoutController.class, EffectiveUiLayoutCompositionController.class, UiLayoutLifecycleController.class, PageCreationController.class})
+@RestControllerAdvice(assignableTypes = {EffectiveUiLayoutController.class, EffectiveUiLayoutCompositionController.class, UiLayoutLifecycleController.class, PageCreationController.class, PageRuntimeController.class})
 @Order(Ordered.HIGHEST_PRECEDENCE)
 public class UiLayoutResolutionExceptionHandler {
     @ExceptionHandler(UiLayoutRevisionRequestBodyAdvice.BodyTooLarge.class)
@@ -25,7 +25,8 @@ public class UiLayoutResolutionExceptionHandler {
         body.setProperty("code", "REVISION_BODY_TOO_LARGE");
         return ResponseEntity.status(HttpStatus.PAYLOAD_TOO_LARGE).cacheControl(CacheControl.noStore()).body(body);
     }
-    @ExceptionHandler({MissingRequestHeaderException.class, MissingServletRequestParameterException.class})
+    @ExceptionHandler({MissingRequestHeaderException.class, MissingServletRequestParameterException.class,
+            org.springframework.web.method.annotation.MethodArgumentTypeMismatchException.class})
     public ResponseEntity<ProblemDetail> missingInput(Exception failure) {
         return invalidRequest(new IllegalArgumentException("Required layout request input is missing."));
     }
@@ -42,6 +43,8 @@ public class UiLayoutResolutionExceptionHandler {
     @ExceptionHandler(UiLayoutResolutionException.class)
     public ResponseEntity<ProblemDetail> handle(UiLayoutResolutionException failure) {
         HttpStatus status = switch (failure.code()) {
+            case INVALID_PUBLICATION_CURSOR -> HttpStatus.BAD_REQUEST;
+            case PUBLICATION_CONTINUATION_STALE, PUBLICATION_SNAPSHOT_CHANGED -> HttpStatus.CONFLICT;
             case SESSION_REQUIRED -> HttpStatus.UNAUTHORIZED;
             case CONTEXT_ACCESS_DENIED, LAYOUT_ACCESS_DENIED -> HttpStatus.FORBIDDEN;
             case CONTEXT_STALE -> HttpStatus.CONFLICT;
@@ -77,6 +80,9 @@ public class UiLayoutResolutionExceptionHandler {
 
     private String safeDetail(UiLayoutResolutionException.Code code) {
         return switch (code) {
+            case INVALID_PUBLICATION_CURSOR -> "The publication cursor is invalid.";
+            case PUBLICATION_CONTINUATION_STALE -> "Restart discovery in the current authorized publication.";
+            case PUBLICATION_SNAPSHOT_CHANGED -> "Publication changed during resolution; reload explicitly.";
             case SESSION_REQUIRED -> "Authenticate again before resolving this layout.";
             case CONTEXT_ACCESS_DENIED -> "Select an authorized enterprise context before resolving this layout.";
             case LAYOUT_ACCESS_DENIED -> "The current enterprise context cannot consume this layout.";

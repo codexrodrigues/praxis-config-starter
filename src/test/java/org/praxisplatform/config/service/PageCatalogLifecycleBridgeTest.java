@@ -330,6 +330,62 @@ class PageCatalogLifecycleBridgeTest {
   }
 
   @Test
+  void prefetchedRawLedgerDefersIntegrityUntilReadHeadAllowsAndPreservesOriginalCorrelation() throws Exception {
+    var creation = nativeCreation();
+    var columns = mapper.createObjectNode();
+    columns.put("page_id", creation.pageId().toString()).put("draft_id", creation.draftId().toString())
+        .put("creation_key", creation.command().creationKey().toString()).put("application_id", "app")
+        .put("route_namespace", "/pages").put("tenant_id", "tenant").put("environment", "test")
+        .put("actor_ref", "alice").put("command_hash", hashes.sha256Exact(codec.tree(creation.command())))
+        .put("evidence_hash", hashes.sha256Exact(codec.tree(creation))).put("evidence_text", codec.write(creation));
+    var raw = new java.util.concurrent.atomic.AtomicReference<>(columns.toString());
+    var connection = mock(java.sql.Connection.class);
+    when(connection.getAutoCommit()).thenReturn(false);
+    when(connection.getTransactionIsolation()).thenReturn(java.sql.Connection.TRANSACTION_READ_COMMITTED);
+    var statement = mock(java.sql.PreparedStatement.class);
+    var result = mock(java.sql.ResultSet.class);
+    when(connection.prepareStatement("SELECT current_setting('transaction_isolation')")).thenReturn(statement);
+    when(statement.executeQuery()).thenAnswer(call -> { when(result.next()).thenReturn(true, false); return result; });
+    when(result.getString(1)).thenReturn("read committed");
+    var dataSource = mock(javax.sql.DataSource.class);
+    when(dataSource.getConnection()).thenReturn(connection);
+    var transactions = new org.springframework.transaction.support.TransactionTemplate(
+        new org.springframework.jdbc.datasource.DataSourceTransactionManager(dataSource));
+    var jdbc = mock(org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate.class);
+    when(jdbc.getJdbcTemplate()).thenReturn(new org.springframework.jdbc.core.JdbcTemplate(dataSource));
+    when(jdbc.query(anyString(), any(org.springframework.jdbc.core.namedparam.MapSqlParameterSource.class),
+        any(org.springframework.jdbc.core.RowMapper.class))).thenAnswer(call -> {
+      String sql = call.getArgument(0);
+      if (sql.contains("AS weight")) return List.of(Map.entry(0, (long) raw.get().getBytes(java.nio.charset.StandardCharsets.UTF_8).length));
+      if (sql.contains("requested.ordinal")) return List.of(Map.entry(0, raw.get()));
+      return List.of(raw.get());
+    });
+    var actualStore = new PageCatalogStore(jdbc, transactions, codec, hashes);
+    var actualBridge = new PageCatalogLifecycleBridge(host, actualStore, codec, hashes,
+        nativeSource, metadata, mock(UiLayoutLifecycleStructureValidator.class), frozen, captures,
+        mapper, (operation, invocation) -> Duration.ofSeconds(30));
+    var allowed = new java.util.concurrent.atomic.AtomicBoolean();
+    var admission = actualBridge.admission((operation, invocation) -> {
+      if (!allowed.get()) throw new UiLayoutLifecycleException(UiLayoutLifecycleException.Code.DENIED, "private policy");
+    });
+    transactions.executeWithoutResult(status -> {
+      assertThat(actualStore.prefetch(context, List.of(creation.pageId()))).isEqualTo(1);
+      assertThat(actualStore.byPage(context, creation.pageId())).contains(creation);
+    });
+    columns.put("evidence_hash", "0".repeat(64));
+    raw.set(columns.toString());
+    transactions.executeWithoutResult(status -> {
+      assertThat(actualStore.prefetch(context, List.of(creation.pageId()))).isEqualTo(1);
+      assertThatThrownBy(() -> admission.require(UiLayoutLifecycleOperation.READ_HEAD, context.forTarget(creation.target())))
+          .extracting("code").isEqualTo(UiLayoutLifecycleException.Code.DENIED);
+      allowed.set(true);
+      assertThatThrownBy(() -> admission.require(UiLayoutLifecycleOperation.READ_HEAD, context.forTarget(creation.target())))
+          .extracting("code").isEqualTo(UiLayoutLifecycleException.Code.INVALID_STATE);
+    });
+    verifyNoInteractions(metadata, nativeSource);
+  }
+
+  @Test
   void crossScopeKnownPageAndUnknownDeniedRootHaveTheSameNonDisclosingOutcome() {
     UUID knownElsewhere = UUID.randomUUID(), unknown = UUID.randomUUID();
     when(host.resolve(any(), eq("c1"))).thenReturn(context);

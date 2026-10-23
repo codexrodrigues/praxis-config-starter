@@ -260,6 +260,33 @@ public class UiLayoutResolutionAutoConfiguration {
     @Bean
     @ConditionalOnBean(org.praxisplatform.config.service.PageCreationService.class)
     @ConditionalOnMissingBean
+    public org.praxisplatform.config.service.PageRuntimeReadService pageRuntimeReadService(
+            org.praxisplatform.config.service.PageCreationService pages,
+            org.praxisplatform.config.service.PageCreationHost host, EffectiveUiAudienceProvider audiences,
+            UiLayoutLifecycleAdmission admission, UiLayoutLifecycleStructureValidator structure,
+            @Qualifier("configNamedParameterJdbcTemplate") NamedParameterJdbcTemplate jdbc,
+            @Qualifier("uiLayoutLifecycleConfigTransactionOperations") TransactionOperations transactions,
+            UiLayoutValidationBudgetPolicy budgets, UiLayoutReleaseRepository releases,
+            UiLayoutDraftRepository drafts, UiLayoutReleaseMemberRepository members,
+            UiLayoutRevisionRepository revisions, UiLayoutDefinitionRepository definitions,
+            UiLayoutAssignmentRevisionRepository assignments, ObjectMapper mapper, CanonicalJsonHashService hashes) {
+        return new org.praxisplatform.config.service.PageRuntimeReadService(pages, host, audiences,
+                pages.lifecycleAdmission(admission), structure, pages.workspaceSource(), pages.metadataAdmission(),
+                jdbc, transactions, budgets, releases, drafts, members, revisions, definitions, assignments,
+                mapper, hashes, Clock.systemUTC());
+    }
+
+    @Bean
+    @ConditionalOnBean(org.praxisplatform.config.service.PageRuntimeReadService.class)
+    @ConditionalOnMissingBean
+    public org.praxisplatform.config.controller.PageRuntimeController pageRuntimeController(
+            org.praxisplatform.config.service.PageRuntimeReadService pages) {
+        return new org.praxisplatform.config.controller.PageRuntimeController(pages);
+    }
+
+    @Bean
+    @ConditionalOnBean(org.praxisplatform.config.service.PageCreationService.class)
+    @ConditionalOnMissingBean
     public org.praxisplatform.config.controller.PageCreationController pageCreationController(
             org.praxisplatform.config.service.PageCreationService pages) {
         return new org.praxisplatform.config.controller.PageCreationController(pages);
