@@ -42,6 +42,7 @@ abstract class UiLayoutPageGroupPostgresFixture {
 
   interface SqlProbe {
     default void managed(int count) {}
+    default void loaded(Object entity) {}
     default void beforeCommit(Connection connection) throws Exception {}
     default void afterCommit(Connection connection, Throwable failure) throws Exception {}
     default void before(Connection connection, String sql, Map<Integer, Object> binds) throws Exception {}
@@ -111,7 +112,10 @@ abstract class UiLayoutPageGroupPostgresFixture {
         .getEventListenerGroup(org.hibernate.event.spi.EventType.POST_LOAD)
         .appendListener(event -> {
           SqlProbe current = probe;
-          if (current != null) current.managed(event.getSession().getPersistenceContextInternal().getNumberOfManagedEntities());
+          if (current != null) {
+            current.managed(event.getSession().getPersistenceContextInternal().getNumberOfManagedEntities());
+            current.loaded(event.getEntity());
+          }
         });
     var manager = new JpaTransactionManager(factory);
     manager.setDataSource(dataSource);

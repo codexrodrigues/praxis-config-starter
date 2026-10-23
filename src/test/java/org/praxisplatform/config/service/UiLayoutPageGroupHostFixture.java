@@ -36,6 +36,12 @@ final class UiLayoutPageGroupHostFixture implements AutoCloseable {
   volatile BiConsumer<UiLayoutLifecycleInvocation, UiLayoutTarget> structureCallback = (invocation, target) -> {};
   volatile BiConsumer<UiLayoutLifecycleInvocation, UiLayoutTarget> metadataCallback = (invocation, target) -> {};
   volatile BiConsumer<UiLayoutLifecycleOperation, UiLayoutLifecycleInvocation> budgetCallback = (operation, invocation) -> {};
+  @FunctionalInterface
+  interface PageGrant {
+    void require(PageCreationOperation operation, PageCreationContext context, PageSourceReference reference);
+  }
+  volatile PageGrant pageGrant = (operation, context, reference) -> {};
+  final java.util.concurrent.atomic.AtomicInteger nativeCaptures = new java.util.concurrent.atomic.AtomicInteger();
   volatile Duration budget = Duration.ofSeconds(40);
 
   UiLayoutPageGroupHostFixture(String tenant) throws Exception {
@@ -107,9 +113,11 @@ final class UiLayoutPageGroupHostFixture implements AutoCloseable {
       }
       public void require(PageCreationOperation operation, PageCreationContext context, PageSourceReference reference) {
         current(context.invocation());
+        pageGrant.require(operation, context, reference);
       }
       public UiLayoutDraftWorkspaceSeed.TargetSeed captureNative(PageCreationContext context, PageSourceReference.Native reference) {
         assertThat(reference).isEqualTo(new PageSourceReference.Native("fixture:page", "r1"));
+        nativeCaptures.incrementAndGet();
         return nativePageSeed(context.invocation());
       }
       public void requireNative(PageCreationContext context, PageSourceReference.Native reference,

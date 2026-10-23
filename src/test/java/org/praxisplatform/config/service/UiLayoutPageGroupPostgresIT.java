@@ -314,7 +314,8 @@ class UiLayoutPageGroupPostgresIT extends UiLayoutPageGroupPostgresFixture {
     var inserted = new java.util.concurrent.atomic.AtomicInteger();
     probe = new SqlProbe() {
       @Override public void after(java.sql.Connection connection, String sql, Map<Integer, Object> binds, Object result) {
-        if (sql.toLowerCase(Locale.ROOT).startsWith("insert into " + table)) {
+        String normalized = sql.toLowerCase(Locale.ROOT);
+        if (normalized.startsWith("insert into ") && normalized.contains(table)) {
           inserted.incrementAndGet();
           throw new IllegalStateException("Injected after successful runtime INSERT");
         }
@@ -329,17 +330,21 @@ class UiLayoutPageGroupPostgresIT extends UiLayoutPageGroupPostgresFixture {
 
   @Test
   void planChangedBeforeItsFirstLockAbortsAndExplicitRetryUsesTheNewHead() throws Exception {
-    UUID initial = groupRelease(UUID.randomUUID()), concurrent = groupRelease(UUID.randomUUID()), candidate = groupRelease(UUID.randomUUID());
+    UUID initialGroup = UUID.randomUUID(), concurrentGroup = UUID.randomUUID(), candidateGroup = UUID.randomUUID();
+    UUID initial = groupRelease(initialGroup), concurrent = groupRelease(concurrentGroup), candidate = groupRelease(candidateGroup);
+    List<Long> plannedKeys = java.util.Collections.synchronizedList(new ArrayList<>());
     var initialHead = publish(host.alice, host.groups, initial, null);
     var planned = new java.util.concurrent.CountDownLatch(1);
     var resume = new java.util.concurrent.CountDownLatch(1);
     var intercepted = new java.util.concurrent.atomic.AtomicBoolean();
     probe = new SqlProbe() {
       @Override public void before(java.sql.Connection connection, String sql, Map<Integer, Object> binds) throws Exception {
-        if (Thread.currentThread().getName().equals("p3-old-plan") && sql.contains("pg_try_advisory_xact_lock")
-            && intercepted.compareAndSet(false, true)) {
-          planned.countDown();
-          if (!resume.await(45, java.util.concurrent.TimeUnit.SECONDS)) throw new AssertionError("plan barrier timeout");
+        if (Thread.currentThread().getName().equals("p3-old-plan") && sql.contains("pg_try_advisory_xact_lock")) {
+          plannedKeys.add(((Number) binds.get(1)).longValue());
+          if (intercepted.compareAndSet(false, true)) {
+            planned.countDown();
+            if (!resume.await(45, java.util.concurrent.TimeUnit.SECONDS)) throw new AssertionError("plan barrier timeout");
+          }
         }
       }
     };
@@ -354,9 +359,20 @@ class UiLayoutPageGroupPostgresIT extends UiLayoutPageGroupPostgresFixture {
       assertThat(planned.await(45, java.util.concurrent.TimeUnit.SECONDS)).isTrue();
       concurrentHead = publish(host.alice, host.groups, concurrent, initialHead.headEtag());
       resume.countDown();
-      assertThat(plannedAttempt.get(60, java.util.concurrent.TimeUnit.SECONDS))
-          .isInstanceOf(UiLayoutLifecycleException.class).extracting("code")
+      Throwable plannedFailure = plannedAttempt.get(60, java.util.concurrent.TimeUnit.SECONDS);
+      assertThat(plannedFailure).isInstanceOf(UiLayoutLifecycleException.class).extracting("code")
           .isEqualTo(UiLayoutLifecycleException.Code.PRECONDITION_FAILED);
+      assertThat(plannedFailure.getStackTrace()).anySatisfy(frame -> {
+        assertThat(frame.getClassName()).isEqualTo(UiLayoutPageGroupHeadStore.class.getName());
+        assertThat(frame.getMethodName()).isEqualTo("conflict");
+      });
+      var expectedKeys = new ArrayList<Long>();
+      java.util.stream.Stream.of(initialGroup, candidateGroup).sorted().forEach(group -> expectedKeys.add(
+          UiLayoutPageGroupHeadStore.lockKey("page-group", host.scope.tenant(), host.scope.application(),
+              host.scope.environment(), host.scope.namespace(), group.toString())));
+      expectedKeys.add(UiLayoutPageGroupHeadStore.lockKey("page-group-root", host.scope.tenant(), host.scope.environment(),
+          host.groups.componentType(), host.groups.componentId()));
+      assertThat(plannedKeys).containsExactlyElementsOf(expectedKeys);
     } finally {
       resume.countDown(); executor.shutdownNow();
       assertThat(executor.awaitTermination(60, java.util.concurrent.TimeUnit.SECONDS)).isTrue();
@@ -430,7 +446,10 @@ class UiLayoutPageGroupPostgresIT extends UiLayoutPageGroupPostgresFixture {
     long groupEvents = eventCount(host.groups), bEvents = eventCount(pageB.target());
     var restored = host.commands.rollback(host.alice, host.alice.version(), pageA.target(),
         UiLayoutLifecycleCommandService.HeadWriteCondition.match(secondHead.headEtag()), a1, "Restore complete A1");
-    assertThat(frozenDocument(UUID.fromString(restored.activeReleaseRef()))).isEqualTo(frozenDocument(a1));
+    var restoredHead = headState(pageA.target());
+    assertThat(restoredHead.get("active_release_id")).isEqualTo(a1);
+    assertThat(restored.activeReleaseRef()).isEqualTo(a1.toString());
+    assertThat(frozenDocument((UUID) restoredHead.get("active_release_id"))).isEqualTo(frozenDocument(a1));
     assertThat(frozenDocument(a1).at("/config/definition/widgets")).hasSize(2);
     assertThat(frozenDocument(a1).at("/config/navigation/0/groupId").asText()).isEqualTo(firstGroup.toString());
     assertThat(headState(host.groups)).isEqualTo(groupsBefore); assertThat(headState(pageB.target())).isEqualTo(bBefore);
@@ -639,6 +658,27 @@ class UiLayoutPageGroupPostgresIT extends UiLayoutPageGroupPostgresFixture {
         UiLayoutLifecycleCommandService.HeadWriteCondition.match(groupHead.headEtag()), "Private pages still count"))
         .isInstanceOf(UiLayoutLifecycleException.class).extracting("code").isEqualTo(UiLayoutLifecycleException.Code.INVALID_RELEASE);
     assertThat(headState(host.groups)).isEqualTo(before); assertThat(eventCount()).isEqualTo(events); assertNoOrphans();
+
+    // Same tenant/environment and group UUID, but a different application and registered shell.
+    var otherScope = new UiLayoutPageGroupHostFixture.Scope(host.scope.tenant(), "app-b", host.scope.environment(), host.scope.namespace());
+    var otherRoot = new UiLayoutTarget("praxis-app-shell", UUID.randomUUID().toString());
+    host.bindGroups(otherScope, otherRoot);
+    var otherActor = host.addActor("operator-app-b", "unit-b", "c1", otherScope);
+    var otherDraft = host.commands.createDraft(otherActor, otherActor.version(), otherRoot, UUID.randomUUID().toString());
+    UUID otherRelease = approve(otherActor, otherRoot, otherDraft, UiLayoutPageGroupHostFixture.groupsDocument(group));
+    var pageBefore = headState(page.target());
+    long groupEventsBefore = eventCount(host.groups), pageEventsBefore = eventCount(page.target());
+    long allEventsBeforeBPublish = eventCount();
+    var otherHead = publish(otherActor, otherRoot, otherRelease, null);
+    host.commands.withdraw(otherActor, otherActor.version(), otherRoot,
+        UiLayoutLifecycleCommandService.HeadWriteCondition.match(otherHead.headEtag()), "Application A references do not belong to B");
+    assertThat(headState(otherRoot).get("active_release_id")).isNull();
+    assertThat(headState(host.groups)).isEqualTo(before);
+    assertThat(headState(page.target())).isEqualTo(pageBefore);
+    assertThat(eventCount(host.groups)).isEqualTo(groupEventsBefore);
+    assertThat(eventCount(page.target())).isEqualTo(pageEventsBefore);
+    assertThat(eventCount()).isEqualTo(allEventsBeforeBPublish + 2);
+    assertNoOrphans();
   }
 
   @Test
@@ -688,6 +728,90 @@ class UiLayoutPageGroupPostgresIT extends UiLayoutPageGroupPostgresFixture {
     }));
     assertThat(failure).isInstanceOf(UiLayoutLifecycleException.class).extracting("code").isEqualTo(UiLayoutLifecycleException.Code.PRECONDITION_FAILED);
     assertThat(jdbc.queryForObject("SELECT count(*) FROM ui_layout_definition WHERE id=?", Long.class, id)).isZero();
+  }
+
+  @Test
+  void historicalPublishedCopyKeepsFixedContentAndPublishesWithoutAncestorReadGrants() throws Exception {
+    var original = newPage(host.alice);
+    var firstDraft = host.reads.draft(host.alice, host.alice.version(), original.target(), original.draftId());
+    ObjectNode firstDocument = firstDraft.targets().getFirst().working().document().deepCopy();
+    String formTitle = "/config/definition/widgets/0/definition/inputs/config/title";
+    ((ObjectNode) firstDocument.at("/config/definition/widgets/0/definition/inputs/config"))
+        .put("title", "A1 evolved native form");
+    UUID firstRelease = approve(host.alice, original.target(), firstDraft, firstDocument);
+    var firstHead = publish(host.alice, original.target(), firstRelease, null);
+    UUID selectedRevision = jdbc.queryForObject("SELECT content_revision_id FROM ui_layout_release_member WHERE release_id=?", UUID.class, firstRelease);
+    var selected = new PageSourceReference.Published(original.pageId(), firstRelease, selectedRevision);
+
+    var secondDraft = host.commands.createDraft(host.alice, host.alice.version(), original.target(), UUID.randomUUID().toString());
+    ObjectNode secondDocument = secondDraft.targets().getFirst().working().document().deepCopy();
+    ((ObjectNode) secondDocument.at("/config/definition/widgets/0/definition/inputs/config"))
+        .put("title", "A2 current native form");
+    UUID secondRelease = approve(host.alice, original.target(), secondDraft, secondDocument);
+    publish(host.alice, original.target(), secondRelease, firstHead.headEtag());
+    var originalHead = headState(original.target());
+    long originalEvents = eventCount(original.target());
+    assertThat(frozenDocument(secondRelease).at(formTitle).asText()).isEqualTo("A2 current native form");
+
+    var bob = host.addActor("bob-copy", "unit-b", "c2", host.scope);
+    var denySelectedReadAndCopy = new java.util.concurrent.atomic.AtomicBoolean();
+    host.pageGrant = (operation, context, reference) -> {
+      if (context.invocation().actorRef().equals(bob.name())
+          && (operation == PageCreationOperation.READ_SOURCE || operation == PageCreationOperation.COPY_SOURCE)
+          && (reference instanceof PageSourceReference.Native || denySelectedReadAndCopy.get())) throw denied();
+    };
+    var copied = host.pages.create(bob, bob.version(), new PageCreationCommand(UUID.randomUUID(), selected, "Independent A1 copy")).receipt();
+    var copiedDraft = host.reads.draft(bob, bob.version(), copied.target(), copied.draftId());
+    assertThat(copiedDraft.targets().getFirst().baseline().document().at(formTitle).asText())
+        .isEqualTo("A1 evolved native form");
+    assertThat(firstDraft.targets().getFirst().baseline().document().at(formTitle).asText()).isEqualTo("Original");
+    assertThat(copied.pageId()).isNotEqualTo(original.pageId());
+    assertThat(copied.source()).isEqualTo(selected);
+    assertThat(copiedDraft.targets().getFirst().baseline().document().at("/config/navigation")).isEmpty();
+    assertThat(host.nativeCaptures.get()).isEqualTo(1);
+    assertThat(new PageCreationCodec().tree(copied).toString()).doesNotContain("fixture:page", "identityMap", "original");
+
+    // Source selection permissions do not become perpetual genealogy permissions for an independent copy.
+    denySelectedReadAndCopy.set(true);
+    assertThat(host.pages.byCreationKey(bob, bob.version(), copied.creationKey()).pageId()).isEqualTo(copied.pageId());
+    UUID copiedRelease = approve(bob, copied.target(), copiedDraft,
+        copiedDraft.targets().getFirst().working().document().deepCopy());
+    var copiedHead = publish(bob, copied.target(), copiedRelease, null);
+    assertThat(headState(copied.target()).get("active_release_id")).isEqualTo(copiedRelease);
+    assertThat(frozenDocument(copiedRelease).at(formTitle).asText()).isEqualTo("A1 evolved native form");
+    assertThat(headState(original.target())).isEqualTo(originalHead);
+    assertThat(eventCount(original.target())).isEqualTo(originalEvents);
+    assertThat(host.nativeCaptures.get()).isEqualTo(1);
+    var selectedCopyDenied = new java.util.concurrent.atomic.AtomicInteger();
+    host.pageGrant = (operation, context, reference) -> {
+      if (operation == PageCreationOperation.COPY_SOURCE && reference.equals(selected)) {
+        selectedCopyDenied.incrementAndGet();
+        throw denied();
+      }
+      if (reference instanceof PageSourceReference.Native
+          && (operation == PageCreationOperation.READ_SOURCE || operation == PageCreationOperation.COPY_SOURCE)) throw denied();
+    };
+    assertThatThrownBy(() -> host.pages.create(bob, bob.version(),
+        new PageCreationCommand(UUID.randomUUID(), selected, "Denied new selected copy")))
+        .isInstanceOf(UiLayoutLifecycleException.class).extracting("code").isEqualTo(UiLayoutLifecycleException.Code.DENIED);
+
+    assertThat(selectedCopyDenied.get()).isEqualTo(1);
+    var beforeDeniedDependency = headState(copied.target());
+    long copiedEvents = eventCount(copied.target());
+    var dependencyDenied = new java.util.concurrent.atomic.AtomicInteger();
+    host.metadataCallback = (invocation, target) -> {
+      if (invocation.actorRef().equals(bob.name())) {
+        dependencyDenied.incrementAndGet();
+        throw denied();
+      }
+    };
+    assertThatThrownBy(() -> publish(bob, copied.target(), copiedRelease, copiedHead.headEtag()))
+        .isInstanceOf(UiLayoutLifecycleException.class).extracting("code").isEqualTo(UiLayoutLifecycleException.Code.DENIED);
+    assertThat(dependencyDenied.get()).isPositive();
+    assertThat(headState(copied.target())).isEqualTo(beforeDeniedDependency);
+    assertThat(eventCount(copied.target())).isEqualTo(copiedEvents);
+    assertThat(headState(original.target())).isEqualTo(originalHead);
+    assertNoOrphans();
   }
 
   private PageCreationReceipt newPage(Actor actor) {

@@ -35,15 +35,17 @@ class UiLayoutPageGroupDensityPostgresIT extends UiLayoutPageGroupPostgresFixtur
       assertThat(jdbc.queryForObject("SELECT count(*) FROM ui_layout_release_head WHERE tenant_id=? AND root_component_id=?", Long.class,
           host.scope.tenant(), prototypePage.target().componentId())).isZero();
       assertThat(TransactionSynchronizationManager.isActualTransactionActive()).isFalse();
-      var positive = measure(host, valid, head.headEtag(), "all-1000-valid", seed.workspaceStoredBytes);
+      var positive = measure(host, valid, head.headEtag(), "all-1000-valid", seed.workspaceEncodedInputBytes);
       assertThat(positive.failure).isNull();
+      assertLoadedPages(positive, seed.pageIds(), 2);
       assertThat(positive.pageQueries).isEqualTo(66); // 32 nonempty + one terminal query, twice.
       assertThat(positive.peakManaged).isLessThanOrEqualTo(positive.baselineManaged + 32 * 6 + 12);
       var before = jdbc.queryForMap("SELECT active_release_id,head_etag,row_version FROM ui_layout_release_head WHERE tenant_id=? AND root_component_id=?",
           host.scope.tenant(), host.groups.componentId());
       long events = jdbc.queryForObject("SELECT count(*) FROM ui_layout_release_event WHERE tenant_id=?", Long.class, host.scope.tenant());
-      var negative = measure(host, invalid, positive.receipt.headEtag(), "last-page-blocks", seed.workspaceStoredBytes);
+      var negative = measure(host, invalid, positive.receipt.headEtag(), "last-page-blocks", seed.workspaceEncodedInputBytes);
       assertThat(negative.failure).isInstanceOf(UiLayoutLifecycleException.class).extracting("code").isEqualTo(UiLayoutLifecycleException.Code.INVALID_RELEASE);
+      assertLoadedPages(negative, seed.pageIds(), 1);
       assertThat(negative.pageQueries).isEqualTo(32); // Sentinel in final nonempty batch prevents the terminal query.
       assertThat(negative.peakManaged).isLessThanOrEqualTo(negative.baselineManaged + 32 * 6 + 12);
       assertThat(jdbc.queryForMap("SELECT active_release_id,head_etag,row_version FROM ui_layout_release_head WHERE tenant_id=? AND root_component_id=?",
@@ -52,30 +54,86 @@ class UiLayoutPageGroupDensityPostgresIT extends UiLayoutPageGroupPostgresFixtur
     } finally { probe = null; }
   }
 
-  private Measurement measure(UiLayoutPageGroupHostFixture host, UUID release, String etag, String name, long workspaceBytes) {
-    var queries = new AtomicInteger(); var peak = new AtomicInteger(); var baseline = new AtomicInteger(-1); var postBatch = new AtomicInteger();
-    probe = new SqlProbe() {
-      @Override public void managed(int count) { peak.accumulateAndGet(count, Math::max); }
-      @Override public void before(java.sql.Connection connection, String sql, Map<Integer, Object> binds) {
-        if (!sql.contains("SELECT c.page_id, c.root_component_type")) return;
-        var holder = (org.springframework.orm.jpa.EntityManagerHolder) TransactionSynchronizationManager.getResource(factory);
-        int count = holder.getEntityManager().unwrap(org.hibernate.engine.spi.SessionImplementor.class).getPersistenceContextInternal().getNumberOfManagedEntities();
-        baseline.compareAndSet(-1, count); postBatch.set(count); queries.incrementAndGet();
-      }
-    };
-    long start = System.nanoTime(), sql = sqlCalls.get(), io = sqlNanos.get(), isolation = isolationCalls.get(), isolationIo = isolationNanos.get();
-    final UiLayoutReleaseHeadReceipt[] receipt = new UiLayoutReleaseHeadReceipt[1];
-    Throwable failure = catchThrowable(() -> receipt[0] = publish(host, release, etag));
-    probe = null;
-    System.out.println("P3-A density case=" + name + " pages=1000 budgetMs=" + host.budget.toMillis()
-        + " wallMs=" + (System.nanoTime()-start)/1_000_000 + " SQL=" + (sqlCalls.get()-sql) + " jdbcMs=" + (sqlNanos.get()-io)/1_000_000
-        + " isolationCalls=" + (isolationCalls.get()-isolation) + " isolationMs=" + (isolationNanos.get()-isolationIo)/1_000_000
-        + " pageQueries=" + queries.get() + " managedBaseline=" + baseline.get() + " managedPeak=" + peak.get() + " managedPostBatch=" + postBatch.get()
-        + " workspaceStoredBytesPerFullPass=" + workspaceBytes + " outcome=" + (failure == null ? "accepted" : failure.getClass().getSimpleName()));
-    return new Measurement(receipt[0], failure, queries.get(), baseline.get(), peak.get());
+  private void assertLoadedPages(Measurement measurement, List<UUID> expected, int passes) {
+    assertThat(measurement.loadedPages).hasSize(passes);
+    measurement.loadedPages.values().forEach(loaded -> {
+      assertThat(loaded.keySet()).containsExactlyInAnyOrderElementsOf(expected);
+      assertThat(loaded.values()).allMatch(count -> count == 1);
+    });
   }
 
-  private record Measurement(UiLayoutReleaseHeadReceipt receipt, Throwable failure, int pageQueries, int baselineManaged, int peakManaged) {}
+  private Measurement measure(UiLayoutPageGroupHostFixture host, UUID release, String etag, String name, long workspaceBytes) {
+    // Fresh state is captured outside the timed operation, including on a deadline failure.
+    var headBefore = headState(host);
+    long eventsBefore = eventCount(host);
+    var queries = new AtomicInteger();
+    var peak = new AtomicInteger();
+    var baseline = new AtomicInteger(-1);
+    var nextBatchManaged = new AtomicInteger();
+    var currentPass = new AtomicInteger();
+    Map<Integer, Map<UUID, Integer>> loadedPages = new LinkedHashMap<>();
+    Map<Integer, Long> loadedWorkspaceBytes = new LinkedHashMap<>();
+    probe = new SqlProbe() {
+      @Override public void managed(int count) { peak.accumulateAndGet(count, Math::max); }
+      @Override public void loaded(Object entity) {
+        if (!(entity instanceof org.praxisplatform.config.domain.UiLayoutDraft draft)
+            || !draft.getRootComponentType().equals("praxis-dynamic-page")
+            || !draft.getTenantId().equals(host.scope.tenant())) return;
+        int pass = currentPass.get();
+        assertThat(pass).isPositive();
+        loadedPages.computeIfAbsent(pass, ignored -> new LinkedHashMap<>())
+            .merge(UUID.fromString(draft.getRootComponentId()), 1, Integer::sum);
+        loadedWorkspaceBytes.merge(pass,
+            (long) draft.getDraftDocument().getBytes(java.nio.charset.StandardCharsets.UTF_8).length, Long::sum);
+      }
+      @Override public void before(java.sql.Connection connection, String sql, Map<Integer, Object> binds) {
+        if (!sql.contains("SELECT c.page_id, c.root_component_type")) return;
+        if (!sql.contains("c.page_id >")) currentPass.incrementAndGet();
+        var holder = (org.springframework.orm.jpa.EntityManagerHolder) TransactionSynchronizationManager.getResource(factory);
+        int count = holder.getEntityManager().unwrap(org.hibernate.engine.spi.SessionImplementor.class)
+            .getPersistenceContextInternal().getNumberOfManagedEntities();
+        baseline.compareAndSet(-1, count);
+        nextBatchManaged.set(count);
+        queries.incrementAndGet();
+      }
+    };
+    long start = System.nanoTime(), sql = sqlCalls.get(), io = sqlNanos.get();
+    long isolation = isolationCalls.get(), isolationIo = isolationNanos.get();
+    final UiLayoutReleaseHeadReceipt[] receipt = new UiLayoutReleaseHeadReceipt[1];
+    Throwable failure = catchThrowable(() -> receipt[0] = publish(host, release, etag));
+    long wallMs = (System.nanoTime() - start) / 1_000_000;
+    long statements = sqlCalls.get() - sql, jdbcMs = (sqlNanos.get() - io) / 1_000_000;
+    long isolationCount = isolationCalls.get() - isolation, isolationMs = (isolationNanos.get() - isolationIo) / 1_000_000;
+    probe = null;
+    if (failure != null) {
+      assertThat(headState(host)).describedAs("Failed scan preserves active release, ETag and row version").isEqualTo(headBefore);
+      assertThat(eventCount(host)).describedAs("Failed scan leaves no audit event").isEqualTo(eventsBefore);
+    }
+    var identitiesPerPass = new LinkedHashMap<Integer, Integer>();
+    loadedPages.forEach((pass, identities) -> identitiesPerPass.put(pass, identities.size()));
+    System.out.println("P3-A density case=" + name + " catalogPages=1000 budgetMs=" + host.budget.toMillis()
+        + " wallMs=" + wallMs + " SQL=" + statements + " jdbcMs=" + jdbcMs
+        + " isolationCalls=" + isolationCount + " isolationMs=" + isolationMs
+        + " attemptedPageQueries=" + queries.get() + " loadedWorkspaceIdentitiesPerPass=" + identitiesPerPass
+        + " loadedWorkspaceBytesPerPass=" + loadedWorkspaceBytes
+        + " managedBaseline=" + baseline.get() + " managedPeak=" + peak.get() + " managedAtLastBatchStart=" + nextBatchManaged.get()
+        + " knownWorkspaceEncodedInputBytesPerFullPass=" + workspaceBytes + " freshRollbackChecked=" + (failure != null)
+        + " outcome=" + (failure == null ? "accepted" : failure));
+    return new Measurement(receipt[0], failure, queries.get(), baseline.get(), peak.get(), loadedPages);
+  }
+
+  private Map<String, Object> headState(UiLayoutPageGroupHostFixture host) {
+    return jdbc.queryForMap("SELECT active_release_id,head_etag,row_version FROM ui_layout_release_head WHERE tenant_id=? AND environment=? AND root_component_id=?",
+        host.scope.tenant(), host.scope.environment(), host.groups.componentId());
+  }
+
+  private long eventCount(UiLayoutPageGroupHostFixture host) {
+    return jdbc.queryForObject("SELECT count(*) FROM ui_layout_release_event WHERE tenant_id=? AND environment=?", Long.class,
+        host.scope.tenant(), host.scope.environment());
+  }
+
+  private record Measurement(UiLayoutReleaseHeadReceipt receipt, Throwable failure, int pageQueries,
+      int baselineManaged, int peakManaged, Map<Integer, Map<UUID, Integer>> loadedPages) {}
 
   private UiLayoutReleaseHeadReceipt publish(UiLayoutPageGroupHostFixture host, UUID release, String etag) {
     return host.commands.publish(host.alice, host.alice.version(), host.groups,

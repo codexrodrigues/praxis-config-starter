@@ -20,7 +20,7 @@ final class UiLayoutPageGroupDenseFixture {
   private final NamedParameterJdbcTemplate jdbc = new NamedParameterJdbcTemplate(UiLayoutPageGroupPostgresFixture.dataSource);
   private final List<UUID> pageIds;
   private final List<Rows> rows = new ArrayList<>();
-  long workspaceStoredBytes;
+  long workspaceEncodedInputBytes;
   long ledgerStoredBytes;
   long rootMetadataBytes;
 
@@ -57,7 +57,7 @@ final class UiLayoutPageGroupDenseFixture {
         insertTable("ui_layout_release_event", chunk.stream().map(row -> row.tables.get("ui_layout_release_event")).toList());
       });
     }
-    System.out.println("P3-A synthetic seed pages=" + rows.size() + " workspaceStoredBytes=" + workspaceStoredBytes + " ledgerStoredBytes=" + ledgerStoredBytes + " rootMetadataBytes=" + rootMetadataBytes
+    System.out.println("P3-A synthetic seed pages=" + rows.size() + " workspaceEncodedInputBytes=" + workspaceEncodedInputBytes + " ledgerStoredBytes=" + ledgerStoredBytes + " rootMetadataBytes=" + rootMetadataBytes
         + " wallMs=" + (System.nanoTime() - started) / 1_000_000 + " runtime=true triggers=true");
     rows.clear(); // Seed preparation retains strings; the measured scan starts after releasing these references.
   }
@@ -103,7 +103,7 @@ final class UiLayoutPageGroupDenseFixture {
         new UiLayoutDraftWorkspaceDocument.AssignmentSelection(assignmentId, revisionId, "TENANT", selector, (short) 0, "synthetic", UUID.randomUUID()), children);
     var workspace = new UiLayoutDraftWorkspaceDocument(UiLayoutDraftWorkspaceDocument.SCHEMA_VERSION, List.of(state), UUID.randomUUID());
     String document = workspaces.encode(workspace);
-    workspaceStoredBytes += document.getBytes(java.nio.charset.StandardCharsets.UTF_8).length;
+    workspaceEncodedInputBytes += document.getBytes(java.nio.charset.StandardCharsets.UTF_8).length;
     workspaces.decode(document, current.composition());
     new UiLayoutPageChildCaptures(hashes).historicalIntegrity(draftId, seed.target(), baseline, candidate, children);
     UiLayoutPageRevisionReproduction.require(seed.target(), seed.authoring(), baseline, candidate, seed.patch(), patch);
