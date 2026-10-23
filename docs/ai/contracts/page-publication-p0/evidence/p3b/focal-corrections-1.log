@@ -1,0 +1,316 @@
+[INFO] Scanning for projects...
+[INFO] 
+[INFO] -----------< io.github.codexrodrigues:praxis-config-starter >-----------
+[INFO] Building Praxis Config Starter 0.1.0-rc.166
+[INFO]   from pom.xml
+[INFO] --------------------------------[ jar ]---------------------------------
+[INFO] 
+[INFO] --- resources:3.3.1:resources (default-resources) @ praxis-config-starter ---
+[INFO] Copying 0 resource from src/main/resources to target/classes
+[INFO] Copying 85 resources from src/main/resources to target/classes
+[INFO] 
+[INFO] --- compiler:3.11.0:compile (default-compile) @ praxis-config-starter ---
+[INFO] Changes detected - recompiling the module! :source
+[INFO] Compiling 812 source files with javac [debug release 21] to target/classes
+[WARNING] ${CONFIG_SOURCE}/src/main/java/org/praxisplatform/config/service/AiStreamService.java:[667,82] java.lang.ThreadDeath in java.lang has been deprecated and marked for removal
+[WARNING] ${CONFIG_SOURCE}/src/main/java/org/praxisplatform/config/service/AiStreamService.java:[1465,82] java.lang.ThreadDeath in java.lang has been deprecated and marked for removal
+[INFO] ${CONFIG_SOURCE}/src/main/java/org/praxisplatform/config/service/DomainRuleExplanationProjectionService.java: Some input files use or override a deprecated API.
+[INFO] ${CONFIG_SOURCE}/src/main/java/org/praxisplatform/config/service/DomainRuleExplanationProjectionService.java: Recompile with -Xlint:deprecation for details.
+[INFO] 
+[INFO] --- resources:3.3.1:testResources (default-testResources) @ praxis-config-starter ---
+[INFO] Copying 7 resources from src/test/resources to target/test-classes
+[INFO] 
+[INFO] --- compiler:3.11.0:testCompile (default-testCompile) @ praxis-config-starter ---
+[INFO] Changes detected - recompiling the module! :dependency
+[INFO] Compiling 321 source files with javac [debug release 21] to target/test-classes
+[WARNING] ${CONFIG_SOURCE}/src/test/java/org/praxisplatform/config/controller/AiPatchStreamHttpSseIntegrationTest.java:[145,6] org.springframework.boot.test.mock.mockito.MockBean in org.springframework.boot.test.mock.mockito has been deprecated and marked for removal
+[WARNING] ${CONFIG_SOURCE}/src/test/java/org/praxisplatform/config/controller/AiPatchStreamHttpSseIntegrationTest.java:[145,6] org.springframework.boot.test.mock.mockito.MockBean in org.springframework.boot.test.mock.mockito has been deprecated and marked for removal
+[WARNING] ${CONFIG_SOURCE}/src/test/java/org/praxisplatform/config/controller/AiPatchStreamHttpSseIntegrationTest.java:[145,6] org.springframework.boot.test.mock.mockito.MockBean in org.springframework.boot.test.mock.mockito has been deprecated and marked for removal
+[WARNING] ${CONFIG_SOURCE}/src/test/java/org/praxisplatform/config/controller/AiPatchStreamHttpSseIntegrationTest.java:[145,6] org.springframework.boot.test.mock.mockito.MockBean in org.springframework.boot.test.mock.mockito has been deprecated and marked for removal
+[WARNING] ${CONFIG_SOURCE}/src/test/java/org/praxisplatform/config/controller/AiPatchStreamHttpSseIntegrationTest.java:[145,6] org.springframework.boot.test.mock.mockito.MockBean in org.springframework.boot.test.mock.mockito has been deprecated and marked for removal
+[WARNING] ${CONFIG_SOURCE}/src/test/java/org/praxisplatform/config/ai/authoring/AgenticAuthoringTerminalApplyPersistenceIntegrationTest.java:[52,2] org.springframework.boot.test.mock.mockito.MockBean in org.springframework.boot.test.mock.mockito has been deprecated and marked for removal
+[WARNING] ${CONFIG_SOURCE}/src/test/java/org/praxisplatform/config/ai/authoring/AgenticAuthoringTerminalApplyPersistenceIntegrationTest.java:[52,2] org.springframework.boot.test.mock.mockito.MockBean in org.springframework.boot.test.mock.mockito has been deprecated and marked for removal
+[WARNING] ${CONFIG_SOURCE}/src/test/java/org/praxisplatform/config/ai/authoring/AgenticAuthoringTerminalApplyPersistenceIntegrationTest.java:[52,2] org.springframework.boot.test.mock.mockito.MockBean in org.springframework.boot.test.mock.mockito has been deprecated and marked for removal
+[WARNING] ${CONFIG_SOURCE}/src/test/java/org/praxisplatform/config/ai/authoring/AgenticAuthoringTerminalApplyPersistenceIntegrationTest.java:[52,2] org.springframework.boot.test.mock.mockito.MockBean in org.springframework.boot.test.mock.mockito has been deprecated and marked for removal
+[WARNING] ${CONFIG_SOURCE}/src/test/java/org/praxisplatform/config/ai/authoring/AgenticAuthoringTerminalApplyPersistenceIntegrationTest.java:[52,2] org.springframework.boot.test.mock.mockito.MockBean in org.springframework.boot.test.mock.mockito has been deprecated and marked for removal
+[WARNING] ${CONFIG_SOURCE}/src/test/java/org/praxisplatform/config/ai/authoring/AgenticAuthoringTerminalApplyPersistenceIntegrationTest.java:[109,6] org.springframework.boot.test.mock.mockito.MockBean in org.springframework.boot.test.mock.mockito has been deprecated and marked for removal
+[WARNING] ${CONFIG_SOURCE}/src/test/java/org/praxisplatform/config/ai/authoring/AgenticAuthoringTerminalApplyPersistenceIntegrationTest.java:[109,6] org.springframework.boot.test.mock.mockito.MockBean in org.springframework.boot.test.mock.mockito has been deprecated and marked for removal
+[WARNING] ${CONFIG_SOURCE}/src/test/java/org/praxisplatform/config/ai/authoring/AgenticAuthoringTerminalApplyPersistenceIntegrationTest.java:[109,6] org.springframework.boot.test.mock.mockito.MockBean in org.springframework.boot.test.mock.mockito has been deprecated and marked for removal
+[WARNING] ${CONFIG_SOURCE}/src/test/java/org/praxisplatform/config/ai/authoring/AgenticAuthoringTerminalApplyPersistenceIntegrationTest.java:[109,6] org.springframework.boot.test.mock.mockito.MockBean in org.springframework.boot.test.mock.mockito has been deprecated and marked for removal
+[WARNING] ${CONFIG_SOURCE}/src/test/java/org/praxisplatform/config/ai/authoring/AgenticAuthoringTerminalApplyPersistenceIntegrationTest.java:[109,6] org.springframework.boot.test.mock.mockito.MockBean in org.springframework.boot.test.mock.mockito has been deprecated and marked for removal
+[WARNING] ${CONFIG_SOURCE}/src/test/java/org/praxisplatform/config/ai/authoring/AgenticAuthoringTerminalApplyPersistenceIntegrationTest.java:[110,6] org.springframework.boot.test.mock.mockito.MockBean in org.springframework.boot.test.mock.mockito has been deprecated and marked for removal
+[WARNING] ${CONFIG_SOURCE}/src/test/java/org/praxisplatform/config/ai/authoring/AgenticAuthoringTerminalApplyPersistenceIntegrationTest.java:[110,6] org.springframework.boot.test.mock.mockito.MockBean in org.springframework.boot.test.mock.mockito has been deprecated and marked for removal
+[WARNING] ${CONFIG_SOURCE}/src/test/java/org/praxisplatform/config/ai/authoring/AgenticAuthoringTerminalApplyPersistenceIntegrationTest.java:[110,6] org.springframework.boot.test.mock.mockito.MockBean in org.springframework.boot.test.mock.mockito has been deprecated and marked for removal
+[WARNING] ${CONFIG_SOURCE}/src/test/java/org/praxisplatform/config/ai/authoring/AgenticAuthoringTerminalApplyPersistenceIntegrationTest.java:[110,6] org.springframework.boot.test.mock.mockito.MockBean in org.springframework.boot.test.mock.mockito has been deprecated and marked for removal
+[WARNING] ${CONFIG_SOURCE}/src/test/java/org/praxisplatform/config/ai/authoring/AgenticAuthoringTerminalApplyPersistenceIntegrationTest.java:[110,6] org.springframework.boot.test.mock.mockito.MockBean in org.springframework.boot.test.mock.mockito has been deprecated and marked for removal
+[WARNING] ${CONFIG_SOURCE}/src/test/java/org/praxisplatform/config/ai/authoring/AgenticAuthoringTerminalApplyPersistenceIntegrationTest.java:[111,6] org.springframework.boot.test.mock.mockito.MockBean in org.springframework.boot.test.mock.mockito has been deprecated and marked for removal
+[WARNING] ${CONFIG_SOURCE}/src/test/java/org/praxisplatform/config/ai/authoring/AgenticAuthoringTerminalApplyPersistenceIntegrationTest.java:[111,6] org.springframework.boot.test.mock.mockito.MockBean in org.springframework.boot.test.mock.mockito has been deprecated and marked for removal
+[WARNING] ${CONFIG_SOURCE}/src/test/java/org/praxisplatform/config/ai/authoring/AgenticAuthoringTerminalApplyPersistenceIntegrationTest.java:[111,6] org.springframework.boot.test.mock.mockito.MockBean in org.springframework.boot.test.mock.mockito has been deprecated and marked for removal
+[WARNING] ${CONFIG_SOURCE}/src/test/java/org/praxisplatform/config/ai/authoring/AgenticAuthoringTerminalApplyPersistenceIntegrationTest.java:[111,6] org.springframework.boot.test.mock.mockito.MockBean in org.springframework.boot.test.mock.mockito has been deprecated and marked for removal
+[WARNING] ${CONFIG_SOURCE}/src/test/java/org/praxisplatform/config/ai/authoring/AgenticAuthoringTerminalApplyPersistenceIntegrationTest.java:[111,6] org.springframework.boot.test.mock.mockito.MockBean in org.springframework.boot.test.mock.mockito has been deprecated and marked for removal
+[WARNING] ${CONFIG_SOURCE}/src/test/java/org/praxisplatform/config/ai/authoring/AgenticAuthoringTerminalApplyPersistenceIntegrationTest.java:[112,6] org.springframework.boot.test.mock.mockito.MockBean in org.springframework.boot.test.mock.mockito has been deprecated and marked for removal
+[WARNING] ${CONFIG_SOURCE}/src/test/java/org/praxisplatform/config/ai/authoring/AgenticAuthoringTerminalApplyPersistenceIntegrationTest.java:[112,6] org.springframework.boot.test.mock.mockito.MockBean in org.springframework.boot.test.mock.mockito has been deprecated and marked for removal
+[WARNING] ${CONFIG_SOURCE}/src/test/java/org/praxisplatform/config/ai/authoring/AgenticAuthoringTerminalApplyPersistenceIntegrationTest.java:[112,6] org.springframework.boot.test.mock.mockito.MockBean in org.springframework.boot.test.mock.mockito has been deprecated and marked for removal
+[WARNING] ${CONFIG_SOURCE}/src/test/java/org/praxisplatform/config/ai/authoring/AgenticAuthoringTerminalApplyPersistenceIntegrationTest.java:[112,6] org.springframework.boot.test.mock.mockito.MockBean in org.springframework.boot.test.mock.mockito has been deprecated and marked for removal
+[WARNING] ${CONFIG_SOURCE}/src/test/java/org/praxisplatform/config/ai/authoring/AgenticAuthoringTerminalApplyPersistenceIntegrationTest.java:[112,6] org.springframework.boot.test.mock.mockito.MockBean in org.springframework.boot.test.mock.mockito has been deprecated and marked for removal
+[WARNING] ${CONFIG_SOURCE}/src/test/java/org/praxisplatform/config/ai/authoring/AgenticAuthoringTerminalApplyPersistenceIntegrationTest.java:[113,6] org.springframework.boot.test.mock.mockito.MockBean in org.springframework.boot.test.mock.mockito has been deprecated and marked for removal
+[WARNING] ${CONFIG_SOURCE}/src/test/java/org/praxisplatform/config/ai/authoring/AgenticAuthoringTerminalApplyPersistenceIntegrationTest.java:[113,6] org.springframework.boot.test.mock.mockito.MockBean in org.springframework.boot.test.mock.mockito has been deprecated and marked for removal
+[WARNING] ${CONFIG_SOURCE}/src/test/java/org/praxisplatform/config/ai/authoring/AgenticAuthoringTerminalApplyPersistenceIntegrationTest.java:[113,6] org.springframework.boot.test.mock.mockito.MockBean in org.springframework.boot.test.mock.mockito has been deprecated and marked for removal
+[WARNING] ${CONFIG_SOURCE}/src/test/java/org/praxisplatform/config/ai/authoring/AgenticAuthoringTerminalApplyPersistenceIntegrationTest.java:[113,6] org.springframework.boot.test.mock.mockito.MockBean in org.springframework.boot.test.mock.mockito has been deprecated and marked for removal
+[WARNING] ${CONFIG_SOURCE}/src/test/java/org/praxisplatform/config/ai/authoring/AgenticAuthoringTerminalApplyPersistenceIntegrationTest.java:[113,6] org.springframework.boot.test.mock.mockito.MockBean in org.springframework.boot.test.mock.mockito has been deprecated and marked for removal
+[WARNING] ${CONFIG_SOURCE}/src/test/java/org/praxisplatform/config/ai/authoring/AgenticAuthoringTerminalApplyPersistenceIntegrationTest.java:[114,6] org.springframework.boot.test.mock.mockito.MockBean in org.springframework.boot.test.mock.mockito has been deprecated and marked for removal
+[WARNING] ${CONFIG_SOURCE}/src/test/java/org/praxisplatform/config/ai/authoring/AgenticAuthoringTerminalApplyPersistenceIntegrationTest.java:[114,6] org.springframework.boot.test.mock.mockito.MockBean in org.springframework.boot.test.mock.mockito has been deprecated and marked for removal
+[WARNING] ${CONFIG_SOURCE}/src/test/java/org/praxisplatform/config/ai/authoring/AgenticAuthoringTerminalApplyPersistenceIntegrationTest.java:[114,6] org.springframework.boot.test.mock.mockito.MockBean in org.springframework.boot.test.mock.mockito has been deprecated and marked for removal
+[WARNING] ${CONFIG_SOURCE}/src/test/java/org/praxisplatform/config/ai/authoring/AgenticAuthoringTerminalApplyPersistenceIntegrationTest.java:[114,6] org.springframework.boot.test.mock.mockito.MockBean in org.springframework.boot.test.mock.mockito has been deprecated and marked for removal
+[WARNING] ${CONFIG_SOURCE}/src/test/java/org/praxisplatform/config/ai/authoring/AgenticAuthoringTerminalApplyPersistenceIntegrationTest.java:[114,6] org.springframework.boot.test.mock.mockito.MockBean in org.springframework.boot.test.mock.mockito has been deprecated and marked for removal
+[WARNING] ${CONFIG_SOURCE}/src/test/java/org/praxisplatform/config/ai/authoring/AgenticAuthoringTerminalApplyPersistenceIntegrationTest.java:[115,6] org.springframework.boot.test.mock.mockito.MockBean in org.springframework.boot.test.mock.mockito has been deprecated and marked for removal
+[WARNING] ${CONFIG_SOURCE}/src/test/java/org/praxisplatform/config/ai/authoring/AgenticAuthoringTerminalApplyPersistenceIntegrationTest.java:[115,6] org.springframework.boot.test.mock.mockito.MockBean in org.springframework.boot.test.mock.mockito has been deprecated and marked for removal
+[WARNING] ${CONFIG_SOURCE}/src/test/java/org/praxisplatform/config/ai/authoring/AgenticAuthoringTerminalApplyPersistenceIntegrationTest.java:[115,6] org.springframework.boot.test.mock.mockito.MockBean in org.springframework.boot.test.mock.mockito has been deprecated and marked for removal
+[WARNING] ${CONFIG_SOURCE}/src/test/java/org/praxisplatform/config/ai/authoring/AgenticAuthoringTerminalApplyPersistenceIntegrationTest.java:[115,6] org.springframework.boot.test.mock.mockito.MockBean in org.springframework.boot.test.mock.mockito has been deprecated and marked for removal
+[WARNING] ${CONFIG_SOURCE}/src/test/java/org/praxisplatform/config/ai/authoring/AgenticAuthoringTerminalApplyPersistenceIntegrationTest.java:[115,6] org.springframework.boot.test.mock.mockito.MockBean in org.springframework.boot.test.mock.mockito has been deprecated and marked for removal
+[WARNING] ${CONFIG_SOURCE}/src/test/java/org/praxisplatform/config/ai/authoring/AgenticAuthoringTurnStreamHttpSseIntegrationTest.java:[63,2] org.springframework.boot.test.mock.mockito.MockBean in org.springframework.boot.test.mock.mockito has been deprecated and marked for removal
+[WARNING] ${CONFIG_SOURCE}/src/test/java/org/praxisplatform/config/ai/authoring/AgenticAuthoringTurnStreamHttpSseIntegrationTest.java:[63,2] org.springframework.boot.test.mock.mockito.MockBean in org.springframework.boot.test.mock.mockito has been deprecated and marked for removal
+[WARNING] ${CONFIG_SOURCE}/src/test/java/org/praxisplatform/config/ai/authoring/AgenticAuthoringTurnStreamHttpSseIntegrationTest.java:[63,2] org.springframework.boot.test.mock.mockito.MockBean in org.springframework.boot.test.mock.mockito has been deprecated and marked for removal
+[WARNING] ${CONFIG_SOURCE}/src/test/java/org/praxisplatform/config/ai/authoring/AgenticAuthoringTurnStreamHttpSseIntegrationTest.java:[63,2] org.springframework.boot.test.mock.mockito.MockBean in org.springframework.boot.test.mock.mockito has been deprecated and marked for removal
+[WARNING] ${CONFIG_SOURCE}/src/test/java/org/praxisplatform/config/ai/authoring/AgenticAuthoringTurnStreamHttpSseIntegrationTest.java:[63,2] org.springframework.boot.test.mock.mockito.MockBean in org.springframework.boot.test.mock.mockito has been deprecated and marked for removal
+[WARNING] ${CONFIG_SOURCE}/src/test/java/org/praxisplatform/config/ai/authoring/AgenticAuthoringTurnStreamHttpSseIntegrationTest.java:[139,6] org.springframework.boot.test.mock.mockito.MockBean in org.springframework.boot.test.mock.mockito has been deprecated and marked for removal
+[WARNING] ${CONFIG_SOURCE}/src/test/java/org/praxisplatform/config/ai/authoring/AgenticAuthoringTurnStreamHttpSseIntegrationTest.java:[139,6] org.springframework.boot.test.mock.mockito.MockBean in org.springframework.boot.test.mock.mockito has been deprecated and marked for removal
+[WARNING] ${CONFIG_SOURCE}/src/test/java/org/praxisplatform/config/ai/authoring/AgenticAuthoringTurnStreamHttpSseIntegrationTest.java:[139,6] org.springframework.boot.test.mock.mockito.MockBean in org.springframework.boot.test.mock.mockito has been deprecated and marked for removal
+[WARNING] ${CONFIG_SOURCE}/src/test/java/org/praxisplatform/config/ai/authoring/AgenticAuthoringTurnStreamHttpSseIntegrationTest.java:[139,6] org.springframework.boot.test.mock.mockito.MockBean in org.springframework.boot.test.mock.mockito has been deprecated and marked for removal
+[WARNING] ${CONFIG_SOURCE}/src/test/java/org/praxisplatform/config/ai/authoring/AgenticAuthoringTurnStreamHttpSseIntegrationTest.java:[139,6] org.springframework.boot.test.mock.mockito.MockBean in org.springframework.boot.test.mock.mockito has been deprecated and marked for removal
+[WARNING] ${CONFIG_SOURCE}/src/test/java/org/praxisplatform/config/ai/authoring/AgenticAuthoringTurnStreamHttpSseIntegrationTest.java:[142,6] org.springframework.boot.test.mock.mockito.MockBean in org.springframework.boot.test.mock.mockito has been deprecated and marked for removal
+[WARNING] ${CONFIG_SOURCE}/src/test/java/org/praxisplatform/config/ai/authoring/AgenticAuthoringTurnStreamHttpSseIntegrationTest.java:[142,6] org.springframework.boot.test.mock.mockito.MockBean in org.springframework.boot.test.mock.mockito has been deprecated and marked for removal
+[WARNING] ${CONFIG_SOURCE}/src/test/java/org/praxisplatform/config/ai/authoring/AgenticAuthoringTurnStreamHttpSseIntegrationTest.java:[142,6] org.springframework.boot.test.mock.mockito.MockBean in org.springframework.boot.test.mock.mockito has been deprecated and marked for removal
+[WARNING] ${CONFIG_SOURCE}/src/test/java/org/praxisplatform/config/ai/authoring/AgenticAuthoringTurnStreamHttpSseIntegrationTest.java:[142,6] org.springframework.boot.test.mock.mockito.MockBean in org.springframework.boot.test.mock.mockito has been deprecated and marked for removal
+[WARNING] ${CONFIG_SOURCE}/src/test/java/org/praxisplatform/config/ai/authoring/AgenticAuthoringTurnStreamHttpSseIntegrationTest.java:[142,6] org.springframework.boot.test.mock.mockito.MockBean in org.springframework.boot.test.mock.mockito has been deprecated and marked for removal
+[WARNING] ${CONFIG_SOURCE}/src/test/java/org/praxisplatform/config/ai/authoring/AgenticAuthoringTurnStreamHttpSseIntegrationTest.java:[145,6] org.springframework.boot.test.mock.mockito.MockBean in org.springframework.boot.test.mock.mockito has been deprecated and marked for removal
+[WARNING] ${CONFIG_SOURCE}/src/test/java/org/praxisplatform/config/ai/authoring/AgenticAuthoringTurnStreamHttpSseIntegrationTest.java:[145,6] org.springframework.boot.test.mock.mockito.MockBean in org.springframework.boot.test.mock.mockito has been deprecated and marked for removal
+[WARNING] ${CONFIG_SOURCE}/src/test/java/org/praxisplatform/config/ai/authoring/AgenticAuthoringTurnStreamHttpSseIntegrationTest.java:[145,6] org.springframework.boot.test.mock.mockito.MockBean in org.springframework.boot.test.mock.mockito has been deprecated and marked for removal
+[WARNING] ${CONFIG_SOURCE}/src/test/java/org/praxisplatform/config/ai/authoring/AgenticAuthoringTurnStreamHttpSseIntegrationTest.java:[145,6] org.springframework.boot.test.mock.mockito.MockBean in org.springframework.boot.test.mock.mockito has been deprecated and marked for removal
+[WARNING] ${CONFIG_SOURCE}/src/test/java/org/praxisplatform/config/ai/authoring/AgenticAuthoringTurnStreamHttpSseIntegrationTest.java:[145,6] org.springframework.boot.test.mock.mockito.MockBean in org.springframework.boot.test.mock.mockito has been deprecated and marked for removal
+[WARNING] ${CONFIG_SOURCE}/src/test/java/org/praxisplatform/config/contract/AiContractV11RetroCompatibilityTest.java:[112,6] org.springframework.boot.test.mock.mockito.MockBean in org.springframework.boot.test.mock.mockito has been deprecated and marked for removal
+[WARNING] ${CONFIG_SOURCE}/src/test/java/org/praxisplatform/config/contract/AiContractV11RetroCompatibilityTest.java:[112,6] org.springframework.boot.test.mock.mockito.MockBean in org.springframework.boot.test.mock.mockito has been deprecated and marked for removal
+[WARNING] ${CONFIG_SOURCE}/src/test/java/org/praxisplatform/config/contract/AiContractV11RetroCompatibilityTest.java:[112,6] org.springframework.boot.test.mock.mockito.MockBean in org.springframework.boot.test.mock.mockito has been deprecated and marked for removal
+[WARNING] ${CONFIG_SOURCE}/src/test/java/org/praxisplatform/config/contract/AiContractV11RetroCompatibilityTest.java:[112,6] org.springframework.boot.test.mock.mockito.MockBean in org.springframework.boot.test.mock.mockito has been deprecated and marked for removal
+[WARNING] ${CONFIG_SOURCE}/src/test/java/org/praxisplatform/config/contract/AiContractV11RetroCompatibilityTest.java:[112,6] org.springframework.boot.test.mock.mockito.MockBean in org.springframework.boot.test.mock.mockito has been deprecated and marked for removal
+[WARNING] ${CONFIG_SOURCE}/src/test/java/org/praxisplatform/config/contract/AiContractV11RetroCompatibilityTest.java:[115,6] org.springframework.boot.test.mock.mockito.MockBean in org.springframework.boot.test.mock.mockito has been deprecated and marked for removal
+[WARNING] ${CONFIG_SOURCE}/src/test/java/org/praxisplatform/config/contract/AiContractV11RetroCompatibilityTest.java:[115,6] org.springframework.boot.test.mock.mockito.MockBean in org.springframework.boot.test.mock.mockito has been deprecated and marked for removal
+[WARNING] ${CONFIG_SOURCE}/src/test/java/org/praxisplatform/config/contract/AiContractV11RetroCompatibilityTest.java:[115,6] org.springframework.boot.test.mock.mockito.MockBean in org.springframework.boot.test.mock.mockito has been deprecated and marked for removal
+[WARNING] ${CONFIG_SOURCE}/src/test/java/org/praxisplatform/config/contract/AiContractV11RetroCompatibilityTest.java:[115,6] org.springframework.boot.test.mock.mockito.MockBean in org.springframework.boot.test.mock.mockito has been deprecated and marked for removal
+[WARNING] ${CONFIG_SOURCE}/src/test/java/org/praxisplatform/config/contract/AiContractV11RetroCompatibilityTest.java:[115,6] org.springframework.boot.test.mock.mockito.MockBean in org.springframework.boot.test.mock.mockito has been deprecated and marked for removal
+[WARNING] ${CONFIG_SOURCE}/src/test/java/org/praxisplatform/config/contract/AiContractV11RetroCompatibilityTest.java:[118,6] org.springframework.boot.test.mock.mockito.MockBean in org.springframework.boot.test.mock.mockito has been deprecated and marked for removal
+[WARNING] ${CONFIG_SOURCE}/src/test/java/org/praxisplatform/config/contract/AiContractV11RetroCompatibilityTest.java:[118,6] org.springframework.boot.test.mock.mockito.MockBean in org.springframework.boot.test.mock.mockito has been deprecated and marked for removal
+[WARNING] ${CONFIG_SOURCE}/src/test/java/org/praxisplatform/config/contract/AiContractV11RetroCompatibilityTest.java:[118,6] org.springframework.boot.test.mock.mockito.MockBean in org.springframework.boot.test.mock.mockito has been deprecated and marked for removal
+[WARNING] ${CONFIG_SOURCE}/src/test/java/org/praxisplatform/config/contract/AiContractV11RetroCompatibilityTest.java:[118,6] org.springframework.boot.test.mock.mockito.MockBean in org.springframework.boot.test.mock.mockito has been deprecated and marked for removal
+[WARNING] ${CONFIG_SOURCE}/src/test/java/org/praxisplatform/config/contract/AiContractV11RetroCompatibilityTest.java:[118,6] org.springframework.boot.test.mock.mockito.MockBean in org.springframework.boot.test.mock.mockito has been deprecated and marked for removal
+[WARNING] ${CONFIG_SOURCE}/src/test/java/org/praxisplatform/config/service/AiStreamRuntimeTransactionManagerIntegrationTest.java:[84,6] org.springframework.boot.test.mock.mockito.MockBean in org.springframework.boot.test.mock.mockito has been deprecated and marked for removal
+[WARNING] ${CONFIG_SOURCE}/src/test/java/org/praxisplatform/config/service/AiStreamRuntimeTransactionManagerIntegrationTest.java:[84,6] org.springframework.boot.test.mock.mockito.MockBean in org.springframework.boot.test.mock.mockito has been deprecated and marked for removal
+[WARNING] ${CONFIG_SOURCE}/src/test/java/org/praxisplatform/config/service/AiStreamRuntimeTransactionManagerIntegrationTest.java:[84,6] org.springframework.boot.test.mock.mockito.MockBean in org.springframework.boot.test.mock.mockito has been deprecated and marked for removal
+[WARNING] ${CONFIG_SOURCE}/src/test/java/org/praxisplatform/config/service/AiStreamRuntimeTransactionManagerIntegrationTest.java:[84,6] org.springframework.boot.test.mock.mockito.MockBean in org.springframework.boot.test.mock.mockito has been deprecated and marked for removal
+[WARNING] ${CONFIG_SOURCE}/src/test/java/org/praxisplatform/config/service/AiStreamRuntimeTransactionManagerIntegrationTest.java:[84,6] org.springframework.boot.test.mock.mockito.MockBean in org.springframework.boot.test.mock.mockito has been deprecated and marked for removal
+[WARNING] ${CONFIG_SOURCE}/src/test/java/org/praxisplatform/config/service/AiStreamRuntimeTransactionManagerIntegrationTest.java:[87,6] org.springframework.boot.test.mock.mockito.MockBean in org.springframework.boot.test.mock.mockito has been deprecated and marked for removal
+[WARNING] ${CONFIG_SOURCE}/src/test/java/org/praxisplatform/config/service/AiStreamRuntimeTransactionManagerIntegrationTest.java:[87,6] org.springframework.boot.test.mock.mockito.MockBean in org.springframework.boot.test.mock.mockito has been deprecated and marked for removal
+[WARNING] ${CONFIG_SOURCE}/src/test/java/org/praxisplatform/config/service/AiStreamRuntimeTransactionManagerIntegrationTest.java:[87,6] org.springframework.boot.test.mock.mockito.MockBean in org.springframework.boot.test.mock.mockito has been deprecated and marked for removal
+[WARNING] ${CONFIG_SOURCE}/src/test/java/org/praxisplatform/config/service/AiStreamRuntimeTransactionManagerIntegrationTest.java:[87,6] org.springframework.boot.test.mock.mockito.MockBean in org.springframework.boot.test.mock.mockito has been deprecated and marked for removal
+[WARNING] ${CONFIG_SOURCE}/src/test/java/org/praxisplatform/config/service/AiStreamRuntimeTransactionManagerIntegrationTest.java:[87,6] org.springframework.boot.test.mock.mockito.MockBean in org.springframework.boot.test.mock.mockito has been deprecated and marked for removal
+[WARNING] ${CONFIG_SOURCE}/src/test/java/org/praxisplatform/config/repository/AiRegistryTemplatePostgresTest.java:[69,4] org.springframework.boot.test.mock.mockito.MockBean in org.springframework.boot.test.mock.mockito has been deprecated and marked for removal
+[WARNING] ${CONFIG_SOURCE}/src/test/java/org/praxisplatform/config/repository/AiRegistryTemplatePostgresTest.java:[69,4] org.springframework.boot.test.mock.mockito.MockBean in org.springframework.boot.test.mock.mockito has been deprecated and marked for removal
+[WARNING] ${CONFIG_SOURCE}/src/test/java/org/praxisplatform/config/repository/AiRegistryTemplatePostgresTest.java:[69,4] org.springframework.boot.test.mock.mockito.MockBean in org.springframework.boot.test.mock.mockito has been deprecated and marked for removal
+[WARNING] ${CONFIG_SOURCE}/src/test/java/org/praxisplatform/config/repository/AiRegistryTemplatePostgresTest.java:[69,4] org.springframework.boot.test.mock.mockito.MockBean in org.springframework.boot.test.mock.mockito has been deprecated and marked for removal
+[WARNING] ${CONFIG_SOURCE}/src/test/java/org/praxisplatform/config/repository/AiRegistryTemplatePostgresTest.java:[69,4] org.springframework.boot.test.mock.mockito.MockBean in org.springframework.boot.test.mock.mockito has been deprecated and marked for removal
+[WARNING] ${CONFIG_SOURCE}/src/test/java/org/praxisplatform/config/controller/AgenticAuthoringTurnStreamSecurityChainIntegrationTest.java:[139,6] org.springframework.boot.test.mock.mockito.MockBean in org.springframework.boot.test.mock.mockito has been deprecated and marked for removal
+[WARNING] ${CONFIG_SOURCE}/src/test/java/org/praxisplatform/config/controller/AgenticAuthoringTurnStreamSecurityChainIntegrationTest.java:[139,6] org.springframework.boot.test.mock.mockito.MockBean in org.springframework.boot.test.mock.mockito has been deprecated and marked for removal
+[WARNING] ${CONFIG_SOURCE}/src/test/java/org/praxisplatform/config/controller/AgenticAuthoringTurnStreamSecurityChainIntegrationTest.java:[139,6] org.springframework.boot.test.mock.mockito.MockBean in org.springframework.boot.test.mock.mockito has been deprecated and marked for removal
+[WARNING] ${CONFIG_SOURCE}/src/test/java/org/praxisplatform/config/controller/AgenticAuthoringTurnStreamSecurityChainIntegrationTest.java:[139,6] org.springframework.boot.test.mock.mockito.MockBean in org.springframework.boot.test.mock.mockito has been deprecated and marked for removal
+[WARNING] ${CONFIG_SOURCE}/src/test/java/org/praxisplatform/config/controller/AgenticAuthoringTurnStreamSecurityChainIntegrationTest.java:[139,6] org.springframework.boot.test.mock.mockito.MockBean in org.springframework.boot.test.mock.mockito has been deprecated and marked for removal
+[INFO] ${CONFIG_SOURCE}/src/test/java/org/praxisplatform/config/service/OperationalPolicyServiceTest.java: Some input files use or override a deprecated API.
+[INFO] ${CONFIG_SOURCE}/src/test/java/org/praxisplatform/config/service/OperationalPolicyServiceTest.java: Recompile with -Xlint:deprecation for details.
+[INFO] ${CONFIG_SOURCE}/src/test/java/org/praxisplatform/config/controller/AgenticAuthoringTurnStreamSecurityChainIntegrationTest.java: Some input files additionally use or override a deprecated API that is marked for removal.
+[INFO] ${CONFIG_SOURCE}/src/test/java/org/praxisplatform/config/service/UiLayoutFrozenNativeContextTest.java: Some input files use unchecked or unsafe operations.
+[INFO] ${CONFIG_SOURCE}/src/test/java/org/praxisplatform/config/service/UiLayoutFrozenNativeContextTest.java: Recompile with -Xlint:unchecked for details.
+[INFO] 
+[INFO] --- surefire:3.5.6:test (default-test) @ praxis-config-starter ---
+[INFO] Using auto detected provider org.apache.maven.surefire.junitplatform.JUnitPlatformProvider
+[INFO] 
+[INFO] -------------------------------------------------------
+[INFO]  T E S T S
+[INFO] -------------------------------------------------------
+[INFO] Running org.praxisplatform.config.controller.PageRuntimeHttpTest
+OpenJDK 64-Bit Server VM warning: Sharing is only supported for boot loader classes because bootstrap classpath has been appended
+Standard Commons Logging discovery in action with spring-jcl: please remove commons-logging.jar from classpath in order to avoid potential conflicts
+08:38:42.625 [main] INFO org.hibernate.validator.internal.util.Version -- HV000001: Hibernate Validator 8.0.3.Final
+08:38:42.785 [main] INFO org.springframework.mock.web.MockServletContext -- Initializing Spring TestDispatcherServlet ''
+08:38:42.786 [main] INFO org.springframework.test.web.servlet.TestDispatcherServlet -- Initializing Servlet ''
+08:38:42.787 [main] INFO org.springframework.test.web.servlet.TestDispatcherServlet -- Completed initialization in 0 ms
+08:38:43.045 [main] INFO org.springframework.mock.web.MockServletContext -- Initializing Spring TestDispatcherServlet ''
+08:38:43.045 [main] INFO org.springframework.test.web.servlet.TestDispatcherServlet -- Initializing Servlet ''
+08:38:43.045 [main] INFO org.springframework.test.web.servlet.TestDispatcherServlet -- Completed initialization in 0 ms
+08:38:43.085 [main] INFO org.springframework.mock.web.MockServletContext -- Initializing Spring TestDispatcherServlet ''
+08:38:43.085 [main] INFO org.springframework.test.web.servlet.TestDispatcherServlet -- Initializing Servlet ''
+08:38:43.085 [main] INFO org.springframework.test.web.servlet.TestDispatcherServlet -- Completed initialization in 0 ms
+08:38:43.110 [main] INFO org.springframework.mock.web.MockServletContext -- Initializing Spring TestDispatcherServlet ''
+08:38:43.110 [main] INFO org.springframework.test.web.servlet.TestDispatcherServlet -- Initializing Servlet ''
+08:38:43.110 [main] INFO org.springframework.test.web.servlet.TestDispatcherServlet -- Completed initialization in 0 ms
+08:38:43.123 [main] INFO org.springframework.mock.web.MockServletContext -- Initializing Spring TestDispatcherServlet ''
+08:38:43.123 [main] INFO org.springframework.test.web.servlet.TestDispatcherServlet -- Initializing Servlet ''
+08:38:43.123 [main] INFO org.springframework.test.web.servlet.TestDispatcherServlet -- Completed initialization in 0 ms
+[ERROR] Tests run: 5, Failures: 1, Errors: 0, Skipped: 0, Time elapsed: 1.076 s <<< FAILURE! -- in org.praxisplatform.config.controller.PageRuntimeHttpTest
+[ERROR] org.praxisplatform.config.controller.PageRuntimeHttpTest.navigationMapsOwnerFailuresAndNeverReturnsPrivateErrorDetails -- Time elapsed: 0.606 s <<< FAILURE!
+java.lang.AssertionError: No value at JSON path "$.code"
+	at org.springframework.test.util.JsonPathExpectationsHelper.evaluateJsonPath(JsonPathExpectationsHelper.java:351)
+	at org.springframework.test.util.JsonPathExpectationsHelper.assertValue(JsonPathExpectationsHelper.java:148)
+	at org.springframework.test.web.servlet.result.JsonPathResultMatchers.lambda$value$2(JsonPathResultMatchers.java:112)
+	at org.springframework.test.web.servlet.MockMvc$1.andExpect(MockMvc.java:214)
+	at org.praxisplatform.config.controller.PageRuntimeHttpTest.navigationMapsOwnerFailuresAndNeverReturnsPrivateErrorDetails(PageRuntimeHttpTest.java:89)
+	at java.base/java.lang.reflect.Method.invoke(Method.java:580)
+	at java.base/java.util.ArrayList.forEach(ArrayList.java:1596)
+	at java.base/java.util.ArrayList.forEach(ArrayList.java:1596)
+Caused by: com.jayway.jsonpath.PathNotFoundException: No results for path: $['code']
+
+[INFO] Running org.praxisplatform.config.service.PageRuntimeReadServiceTest
+[ERROR] Tests run: 7, Failures: 0, Errors: 7, Skipped: 0, Time elapsed: 0.048 s <<< FAILURE! -- in org.praxisplatform.config.service.PageRuntimeReadServiceTest
+[ERROR] org.praxisplatform.config.service.PageRuntimeReadServiceTest.lastMetadataAndLastMappingCallbacksCannotRevokeGrantsAndStillReturn -- Time elapsed: 0.028 s <<< ERROR!
+org.mockito.exceptions.base.MockitoException: 
+
+The used MockMaker SubclassByteBuddyMockMaker does not support the creation of construction mocks
+
+Ensure your MockMaker implementation supports this feature.
+Note that construction mocks maker is not supported on Android.
+	at org.praxisplatform.config.service.PageRuntimeReadServiceTest.setUp(PageRuntimeReadServiceTest.java:65)
+	at java.base/java.lang.reflect.Method.invoke(Method.java:580)
+	at java.base/java.util.ArrayList.forEach(ArrayList.java:1596)
+	at java.base/java.util.ArrayList.forEach(ArrayList.java:1596)
+
+[ERROR] org.praxisplatform.config.service.PageRuntimeReadServiceTest.requiredReadsDoNotFreezeTheHeadUntilOuterCommitButKeepAuthorityChecks -- Time elapsed: 0.001 s <<< ERROR!
+org.mockito.exceptions.base.MockitoException: 
+
+The used MockMaker SubclassByteBuddyMockMaker does not support the creation of construction mocks
+
+Ensure your MockMaker implementation supports this feature.
+Note that construction mocks maker is not supported on Android.
+	at org.praxisplatform.config.service.PageRuntimeReadServiceTest.setUp(PageRuntimeReadServiceTest.java:65)
+	at java.base/java.lang.reflect.Method.invoke(Method.java:580)
+	at java.base/java.util.ArrayList.forEach(ArrayList.java:1596)
+	at java.base/java.util.ArrayList.forEach(ArrayList.java:1596)
+
+[ERROR] org.praxisplatform.config.service.PageRuntimeReadServiceTest.vectorPhantomAndHeadABAInvalidateTheOperation -- Time elapsed: 0.001 s <<< ERROR!
+org.mockito.exceptions.base.MockitoException: 
+
+The used MockMaker SubclassByteBuddyMockMaker does not support the creation of construction mocks
+
+Ensure your MockMaker implementation supports this feature.
+Note that construction mocks maker is not supported on Android.
+	at org.praxisplatform.config.service.PageRuntimeReadServiceTest.setUp(PageRuntimeReadServiceTest.java:65)
+	at java.base/java.lang.reflect.Method.invoke(Method.java:580)
+	at java.base/java.util.ArrayList.forEach(ArrayList.java:1596)
+	at java.base/java.util.ArrayList.forEach(ArrayList.java:1596)
+
+[ERROR] org.praxisplatform.config.service.PageRuntimeReadServiceTest.permissiveReadGrantNeverBypassesNativeAdmissionAndFinalAudience -- Time elapsed: 0.001 s <<< ERROR!
+org.mockito.exceptions.base.MockitoException: 
+
+The used MockMaker SubclassByteBuddyMockMaker does not support the creation of construction mocks
+
+Ensure your MockMaker implementation supports this feature.
+Note that construction mocks maker is not supported on Android.
+	at org.praxisplatform.config.service.PageRuntimeReadServiceTest.setUp(PageRuntimeReadServiceTest.java:65)
+	at java.base/java.lang.reflect.Method.invoke(Method.java:580)
+	at java.base/java.util.ArrayList.forEach(ArrayList.java:1596)
+	at java.base/java.util.ArrayList.forEach(ArrayList.java:1596)
+
+[ERROR] org.praxisplatform.config.service.PageRuntimeReadServiceTest.directPageDoesNotRequireGroupGrantButMenuRequiresBoth -- Time elapsed: 0.001 s <<< ERROR!
+org.mockito.exceptions.base.MockitoException: 
+
+The used MockMaker SubclassByteBuddyMockMaker does not support the creation of construction mocks
+
+Ensure your MockMaker implementation supports this feature.
+Note that construction mocks maker is not supported on Android.
+	at org.praxisplatform.config.service.PageRuntimeReadServiceTest.setUp(PageRuntimeReadServiceTest.java:65)
+	at java.base/java.lang.reflect.Method.invoke(Method.java:580)
+	at java.base/java.util.ArrayList.forEach(ArrayList.java:1596)
+	at java.base/java.util.ArrayList.forEach(ArrayList.java:1596)
+
+[ERROR] org.praxisplatform.config.service.PageRuntimeReadServiceTest.globalOrderingAndBindingIdentityAreIndependentOfCatalogOrder -- Time elapsed: 0.001 s <<< ERROR!
+org.mockito.exceptions.base.MockitoException: 
+
+The used MockMaker SubclassByteBuddyMockMaker does not support the creation of construction mocks
+
+Ensure your MockMaker implementation supports this feature.
+Note that construction mocks maker is not supported on Android.
+	at org.praxisplatform.config.service.PageRuntimeReadServiceTest.setUp(PageRuntimeReadServiceTest.java:65)
+	at java.base/java.lang.reflect.Method.invoke(Method.java:580)
+	at java.base/java.util.ArrayList.forEach(ArrayList.java:1596)
+	at java.base/java.util.ArrayList.forEach(ArrayList.java:1596)
+
+[ERROR] org.praxisplatform.config.service.PageRuntimeReadServiceTest.authorizedEmptyGroupsWitnessTheirHeadButDeniedGroupsRevealNoHead -- Time elapsed: 0.001 s <<< ERROR!
+org.mockito.exceptions.base.MockitoException: 
+
+The used MockMaker SubclassByteBuddyMockMaker does not support the creation of construction mocks
+
+Ensure your MockMaker implementation supports this feature.
+Note that construction mocks maker is not supported on Android.
+	at org.praxisplatform.config.service.PageRuntimeReadServiceTest.setUp(PageRuntimeReadServiceTest.java:65)
+	at java.base/java.lang.reflect.Method.invoke(Method.java:580)
+	at java.base/java.util.ArrayList.forEach(ArrayList.java:1596)
+	at java.base/java.util.ArrayList.forEach(ArrayList.java:1596)
+
+[INFO] 
+[INFO] Results:
+[INFO] 
+[ERROR] Failures: 
+[ERROR]   PageRuntimeHttpTest.navigationMapsOwnerFailuresAndNeverReturnsPrivateErrorDetails:89 No value at JSON path "$.code"
+[ERROR] Errors: 
+[ERROR]   PageRuntimeReadServiceTest.setUp:65 Mockito 
+The used MockMaker SubclassByteBuddyMockMaker does not support the creation of construction mocks
+
+Ensure your MockMaker implementation supports this feature.
+Note that construction mocks maker is not supported on Android.
+[ERROR]   PageRuntimeReadServiceTest.setUp:65 Mockito 
+The used MockMaker SubclassByteBuddyMockMaker does not support the creation of construction mocks
+
+Ensure your MockMaker implementation supports this feature.
+Note that construction mocks maker is not supported on Android.
+[ERROR]   PageRuntimeReadServiceTest.setUp:65 Mockito 
+The used MockMaker SubclassByteBuddyMockMaker does not support the creation of construction mocks
+
+Ensure your MockMaker implementation supports this feature.
+Note that construction mocks maker is not supported on Android.
+[ERROR]   PageRuntimeReadServiceTest.setUp:65 Mockito 
+The used MockMaker SubclassByteBuddyMockMaker does not support the creation of construction mocks
+
+Ensure your MockMaker implementation supports this feature.
+Note that construction mocks maker is not supported on Android.
+[ERROR]   PageRuntimeReadServiceTest.setUp:65 Mockito 
+The used MockMaker SubclassByteBuddyMockMaker does not support the creation of construction mocks
+
+Ensure your MockMaker implementation supports this feature.
+Note that construction mocks maker is not supported on Android.
+[ERROR]   PageRuntimeReadServiceTest.setUp:65 Mockito 
+The used MockMaker SubclassByteBuddyMockMaker does not support the creation of construction mocks
+
+Ensure your MockMaker implementation supports this feature.
+Note that construction mocks maker is not supported on Android.
+[ERROR]   PageRuntimeReadServiceTest.setUp:65 Mockito 
+The used MockMaker SubclassByteBuddyMockMaker does not support the creation of construction mocks
+
+Ensure your MockMaker implementation supports this feature.
+Note that construction mocks maker is not supported on Android.
+[INFO] 
+[ERROR] Tests run: 12, Failures: 1, Errors: 7, Skipped: 0
+[INFO] 
+[INFO] ------------------------------------------------------------------------
+[INFO] BUILD FAILURE
+[INFO] ------------------------------------------------------------------------
+[INFO] Total time:  16.734 s
+[INFO] Finished at: 2026-10-23T08:38:43-03:00
+[INFO] ------------------------------------------------------------------------
+[ERROR] Failed to execute goal org.apache.maven.plugins:maven-surefire-plugin:3.5.6:test (default-test) on project praxis-config-starter: There are test failures.
+[ERROR] 
+[ERROR] See ${CONFIG_SOURCE}/target/surefire-reports for the individual test results.
+[ERROR] See dump files (if any exist) [date].dump, [date]-jvmRun[N].dump and [date].dumpstream.
+[ERROR] -> [Help 1]
+[ERROR] 
+[ERROR] To see the full stack trace of the errors, re-run Maven with the -e switch.
+[ERROR] Re-run Maven using the -X switch to enable full debug logging.
+[ERROR] 
+[ERROR] For more information about the errors and possible solutions, please read the following articles:
+[ERROR] [Help 1] http://cwiki.apache.org/confluence/display/MAVEN/MojoFailureException

@@ -1,0 +1,56 @@
+[INFO] Scanning for projects...
+[INFO] 
+[INFO] -----------< io.github.codexrodrigues:praxis-config-starter >-----------
+[INFO] Building Praxis Config Starter 0.1.0-rc.166
+[INFO]   from pom.xml
+[INFO] --------------------------------[ jar ]---------------------------------
+[INFO] 
+[INFO] --- resources:3.3.1:resources (default-resources) @ praxis-config-starter ---
+[INFO] Copying 0 resource from src/main/resources to target/classes
+[INFO] Copying 85 resources from src/main/resources to target/classes
+[INFO] 
+[INFO] --- compiler:3.11.0:compile (default-compile) @ praxis-config-starter ---
+[INFO] Nothing to compile - all classes are up to date
+[INFO] 
+[INFO] --- resources:3.3.1:testResources (default-testResources) @ praxis-config-starter ---
+[INFO] Copying 7 resources from src/test/resources to target/test-classes
+[INFO] 
+[INFO] --- compiler:3.11.0:testCompile (default-testCompile) @ praxis-config-starter ---
+[INFO] Nothing to compile - all classes are up to date
+[INFO] 
+[INFO] --- surefire:3.5.6:test (default-test) @ praxis-config-starter ---
+[INFO] Using auto detected provider org.apache.maven.surefire.junitplatform.JUnitPlatformProvider
+[INFO] 
+[INFO] -------------------------------------------------------
+[INFO]  T E S T S
+[INFO] -------------------------------------------------------
+[INFO] Running org.praxisplatform.config.service.PageRuntimeDensityPostgresIT
+Standard Commons Logging discovery in action with spring-jcl: please remove commons-logging.jar from classpath in order to avoid potential conflicts
+P3-B Neon project=ancient-leaf-72055027 branch=br-weathered-mountain-a48o0map endpoint=ep-floral-voice-a40bufyv.us-east-1.aws.neon.tech role=p3b_runtime_512_runtime schema=p3b_runtime_512_20261023 PostgreSQL=17.11 (11592b3) TLS=TLSv1.3 peer=CN=*.us-east-1.aws.neon.tech
+10:27:54.624 [main] INFO org.hibernate.Version -- HHH000412: Hibernate ORM core version 6.6.53.Final
+10:27:54.652 [main] INFO org.hibernate.cache.internal.RegionFactoryInitiator -- HHH000026: Second-level cache disabled
+10:27:56.860 [main] INFO org.hibernate.orm.connections.pooling -- HHH10001005: Database info:
+	Database JDBC URL [Connecting through datasource 'org.praxisplatform.config.service.PageRuntimePostgresFixture$1@12e0f1cb']
+	Database driver: undefined/unknown
+	Database version: 17.11
+	Autocommit mode: undefined/unknown
+	Isolation level: undefined/unknown
+	Minimum pool size: undefined/unknown
+	Maximum pool size: undefined/unknown
+10:27:57.054 [main] INFO org.hibernate.validator.internal.util.Version -- HV000001: Hibernate Validator 8.0.3.Final
+10:27:57.351 [main] INFO org.hibernate.engine.transaction.jta.platform.internal.JtaPlatformInitiator -- HHH000489: No JTA platform available (set 'hibernate.transaction.jta.platform' to enable JTA platform integration)
+10:27:59.798 [main] INFO org.springframework.data.jpa.repository.query.QueryEnhancerFactory -- Hibernate is in classpath; If applicable, HQL parser will be used.
+P3-B synthetic seed pages=1000 workspaceEncodedInputBytes=7194997 ledgerStoredBytes=5931991 rootMetadataBytes=494000 wallMs=96891 runtime=true triggers=true
+P3-B runtime density diagnosis {"catalogPages":1000,"expectedFullVectorIdentitiesIncludingUnpublishedPrototype":1001,"fixturePolicyCallbacksHaveNoRemoteExternalIO":true,"budgetMs":40000,"acceptedWithinBudget":true,"wallMs":35476,"threadCpuTimeAvailable":true,"currentThreadCpuNanos":10789284000,"readSetRetentionObserved":{"notHeapOrGlobalCap":true,"peakBytesPerOwner":{"PageCatalogStore#0":936960,"JdbcUiLayoutMetadataCaptureStore#1":365824},"maxSimultaneousEntriesObserved":256,"peakEntriesPerOwner":{"PageCatalogStore#0":128,"JdbcUiLayoutMetadataCaptureStore#1":128},"maxSimultaneousBytesObserved":1302784,"sampledAfterCompletedSqlAndCurrentCallbacks":true},"preparedStatementsCompleted":108,"completedPreparedExecutionMs":20186,"attemptedSqlCategories":{"creation-ledger-prefetch-rows":16,"creation-ledger-prefetch-weights":16,"frozen-ui_layout_assignment_revision":8,"frozen-ui_layout_definition":8,"frozen-ui_layout_draft":8,"frozen-ui_layout_release":8,"frozen-ui_layout_release_member":8,"frozen-ui_layout_revision":8,"other":2,"root-metadata-prefetch-rows":8,"root-metadata-prefetch-weights":8,"vector":2,"weights":8},"completedSqlCategoryMs":{"creation-ledger-prefetch-rows":2890,"creation-ledger-prefetch-weights":2400,"frozen-ui_layout_assignment_revision":1194,"frozen-ui_layout_definition":1180,"frozen-ui_layout_draft":4110,"frozen-ui_layout_release":1185,"frozen-ui_layout_release_member":1182,"frozen-ui_layout_revision":1182,"other":289,"root-metadata-prefetch-rows":1261,"root-metadata-prefetch-weights":1227,"vector":874,"weights":1215},"successfulIsolationGetterCalls":20,"successfulIsolationGetterMs":2877,"nativeCallbacks":16000,"metadataCallbacks":48000,"structureCallbacks":17000,"pageRootsObservedByStructureCallback":1001,"seededPageRootsObservedByStructureCallback":1000,"otherPageRootsObservedByStructureCallback":1,"loadedIdentitiesDoNotProveAdmission":true,"failedSqlExecutionTimeExcluded":true,"loadedWorkspaceIdentities":1000,"loadedWorkspaceTextBytes":7380997,"loadedRevisionPatchTextBytes":621000,"maxBatchLoadedWorkspaceTextBytes":944768,"maxBatchLoadedPatchTextBytes":79488,"workspaceEncodedSeedInputBytes":7194997,"managedBaseline":0,"managedPeak":768,"managedAtLastBatchStart":0,"managedAtBatchStarts":[0,0,0,0,0,0,0,0],"returnedItems":1,"freshHeadAndAuditUnchanged":true,"outcome":"accepted"}
+[INFO] Tests run: 1, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 193.7 s -- in org.praxisplatform.config.service.PageRuntimeDensityPostgresIT
+[INFO] 
+[INFO] Results:
+[INFO] 
+[INFO] Tests run: 1, Failures: 0, Errors: 0, Skipped: 0
+[INFO] 
+[INFO] ------------------------------------------------------------------------
+[INFO] BUILD SUCCESS
+[INFO] ------------------------------------------------------------------------
+[INFO] Total time:  03:15 min
+[INFO] Finished at: 2026-10-23T10:31:01-03:00
+[INFO] ------------------------------------------------------------------------
