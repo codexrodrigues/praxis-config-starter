@@ -112,6 +112,10 @@ class PageRuntimePostgresIT extends PageRuntimePostgresFixture {
       host.commands.withdraw(host.alice, "c1", page.target(),
           UiLayoutLifecycleCommandService.HeadWriteCondition.match(initial.headEtag()), "Outer rollback");
       assertThat(host.runtime.catalog(host.alice, "c1", null, 50).items()).isEmpty();
+      assertThatThrownBy(() -> published(page.pageId())).extracting("code")
+          .isEqualTo(UiLayoutLifecycleException.Code.NOT_FOUND);
+      // The failed participating read poisons this outer transaction; only the separate branch commits.
+      assertThat(status.isRollbackOnly()).isTrue();
       status.setRollbackOnly();
     });
     assertThat(headState(page.target())).isEqualTo(original);
