@@ -147,7 +147,7 @@ class PageRuntimePostgresIT extends PageRuntimePostgresFixture {
     var hidden = newPage();
     publish(later.target(), orderedPageRelease(later, "Later", group, binding, 9), null);
     var earlierHead = publish(earlier.target(), orderedPageRelease(earlier, "Earlier", group, binding, 1), null);
-    publish(hidden.target(), orderedPageRelease(hidden, "Private label", group, binding, 0), null);
+    var hiddenHead = publish(hidden.target(), orderedPageRelease(hidden, "Private label", group, binding, 0), null);
     host.grant = (operation, invocation) -> {
       if (operation == UiLayoutLifecycleOperation.READ_HEAD && invocation.rootTarget().equals(hidden.target())) throw denied();
     };
@@ -160,6 +160,18 @@ class PageRuntimePostgresIT extends PageRuntimePostgresFixture {
     assertThat(second.nodes().getFirst().id()).isEqualTo(later.pageId() + ":" + binding);
     assertThat(second.nextCursor()).isNull();
     assertThat(second.headReceipts()).noneMatch(receipt -> receipt.rootTarget().equals(hidden.target()));
+    host.grant = (operation, invocation) -> {};
+    host.commands.withdraw(host.alice, "c1", hidden.target(),
+        UiLayoutLifecycleCommandService.HeadWriteCondition.match(hiddenHead.headEtag()), "Private head transition");
+    host.grant = (operation, invocation) -> {
+      if (operation == UiLayoutLifecycleOperation.READ_HEAD && invocation.rootTarget().equals(hidden.target())) throw denied();
+    };
+    assertThat(headState(hidden.target()).get("head_etag").toString()).isNotEqualTo(hiddenHead.headEtag());
+    var afterPrivateTransition = navigation(group.toString(), first.nextCursor(), 1);
+    assertThat(afterPrivateTransition.receiptEtag()).isEqualTo(second.receiptEtag());
+    assertThat(afterPrivateTransition.nodes()).isEqualTo(second.nodes());
+    assertThat(afterPrivateTransition.headReceipts()).noneMatch(receipt -> receipt.rootTarget().equals(hidden.target()));
+    assertThat(navigation(group.toString(), null, 1).receiptEtag()).isEqualTo(first.receiptEtag());
     host.grant = (operation, invocation) -> {
       if (operation == UiLayoutLifecycleOperation.READ_HEAD
           && (invocation.rootTarget().equals(hidden.target()) || invocation.rootTarget().equals(later.target()))) throw denied();
@@ -263,6 +275,7 @@ class PageRuntimePostgresIT extends PageRuntimePostgresFixture {
     };
     assertThatThrownBy(() -> navigation(group.toString(), null, 50)).extracting("code")
         .isEqualTo(UiLayoutLifecycleException.Code.NOT_FOUND);
+    host.grant = (operation, invocation) -> {};
     assertThatThrownBy(() -> navigation(UUID.randomUUID().toString(), null, 50)).extracting("code")
         .isEqualTo(UiLayoutLifecycleException.Code.NOT_FOUND);
     assertThat(headState(page.target())).isEqualTo(originalHead);
