@@ -15,4 +15,8 @@ public record EnterpriseRuntimeNavigationNode(
         String actionRef,
         String capabilityRef,
         List<EnterpriseRuntimeNavigationNode> children) {
+    public EnterpriseRuntimeNavigationNode {
+        if (id == null || id.isBlank()) throw new IllegalArgumentException("Navigation identity is required.");
+        children = children == null ? null : List.copyOf(children);
+    }
 }

@@ -104,6 +104,22 @@ class PageRuntimeHttpTest {
     }
   }
 
+  @Test void invalidProviderNodeOrNullChildCannotReturn200Or304() throws Exception {
+    for (int failure = 0; failure < 3; failure++) {
+      final int scenario = failure;
+      doAnswer(call -> {
+        var node = new EnterpriseRuntimeNavigationNode(scenario == 0 ? null : scenario == 1 ? " " : "valid",
+            "Label", null, null, null, null, null, null, null, null, null,
+            scenario == 2 ? java.util.Arrays.asList((EnterpriseRuntimeNavigationNode) null) : null);
+        return new EnterpriseRuntimeNavigationResponse(EnterpriseRuntimeNavigationResponse.SCHEMA_VERSION,
+            List.of(node), List.of(), Instant.EPOCH, "c1", etag, List.of(), null);
+      }).when(navigation).getNavigation(any(), anyString(), any(), any(), anyInt());
+      mvc.perform(get("/api/praxis/runtime/navigation").principal(() -> "actor")
+          .header("X-Praxis-Context-Version", "c1").header("If-None-Match", "*"))
+          .andExpect(status().isServiceUnavailable()).andExpect(header().string("Cache-Control", "no-store"));
+    }
+  }
+
   @Test void parametersAndMissingContextAreSanitizedBeforeProviders() throws Exception {
     mvc.perform(get("/api/praxis/runtime/navigation").principal(() -> "actor"))
         .andExpect(status().isBadRequest()).andExpect(header().string("Cache-Control", "no-store"));
