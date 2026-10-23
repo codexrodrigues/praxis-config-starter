@@ -35,6 +35,8 @@ class PageRuntimeReadServiceTest {
   final PageCreationHost host = mock(PageCreationHost.class);
   final UiLayoutLifecycleAdmission grants = mock(UiLayoutLifecycleAdmission.class);
   final EffectiveUiAudienceProvider audiences = mock(EffectiveUiAudienceProvider.class);
+  final UiLayoutLifecycleStructureValidator structure = mock(UiLayoutLifecycleStructureValidator.class);
+  Duration budget = Duration.ofMinutes(1);
   final List<PageRuntimeStore.Head> heads = new ArrayList<>();
   final Set<UiLayoutTarget> denied = new HashSet<>();
   final AtomicInteger vectorReads = new AtomicInteger();
@@ -132,9 +134,9 @@ class PageRuntimeReadServiceTest {
       }
       return null;
     }).when(grants).require(eq(UiLayoutLifecycleOperation.READ_HEAD), any());
-    service = new PageRuntimeReadService(host, audiences, grants, mock(UiLayoutLifecycleStructureValidator.class),
+    service = new PageRuntimeReadService(host, audiences, grants, structure,
         mock(UiLayoutDraftWorkspaceSource.class), metadata, jdbc, transactions,
-        (op, inv) -> Duration.ofMinutes(1), releases, drafts, members, revisions, definitions, assignments,
+        (op, inv) -> budget, releases, drafts, members, revisions, definitions, assignments,
         json, hashes, Clock.fixed(Instant.EPOCH, ZoneOffset.UTC));
   }
 
@@ -144,6 +146,48 @@ class PageRuntimeReadServiceTest {
     var values = new ArrayList<T>();
     ids.forEach(id -> { if (records.containsKey(id)) values.add(records.get(id)); });
     return values;
+  }
+
+  @Test void elapsedBudgetAfterSuccessfulStructureCallbackCannotReturnBodyOr304() throws Exception {
+    var page = addPage("30000000-0000-4000-8000-000000000001", 1, "Must not escape");
+    budget = Duration.ofSeconds(2);
+    var callbacks = new AtomicInteger();
+    var admittedRemaining = new java.util.concurrent.atomic.AtomicLong();
+    var expired = new java.util.concurrent.atomic.AtomicBoolean();
+    doAnswer(call -> {
+      UiLayoutValidationContext validation = call.getArgument(2);
+      callbacks.incrementAndGet();
+      admittedRemaining.set(validation.attempt().remainingBudget().toNanos());
+      assertThat(admittedRemaining.get()).isPositive();
+      long bound = System.nanoTime() + Duration.ofSeconds(3).toNanos();
+      while (!validation.attempt().remainingBudget().isZero()) {
+        assertThat(System.nanoTime()).isLessThan(bound);
+        java.util.concurrent.locks.LockSupport.parkNanos(1_000_000);
+      }
+      expired.set(true);
+      return null; // An extension succeeds, but its admitted attempt has elapsed.
+    }).when(structure).validateFrozenRelease(any(), anyList(), any());
+    var mapper = json.copy().addMixIn(org.springframework.http.ProblemDetail.class,
+        org.springframework.http.converter.json.ProblemDetailJacksonMixin.class);
+    var mvc = org.springframework.test.web.servlet.setup.MockMvcBuilders.standaloneSetup(
+        new org.praxisplatform.config.controller.PageRuntimeController(service))
+        .setControllerAdvice(new org.praxisplatform.config.controller.UiLayoutResolutionExceptionHandler())
+        .setMessageConverters(new org.springframework.http.converter.json.MappingJackson2HttpMessageConverter(mapper)).build();
+    mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get(
+        "/api/praxis/config/pages/" + page.pageId() + "/published").principal(() -> "actor")
+        .header("X-Praxis-Context-Version", "c1").header("If-None-Match", "*"))
+        .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.status().isServiceUnavailable())
+        .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.header().string("Cache-Control", "no-store"))
+        .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.header().doesNotExist("ETag"))
+        .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath("$.receiptEtag").doesNotExist())
+        .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath("$.document").doesNotExist())
+        .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.content().string(
+            org.hamcrest.Matchers.not(org.hamcrest.Matchers.containsString("Must not escape"))));
+    assertThat(callbacks).hasValue(1);
+    assertThat(expired).isTrue();
+    assertThat(admittedRemaining.get()).isPositive();
+    System.out.println("P3-B callback budget admittedRemainingNanos=" + admittedRemaining.get()
+        + " observedRemainingNanos=0 callbacks=" + callbacks.get() + " HTTP=503 noStore=true IO=simulated");
   }
 
   @Test void unexpectedHostFailureIsUnavailableAndInvalidInputIsAClientError() {
