@@ -125,15 +125,20 @@ class PageRuntimeRawEvidencePostgresIT extends PageRuntimePostgresFixture {
         var selected = new ArrayList<UUID>();
         selected.add(absent);
         selected.addAll(seed.pageIds().subList(129, seed.pageIds().size()));
+        UUID absentMiddle = UUID.randomUUID();
+        int missingOrdinal = 1 + largeCount / 2;
+        selected.add(missingOrdinal, absentMiddle);
         observed.reset();
         int consumed = prefetch.apply(selected);
-        assertThat(consumed).isEqualTo(largeCount + 1);
-        assertThat(observed.lastPayloadOrdinals).containsExactlyElementsOf(java.util.stream.IntStream.range(1, largeCount + 1).boxed().toList());
+        assertThat(consumed).isEqualTo(largeCount + 2);
+        assertThat(observed.lastPayloadOrdinals).containsExactlyElementsOf(java.util.stream.IntStream.range(1, consumed)
+            .filter(ordinal -> ordinal != missingOrdinal).boxed().toList());
         assertThat(observed.lastPayloadBytes).isEqualTo(8L * MIB);
-        assertRetained(owner, expected, selected.subList(1, consumed), metadata);
+        var retainedPages = selected.subList(1, consumed).stream().filter(page -> !page.equals(absentMiddle)).toList();
+        assertRetained(owner, expected, retainedPages, metadata);
         assertThat(retained(owner)).hasSize(largeCount);
         int beforeNegativeConsumption = observed.queries;
-        for (UUID malformed : selected.subList(1, consumed)) {
+        for (UUID malformed : retainedPages) {
           if (metadata) {
             assertThatThrownBy(() -> captures.read(host.context(host.alice, rowKeys.get(malformed).root()).invocation(),
                 bindings.get(malformed), (invocation, capture) -> {})).isInstanceOf(UiLayoutLifecycleException.class);
@@ -170,7 +175,7 @@ class PageRuntimeRawEvidencePostgresIT extends PageRuntimePostgresFixture {
       assertThat(heads(host)).isEqualTo(before);
       assertThat(events(host)).isEqualTo(eventsBefore);
       System.out.println("P3-B raw prefix owner=" + ownerType.getSimpleName()
-          + " entryWindows=128,1 exactAggregateBytes=8388608 missingProgress=true payloadOnlyPrefix=true"
+          + " entryWindows=128,1 exactAggregateBytes=8388608 missingFirstAndInterleavedProgress=true payloadOnlyPrefix=true"
           + " escapingAndNulls=true negativeStorageRows=true admittedPublication=false freshHeadsAuditUnchanged=true");
     }
   }

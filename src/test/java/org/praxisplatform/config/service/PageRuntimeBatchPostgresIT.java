@@ -131,6 +131,9 @@ class PageRuntimeBatchPostgresIT extends PageRuntimePostgresFixture {
       publicSeed.insert();
       var beforeInsert = host.runtime.catalog(host.alice, "c1", null, 1);
       var beforeContinuation = host.runtime.catalog(host.alice, "c1", beforeInsert.nextCursor(), 1);
+      assertThat(beforeInsert.items()).extracting(PageCatalogEntry::pageId).containsExactly(publicSeed.pageIds().getFirst());
+      assertThat(beforeContinuation.items()).extracting(PageCatalogEntry::pageId).containsExactly(publicSeed.pageIds().getLast());
+      assertThat(beforeContinuation.nextCursor()).isNull();
       var request = new EnterpriseRuntimeContextRequest(host.alice, null, null, null);
       var beforeMenu = host.runtime.navigation(request, "c1", group.toString(), null, 1);
       assertThat(beforeInsert.nextCursor()).isNotNull();
@@ -142,6 +145,8 @@ class PageRuntimeBatchPostgresIT extends PageRuntimePostgresFixture {
       var bob = host.addActor("bob-private", "other-unit", "b1", host.scope);
       var badCapture = new PageRuntimeDenseFixture(host, prototype, group, group, 1, bob.name());
       badCapture.corruptRootMetadataRawHashForAdmissionProbe(0);
+      var healthyUser = new PageRuntimeDenseFixture(host, prototype, group, group, 1, bob.name());
+      UUID healthyUserPage = healthyUser.pageIds().getFirst();
       UUID ledgerPage = badLedger.pageIds().getFirst();
       UUID capturePage = badCapture.pageIds().getFirst();
       var deniedPages = new java.util.HashSet<>(List.of(ledgerPage.toString(), capturePage.toString()));
@@ -151,6 +156,7 @@ class PageRuntimeBatchPostgresIT extends PageRuntimePostgresFixture {
       };
       badLedger.insert();
       badCapture.insert();
+      healthyUser.insert();
       var afterInsertHeads = headStates(host);
       assertThat(afterInsertHeads).containsAll(publicHeadsBefore);
       long eventsAfterInsert = events(host);
@@ -195,17 +201,20 @@ class PageRuntimeBatchPostgresIT extends PageRuntimePostgresFixture {
         assertUnavailableWithoutPublishedBody(mvc, uri, host.alice, "c1", "W/\"" + beforeInsert.receiptEtag() + "\"");
       }
       deniedPages.add(ledgerPage.toString());
+      assertThat(host.runtime.published(bob, "b1", healthyUserPage).pageId()).isEqualTo(healthyUserPage);
       // Bob's real principal/context/selector now admits the same capture, so its corruption must fail.
       for (String uri : List.of("/api/praxis/config/pages", "/api/praxis/config/pages/" + capturePage + "/published")) {
         assertUnavailableWithoutPublishedBody(mvc, uri, bob, "b1", "*");
       }
       var restored = host.runtime.catalog(host.alice, "c1", null, 1);
+      assertThat(host.runtime.catalog(host.alice, "c1", null, 50).items())
+          .extracting(PageCatalogEntry::pageId).containsExactlyElementsOf(publicSeed.pageIds());
       assertThat(restored.receiptEtag()).isEqualTo(beforeInsert.receiptEtag());
       assertThat(restored.nextCursor()).isEqualTo(beforeInsert.nextCursor());
       assertThat(headStates(host)).isEqualTo(afterInsertHeads);
       assertThat(events(host)).isEqualTo(eventsAfterInsert);
       System.out.println("P3-B private corrupt SQL baselineBeforeNegativeInsert=true sameActorContext=true"
-          + " deniedLedgerAndCaptureIgnored=true selectorMismatchCaptureIgnored=true compatibleActor503=true"
+          + " deniedLedgerAndCaptureIgnored=true selectorMismatchCaptureIgnored=true healthyUserBobPublished=true compatibleActor503=true"
           + " publicReceiptCursorUnchanged=true partialOr304=false freshHeadsAuditUnchanged=true");
     }
   }
