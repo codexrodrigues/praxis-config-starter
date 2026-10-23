@@ -112,7 +112,7 @@ class UiLayoutPageGroupSnapshotContractTest {
 
   private void persistSnapshot(String documentType, ObjectNode document) {
     UUID definitionId = UUID.randomUUID(), revisionId = UUID.randomUUID(), assignmentId = UUID.randomUUID();
-    var patch = mapper.createObjectNode();
+    ObjectNode patch = ((ObjectNode) document.get("config")).deepCopy();
     String patchHash = hashes.sha256Exact(patch);
     String documentHash = hashes.sha256Exact(document);
     var selector = new UiLayoutAudienceSelectorCommand("tenant", null, null, null, null, null);
