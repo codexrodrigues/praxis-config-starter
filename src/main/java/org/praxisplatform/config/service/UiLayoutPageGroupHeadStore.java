@@ -26,7 +26,10 @@ final class UiLayoutPageGroupHeadStore {
   }
 
   void flush() { transactions.flush(); }
-  void detach(UiLayoutFrozenRecordBatch batch) { transactions.detachImmutable(batch); }
+  java.util.Set<Object> managedDefinitions() { return transactions.managedDefinitions(); }
+  void detach(UiLayoutFrozenRecordBatch batch, java.util.Set<Object> previouslyManagedDefinitions) {
+    transactions.detachBatch(batch, previouslyManagedDefinitions);
+  }
 
   Head head(UiLayoutLifecycleInvocation invocation, UiLayoutTarget root) {
     transactions.require();

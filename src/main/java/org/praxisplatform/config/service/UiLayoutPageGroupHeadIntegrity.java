@@ -21,6 +21,8 @@ final class UiLayoutPageGroupHeadIntegrity {
   private final UiLayoutMetadataCapturePersistence metadata;
   private final UiLayoutBaselineMetadataAdmission metadataAdmission;
   private final UiLayoutMetadataCaptureCodec metadataCodec;
+  private final UiLayoutDraftWorkspaceSource workspaceSource;
+  private final UiLayoutPageChildCaptures pageChildren;
   private final UiLayoutFrozenWorkspaceResolver frozen;
   private final UiLayoutReleaseRepository releases;
   private final UiLayoutDraftRepository drafts;
@@ -32,6 +34,7 @@ final class UiLayoutPageGroupHeadIntegrity {
   UiLayoutPageGroupHeadIntegrity(PageCreationHost host, UiLayoutPageGroupHeadStore store,
       UiLayoutLifecycleAdmission admission, UiLayoutLifecycleStructureValidator structure,
       UiLayoutMetadataCapturePersistence metadata, UiLayoutBaselineMetadataAdmission metadataAdmission,
+      UiLayoutDraftWorkspaceSource workspaceSource,
       UiLayoutReleaseRepository releases, UiLayoutDraftRepository drafts,
       UiLayoutReleaseMemberRepository members, UiLayoutRevisionRepository revisions,
       UiLayoutDefinitionRepository definitions, UiLayoutAssignmentRevisionRepository assignments,
@@ -42,6 +45,8 @@ final class UiLayoutPageGroupHeadIntegrity {
     this.structure = new UiLayoutBoundedStructureValidator(structure);
     this.metadata = metadata;
     this.metadataAdmission = metadataAdmission;
+    this.workspaceSource = Objects.requireNonNull(workspaceSource);
+    this.pageChildren = new UiLayoutPageChildCaptures(hashes);
     this.metadataCodec = new UiLayoutMetadataCaptureCodec(mapper, hashes);
     this.releases = releases;
     this.drafts = drafts;
@@ -111,18 +116,27 @@ final class UiLayoutPageGroupHeadIntegrity {
         var snapshot = snapshot(groupInvocation, groupHead.activeReleaseId(), null, validation);
         var available = ids(snapshot);
         if (!available.containsAll(candidateIds)) throw invalid();
-        admitGroups(groupInvocation, snapshot, validation);
+        admitFrozen(groupInvocation, snapshot, validation);
+      }
+      if (candidateRelease != null) {
+        admitFrozen(invocation, snapshot(invocation, candidateRelease, null, validation), validation);
+      }
+      // Page metadata/structure may revoke the dependency grant. Recheck it after those callbacks.
+      if (!candidateIds.isEmpty()) {
+        var groupInvocation = context.forTarget(groupsRoot);
+        validation.run(invocation, () -> admission.require(UiLayoutLifecycleOperation.READ_HEAD, groupInvocation));
       }
     } else {
       store.requireCompleteCatalog(context);
       if (candidateRelease != null) {
-        admitGroups(invocation, snapshot(invocation, candidateRelease, null, validation), validation);
+        admitFrozen(invocation, snapshot(invocation, candidateRelease, null, validation), validation);
       }
       UUID after = null;
       while (true) {
         validation.require(invocation);
         var pages = store.activePages(context, after);
         if (pages.isEmpty()) break;
+        var previouslyManagedDefinitions = store.managedDefinitions();
         var batch = UiLayoutFrozenRecordBatch.load(pages.stream().map(UiLayoutPageGroupHeadStore.ActivePage::releaseId).toList(),
             releases, drafts, members, revisions, definitions, assignments);
         try {
@@ -133,7 +147,7 @@ final class UiLayoutPageGroupHeadIntegrity {
             }
           }
         } finally {
-          store.detach(batch);
+          store.detach(batch, previouslyManagedDefinitions);
         }
         after = pages.getLast().pageId();
         validation.require(invocation);
@@ -174,7 +188,7 @@ final class UiLayoutPageGroupHeadIntegrity {
     return snapshot;
   }
 
-  private void admitGroups(UiLayoutLifecycleInvocation invocation,
+  private void admitFrozen(UiLayoutLifecycleInvocation invocation,
       UiLayoutFrozenWorkspaceResolver.Snapshot snapshot, UiLayoutValidationContext outer) {
     outer.attempt().requireActive();
     try (var attempt = UiLayoutValidationAttempt.start(invocation, outer.attempt().operation(),
@@ -194,7 +208,6 @@ final class UiLayoutPageGroupHeadIntegrity {
           new UiLayoutLifecycleFrozenContribution.NativeAuthoring(snapshot.releaseId(), snapshot.draftId(),
               snapshot.document().freezeCommandRef(), state.authoring(), state.patch(), state.baseline().sourceRef(),
               state.baseline().contentHash(), state.baseline().document(), state.working().contentHash(), state.working().document()));
-      validation.run(invocation, () -> structure.validateFrozenRelease(invocation, List.of(contribution), validation));
       var binding = new UiLayoutMetadataCapture.Binding(snapshot.draftId(),
           new UiLayoutMetadataCapture.Scope(invocation.tenantId(), invocation.environment(), invocation.rootTarget(), state.target()),
           state.baseline().sourceRef(), state.authoring(), state.baseline().contentHash());
@@ -204,6 +217,10 @@ final class UiLayoutPageGroupHeadIntegrity {
                   capture.observation(), capture.rawInputText())));
       var capture = validation.call(invocation, () -> metadata.read(invocation, binding, access));
       metadataCodec.verifyAndRead(invocation, binding, capture, access);
+      pageChildren.verify(invocation, snapshot.draftId(), state.target(), state.baseline().document(),
+          state.working().document(), state.pageChildren(), workspaceSource, metadataAdmission, validation);
+      // Current metadata and producer callbacks run before the final structural policy check.
+      validation.run(invocation, () -> structure.validateFrozenRelease(invocation, List.of(contribution), validation));
       if (dependency) validation.run(invocation, () -> admission.require(UiLayoutLifecycleOperation.READ_HEAD, invocation));
       validation.require(invocation);
     } finally {

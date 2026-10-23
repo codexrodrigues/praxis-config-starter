@@ -50,7 +50,6 @@ public class UiLayoutLifecycleCommandService {
   private final UiLayoutLifecycleStructureValidator structure;
   private final UiLayoutDraftRepository drafts;
   private final UiLayoutReleaseReviewRepository reviews;
-  private final UiLayoutReleaseHeadRepository heads;
   private final ObjectMapper objectMapper;
   private final TransactionOperations transactions;
   private final UiLayoutReleaseRepository releases;
@@ -71,7 +70,7 @@ public class UiLayoutLifecycleCommandService {
 
   UiLayoutLifecycleCommandService(UiLayoutLifecycleService core, UiLayoutLifecycleInvocationProvider invocations,
       UiLayoutLifecycleAdmission admission, UiLayoutLifecycleStructureValidator structure, UiLayoutDraftRepository drafts,
-      UiLayoutReleaseReviewRepository reviews, UiLayoutReleaseHeadRepository heads, ObjectMapper objectMapper,
+      UiLayoutReleaseReviewRepository reviews, ObjectMapper objectMapper,
       TransactionOperations transactions, UiLayoutReleaseRepository releases, UiLayoutReleaseMemberRepository members,
       UiLayoutAssignmentRevisionRepository assignments, UiLayoutRevisionRepository revisions,
       UiLayoutDefinitionRepository definitions, CanonicalJsonHashService hashes,
@@ -80,7 +79,7 @@ public class UiLayoutLifecycleCommandService {
     this.budgetPolicy = java.util.Objects.requireNonNull(budgetPolicy, "Validation budget policy is required.");
     this.core = core; this.invocations = invocations; this.admission = admission == null ? UiLayoutLifecycleAdmission.denyAll() : admission;
     this.structure = new UiLayoutBoundedStructureValidator(structure);
-    this.drafts = drafts; this.reviews = reviews; this.heads = heads; this.objectMapper = objectMapper; this.transactions = transactions;
+    this.drafts = drafts; this.reviews = reviews; this.objectMapper = objectMapper; this.transactions = transactions;
     this.releases = releases; this.members = members; this.assignments = assignments; this.revisions = revisions; this.definitions = definitions; this.hashes = hashes;
     this.workspaceSource = workspaceSource; this.creationLock = creationLock;
     this.metadataStore = metadataStore;
@@ -107,7 +106,7 @@ public class UiLayoutLifecycleCommandService {
     var metadataStore = new JdbcUiLayoutMetadataCaptureStore(configJdbc, mapper, hashes, transactions);
     var headIntegrity = pageHost == null ? null : new UiLayoutPageGroupHeadIntegrity(pageHost,
         new UiLayoutPageGroupHeadStore(configJdbc, transactions, heads), admission, structure, metadataStore,
-        metadataAdmission, releases, drafts, members, revisions, definitions, assignments, mapper, hashes);
+        metadataAdmission, workspaceSource, releases, drafts, members, revisions, definitions, assignments, mapper, hashes);
     return assemble(definitions, revisions, assignments, drafts, releases, members, reviews, approvals, heads, events,
         allocationLock, hashes, mapper, releaseValidator, invocations, admission, structure, workspaceSource, creationLock,
         metadataStore, metadataAdmission, transactions, budgetPolicy, headIntegrity);
@@ -126,7 +125,7 @@ public class UiLayoutLifecycleCommandService {
     UiLayoutLifecycleService core = new UiLayoutLifecycleService(definitions, revisions, assignments, drafts, releases, members,
         reviews, approvals, heads, events, allocationLock, hashes, mapper, (operation, actor, tenant, unit, environment, target) -> true,
         releaseValidator, java.time.Clock.systemUTC(), headIntegrity);
-    return new UiLayoutLifecycleCommandService(core, invocations, admission, structure, drafts, reviews, heads, mapper, transactions,
+    return new UiLayoutLifecycleCommandService(core, invocations, admission, structure, drafts, reviews, mapper, transactions,
         releases, members, assignments, revisions, definitions, hashes, workspaceSource, creationLock, metadataStore, metadataAdmission, budgetPolicy);
   }
 
@@ -437,15 +436,15 @@ public class UiLayoutLifecycleCommandService {
     UiLayoutLifecycleInvocation invocation = invoke(principal, contextVersion, root, UiLayoutLifecycleOperation.PUBLISH_RELEASE);
     UiLayoutValidationContext validation = beginValidation(invocation, UiLayoutLifecycleOperation.PUBLISH_RELEASE, UiLayoutValidationPurpose.FROZEN_RELEASE);
     return inAuthorizedConfigTransaction(principal, contextVersion, root, invocation,
-        UiLayoutLifecycleOperation.PUBLISH_RELEASE, validation, status -> { UUID expected = validateHeadCondition(invocation, root, condition, true); structure.validateFrozenRelease(invocation, frozenRelease(invocation, root, releaseId, validation), validation);
-      UiLayoutReleaseHead head = validation.call(invocation, () -> core.publish(invocation, releaseId, expected, required(reason, "reason"), validation)); return head(root, head); });
+        UiLayoutLifecycleOperation.PUBLISH_RELEASE, validation, status -> { structure.validateFrozenRelease(invocation, frozenRelease(invocation, root, releaseId, validation), validation);
+      UiLayoutReleaseHead head = validation.call(invocation, () -> core.publish(invocation, releaseId, condition, required(reason, "reason"), validation)); return head(root, head); });
   }
 
   public UiLayoutReleaseHeadReceipt withdraw(Principal principal, String contextVersion, UiLayoutTarget root, HeadWriteCondition condition, String reason) {
     UiLayoutLifecycleInvocation invocation = invoke(principal, contextVersion, root, UiLayoutLifecycleOperation.WITHDRAW_RELEASE);
     UiLayoutValidationContext validation = beginValidation(invocation, UiLayoutLifecycleOperation.WITHDRAW_RELEASE, UiLayoutValidationPurpose.AUTHORING);
     return inAuthorizedConfigTransaction(principal, contextVersion, root, invocation,
-        UiLayoutLifecycleOperation.WITHDRAW_RELEASE, validation, status -> { UiLayoutReleaseHead head = validation.call(invocation, () -> core.withdraw(invocation, validateHeadCondition(invocation, root, condition, false), required(reason, "reason"), validation)); return head(root, head); });
+        UiLayoutLifecycleOperation.WITHDRAW_RELEASE, validation, status -> { UiLayoutReleaseHead head = validation.call(invocation, () -> core.withdraw(invocation, condition, required(reason, "reason"), validation)); return head(root, head); });
   }
 
   public UiLayoutReleaseHeadReceipt rollback(Principal principal, String contextVersion, UiLayoutTarget root, HeadWriteCondition condition,
@@ -453,7 +452,7 @@ public class UiLayoutLifecycleCommandService {
     UiLayoutLifecycleInvocation invocation = invoke(principal, contextVersion, root, UiLayoutLifecycleOperation.ROLLBACK_RELEASE);
     UiLayoutValidationContext validation = beginValidation(invocation, UiLayoutLifecycleOperation.ROLLBACK_RELEASE, UiLayoutValidationPurpose.FROZEN_RELEASE);
     return inAuthorizedConfigTransaction(principal, contextVersion, root, invocation,
-        UiLayoutLifecycleOperation.ROLLBACK_RELEASE, validation, status -> { structure.validateFrozenRelease(invocation, frozenRelease(invocation, root, releaseId, validation), validation); UiLayoutReleaseHead head = validation.call(invocation, () -> core.rollback(invocation, releaseId, validateHeadCondition(invocation, root, condition, false), required(reason, "reason"), validation)); return head(root, head); });
+        UiLayoutLifecycleOperation.ROLLBACK_RELEASE, validation, status -> { structure.validateFrozenRelease(invocation, frozenRelease(invocation, root, releaseId, validation), validation); UiLayoutReleaseHead head = validation.call(invocation, () -> core.rollback(invocation, releaseId, condition, required(reason, "reason"), validation)); return head(root, head); });
   }
 
   /** Internal construction seam; the public factory always uses mandatory server budget policy. */
@@ -511,17 +510,6 @@ public class UiLayoutLifecycleCommandService {
       // A successful participating command retains its attempt until the outer commit/completion.
       if (!registered.get()) validation.attempt().close();
     }
-  }
-
-  private UUID validateHeadCondition(UiLayoutLifecycleInvocation invocation, UiLayoutTarget root, HeadWriteCondition condition, boolean allowCreate) {
-    if (condition == null) throw precondition();
-    var existing = heads.findByTenantIdAndEnvironmentAndRootComponentTypeAndRootComponentId(invocation.tenantId(), invocation.environment(), root.componentType(), root.componentId());
-    if (existing.isEmpty()) {
-      if (allowCreate && condition.createOnly()) return null;
-      throw precondition();
-    }
-    if (condition.createOnly() || condition.etag() == null || !condition.etag().equals(existing.orElseThrow().getHeadEtag().toString())) throw precondition();
-    return existing.orElseThrow().getHeadEtag();
   }
 
   private UiLayoutDraft currentDraft(UiLayoutLifecycleInvocation invocation, UiLayoutTarget root, UUID draftId) {

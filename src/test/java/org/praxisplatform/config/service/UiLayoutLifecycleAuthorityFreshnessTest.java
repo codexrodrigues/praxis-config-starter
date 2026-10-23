@@ -245,7 +245,7 @@ class UiLayoutLifecycleAuthorityFreshnessTest {
           (operation, invocation) -> {
             if (technicalFailure.get()) throw new IllegalStateException("private-credential");
             if (revoked.get()) throw new UiLayoutLifecycleException(UiLayoutLifecycleException.Code.DENIED, "revoked");
-          }, null, null, null, heads, new ObjectMapper(), operations,
+          }, null, null, null, new ObjectMapper(), operations,
           null, null, null, null, null, new CanonicalJsonHashService(new ObjectMapper()),
           null, null, null, null, (budgetOperation, budgetInvocation) -> {
             budgetSelections.incrementAndGet(); return java.time.Duration.ofMinutes(1);

@@ -220,20 +220,20 @@ class UiLayoutLifecycleService {
   }
 
   @Transactional(transactionManager = ConfigTransactionManagerNames.CONFIG)
-  public UiLayoutReleaseHead publish(UiLayoutLifecycleInvocation invocation, UUID releaseId, UUID ifMatch, String reason, UiLayoutValidationContext validation) {
+  public UiLayoutReleaseHead publish(UiLayoutLifecycleInvocation invocation, UUID releaseId, UiLayoutLifecycleCommandService.HeadWriteCondition condition, String reason, UiLayoutValidationContext validation) {
     String actor = invocation.actorRef();
     requireHeadIntegrity(invocation, UiLayoutLifecycleOperation.PUBLISH_RELEASE, releaseId, validation);
-    return moveHead(scope(invocation), releaseId, ifMatch, actor, reason, UiLayoutLifecycleOperation.PUBLISH_RELEASE, "PUBLISHED", false);
+    return moveHead(scope(invocation), releaseId, condition, actor, reason, UiLayoutLifecycleOperation.PUBLISH_RELEASE, "PUBLISHED", false);
   }
 
   @Transactional(transactionManager = ConfigTransactionManagerNames.CONFIG)
-  public UiLayoutReleaseHead withdraw(UiLayoutLifecycleInvocation invocation, UUID ifMatch, String reason, UiLayoutValidationContext validation) {
+  public UiLayoutReleaseHead withdraw(UiLayoutLifecycleInvocation invocation, UiLayoutLifecycleCommandService.HeadWriteCondition condition, String reason, UiLayoutValidationContext validation) {
     String actor = invocation.actorRef();
     requireHeadIntegrity(invocation, UiLayoutLifecycleOperation.WITHDRAW_RELEASE, null, validation);
     Scope scope = scope(invocation);
     requirePolicy(UiLayoutLifecycleOperation.WITHDRAW_RELEASE, scope, actor);
     reason = requireReason(reason);
-    UiLayoutReleaseHead head = head(scope); requireMatch(ifMatch, head.getHeadEtag());
+    UiLayoutReleaseHead head = head(scope); requireHeadCondition(condition, head, false);
     UUID previous = head.getActiveReleaseId();
     if (previous == null) fail(UiLayoutLifecycleException.Code.INVALID_STATE, "There is no active release to withdraw.");
     head.setActiveReleaseId(null); head.setHeadEtag(UUID.randomUUID()); head.setUpdatedAt(Instant.now(clock)); heads.save(head);
@@ -242,10 +242,10 @@ class UiLayoutLifecycleService {
   }
 
   @Transactional(transactionManager = ConfigTransactionManagerNames.CONFIG)
-  public UiLayoutReleaseHead rollback(UiLayoutLifecycleInvocation invocation, UUID releaseId, UUID ifMatch, String reason, UiLayoutValidationContext validation) {
+  public UiLayoutReleaseHead rollback(UiLayoutLifecycleInvocation invocation, UUID releaseId, UiLayoutLifecycleCommandService.HeadWriteCondition condition, String reason, UiLayoutValidationContext validation) {
     String actor = invocation.actorRef();
     requireHeadIntegrity(invocation, UiLayoutLifecycleOperation.ROLLBACK_RELEASE, releaseId, validation);
-    return moveHead(scope(invocation), releaseId, ifMatch, actor, reason, UiLayoutLifecycleOperation.ROLLBACK_RELEASE, "ROLLED_BACK", true);
+    return moveHead(scope(invocation), releaseId, condition, actor, reason, UiLayoutLifecycleOperation.ROLLBACK_RELEASE, "ROLLED_BACK", true);
   }
 
   private Scope scope(UiLayoutLifecycleInvocation invocation) {
@@ -260,7 +260,7 @@ class UiLayoutLifecycleService {
     headIntegrity.require(invocation, operation, releaseId, validation);
   }
 
-  private UiLayoutReleaseHead moveHead(Scope scope, UUID releaseId, UUID ifMatch, String actor, String reason,
+  private UiLayoutReleaseHead moveHead(Scope scope, UUID releaseId, UiLayoutLifecycleCommandService.HeadWriteCondition condition, String actor, String reason,
       UiLayoutLifecycleOperation operation, String eventType, boolean rollback) {
     requirePolicy(operation, scope, actor);
     reason = requireReason(reason);
@@ -272,8 +272,7 @@ class UiLayoutLifecycleService {
     UiLayoutReleaseHead head = existingHead.orElseGet(() -> UiLayoutReleaseHead.builder().id(UUID.randomUUID()).tenantId(scope.tenantId())
         .environment(scope.environment()).rootComponentType(scope.rootTarget().componentType()).rootComponentId(scope.rootTarget().componentId())
         .headEtag(UUID.randomUUID()).updatedAt(Instant.now(clock)).build());
-    if (existingHead.isPresent()) requireMatch(ifMatch, head.getHeadEtag());
-    else if (ifMatch != null) fail(UiLayoutLifecycleException.Code.PRECONDITION_FAILED, "A creation precondition cannot name a head that does not exist.");
+    requireHeadCondition(condition, existingHead.orElse(null), !rollback);
     if (releaseId.equals(head.getActiveReleaseId())) fail(UiLayoutLifecycleException.Code.INVALID_STATE, "The requested release is already active.");
     UUID previous = head.getActiveReleaseId();
     if (rollback && previous == null) fail(UiLayoutLifecycleException.Code.INVALID_STATE, "Rollback requires an active release to replace.");
@@ -282,6 +281,17 @@ class UiLayoutLifecycleService {
       throw failure(UiLayoutLifecycleException.Code.PRECONDITION_FAILED, "Publication head changed concurrently; reload the scoped state.");
     }
     append(eventType, release, previous, releaseId, head.getHeadEtag(), actor, reason); return head;
+  }
+
+  private void requireHeadCondition(UiLayoutLifecycleCommandService.HeadWriteCondition condition,
+      UiLayoutReleaseHead head, boolean allowCreate) {
+    if (condition == null) fail(UiLayoutLifecycleException.Code.PRECONDITION_FAILED, "A head precondition is required.");
+    if (head == null) {
+      if (allowCreate && condition.createOnly() && condition.etag() == null) return;
+    } else if (!condition.createOnly() && head.getHeadEtag().toString().equals(condition.etag())) {
+      return;
+    }
+    fail(UiLayoutLifecycleException.Code.PRECONDITION_FAILED, "Publication head changed; reload its current validator.");
   }
 
   private void transitionReview(Scope scope, UUID releaseId, UUID ifMatch, String actor, String from, String to,

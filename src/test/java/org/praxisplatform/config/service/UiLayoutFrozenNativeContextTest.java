@@ -98,7 +98,7 @@ class UiLayoutFrozenNativeContextTest {
     when(core.publish(any(), eq(releaseId), any(), any(), any())).thenReturn(head);
     when(core.rollback(any(), eq(releaseId), any(), any(), any())).thenReturn(head);
     service = new UiLayoutLifecycleCommandService(core, invocations, admission, structure, drafts,
-        mock(UiLayoutReleaseReviewRepository.class), heads, mapper,
+        mock(UiLayoutReleaseReviewRepository.class), mapper,
         new org.springframework.transaction.support.TransactionTemplate(transactions), releases, members, assignments,
         revisions, definitions, hashes, null, null, null, null, (budgetOperation, budgetInvocation) -> java.time.Duration.ofMinutes(1));
   }

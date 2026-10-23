@@ -43,14 +43,25 @@ final class ConfigJdbcTransactionGuard {
     entityManager().refresh(entity, jakarta.persistence.LockModeType.PESSIMISTIC_WRITE);
   }
 
-  void detachImmutable(UiLayoutFrozenRecordBatch batch) {
+  java.util.Set<Object> managedDefinitions() {
+    require();
+    var result = java.util.Collections.newSetFromMap(new java.util.IdentityHashMap<Object, Boolean>());
+    entityManager().unwrap(org.hibernate.engine.spi.SessionImplementor.class)
+        .getPersistenceContextInternal().getEntitiesByKey().values().stream()
+        .filter(org.praxisplatform.config.domain.UiLayoutDefinition.class::isInstance)
+        .forEach(result::add);
+    return result;
+  }
+
+  /** Retire sealed batch records and scan-loaded definitions; preserve caller-managed definitions. */
+  void detachBatch(UiLayoutFrozenRecordBatch batch, java.util.Set<Object> previouslyManagedDefinitions) {
     var manager = entityManager();
     java.util.stream.Stream.of(batch.releases().values(), batch.drafts().values(),
         batch.revisions().values(), batch.definitions().values(), batch.assignments().values())
         .flatMap(java.util.Collection::stream).forEach(entity -> {
           if (entity instanceof org.praxisplatform.config.domain.UiLayoutDraft draft
               && !"RELEASED".equals(draft.getState())) throw unavailable();
-          if (manager.contains(entity)) manager.detach(entity);
+          if (!previouslyManagedDefinitions.contains(entity) && manager.contains(entity)) manager.detach(entity);
         });
     batch.members().values().stream().flatMap(java.util.Collection::stream)
         .forEach(entity -> { if (manager.contains(entity)) manager.detach(entity); });
@@ -131,7 +142,9 @@ final class ConfigJdbcTransactionGuard {
           || !(TransactionSynchronizationManager.getResource(dataSource)
               instanceof ConnectionHolder holder)
           || holder.isRollbackOnly()
-          || (!holder.isSynchronizedWithTransaction() && !isJpaConnection(holder.getConnection()))
+          || (entityManagerFactory != null
+              ? !isJpaConnection(holder.getConnection())
+              : !holder.isSynchronizedWithTransaction())
           || holder.getConnection().getAutoCommit()
           || (inspectIsolation
               && holder.getConnection().getTransactionIsolation()

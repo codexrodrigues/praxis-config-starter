@@ -9,7 +9,7 @@ import java.util.stream.Collectors;
 import org.praxisplatform.config.domain.*;
 import org.praxisplatform.config.repository.*;
 
-/** Bounded operation-local immutable records. No heads, permissions or producer decisions. */
+/** Bounded sealed records plus correlated definition identities. No heads or authority decisions. */
 record UiLayoutFrozenRecordBatch(
     Map<UUID, UiLayoutRelease> releases,
     Map<UUID, UiLayoutDraft> drafts,
