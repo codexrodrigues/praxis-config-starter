@@ -509,9 +509,9 @@ vector similarity score or decide user intent. Queries without lexical evidence 
 | `GET /api/praxis/runtime/context` | Return selection state and opaque selection version; only `ready` carries the host-confirmed effective context and context version. Private authorization internals remain host-owned. |
 | `GET /api/praxis/runtime/context/choices` | Discover bounded host-authorized choices through opaque choice references and a session/query-bound cursor. |
 | `PUT /api/praxis/runtime/context` | Submit `choiceRef` and `expectedSelectionVersion`; return the same canonical context projection after host-authorized selection. Default providers fail closed when host authority is unavailable. |
-| `GET /api/praxis/runtime/tenants` | Return host-provided accessible tenant/company choices for corporate shells. The default provider exposes only the active tenant and never private entitlement internals. |
-| `GET /api/praxis/runtime/navigation` | Return host-provided navigation nodes for corporate shells, with optional canonical Praxis refs such as `resourceKey`, `surfaceRef`, `actionRef`, `moduleKey`, and `capabilityRef`. The default provider returns an empty safe tree. |
-| `GET /api/praxis/runtime/security-events` | Return host-provided safe runtime/security signals for corporate shells. The default provider returns an empty safe list and never exposes raw roles, policies, tokens, prompts, SQL or private audit internals. |
+| `GET /api/praxis/runtime/tenants` | Return host-provided accessible tenant/company choices for corporate shells. Without a host provider, the default fails closed with `503 RUNTIME_PROVIDER_UNAVAILABLE`. |
+| `GET /api/praxis/runtime/navigation` | Return host-provided navigation nodes for corporate shells, with optional canonical Praxis refs such as `resourceKey`, `surfaceRef`, `actionRef`, `moduleKey`, and `capabilityRef`. Without a host provider, the default fails closed with `503 RUNTIME_PROVIDER_UNAVAILABLE`; Config page navigation requires explicit host delegation. |
+| `GET /api/praxis/runtime/security-events` | Return host-provided safe runtime/security signals for corporate shells. Without a host provider, the default fails closed with `503 RUNTIME_PROVIDER_UNAVAILABLE`. Responses never expose raw roles, policies, tokens, prompts, SQL or private audit internals. |
 
 ## Documentation
 

@@ -1,0 +1,11 @@
+<testsuite xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="https://maven.apache.org/surefire/maven-surefire-plugin/xsd/surefire-test-report.xsd" version="3.0.2" name="org.praxisplatform.config.service.PageRuntimeReadServiceTest" time="2.948" tests="1" errors="0" skipped="0" failures="0" flakes="0">
+  <testcase name="elapsedBudgetAfterSuccessfulStructureCallbackCannotReturnBodyOr304" classname="org.praxisplatform.config.service.PageRuntimeReadServiceTest" time="2.519">
+    <system-out>Standard Commons Logging discovery in action with spring-jcl: please remove commons-logging.jar from classpath in order to avoid potential conflicts
+09:34:50.173 [main] INFO org.hibernate.validator.internal.util.Version -- HV000001: Hibernate Validator 8.0.3.Final
+09:34:50.316 [main] INFO org.springframework.mock.web.MockServletContext -- Initializing Spring TestDispatcherServlet ''
+09:34:50.316 [main] INFO org.springframework.test.web.servlet.TestDispatcherServlet -- Initializing Servlet ''
+09:34:50.317 [main] INFO org.springframework.test.web.servlet.TestDispatcherServlet -- Completed initialization in 1 ms
+P3-B callback budget admittedRemainingNanos=1930408251 observedRemainingNanos=0 callbacks=1 HTTP=503 noStore=true IO=simulated
+</system-out>
+  </testcase>
+</testsuite>

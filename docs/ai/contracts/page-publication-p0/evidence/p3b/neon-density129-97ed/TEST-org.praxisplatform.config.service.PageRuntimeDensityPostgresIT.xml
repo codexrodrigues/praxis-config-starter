@@ -1,0 +1,22 @@
+<testsuite xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="https://maven.apache.org/surefire/maven-surefire-plugin/xsd/surefire-test-report.xsd" version="3.0.2" name="org.praxisplatform.config.service.PageRuntimeDensityPostgresIT" time="122.523" tests="1" errors="0" skipped="0" failures="0" flakes="0">
+  <testcase name="diagnoseOneHundredTwentyNineAuthorizedPagesAcrossBatchBoundary" classname="org.praxisplatform.config.service.PageRuntimeDensityPostgresIT" time="110.844">
+    <system-out>Standard Commons Logging discovery in action with spring-jcl: please remove commons-logging.jar from classpath in order to avoid potential conflicts
+P3-B Neon project=ancient-leaf-72055027 branch=br-weathered-mountain-a48o0map endpoint=ep-floral-voice-a40bufyv.us-east-1.aws.neon.tech role=p3b_runtime_512_runtime schema=p3b_runtime_512_20261023 PostgreSQL=17.11 (11592b3) TLS=TLSv1.3 peer=CN=*.us-east-1.aws.neon.tech
+09:39:56.193 [main] INFO org.hibernate.Version -- HHH000412: Hibernate ORM core version 6.6.53.Final
+09:39:56.216 [main] INFO org.hibernate.cache.internal.RegionFactoryInitiator -- HHH000026: Second-level cache disabled
+09:39:58.394 [main] INFO org.hibernate.orm.connections.pooling -- HHH10001005: Database info:
+	Database JDBC URL [Connecting through datasource 'org.praxisplatform.config.service.PageRuntimePostgresFixture$1@75de29c0']
+	Database driver: undefined/unknown
+	Database version: 17.11
+	Autocommit mode: undefined/unknown
+	Isolation level: undefined/unknown
+	Minimum pool size: undefined/unknown
+	Maximum pool size: undefined/unknown
+09:39:58.569 [main] INFO org.hibernate.validator.internal.util.Version -- HV000001: Hibernate Validator 8.0.3.Final
+09:39:58.852 [main] INFO org.hibernate.engine.transaction.jta.platform.internal.JtaPlatformInitiator -- HHH000489: No JTA platform available (set 'hibernate.transaction.jta.platform' to enable JTA platform integration)
+09:40:01.315 [main] INFO org.springframework.data.jpa.repository.query.QueryEnhancerFactory -- Hibernate is in classpath; If applicable, HQL parser will be used.
+P3-B synthetic seed pages=129 workspaceEncodedInputBytes=928155 ledgerStoredBytes=765228 rootMetadataBytes=63726 wallMs=18445 runtime=true triggers=true
+P3-B runtime density diagnosis {"catalogPages":129,"expectedFullVectorIdentitiesIncludingUnpublishedPrototype":130,"fixturePolicyCallbacksHaveNoRemoteExternalIO":true,"budgetMs":40000,"acceptedWithinBudget":false,"wallMs":40389,"preparedStatementsCompleted":166,"completedPreparedExecutionMs":24887,"attemptedSqlCategories":{"creation-ledger":79,"frozen-ui_layout_assignment_revision":1,"frozen-ui_layout_definition":1,"frozen-ui_layout_draft":1,"frozen-ui_layout_release":1,"frozen-ui_layout_release_member":1,"frozen-ui_layout_revision":1,"other":1,"root-metadata":78,"vector":1,"weights":1},"completedSqlCategoryMs":{"creation-ledger":11597,"frozen-ui_layout_assignment_revision":147,"frozen-ui_layout_definition":148,"frozen-ui_layout_draft":596,"frozen-ui_layout_release":154,"frozen-ui_layout_release_member":150,"frozen-ui_layout_revision":149,"other":145,"root-metadata":11350,"vector":298,"weights":152},"successfulIsolationGetterCalls":82,"successfulIsolationGetterMs":11872,"nativeCallbacks":1248,"metadataCallbacks":3744,"structureCallbacks":1326,"pageRootsObservedByStructureCallback":79,"loadedIdentitiesDoNotProveAdmission":true,"failedSqlExecutionTimeExcluded":true,"loadedWorkspaceIdentities":128,"loadedWorkspaceTextBytes":944768,"loadedRevisionPatchTextBytes":79488,"maxBatchLoadedWorkspaceTextBytes":944768,"maxBatchLoadedPatchTextBytes":79488,"workspaceEncodedSeedInputBytes":928155,"managedBaseline":0,"managedPeak":768,"managedAtLastBatchStart":0,"managedAtBatchStarts":[0],"returnedItems":0,"freshHeadAndAuditUnchanged":true,"outcome":"UiLayoutLifecycleException"}
+</system-out>
+  </testcase>
+</testsuite>

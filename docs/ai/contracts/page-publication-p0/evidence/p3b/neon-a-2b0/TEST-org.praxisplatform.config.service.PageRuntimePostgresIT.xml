@@ -1,0 +1,25 @@
+<testsuite xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="https://maven.apache.org/surefire/maven-surefire-plugin/xsd/surefire-test-report.xsd" version="3.0.2" name="org.praxisplatform.config.service.PageRuntimePostgresIT" time="367.076" tests="3" errors="0" skipped="0" failures="0" flakes="0">
+  <testcase name="publishedCatalogAndMenuShareTheHeadButUrlAndMenuKeepDistinctGrants" classname="org.praxisplatform.config.service.PageRuntimePostgresIT" time="143.742">
+    <system-out>Standard Commons Logging discovery in action with spring-jcl: please remove commons-logging.jar from classpath in order to avoid potential conflicts
+P3-B Neon project=ancient-leaf-72055027 branch=br-weathered-mountain-a48o0map endpoint=ep-floral-voice-a40bufyv.us-east-1.aws.neon.tech role=p3b_runtime_512_runtime schema=p3b_runtime_512_20261023 PostgreSQL=17.11 (11592b3) TLS=TLSv1.3 peer=CN=*.us-east-1.aws.neon.tech
+08:59:49.558 [main] INFO org.hibernate.Version -- HHH000412: Hibernate ORM core version 6.6.53.Final
+08:59:49.581 [main] INFO org.hibernate.cache.internal.RegionFactoryInitiator -- HHH000026: Second-level cache disabled
+08:59:51.846 [main] INFO org.hibernate.orm.connections.pooling -- HHH10001005: Database info:
+	Database JDBC URL [Connecting through datasource 'org.praxisplatform.config.service.PageRuntimePostgresFixture$1@4faa298']
+	Database driver: undefined/unknown
+	Database version: 17.11
+	Autocommit mode: undefined/unknown
+	Isolation level: undefined/unknown
+	Minimum pool size: undefined/unknown
+	Maximum pool size: undefined/unknown
+08:59:52.028 [main] INFO org.hibernate.validator.internal.util.Version -- HV000001: Hibernate Validator 8.0.3.Final
+08:59:52.311 [main] INFO org.hibernate.engine.transaction.jta.platform.internal.JtaPlatformInitiator -- HHH000489: No JTA platform available (set 'hibernate.transaction.jta.platform' to enable JTA platform integration)
+08:59:54.852 [main] INFO org.springframework.data.jpa.repository.query.QueryEnhancerFactory -- Hibernate is in classpath; If applicable, HQL parser will be used.
+09:01:51.437 [main] INFO org.springframework.mock.web.MockServletContext -- Initializing Spring TestDispatcherServlet ''
+09:01:51.437 [main] INFO org.springframework.test.web.servlet.TestDispatcherServlet -- Initializing Servlet ''
+09:01:51.438 [main] INFO org.springframework.test.web.servlet.TestDispatcherServlet -- Completed initialization in 0 ms
+</system-out>
+  </testcase>
+  <testcase name="participatingReadsObserveOwnWritesAndDoNotFreezeEarlierSnapshotsUntilCommit" classname="org.praxisplatform.config.service.PageRuntimePostgresIT" time="113.348" />
+  <testcase name="fullVectorDetectsNullHeadPhantomsAndHeadAbaAcrossIndependentTransactions" classname="org.praxisplatform.config.service.PageRuntimePostgresIT" time="97.458" />
+</testsuite>

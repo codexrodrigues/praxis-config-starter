@@ -1,0 +1,52 @@
+<testsuite xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="https://maven.apache.org/surefire/maven-surefire-plugin/xsd/surefire-test-report.xsd" version="3.0.2" name="org.praxisplatform.config.service.JdbcUiLayoutMetadataCaptureStoreTest" time="0.209" tests="47" errors="0" skipped="0" failures="0" flakes="0">
+  <testcase name="rejectsTargetOrderDivergenceBeforeFirstInsert" classname="org.praxisplatform.config.service.JdbcUiLayoutMetadataCaptureStoreTest" time="0.013">
+    <system-out>Standard Commons Logging discovery in action with spring-jcl: please remove commons-logging.jar from classpath in order to avoid potential conflicts
+</system-out>
+  </testcase>
+  <testcase name="rejectsCompletedWriterStatusBeforeFirstQuery" classname="org.praxisplatform.config.service.JdbcUiLayoutMetadataCaptureStoreTest" time="0.003" />
+  <testcase name="rejectsMissingWriterStatusBeforeFirstQuery" classname="org.praxisplatform.config.service.JdbcUiLayoutMetadataCaptureStoreTest" time="0.002" />
+  <testcase name="rejectsIncompleteHistoricalAssemblyWithoutBackfill(String)[1]" classname="org.praxisplatform.config.service.JdbcUiLayoutMetadataCaptureStoreTest" time="0.007" />
+  <testcase name="rejectsIncompleteHistoricalAssemblyWithoutBackfill(String)[2]" classname="org.praxisplatform.config.service.JdbcUiLayoutMetadataCaptureStoreTest" time="0.005" />
+  <testcase name="rejectsIncompleteHistoricalAssemblyWithoutBackfill(String)[3]" classname="org.praxisplatform.config.service.JdbcUiLayoutMetadataCaptureStoreTest" time="0.005" />
+  <testcase name="rejectsIncompleteHistoricalAssemblyWithoutBackfill(String)[4]" classname="org.praxisplatform.config.service.JdbcUiLayoutMetadataCaptureStoreTest" time="0.004" />
+  <testcase name="roundTripsRawUtf8AndNanosecondsAndExactBinding" classname="org.praxisplatform.config.service.JdbcUiLayoutMetadataCaptureStoreTest" time="0.006" />
+  <testcase name="rejectsPartialCompositionBeforeFirstInsert" classname="org.praxisplatform.config.service.JdbcUiLayoutMetadataCaptureStoreTest" time="0.003" />
+  <testcase name="requiresPersistedEditableScopedDraft" classname="org.praxisplatform.config.service.JdbcUiLayoutMetadataCaptureStoreTest" time="0.002" />
+  <testcase name="storedBaselineRejectsHostPermissiveJsonBeforeAdmission" classname="org.praxisplatform.config.service.JdbcUiLayoutMetadataCaptureStoreTest" time="0.005" />
+  <testcase name="rejectsNativeRowsContainingStructuralDeclarations(String)[1]" classname="org.praxisplatform.config.service.JdbcUiLayoutMetadataCaptureStoreTest" time="0.004" />
+  <testcase name="rejectsNativeRowsContainingStructuralDeclarations(String)[2]" classname="org.praxisplatform.config.service.JdbcUiLayoutMetadataCaptureStoreTest" time="0.004" />
+  <testcase name="rejectsNativeRowsContainingStructuralDeclarations(String)[3]" classname="org.praxisplatform.config.service.JdbcUiLayoutMetadataCaptureStoreTest" time="0.004" />
+  <testcase name="rejectsNativeRowsContainingStructuralDeclarations(String)[4]" classname="org.praxisplatform.config.service.JdbcUiLayoutMetadataCaptureStoreTest" time="0.004" />
+  <testcase name="rejectsNativeRowsContainingStructuralDeclarations(String)[5]" classname="org.praxisplatform.config.service.JdbcUiLayoutMetadataCaptureStoreTest" time="0.004" />
+  <testcase name="rejectsNativeRowsContainingStructuralDeclarations(String)[6]" classname="org.praxisplatform.config.service.JdbcUiLayoutMetadataCaptureStoreTest" time="0.003" />
+  <testcase name="rejectsNativeRowsContainingStructuralDeclarations(String)[7]" classname="org.praxisplatform.config.service.JdbcUiLayoutMetadataCaptureStoreTest" time="0.003" />
+  <testcase name="explicitFinalRevocationPoisonsTransactionWithoutBecomingTechnicalFailure" classname="org.praxisplatform.config.service.JdbcUiLayoutMetadataCaptureStoreTest" time="0.003" />
+  <testcase name="rejectsMissingTransactionWithoutQuery" classname="org.praxisplatform.config.service.JdbcUiLayoutMetadataCaptureStoreTest" time="0.001" />
+  <testcase name="deniesAbsentContentAuthorizationBeforeFirstInsert" classname="org.praxisplatform.config.service.JdbcUiLayoutMetadataCaptureStoreTest" time="0.002" />
+  <testcase name="persistsAndReadsExactAssemblyInputsWithoutTouchingSchema" classname="org.praxisplatform.config.service.JdbcUiLayoutMetadataCaptureStoreTest" time="0.003" />
+  <testcase name="rejectsStoredAssemblyCorruption" classname="org.praxisplatform.config.service.JdbcUiLayoutMetadataCaptureStoreTest" time="0.003" />
+  <testcase name="roundTripsMixedOriginsUnderOneCompositionAndQuota" classname="org.praxisplatform.config.service.JdbcUiLayoutMetadataCaptureStoreTest" time="0.003" />
+  <testcase name="historicalReadUsesCurrentAuthorizationNotHistoricalContext" classname="org.praxisplatform.config.service.JdbcUiLayoutMetadataCaptureStoreTest" time="0.003" />
+  <testcase name="acceptsOnlyExactConfigJpaConnectionWhenJdbcFlagIsUnset" classname="org.praxisplatform.config.service.JdbcUiLayoutMetadataCaptureStoreTest" time="0.039" />
+  <testcase name="poisonsTransactionWhenSecondInsertFailsEvenIfCallerCatches" classname="org.praxisplatform.config.service.JdbcUiLayoutMetadataCaptureStoreTest" time="0.003" />
+  <testcase name="requiresCurrentObservationContextAtAppend" classname="org.praxisplatform.config.service.JdbcUiLayoutMetadataCaptureStoreTest" time="0.003" />
+  <testcase name="refusesCorruptOrNormalizedStoredFields(String)[1]" classname="org.praxisplatform.config.service.JdbcUiLayoutMetadataCaptureStoreTest" time="0.003" />
+  <testcase name="refusesCorruptOrNormalizedStoredFields(String)[2]" classname="org.praxisplatform.config.service.JdbcUiLayoutMetadataCaptureStoreTest" time="0.003" />
+  <testcase name="refusesCorruptOrNormalizedStoredFields(String)[3]" classname="org.praxisplatform.config.service.JdbcUiLayoutMetadataCaptureStoreTest" time="0.004" />
+  <testcase name="refusesCorruptOrNormalizedStoredFields(String)[4]" classname="org.praxisplatform.config.service.JdbcUiLayoutMetadataCaptureStoreTest" time="0.004" />
+  <testcase name="refusesCorruptOrNormalizedStoredFields(String)[5]" classname="org.praxisplatform.config.service.JdbcUiLayoutMetadataCaptureStoreTest" time="0.003" />
+  <testcase name="refusesCorruptOrNormalizedStoredFields(String)[6]" classname="org.praxisplatform.config.service.JdbcUiLayoutMetadataCaptureStoreTest" time="0.003" />
+  <testcase name="refusesCorruptOrNormalizedStoredFields(String)[7]" classname="org.praxisplatform.config.service.JdbcUiLayoutMetadataCaptureStoreTest" time="0.003" />
+  <testcase name="refusesCorruptOrNormalizedStoredFields(String)[8]" classname="org.praxisplatform.config.service.JdbcUiLayoutMetadataCaptureStoreTest" time="0.002" />
+  <testcase name="crossTenantReadDeniesBeforeQuery" classname="org.praxisplatform.config.service.JdbcUiLayoutMetadataCaptureStoreTest" time="0.001" />
+  <testcase name="rejectsUnknownOriginAndNativeFieldsOnOperationRow" classname="org.praxisplatform.config.service.JdbcUiLayoutMetadataCaptureStoreTest" time="0.003" />
+  <testcase name="finalTechnicalFailurePoisonsTransactionAndRedactsProviderFailure" classname="org.praxisplatform.config.service.JdbcUiLayoutMetadataCaptureStoreTest" time="0.003" />
+  <testcase name="corporateSortedMapperCannotReorderNativeBaselineAtPersistence" classname="org.praxisplatform.config.service.JdbcUiLayoutMetadataCaptureStoreTest" time="0.003" />
+  <testcase name="collisionNeverOverwritesOrRecapturesStoredEvidence" classname="org.praxisplatform.config.service.JdbcUiLayoutMetadataCaptureStoreTest" time="0.003" />
+  <testcase name="rejectsAutoCommitEvenWithSynchronizedHolder" classname="org.praxisplatform.config.service.JdbcUiLayoutMetadataCaptureStoreTest" time="0.002" />
+  <testcase name="rejectsUnsynchronizedConnectionHolder" classname="org.praxisplatform.config.service.JdbcUiLayoutMetadataCaptureStoreTest" time="0.001" />
+  <testcase name="missingHistoricalRowDoesNotFallBackToCurrentMetadata" classname="org.praxisplatform.config.service.JdbcUiLayoutMetadataCaptureStoreTest" time="0.001" />
+  <testcase name="rejectsTransactionOfAnotherDatasource" classname="org.praxisplatform.config.service.JdbcUiLayoutMetadataCaptureStoreTest" time="0.002" />
+  <testcase name="rejectsRepeatableReadQuotaSnapshot" classname="org.praxisplatform.config.service.JdbcUiLayoutMetadataCaptureStoreTest" time="0.001" />
+  <testcase name="rejectsCorruptPersistedBaselineBeforeFirstInsert" classname="org.praxisplatform.config.service.JdbcUiLayoutMetadataCaptureStoreTest" time="0.003" />
+</testsuite>

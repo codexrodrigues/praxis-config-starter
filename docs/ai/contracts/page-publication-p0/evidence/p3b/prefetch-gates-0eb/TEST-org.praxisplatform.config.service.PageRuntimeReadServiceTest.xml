@@ -1,0 +1,20 @@
+<testsuite xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="https://maven.apache.org/surefire/maven-surefire-plugin/xsd/surefire-test-report.xsd" version="3.0.2" name="org.praxisplatform.config.service.PageRuntimeReadServiceTest" time="2.494" tests="11" errors="0" skipped="0" failures="0" flakes="0">
+  <testcase name="malformedHostGroupsRootIsUnavailableRatherThanAnInvalidCallerCursor" classname="org.praxisplatform.config.service.PageRuntimeReadServiceTest" time="0.089" />
+  <testcase name="deniedAndSelectorIncompatibleMetadataRemainUnconsumedUntilAdmitted" classname="org.praxisplatform.config.service.PageRuntimeReadServiceTest" time="0.035" />
+  <testcase name="elapsedBudgetAfterSuccessfulStructureCallbackCannotReturnBodyOr304" classname="org.praxisplatform.config.service.PageRuntimeReadServiceTest" time="2.266">
+    <system-out>10:08:39.563 [main] INFO org.hibernate.validator.internal.util.Version -- HV000001: Hibernate Validator 8.0.3.Final
+10:08:39.695 [main] INFO org.springframework.mock.web.MockServletContext -- Initializing Spring TestDispatcherServlet ''
+10:08:39.696 [main] INFO org.springframework.test.web.servlet.TestDispatcherServlet -- Initializing Servlet ''
+10:08:39.696 [main] INFO org.springframework.test.web.servlet.TestDispatcherServlet -- Completed initialization in 0 ms
+P3-B callback budget admittedRemainingNanos=1996616000 observedRemainingNanos=0 callbacks=1 HTTP=503 noStore=true IO=simulated
+</system-out>
+  </testcase>
+  <testcase name="lastMetadataAndLastMappingCallbacksCannotRevokeGrantsAndStillReturn" classname="org.praxisplatform.config.service.PageRuntimeReadServiceTest" time="0.013" />
+  <testcase name="requiredReadsDoNotFreezeTheHeadUntilOuterCommitButKeepAuthorityChecks" classname="org.praxisplatform.config.service.PageRuntimeReadServiceTest" time="0.009" />
+  <testcase name="vectorPhantomAndHeadABAInvalidateTheOperation" classname="org.praxisplatform.config.service.PageRuntimeReadServiceTest" time="0.005" />
+  <testcase name="permissiveReadGrantNeverBypassesNativeAdmissionAndFinalAudience" classname="org.praxisplatform.config.service.PageRuntimeReadServiceTest" time="0.005" />
+  <testcase name="directPageDoesNotRequireGroupGrantButMenuRequiresBoth" classname="org.praxisplatform.config.service.PageRuntimeReadServiceTest" time="0.008" />
+  <testcase name="unexpectedHostFailureIsUnavailableAndInvalidInputIsAClientError" classname="org.praxisplatform.config.service.PageRuntimeReadServiceTest" time="0.002" />
+  <testcase name="globalOrderingAndBindingIdentityAreIndependentOfCatalogOrder" classname="org.praxisplatform.config.service.PageRuntimeReadServiceTest" time="0.012" />
+  <testcase name="authorizedEmptyGroupsWitnessTheirHeadButDeniedGroupsRevealNoHead" classname="org.praxisplatform.config.service.PageRuntimeReadServiceTest" time="0.005" />
+</testsuite>

@@ -1,0 +1,30 @@
+<testsuite xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="https://maven.apache.org/surefire/maven-surefire-plugin/xsd/surefire-test-report.xsd" version="3.0.2" name="org.praxisplatform.config.service.PageRuntimeBatchPostgresIT" time="115.471" tests="2" errors="0" skipped="0" failures="0" flakes="0">
+  <testcase name="corruptRootMetadataRejectsOtherwiseCorrelatedPublicationWithoutPartialCatalog" classname="org.praxisplatform.config.service.PageRuntimeBatchPostgresIT" time="64.965">
+    <system-out>Standard Commons Logging discovery in action with spring-jcl: please remove commons-logging.jar from classpath in order to avoid potential conflicts
+P3-B Neon project=ancient-leaf-72055027 branch=br-weathered-mountain-a48o0map endpoint=ep-floral-voice-a40bufyv.us-east-1.aws.neon.tech role=p3b_runtime_512_runtime schema=p3b_runtime_512_20261023 PostgreSQL=17.11 (11592b3) TLS=TLSv1.3 peer=CN=*.us-east-1.aws.neon.tech
+10:34:45.782 [main] INFO org.hibernate.Version -- HHH000412: Hibernate ORM core version 6.6.53.Final
+10:34:45.804 [main] INFO org.hibernate.cache.internal.RegionFactoryInitiator -- HHH000026: Second-level cache disabled
+10:34:48.080 [main] INFO org.hibernate.orm.connections.pooling -- HHH10001005: Database info:
+	Database JDBC URL [Connecting through datasource 'org.praxisplatform.config.service.PageRuntimePostgresFixture$1@70887727']
+	Database driver: undefined/unknown
+	Database version: 17.11
+	Autocommit mode: undefined/unknown
+	Isolation level: undefined/unknown
+	Minimum pool size: undefined/unknown
+	Maximum pool size: undefined/unknown
+10:34:48.262 [main] INFO org.hibernate.validator.internal.util.Version -- HV000001: Hibernate Validator 8.0.3.Final
+10:34:48.548 [main] INFO org.hibernate.engine.transaction.jta.platform.internal.JtaPlatformInitiator -- HHH000489: No JTA platform available (set 'hibernate.transaction.jta.platform' to enable JTA platform integration)
+10:34:51.031 [main] INFO org.springframework.data.jpa.repository.query.QueryEnhancerFactory -- Hibernate is in classpath; If applicable, HQL parser will be used.
+P3-B synthetic seed pages=2 workspaceEncodedInputBytes=14390 ledgerStoredBytes=11864 rootMetadataBytes=988 wallMs=8387 runtime=true triggers=true
+10:35:44.506 [main] INFO org.springframework.mock.web.MockServletContext -- Initializing Spring TestDispatcherServlet ''
+10:35:44.506 [main] INFO org.springframework.test.web.servlet.TestDispatcherServlet -- Initializing Servlet ''
+10:35:44.507 [main] INFO org.springframework.test.web.servlet.TestDispatcherServlet -- Completed initialization in 0 ms
+P3-B corrupt root capture otherwiseCorrelated=true firstPageStructurePassed=true catalog503=true published503=true partialBody=false runtime=true triggers=true
+</system-out>
+  </testcase>
+  <testcase name="bytePrefixPreservesExactBoundaryOversizedAndMissingWorkspacesWithoutSkippingIdentities" classname="org.praxisplatform.config.service.PageRuntimeBatchPostgresIT" time="38.466">
+    <system-out>P3-B synthetic seed pages=7 workspaceEncodedInputBytes=16805974 ledgerStoredBytes=41489 rootMetadataBytes=3458 wallMs=10575 runtime=true triggers=true
+P3-B pinned batch-prefix proof identities=7 prefixes=2,1,1,1,2 boundaryBytes=8388608 oversizedFirstBytes=8388609 missingDraftPreserved=true runtimePublishedDenied503=true negativeStorageFixture=true runtime=true triggers=true
+</system-out>
+  </testcase>
+</testsuite>

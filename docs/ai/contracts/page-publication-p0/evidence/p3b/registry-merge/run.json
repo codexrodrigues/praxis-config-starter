@@ -1,0 +1,16 @@
+{
+  "sourceCommit": "4ec36ce44f7e49a76c44628d2ea45ae45db60498",
+  "sourceState": "Only closure documentation/export uncommitted; registry source/test/POM identical to this commit.",
+  "selector": "AiRegistrySnapshotContractTest",
+  "command": "mvn -B -Dmaven.repo.local=${P3B_M2} -Dtest=AiRegistrySnapshotContractTest -DfailIfNoTests=true test",
+  "exitCode": 0,
+  "suite": {
+    "name": "org.praxisplatform.config.registry.AiRegistrySnapshotContractTest",
+    "tests": "11",
+    "failures": "0",
+    "errors": "0",
+    "skipped": "0",
+    "time": "1.928"
+  },
+  "scope": "Only registry delta from main; no database and no new runtime campaign."
+}

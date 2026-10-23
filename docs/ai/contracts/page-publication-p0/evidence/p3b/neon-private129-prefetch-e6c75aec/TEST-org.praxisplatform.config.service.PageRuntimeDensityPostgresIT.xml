@@ -1,0 +1,22 @@
+<testsuite xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="https://maven.apache.org/surefire/maven-surefire-plugin/xsd/surefire-test-report.xsd" version="3.0.2" name="org.praxisplatform.config.service.PageRuntimeDensityPostgresIT" time="95.312" tests="1" errors="0" skipped="0" failures="0" flakes="0">
+  <testcase name="mostlyPrivateCatalogDoesNotStopBeforeAuthorizedLastBatchOrLoseGlobalOrder" classname="org.praxisplatform.config.service.PageRuntimeDensityPostgresIT" time="83.282">
+    <system-out>Standard Commons Logging discovery in action with spring-jcl: please remove commons-logging.jar from classpath in order to avoid potential conflicts
+P3-B Neon project=ancient-leaf-72055027 branch=br-weathered-mountain-a48o0map endpoint=ep-floral-voice-a40bufyv.us-east-1.aws.neon.tech role=p3b_runtime_512_runtime schema=p3b_runtime_512_20261023 PostgreSQL=17.11 (11592b3) TLS=TLSv1.3 peer=CN=*.us-east-1.aws.neon.tech
+10:32:53.392 [main] INFO org.hibernate.Version -- HHH000412: Hibernate ORM core version 6.6.53.Final
+10:32:53.415 [main] INFO org.hibernate.cache.internal.RegionFactoryInitiator -- HHH000026: Second-level cache disabled
+10:32:55.704 [main] INFO org.hibernate.orm.connections.pooling -- HHH10001005: Database info:
+	Database JDBC URL [Connecting through datasource 'org.praxisplatform.config.service.PageRuntimePostgresFixture$1@10f7c76']
+	Database driver: undefined/unknown
+	Database version: 17.11
+	Autocommit mode: undefined/unknown
+	Isolation level: undefined/unknown
+	Minimum pool size: undefined/unknown
+	Maximum pool size: undefined/unknown
+10:32:55.895 [main] INFO org.hibernate.validator.internal.util.Version -- HV000001: Hibernate Validator 8.0.3.Final
+10:32:56.181 [main] INFO org.hibernate.engine.transaction.jta.platform.internal.JtaPlatformInitiator -- HHH000489: No JTA platform available (set 'hibernate.transaction.jta.platform' to enable JTA platform integration)
+10:32:58.652 [main] INFO org.springframework.data.jpa.repository.query.QueryEnhancerFactory -- Hibernate is in classpath; If applicable, HQL parser will be used.
+P3-B synthetic seed pages=129 workspaceEncodedInputBytes=933315 ledgerStoredBytes=770388 rootMetadataBytes=63726 wallMs=18053 runtime=true triggers=true
+P3-B mostly-private pages=129 private=127 authorized=2 batches=4 loadedWorkspaceIdentities=129 loadsEach=2 globalOrder=true noFalseEnd=true privateHeadReceipts=false
+</system-out>
+  </testcase>
+</testsuite>

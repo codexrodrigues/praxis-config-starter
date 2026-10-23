@@ -1,0 +1,531 @@
+{
+  "format": "p3b-evidence-export/1",
+  "productionCommit": "0eb159862ba9fcd8fbcecb1ad851f6ba30fe5218",
+  "reconciledCommit": "4ec36ce44f7e49a76c44628d2ea45ae45db60498",
+  "scope": "Existing attributed runs; no Neon rerun after reconciliation. Source bodies remain retrievable by immutable Git commit/path; not duplicated in this export.",
+  "sanitization": "XML properties removed; machine/private assignment paths replaced; known credential values scanned/redacted. Original and exported hashes are distinct.",
+  "runs": [
+    {
+      "name": "neon-a-2b0",
+      "originalRunSha256": "efd2b38ffc55823d386251a7c369326996fae6698c2d96a90879c85292e29166",
+      "sourceHashesVerifiedAgainstGit": 28,
+      "files": {
+        "maven.log": {
+          "originalSha256": "63d72273b7512ba68ffa526162070ea1eb4aaa2fb62bbb4040b9b0c10f63e1b3",
+          "exportedSha256": "63d72273b7512ba68ffa526162070ea1eb4aaa2fb62bbb4040b9b0c10f63e1b3"
+        },
+        "TEST-org.praxisplatform.config.service.PageRuntimePostgresIT.xml": {
+          "originalSha256": "d208545dc87650c2d2c9fb3a3943545c10f059ef10e591b377011a19e6fd6935",
+          "exportedSha256": "a8cfd62eae9ef0f40749c857e2a85045f88c8b579dde363968dca456dbaca3a3"
+        },
+        "run.json": {
+          "originalSha256": "efd2b38ffc55823d386251a7c369326996fae6698c2d96a90879c85292e29166",
+          "exportedSha256": "d9c12bc15b2c48e8f5c55162010f6ee75abe5ea769cfccad89aae5d53160c0e5"
+        },
+        "run-start.json": {
+          "originalSha256": "b402aedb260292a04a70c49a17999962bad95ea10e5c1b8281bbb78ef856b056",
+          "exportedSha256": "401e91b3c7d9c8fa99d1133862955e7d88ab4326c737d9bf4b37484fb0d12857"
+        }
+      }
+    },
+    {
+      "name": "neon-b-ad62",
+      "originalRunSha256": "86849fe227bd72989372619bb41d432cb7f737101557a8b7936cc59fcec3a855",
+      "sourceHashesVerifiedAgainstGit": 28,
+      "files": {
+        "maven.log": {
+          "originalSha256": "4f2cc84a2ef766f05934f8aa52f7995d3fd729b12eb85f2a126be54b509eeee2",
+          "exportedSha256": "4f2cc84a2ef766f05934f8aa52f7995d3fd729b12eb85f2a126be54b509eeee2"
+        },
+        "TEST-org.praxisplatform.config.service.PageRuntimePostgresIT.xml": {
+          "originalSha256": "3670bb0658c9ddd87773a95b2020fdaebded54a4bd7daa00e0b68670f0a48d83",
+          "exportedSha256": "b3078a6663185cd9d56e716a81cbb77e5013baf4ce0e13a1a155e104a47368d2"
+        },
+        "run.json": {
+          "originalSha256": "86849fe227bd72989372619bb41d432cb7f737101557a8b7936cc59fcec3a855",
+          "exportedSha256": "2a9abeb2c9cc7b6131b623f645c1d904a8e167af62871ce265d17dc27c7f060d"
+        },
+        "run-start.json": {
+          "originalSha256": "023393f117b337adec308e49772653bea19b5820bd97cabd66077276f4b08c5e",
+          "exportedSha256": "6715427136fef0d7949fe4e28be0ff45ead4a3041c34e689077ed0a990b216f8"
+        }
+      }
+    },
+    {
+      "name": "neon-c-ad62",
+      "originalRunSha256": "efc65b26427090c2d91bf749b98c271d501f883b665bc1a4426aa01b088f073a",
+      "sourceHashesVerifiedAgainstGit": 28,
+      "files": {
+        "maven.log": {
+          "originalSha256": "6bc7f6c8e35e5606a7609ea58c5ff5c2d2415a15be728db66e30fdc62b49c9fe",
+          "exportedSha256": "6bc7f6c8e35e5606a7609ea58c5ff5c2d2415a15be728db66e30fdc62b49c9fe"
+        },
+        "TEST-org.praxisplatform.config.service.PageRuntimePostgresIT.xml": {
+          "originalSha256": "402ba2ce90b399566337f66f46e8bfdc6602daace834692a64b97c6bb42c23c4",
+          "exportedSha256": "d947a0a7385fbc24cbe8eae429aa308ff8a7094c4fd483ff85f4508fa26adf2f"
+        },
+        "run.json": {
+          "originalSha256": "efc65b26427090c2d91bf749b98c271d501f883b665bc1a4426aa01b088f073a",
+          "exportedSha256": "d165ff62c58641049b19837ac585bbdd58acc0dd0c32aa697e2040e2e04ba726"
+        },
+        "run-start.json": {
+          "originalSha256": "b4b303e3346a60ae853702d8c4c4837e55e55255ad10b46931619ad507539ec6",
+          "exportedSha256": "a6694f395484766b041def5fc0f2e36e1ebfa33fa81439150816fb531725000e"
+        }
+      }
+    },
+    {
+      "name": "neon-density1000-prefetch-e6c75aec",
+      "originalRunSha256": "8a445fd92ada812537b3bf18599229d1212a54cd9ba4134bb0049e1231dea539",
+      "sourceHashesVerifiedAgainstGit": 40,
+      "files": {
+        "maven.log": {
+          "originalSha256": "1821c45d272f42b696eaf914359c0722ef2c8df26393a303957df7e1f07869ee",
+          "exportedSha256": "1821c45d272f42b696eaf914359c0722ef2c8df26393a303957df7e1f07869ee"
+        },
+        "TEST-org.praxisplatform.config.service.PageRuntimeDensityPostgresIT.xml": {
+          "originalSha256": "679cbb52fe346dbc67c3d26eb236b0f251c2d4858ccd660436cfd533ae9ae3d1",
+          "exportedSha256": "9fe2ea24787606c8d0c68e02ce96a3fee0b3f4bf83991d43bb28d075f7f05134"
+        },
+        "run.json": {
+          "originalSha256": "8a445fd92ada812537b3bf18599229d1212a54cd9ba4134bb0049e1231dea539",
+          "exportedSha256": "06cb2451251e07eb870618f7e3de21e572c3140501462027850d7e7297611efc"
+        },
+        "run-start.json": {
+          "originalSha256": "f3c07c30badea68386eeafa02998f7d64e7479cf644a37ff766b5ca7300f108e",
+          "exportedSha256": "f0109f950f08a33bcc040ae9c3fa6e18808a501b6e002cd8c721b1066f78641f"
+        }
+      }
+    },
+    {
+      "name": "neon-density129-97ed",
+      "originalRunSha256": "4d0def5a2613a0d065b914003dd4a7d205acfc4a11b630101c0b30f39871de5b",
+      "sourceHashesVerifiedAgainstGit": 31,
+      "files": {
+        "maven.log": {
+          "originalSha256": "ac90890cd7b664faf03ea8924501f812c1937d3db88625e693615d2e91c805f0",
+          "exportedSha256": "ac90890cd7b664faf03ea8924501f812c1937d3db88625e693615d2e91c805f0"
+        },
+        "TEST-org.praxisplatform.config.service.PageRuntimeDensityPostgresIT.xml": {
+          "originalSha256": "6901933922e18c186dfc57bbefb84d233860a432f0915fa9db9512e753f56182",
+          "exportedSha256": "97a8d6888609ca946effb307769e3a96ad42ad3a05c0c5e5b0ad5d299ef1227e"
+        },
+        "run.json": {
+          "originalSha256": "4d0def5a2613a0d065b914003dd4a7d205acfc4a11b630101c0b30f39871de5b",
+          "exportedSha256": "be9902cb4f5370fbed64baa57795ae1b0aae73de08269c5ec128c288d6409ff6"
+        },
+        "run-start.json": {
+          "originalSha256": "33aa78e4b0e04c909ce16830bb45b449f1cb37576db6537cda930723363b024a",
+          "exportedSha256": "aa42aa5de54f71fb58673aec0c7807c2925edec129f3305827bcd95f9a33f53b"
+        }
+      }
+    },
+    {
+      "name": "neon-density129-prefetch-e6c75aec",
+      "originalRunSha256": "4b931cd5ea3812d010bb32d869134219b1b4b9e6c98ecf6543e7fff50f4be3a7",
+      "sourceHashesVerifiedAgainstGit": 40,
+      "files": {
+        "maven.log": {
+          "originalSha256": "27c67f3f55ba86fd6e3f0c8d40b378b74b38f34db1d3e8efcb28fb8d1e82a840",
+          "exportedSha256": "27c67f3f55ba86fd6e3f0c8d40b378b74b38f34db1d3e8efcb28fb8d1e82a840"
+        },
+        "TEST-org.praxisplatform.config.service.PageRuntimeDensityPostgresIT.xml": {
+          "originalSha256": "715e3b41339cca08b2a390f3e248e7638c55a45db139eb201885e16e58901d8e",
+          "exportedSha256": "20ceab163d082f09901829fc8adc771193f6df2d8ed457c2463b11cbba51b902"
+        },
+        "run.json": {
+          "originalSha256": "4b931cd5ea3812d010bb32d869134219b1b4b9e6c98ecf6543e7fff50f4be3a7",
+          "exportedSha256": "1d2166614fecd86352add57b4bc10464950cbc1d10948ff70947779dca2e98a2"
+        },
+        "run-start.json": {
+          "originalSha256": "fa234dfc6e4b504ed7e500365b9144fbeaf69ab27565a502aefd046d118a4ed0",
+          "exportedSha256": "170e70a31ae8a7de475ebac60b35f837105ef3c3de6ee9a9ae0e1dffe1f9ffa0"
+        }
+      }
+    },
+    {
+      "name": "neon-density32-97ed",
+      "originalRunSha256": "7ecc1146fbafecb8308b6b672e4162f4935d07982d8aa9ec18a3af8871be98ec",
+      "sourceHashesVerifiedAgainstGit": 31,
+      "files": {
+        "maven.log": {
+          "originalSha256": "4c6581cbef093bc3cc4037678b597728ddfd62ba963eb454d8b1faf4fac52483",
+          "exportedSha256": "4c6581cbef093bc3cc4037678b597728ddfd62ba963eb454d8b1faf4fac52483"
+        },
+        "TEST-org.praxisplatform.config.service.PageRuntimeDensityPostgresIT.xml": {
+          "originalSha256": "ffc540e14179827deeb66db0af041bd1539f254edd8d209012a8eabeef23d8af",
+          "exportedSha256": "96ed9af06dc206c2d540957576fbe90ba464979d772b42e1afe116d07492c2a9"
+        },
+        "run.json": {
+          "originalSha256": "7ecc1146fbafecb8308b6b672e4162f4935d07982d8aa9ec18a3af8871be98ec",
+          "exportedSha256": "4790d5f7de25d77c8b89c6b3c3f00dd6c7af2cc0e40ebfa0a9d07ad02bb44f16"
+        },
+        "run-start.json": {
+          "originalSha256": "67e2ddefd638d1b6373a48a1b617615710ef2c6ab92351c48d122ebbf70098f1",
+          "exportedSha256": "2ab23b50377c0547687547d3366c7f4775a0998b7e4d75c4e506ae7770421f46"
+        }
+      }
+    },
+    {
+      "name": "neon-density32-prefetch-1e133455",
+      "originalRunSha256": "af11bc918565b550463d78205e520666140cf7ed8c7d5fe038139a6b9d596474",
+      "sourceHashesVerifiedAgainstGit": 40,
+      "files": {
+        "maven.log": {
+          "originalSha256": "3057eaf02fa56377dc3b14c798328ca3026acaebb694b17d0304ab2474f2d2c9",
+          "exportedSha256": "3057eaf02fa56377dc3b14c798328ca3026acaebb694b17d0304ab2474f2d2c9"
+        },
+        "TEST-org.praxisplatform.config.service.PageRuntimeDensityPostgresIT.xml": {
+          "originalSha256": "d5cacfd89c05cd56c5f65889ecdbbf886b5f3f9a0feef1b31bee1e21ad14b1e6",
+          "exportedSha256": "1fa34834959664033642ea1e90ea356bed1056ba877fd7396c083ff5f074f889"
+        },
+        "run.json": {
+          "originalSha256": "af11bc918565b550463d78205e520666140cf7ed8c7d5fe038139a6b9d596474",
+          "exportedSha256": "a54905b774a1da7f21842687d8a65e44b1c4ba55dca7f67be3462a03f0a45c95"
+        },
+        "run-start.json": {
+          "originalSha256": "ab392c7bf0ba8055b70515403b3c8199b93980a525d2a4fa42e14a04f3f0fa3d",
+          "exportedSha256": "ea2740eb11b141e4a7fc89d8d81fb22517858379c0f2b9b17734fcd1223d1fef"
+        }
+      }
+    },
+    {
+      "name": "neon-private-corruption-bfec7fe7",
+      "originalRunSha256": "36db125e1f0e624818c5de5935d0c1ed2f6289e5ad0dc7dda89e0ad83e063178",
+      "sourceHashesVerifiedAgainstGit": 41,
+      "files": {
+        "maven.log": {
+          "originalSha256": "cd74a0325f521dbcaab3a6cc7468693497005220e79052ac0d46c9235fe0843b",
+          "exportedSha256": "cd74a0325f521dbcaab3a6cc7468693497005220e79052ac0d46c9235fe0843b"
+        },
+        "TEST-org.praxisplatform.config.service.PageRuntimeBatchPostgresIT.xml": {
+          "originalSha256": "09e480b94d09e26bc3ef3da8d748418c85a56b4ec510cdfd790cf014bfcae05c",
+          "exportedSha256": "249b07429eb32ad3640049fd82166d128141d10eb5ef831fa5e336109954cea8"
+        },
+        "run.json": {
+          "originalSha256": "36db125e1f0e624818c5de5935d0c1ed2f6289e5ad0dc7dda89e0ad83e063178",
+          "exportedSha256": "9148a9d2b0695e81b2b6569e9e05feb56ad429eaf13f7c9f01b0609019ec28da"
+        },
+        "run-start.json": {
+          "originalSha256": "28865170b081bfbc24d48dbb0c1395f0ebae187b75ec9a62ff65b8ddb49bdca7",
+          "exportedSha256": "9105634955b8f3c48bc587229508b3adb85ecd3b1878193ea9ff07f8bad8e029"
+        }
+      }
+    },
+    {
+      "name": "neon-private129-prefetch-e6c75aec",
+      "originalRunSha256": "64a21f45dd4ac42da70d9002bf60a912b2449c097574481962bbb4a217587520",
+      "sourceHashesVerifiedAgainstGit": 40,
+      "files": {
+        "maven.log": {
+          "originalSha256": "a580b8f015deb216d869db9a0a0b56bbde028fa576dfa11639b23ea47bad75da",
+          "exportedSha256": "a580b8f015deb216d869db9a0a0b56bbde028fa576dfa11639b23ea47bad75da"
+        },
+        "TEST-org.praxisplatform.config.service.PageRuntimeDensityPostgresIT.xml": {
+          "originalSha256": "87f6f785cdf7876816a574f91107efe12a9bfa21c26f28ffd485601c8496ef44",
+          "exportedSha256": "261caf134b71943cf56cdac148a0c6852b341915134ebafc336852f81843822e"
+        },
+        "run.json": {
+          "originalSha256": "64a21f45dd4ac42da70d9002bf60a912b2449c097574481962bbb4a217587520",
+          "exportedSha256": "b601e2e134e17de0f54741264a38188e34d4082107c7a6670cf6d442cca3fcfa"
+        },
+        "run-start.json": {
+          "originalSha256": "27ce9ac9167de49510605591776baaedbea092b5391dbc9b2c688c6fac81a53a",
+          "exportedSha256": "db9eafc61de93ba5ad69a5b6101df53a05f11dc7355babd6cc591053b239a6a3"
+        }
+      }
+    },
+    {
+      "name": "neon-raw-evidence-bfec7fe7",
+      "originalRunSha256": "82e349e3b831a0781446fdaa28d17948bfae89efce9ecfbbf77ea1b15478c023",
+      "sourceHashesVerifiedAgainstGit": 41,
+      "files": {
+        "maven.log": {
+          "originalSha256": "6f899ffaec07b40c3eb9b0daac3419f2cd001566a96cfc2c66aef027a0d05aff",
+          "exportedSha256": "6f899ffaec07b40c3eb9b0daac3419f2cd001566a96cfc2c66aef027a0d05aff"
+        },
+        "TEST-org.praxisplatform.config.service.PageRuntimeRawEvidencePostgresIT.xml": {
+          "originalSha256": "f2ea7ee865e51c1a44ef6c4b678e363228b14917efac893a745b2bde36aecbd3",
+          "exportedSha256": "89e7214f8dbc7f2ce0e1e19ecb4d1eaac7ec55d2c7df8869bbfc00a54c66bdbe"
+        },
+        "run.json": {
+          "originalSha256": "82e349e3b831a0781446fdaa28d17948bfae89efce9ecfbbf77ea1b15478c023",
+          "exportedSha256": "9c81df69f9bbcff5ea6369812c42b5744acf1632745f21b95bc3851cda2aeb79"
+        },
+        "run-start.json": {
+          "originalSha256": "ec3e7202ae08c141057f65c7fa043687f7743f1dd27715c0143484a26deabf0a",
+          "exportedSha256": "17e5efba6df4388f06b1d386b04354cae08c682bbda50a1a724b585c70eda516"
+        }
+      }
+    },
+    {
+      "name": "neon-runtime-regressions-prefetch-e6c75aec",
+      "originalRunSha256": "fa359bb43eaacc1232a03d062d362c90c6cd70774d4db85416da206a257e75a6",
+      "sourceHashesVerifiedAgainstGit": 40,
+      "files": {
+        "maven.log": {
+          "originalSha256": "2f92ba336963aa0f5426d4c17386cca405a372e34ff60122ec244b9751dc9973",
+          "exportedSha256": "2f92ba336963aa0f5426d4c17386cca405a372e34ff60122ec244b9751dc9973"
+        },
+        "TEST-org.praxisplatform.config.service.PageRuntimePostgresIT.xml": {
+          "originalSha256": "59bae4cde3af9899bf252c81195c19ac2875f28373e4b1ce4a6f1e467a5dad51",
+          "exportedSha256": "157a74fe6cef8a1753ef212c4343c7e667b8c7c219845a5b9e38991c69dd11ff"
+        },
+        "run.json": {
+          "originalSha256": "fa359bb43eaacc1232a03d062d362c90c6cd70774d4db85416da206a257e75a6",
+          "exportedSha256": "4a18d96146c080a1038bc2b7d4076ed1f2d3e622217667b82e6dbcd2d53c2b87"
+        },
+        "run-start.json": {
+          "originalSha256": "eed1783929c8781189b99be7952206325be42679fb40f13329e30209c066c204",
+          "exportedSha256": "43d421cbb1b27162210e9d215e6bf2d441e2fdb031c5c1a15c81773480410a76"
+        }
+      }
+    },
+    {
+      "name": "neon-workspace-capture-prefetch-e6c75aec",
+      "originalRunSha256": "552ee8c98bf012d5d969d4d25e99db97154322f2424326bb4a99e62b255fa07f",
+      "sourceHashesVerifiedAgainstGit": 40,
+      "files": {
+        "maven.log": {
+          "originalSha256": "8dd89e476ea828a2c19b8376b14663d05ed025eb2431a06007b6f6e638ddc67b",
+          "exportedSha256": "8dd89e476ea828a2c19b8376b14663d05ed025eb2431a06007b6f6e638ddc67b"
+        },
+        "TEST-org.praxisplatform.config.service.PageRuntimeBatchPostgresIT.xml": {
+          "originalSha256": "5baafb98699e64c1e62c111bb7fbbebca39988487a82a012945c114781e5c8f7",
+          "exportedSha256": "5672a02dfafa4633fd469a204a0b610534ec1bbec25e5cf9d741edcd8a64bfb9"
+        },
+        "run.json": {
+          "originalSha256": "552ee8c98bf012d5d969d4d25e99db97154322f2424326bb4a99e62b255fa07f",
+          "exportedSha256": "8c89bed060dd0dbd2c55173dfb29c5da8561259637618cecb9d7cebd7f76956a"
+        },
+        "run-start.json": {
+          "originalSha256": "85a4c1faf89d568defd026ceebdf5e77b92b3f2a016fb54f13f5456cffcf3d21",
+          "exportedSha256": "1d5b47dc9a66e095213e42fec6f81845fb4e12f2544a4dfc79658da04740f18b"
+        }
+      }
+    },
+    {
+      "name": "prefetch-gates-0eb",
+      "originalRunSha256": "7f7be47e0d96559b9a8335c5fee92ed3a1c6a8b2440db56c65c61357a605b576",
+      "sourceHashesVerifiedAgainstGit": 40,
+      "files": {
+        "maven.log": {
+          "originalSha256": "97a870388f3c88a77eb9e50084eac7e708c5dd3811517fd25c1f9eebb44bc0ea",
+          "exportedSha256": "3f7c87beb669749784b0a4b4953fd33a815ae6e6ab261675ee0dd211d04f3ae5"
+        },
+        "TEST-org.praxisplatform.config.service.JdbcUiLayoutMetadataCaptureStoreTest.xml": {
+          "originalSha256": "62f11a8767eae7f670dd151992f4850e8e1138c59b796c4bc93b81e21aba4360",
+          "exportedSha256": "5c94b128dfd5cd0d8b619636e2e6726342971293a31fd207a870c37cddde69c3"
+        },
+        "TEST-org.praxisplatform.config.service.PageRuntimeReadServiceTest.xml": {
+          "originalSha256": "29ebec385121dadd841cbcfd41e5d49e1da913cd462c6d01eb3368af07171bda",
+          "exportedSha256": "cb4780609add46fccd7010649aa7e66f408dc8d74b9d7d45a75a9fb7f4f16060"
+        },
+        "TEST-org.praxisplatform.config.service.PageCatalogLifecycleBridgeTest.xml": {
+          "originalSha256": "29e1455aef435fc8b2c838982c6df7100568eab6e6262ae45eb212dd45c2211f",
+          "exportedSha256": "ffa35deddda61553f92aa857e697731c4cbce6c47c3c4aeec6331dcb79f837b8"
+        },
+        "run.json": {
+          "originalSha256": "7f7be47e0d96559b9a8335c5fee92ed3a1c6a8b2440db56c65c61357a605b576",
+          "exportedSha256": "c69f8f54fc3d07e1cdc8b261a0aea32f4026105e7925b4414cdd91a37a101ba7"
+        },
+        "run-start.json": {
+          "originalSha256": "3f0d9ac7f0aa9ebb1e6b37e37a7e452489bdeba676fd693117f444bd7860162e",
+          "exportedSha256": "08235f4109519902d1ba7ff3fa64ac10229915a26f3ba754add08c5e43ca72b9"
+        }
+      }
+    },
+    {
+      "name": "prefetch-loop-final",
+      "originalRunSha256": "3ab05bd4e56fe19efbe9da207b2052fe122225a15760f49f993558eb521aec7f",
+      "sourceHashesVerifiedAgainstGit": 40,
+      "files": {
+        "maven.log": {
+          "originalSha256": "2df3794e4d1793407bfa535cbec6fe418dc9deb76601174d638103e61afc68c5",
+          "exportedSha256": "947553e891a5ef8e1d1feeff9a9ac30917238f0ee1d0aaf2623bff3ed4739104"
+        },
+        "TEST-org.praxisplatform.config.service.PageRuntimeReadServiceTest.xml": {
+          "originalSha256": "4850fef9fe2b9ef8de6d18304b7dea00625d2434bf63d0e9c92b9eac2eb40b5b",
+          "exportedSha256": "bca8f5c7ca694746146abaf62c86e8a87f13d4ec36ed9e8d81aa109297f23dc6"
+        },
+        "run.json": {
+          "originalSha256": "3ab05bd4e56fe19efbe9da207b2052fe122225a15760f49f993558eb521aec7f",
+          "exportedSha256": "8dcceb314dc16468aad2f645956d05c94ec6a01504b632629498c7196ef58e08"
+        },
+        "run-start.json": {
+          "originalSha256": "075762162328e2fa236e10a9bb8c26d9dedb9b4f944eb1c16338fa770ec2dd56",
+          "exportedSha256": "977c6e80d2ba8da2efb00680aff54618f55ad40ff2184c481a053342e9007a9a"
+        }
+      }
+    },
+    {
+      "name": "prefetch-unit-initial-529b",
+      "originalRunSha256": "72348c295f83bc783526781c799a1aca37bfef75493594fd381e1881fddc8888",
+      "sourceHashesVerifiedAgainstGit": 13,
+      "files": {
+        "maven.log": {
+          "originalSha256": "8ac5e727ed96fccd54337bd7eb822473591339dea28fa8652556efe3ab87bd3e",
+          "exportedSha256": "1c11c5e968ad3c586a3d61e93c3de2cdb7575953f52d66c06de4d5b2432c029d"
+        },
+        "TEST-org.praxisplatform.config.service.ConfigTransactionReadSetTest.xml": {
+          "originalSha256": "5fc8a35c8a7497b26a3e15e1a847c550aa9ccfae33a31c7b13c1a50d5368a214",
+          "exportedSha256": "8f73b471d63e1905a8f0b0fd06ab660886850482ac379536600cbbc558779a28"
+        },
+        "TEST-org.praxisplatform.config.service.ConfigImmutableSqlRowTest.xml": {
+          "originalSha256": "abc2cf5d5a2ce867149445bba58291e5732cbb9730ce74e8c964e2aca86248b6",
+          "exportedSha256": "8bc3b2e4a52a53a2f9965010f49db9192b73219b5b9b678d358fd58ba61b619d"
+        },
+        "TEST-org.praxisplatform.config.service.JdbcUiLayoutMetadataCaptureStoreTest.xml": {
+          "originalSha256": "52361101ff4a2811562c48ff4dc42308e0375bc2192df7215430bac6faef6ec9",
+          "exportedSha256": "c0c4f8f557efd88f50db5b380a422a25cbb6a715fc2004ab2d13b6723c5542b4"
+        },
+        "TEST-org.praxisplatform.config.service.PageRuntimeReadServiceTest.xml": {
+          "originalSha256": "51996e10b540622f04c63b9ca60dcfd444972cee9b26a96d0581f5fb0fdbe2b2",
+          "exportedSha256": "f069e6644e743db2462db86246d6228fa595e7e04fcdcad3cc4098f017cf379e"
+        },
+        "TEST-org.praxisplatform.config.service.PageCatalogLifecycleBridgeTest.xml": {
+          "originalSha256": "1c4c5b438189a72bdcc3a1f446cc3cfe20eb096510143eb2a9fea97b3ad34ad5",
+          "exportedSha256": "17d45f95ed6a0057e60bd11c22513c68d559fab69c41aee68dce50ee50568ac8"
+        },
+        "TEST-org.praxisplatform.config.service.UiLayoutPageGroupSnapshotContractTest.xml": {
+          "originalSha256": "9415fd15887189cc0b152824f4cde6298b9e1580ea16f1f39094a1e0fb413249",
+          "exportedSha256": "9e98808abafa858c2899c581f2baab96e4cb73233326850e8f8c9cae50dbd980"
+        },
+        "run.json": {
+          "originalSha256": "72348c295f83bc783526781c799a1aca37bfef75493594fd381e1881fddc8888",
+          "exportedSha256": "f4d3d8b86b73c1467c94f9666392a5d95c62c6dc68cc8d494b0a422ad5253268"
+        },
+        "run-start.json": {
+          "originalSha256": "53a83847bb68fb9c28a70c0475f11bef2546374b5c7f6e1ef6af139526dcf114",
+          "exportedSha256": "413ea4af562e54b55eb196cc687c84e41838db39ad67cadabbb15be17d8ee863"
+        }
+      }
+    },
+    {
+      "name": "unit-deadline-97ed",
+      "originalRunSha256": "87ba7d4284dbeb6f7f522624580387fe778ea92345010249059ed65640273ba1",
+      "sourceHashesVerifiedAgainstGit": 31,
+      "files": {
+        "maven.log": {
+          "originalSha256": "64870bcfc7a33d3d71790e83e13fda90b042a29e13d8c0e2022bd8e1cb13e732",
+          "exportedSha256": "64870bcfc7a33d3d71790e83e13fda90b042a29e13d8c0e2022bd8e1cb13e732"
+        },
+        "TEST-org.praxisplatform.config.service.PageRuntimeReadServiceTest.xml": {
+          "originalSha256": "afc793f89b0a58ab223d218b9798fc0602ff31f8e642520ce5b50898a8c5c625",
+          "exportedSha256": "a0d76bc9a08b0a867f8cccf5c3c549bac2ee6e18a31dda06edb64230891c35fa"
+        },
+        "run.json": {
+          "originalSha256": "87ba7d4284dbeb6f7f522624580387fe778ea92345010249059ed65640273ba1",
+          "exportedSha256": "0662e86c98b2eb59a08287f1e51cccba04d5d455aa4553801c4ebb93c4e2393a"
+        },
+        "run-start.json": {
+          "originalSha256": "0673810cb7f71112caeac6cfc20d40def6068423e2cec20daf5e7a9cd5a52dd2",
+          "exportedSha256": "5f8d34fe8bba56e2da8ea7180d4c6575559faa06fd201a27a6720ae4b330ae8f"
+        }
+      }
+    }
+  ],
+  "files": {
+    "neon-preparation.json": {
+      "originalSha256": "731153a1e1e1583e8b45e20537eb94d18097ad0501fd0bbfd89027c291550f92",
+      "exportedSha256": "731153a1e1e1583e8b45e20537eb94d18097ad0501fd0bbfd89027c291550f92"
+    },
+    "control-plane.json": {
+      "originalSha256": "df9b3ad29beb32077ea587d1fca3b961961c1a2b21f4d3ceaa0f07755b71918c",
+      "exportedSha256": "df9b3ad29beb32077ea587d1fca3b961961c1a2b21f4d3ceaa0f07755b71918c"
+    },
+    "tls-peer.json": {
+      "originalSha256": "a55ac943f513dc65529cf3ee36e2fca8e413ebaf0ecc7d5d56d5e118ab3b7334",
+      "exportedSha256": "a55ac943f513dc65529cf3ee36e2fca8e413ebaf0ecc7d5d56d5e118ab3b7334"
+    },
+    "neon-preparation.log": {
+      "originalSha256": "2498cfc5acb7846d35f74086a38cf79011dd83ff596b59b174d3ae71974531c9",
+      "exportedSha256": "2498cfc5acb7846d35f74086a38cf79011dd83ff596b59b174d3ae71974531c9"
+    },
+    "neon-preparation-2.log": {
+      "originalSha256": "3f8e67720fe1d612c609e6ad52f590fbf31770789ab309dd3dda7ce615653b73",
+      "exportedSha256": "3f8e67720fe1d612c609e6ad52f590fbf31770789ab309dd3dda7ce615653b73"
+    },
+    "preflight-tooling.log": {
+      "originalSha256": "4be9e2311d03033db157f474e71f869fad7ca25c45b2e76059b96d38330b3368",
+      "exportedSha256": "5d4211c7820de4d6b3890abe2d2ef714165171b50ecd6e78313ec1bb13ba1740"
+    },
+    "focal-initial.log": {
+      "originalSha256": "a4d3f7373f5ef59129711384df3217056676b5c3b107c11784f81b98a2987f59",
+      "exportedSha256": "c9af6807c5938a81659b495c9148fefdde809d7827497702a40238462ae86d15"
+    },
+    "focal-corrections-1.log": {
+      "originalSha256": "2ca8ddbbc23673036e9ad751bfe83bf6cbc9a53215072fc4a76614434fa6efab",
+      "exportedSha256": "ea12b97c0be64ca4053e283efffdf2884e1f76391e398bf9a1deeded16a6032e"
+    },
+    "focal-corrections-2.log": {
+      "originalSha256": "ea8aa9f9bb255e065b60560c7f37e2a1a0ead332837fb0a78142736a43e6b09e",
+      "exportedSha256": "1c5adda30ffd7f9f240ba4141919d810e48d06efee2b13718a6b52b5daea4cc1"
+    },
+    "focal-boundary.log": {
+      "originalSha256": "efe3cc4036e8f3fe30bf318dc3e55a904bada8d14df7287c506308af8830f2e7",
+      "exportedSha256": "2e6b33fa17e9a398ce29d8555d3b3814b09fff26d778bcd51527ed52fddbb3e8"
+    },
+    "focal-host-root.log": {
+      "originalSha256": "f085a4b1d361270e6b9adb470789270393463c69860b627caee1fa3e94a2f933",
+      "exportedSha256": "0712e9bc1859ebe034401654b5b2dd7e4b05a9328349fc4f7b0e284779a0c12b"
+    },
+    "focal-node-boundary.log": {
+      "originalSha256": "1f216e77496849a0f024d4afdac813ac83958b2bb1ffeaa7853acaa28779f7c3",
+      "exportedSha256": "682ac7bcb1fc7d27c41e6de69e60a1c4962e82285010348a6d85705e061d6e94"
+    },
+    "focal-provider-wiring.log": {
+      "originalSha256": "75e11a93389886384009ab37dc05bbfa17d785ee694983ba406a9c1bd8798e55",
+      "exportedSha256": "5930e2f3fd97cbae5e31773bfc2e23aaf2aaa852477c4bd149cb58a294df95c5"
+    },
+    "run-neon.py": {
+      "originalSha256": "3e6e57ba6bf5fd52ca86975fc7965439d1a4456ac9a7a4e59b43fa0b027bfec7",
+      "exportedSha256": "b706651a272f8fc8c3a64baf2cfc08315ffe7e583b89df53bdf0a1e813d388e6",
+      "note": "Current retained runner; historical runner hashes in run manifests are not retroactively replaced."
+    },
+    "run-focal.py": {
+      "originalSha256": "5d015c3a9a886ea836378f3d53e00d74383719376176fa99fa6bd5541ba80a02",
+      "exportedSha256": "2b71b468eaf00fd412db0eace9ac911df49fd22ea2079a57881285abe9a39ccb",
+      "note": "Current retained runner; historical runner hashes in run manifests are not retroactively replaced."
+    },
+    "run-unit-classes.py": {
+      "originalSha256": "913cc3ac71e59500e8a686630e2d89ddde400471fb23934b649312f2668844cc",
+      "exportedSha256": "8b28b8b93657999b645d157475ba35c2581a386a2b77bc82990a291633a51fd4",
+      "note": "Current retained runner; historical runner hashes in run manifests are not retroactively replaced."
+    },
+    "prepare.py": {
+      "originalSha256": "4147465550693e916f36d2d84dd63b391ae0ce3945992a4d0f7b40dcfc587e65",
+      "exportedSha256": "ed2c96f012575890273af1f6397206d2337ee10cad183d2373b7e5a76eae9694",
+      "note": "Current retained runner; historical runner hashes in run manifests are not retroactively replaced."
+    },
+    "POST-R2-REVIEW-MATRIX.md": {
+      "originalSha256": "693b0e67b07070c5eaa6b6863cdc1fc0d1be17d22e3ba4b42fa188861ec8df4f",
+      "exportedSha256": "693b0e67b07070c5eaa6b6863cdc1fc0d1be17d22e3ba4b42fa188861ec8df4f"
+    },
+    "CONSUMER-GUIDANCE-REVIEW.md": {
+      "originalSha256": "e72d616f262441ec6d51dbea5e64b6f1811f00dbd2c02fb8ecf5982ba92c1772",
+      "exportedSha256": "166abc0ab408793447b0b2d6953b9663eef8a93528bfd1ca5fd2833c445b5f26"
+    },
+    "dependencies-at-export.json": {
+      "exportedSha256": "32d345dfb230e638f81cf167facc8de2ecfbf92a54810156995ee6ab6d3385e4"
+    },
+    "README.md": {
+      "exportedSha256": "1aac66fa68d1db7c7f3b4ef4493b7262344bbc543f96ed91031a023a74265304"
+    },
+    "S2-REVIEW.md": {
+      "exportedSha256": "b6334bf10a5b960e4b393609e91226c02e554eafb9f6b175d47810cfadc96840"
+    },
+    "registry-merge/maven.log": {
+      "exportedSha256": "fc40ae9ec53c821735f04bc3f721193871238624badbc7f79116421c0f3100e2",
+      "originalSha256": "acec9218b85774a41e24642410fc6499fe977ef025f61ef93775ece95e6e48fc"
+    },
+    "registry-merge/TEST-org.praxisplatform.config.registry.AiRegistrySnapshotContractTest.xml": {
+      "exportedSha256": "4fab47a1a531edf7caf47a762857aff98ae7ea38ffc1bb8d3e12f65ba7575ad8",
+      "originalSha256": "f9a4dca98311f8b0e76bd6408dc40dcbb1feb3c4a52762d75d88c7adb4029665"
+    },
+    "registry-merge/run.json": {
+      "exportedSha256": "f1ff3db28022e75a3a413baea39c29243bb3c8608c0946e4ff4ba9de12c2918c"
+    }
+  },
+  "dependencyCollection": "JAR hashes collected at export from paths recorded in original Surefire XML; not proof of historical JAR byte identity at execution."
+}

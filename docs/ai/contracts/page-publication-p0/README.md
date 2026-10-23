@@ -5,7 +5,7 @@ Classificação: `contrato-publico`, com impacto arquitetural/transversal. P0 al
 especificação, corpus e testes de contrato. Não modifica produção, hosts, banco ou release.
 O schema tem versão de documento 1; `p0` identifica o pacote de planejamento, não uma API paralela.
 
-Estado posterior ao planejamento P0: Config P1/P2 foram integrados; P3-A entrega a integridade transacional de páginas/grupos, com fontes e gates em [P3A-IMPLEMENTATION](P3A-IMPLEMENTATION.md). P3-B e adoção HTTP/UI dos hosts continuam etapas posteriores. O plano original abaixo permanece como proveniência; não representa o estado atual de toda a implementação.
+Estado posterior ao planejamento P0: Config P1/P2 e P3-A foram integrados; [P3A-IMPLEMENTATION](P3A-IMPLEMENTATION.md) registra a integridade transacional. P3-B entrega a fonte candidata de leitura publicada, catálogo e navegação na biblioteca Config, com resultados atribuídos em [P3B-IMPLEMENTATION](P3B-IMPLEMENTATION.md) e [P3B-VALIDATION](P3B-VALIDATION.md). Integração do candidato, pacote/consumidores e skills têm aceite próprio; a adoção HTTP operacional P3-C e a jornada visual P4 permanecem posteriores. O plano original abaixo é proveniência, sem anunciar essas etapas como disponíveis.
 
 ## Planejamento e entrega
 
