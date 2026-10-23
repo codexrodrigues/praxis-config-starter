@@ -564,7 +564,7 @@ class UiLayoutLifecycleHttpRoundTripTest {
   }
 
   @Test
-  void pageRootCreateEditFreezePublishAndHistoricalReadKeepInternalChildEvidence() throws Exception {
+  void pageRootKeepsHistoricalEvidenceButCannotPublishWithoutTheIntegrityOwner() throws Exception {
     Fixture fixture = new Fixture(); fixture.pageMode = true;
     MockMvc http = fixture.http();
     var target = UiLayoutPageRevisionReproductionTest.PAGE;
@@ -596,8 +596,9 @@ class UiLayoutLifecycleHttpRoundTripTest {
         .header(HttpHeaders.IF_MATCH,requiredEtag(submitted)).content("{\"reason\":\"approve page\"}"))
         .andExpect(status().isOk());
     http.perform(pagePost("/api/praxis/config/ui-layouts/release-head/publish")
-        .header(HttpHeaders.IF_NONE_MATCH,"*").content(headBody(release,"publish page"))).andExpect(status().isOk());
-    assertThat(fixture.headRows).hasSize(1);
+        .header(HttpHeaders.IF_NONE_MATCH,"*").content(headBody(release,"publish page"))).andExpect(status().isServiceUnavailable())
+        .andExpect(jsonPath("$.code").value("SOURCE_UNAVAILABLE"));
+    assertThat(fixture.headRows).isEmpty();
     var frozenSource = new UiLayoutFrozenWorkspaceResolver(fixture.releases,fixture.drafts,fixture.members,fixture.definitions,
         fixture.revisions,fixture.assignments,mapper,new CanonicalJsonHashService(mapper));
     var invocation = new UiLayoutLifecycleInvocation(publisher.getName(),"tenant-a","procurement","lab",CONTEXT,new UiLayoutCompositionRegistration(target,List.of(target)));
@@ -606,7 +607,7 @@ class UiLayoutLifecycleHttpRoundTripTest {
     fixture.pageRevoked = true;
     int mutations = fixture.mutations.get();
     http.perform(pagePost("/api/praxis/config/ui-layouts/release-head/rollback")
-        .header(HttpHeaders.IF_MATCH,"\""+fixture.headRows.values().iterator().next().getHeadEtag()+"\"")
+        .header(HttpHeaders.IF_MATCH,"\""+UUID.randomUUID()+"\"")
         .content(headBody(release,"revoked child"))).andExpect(status().isForbidden());
     assertThat(fixture.mutations).hasValue(mutations);
     var persisted=fixture.draftRows.get(UUID.fromString(draftId));
@@ -901,7 +902,7 @@ class UiLayoutLifecycleHttpRoundTripTest {
           (release, frozen) -> assertThat(frozen).hasSize(registeredTargets.size()), provider, admission, structure,
           workspaceSource, creationLock, new UiLayoutMetadataTestFixtures.MemoryStore(),
           (invocation, target, authoring, source, baseline, metadata) -> assertConfigWhenActive(),
-          new TransactionTemplate(new DataSourceTransactionManager(configDataSource)), (budgetOperation, budgetInvocation) -> java.time.Duration.ofMinutes(1));
+          new TransactionTemplate(new DataSourceTransactionManager(configDataSource)), (budgetOperation, budgetInvocation) -> java.time.Duration.ofMinutes(1), null);
       UiLayoutLifecycleReadService reads = new UiLayoutLifecycleReadService(provider, admission, drafts, releases, reviews, heads,
           definitions, revisions, assignments, mapper, new CanonicalJsonHashService(mapper), structure, (budgetOperation, budgetInvocation) -> java.time.Duration.ofMinutes(1));
       UiLayoutLifecycleController controller = new UiLayoutLifecycleController(reads, commands, new UiLayoutLifecycleRequestDecoder(mapper));

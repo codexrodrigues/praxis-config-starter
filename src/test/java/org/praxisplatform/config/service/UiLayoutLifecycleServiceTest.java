@@ -37,6 +37,11 @@ import org.praxisplatform.config.repository.UiLayoutRevisionRepository;
 
 @Tag("unit")
 class UiLayoutLifecycleServiceTest {
+  private UiLayoutLifecycleInvocation invocation(UiLayoutLifecycleService.Scope scope) {
+    return new UiLayoutLifecycleInvocation("actor", scope.tenantId(), scope.administrativeUnit(), scope.environment(), "c1",
+        new UiLayoutCompositionRegistration(scope.rootTarget(), java.util.List.of(scope.rootTarget())));
+  }
+
   private final UiLayoutDefinitionRepository definitions = mock(UiLayoutDefinitionRepository.class);
   private final UiLayoutRevisionRepository revisions = mock(UiLayoutRevisionRepository.class);
   private final UiLayoutAssignmentRevisionRepository assignments = mock(UiLayoutAssignmentRevisionRepository.class);
@@ -48,7 +53,7 @@ class UiLayoutLifecycleServiceTest {
   private final UiLayoutReleaseHeadRepository heads = mock(UiLayoutReleaseHeadRepository.class);
   private final UiLayoutReleaseEventRepository events = mock(UiLayoutReleaseEventRepository.class);
   private final UiLayoutRevisionAllocationLock revisionAllocationLock = mock(UiLayoutRevisionAllocationLock.class);
-  private final UiLayoutTarget root = new UiLayoutTarget("praxis-dynamic-page", "procurement-master-detail");
+  private final UiLayoutTarget root = new UiLayoutTarget("praxis-dashboard", "procurement-master-detail");
   private final UiLayoutLifecycleService.Scope scope = new UiLayoutLifecycleService.Scope("tenant-a", "procurement", "lab", root);
   private UiLayoutLifecycleService service;
 
@@ -58,7 +63,7 @@ class UiLayoutLifecycleServiceTest {
     service = new UiLayoutLifecycleService(definitions, revisions, assignments, drafts, releases, members,
         reviews, approvals, heads, events, revisionAllocationLock, new CanonicalJsonHashService(mapper), mapper,
         (operation, actor, tenant, unit, environment, target) -> true,
-        (release, releaseMembers) -> {}, Clock.fixed(Instant.parse("2026-09-10T15:00:00Z"), ZoneOffset.UTC));
+        (release, releaseMembers) -> {}, Clock.fixed(Instant.parse("2026-09-10T15:00:00Z"), ZoneOffset.UTC), null);
     when(drafts.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
     when(releases.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
     when(reviews.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
@@ -67,19 +72,21 @@ class UiLayoutLifecycleServiceTest {
   }
 
   @Test
-  void navigationGroupHeadTransitionsAreClosedWithoutPageHostEvenWithPermissivePolicyAndValidator() {
+  void pageAndGroupHeadTransitionsAreClosedWithoutPageHostEvenWithPermissivePolicyAndValidator() {
+    for (String type : List.of("praxis-app-shell", "praxis-dynamic-page")) {
     var groups = new UiLayoutLifecycleService.Scope("tenant-a", "unit", "lab",
-        new UiLayoutTarget("praxis-app-shell", UUID.randomUUID().toString()));
+        new UiLayoutTarget(type, UUID.randomUUID().toString()));
     UUID release = UUID.randomUUID();
     for (Runnable transition : List.<Runnable>of(
-        () -> service.publish(groups, release, null, "actor", "publish"),
-        () -> service.withdraw(groups, UUID.randomUUID(), "actor", "withdraw"),
-        () -> service.rollback(groups, release, UUID.randomUUID(), "actor", "rollback"))) {
+        () -> service.publish(invocation(groups), release, null, "publish", null),
+        () -> service.withdraw(invocation(groups), UUID.randomUUID(), "withdraw", null),
+        () -> service.rollback(invocation(groups), release, UUID.randomUUID(), "rollback", null))) {
       assertThatThrownBy(transition::run).isInstanceOf(UiLayoutLifecycleException.class)
           .extracting(error -> ((UiLayoutLifecycleException) error).getCode())
           .isEqualTo(UiLayoutLifecycleException.Code.SOURCE_UNAVAILABLE);
     }
     org.mockito.Mockito.verifyNoInteractions(heads, events, releases, reviews, members);
+    }
   }
 
   @Test void oversizedReasonsFailBeforeRevisionApprovalOrEventWrites() {
@@ -89,9 +96,9 @@ class UiLayoutLifecycleServiceTest {
     for (String reason : List.of("x".repeat(1025), "🧭".repeat(1025))) {
       assertThatThrownBy(() -> service.createRevision(new UiLayoutLifecycleService.RevisionCommand(scope,draft.getId(),draft.getDraftEtag(),root,"{}","1",reason),"actor")).isInstanceOf(UiLayoutLifecycleException.class);
       assertThatThrownBy(() -> service.approve(scope,id,id,"actor",reason)).isInstanceOf(UiLayoutLifecycleException.class);
-      assertThatThrownBy(() -> service.publish(scope,id,id,"actor",reason)).isInstanceOf(UiLayoutLifecycleException.class);
-      assertThatThrownBy(() -> service.withdraw(scope,id,"actor",reason)).isInstanceOf(UiLayoutLifecycleException.class);
-      assertThatThrownBy(() -> service.rollback(scope,id,id,"actor",reason)).isInstanceOf(UiLayoutLifecycleException.class);
+      assertThatThrownBy(() -> service.publish(invocation(scope),id,id,reason, null)).isInstanceOf(UiLayoutLifecycleException.class);
+      assertThatThrownBy(() -> service.withdraw(invocation(scope),id,reason, null)).isInstanceOf(UiLayoutLifecycleException.class);
+      assertThatThrownBy(() -> service.rollback(invocation(scope),id,id,reason, null)).isInstanceOf(UiLayoutLifecycleException.class);
     }
     verify(definitions,never()).save(any()); verify(revisions,never()).save(any());
     verify(approvals,never()).save(any()); verify(events,never()).save(any());
@@ -115,7 +122,7 @@ class UiLayoutLifecycleServiceTest {
   @Test
   void absentPolicyDeniesBeforePersistence() {
     UiLayoutLifecycleService denied = new UiLayoutLifecycleService(definitions, revisions, assignments, drafts, releases, members,
-        reviews, approvals, heads, events, revisionAllocationLock, new CanonicalJsonHashService(new ObjectMapper()), new ObjectMapper(), null, null, Clock.systemUTC());
+        reviews, approvals, heads, events, revisionAllocationLock, new CanonicalJsonHashService(new ObjectMapper()), new ObjectMapper(), null, null, Clock.systemUTC(), null);
 
     assertThatThrownBy(() -> denied.createDraft(scope, "{}", "author", "create-1"))
         .isInstanceOf(UiLayoutLifecycleException.class)
@@ -135,7 +142,7 @@ class UiLayoutLifecycleServiceTest {
     when(heads.findForUpdate("tenant-a", "lab", root.componentType(), root.componentId())).thenReturn(Optional.of(head));
     service = withValidator((candidate, releaseMembers) -> { throw new UiLayoutLifecycleException(UiLayoutLifecycleException.Code.VALIDATION_FAILED, "child invalid now"); });
 
-    assertThatThrownBy(() -> service.publish(scope, releaseId, head.getHeadEtag(), "publisher", "publish procurement"))
+    assertThatThrownBy(() -> service.publish(invocation(scope), releaseId, head.getHeadEtag(), "publish procurement", null))
         .isInstanceOf(UiLayoutLifecycleException.class)
         .extracting(error -> ((UiLayoutLifecycleException) error).getCode())
         .isEqualTo(UiLayoutLifecycleException.Code.VALIDATION_FAILED);
@@ -149,7 +156,7 @@ class UiLayoutLifecycleServiceTest {
     when(releases.findByIdAndTenantIdAndEnvironment(releaseId, "tenant-a", "lab")).thenReturn(Optional.of(release(releaseId)));
     when(reviews.findByReleaseId(releaseId)).thenReturn(Optional.of(review(releaseId, "SUBMITTED")));
 
-    assertThatThrownBy(() -> service.publish(scope, releaseId, UUID.randomUUID(), "publisher", "publish procurement"))
+    assertThatThrownBy(() -> service.publish(invocation(scope), releaseId, UUID.randomUUID(), "publish procurement", null))
         .isInstanceOf(UiLayoutLifecycleException.class)
         .extracting(error -> ((UiLayoutLifecycleException) error).getCode())
         .isEqualTo(UiLayoutLifecycleException.Code.INVALID_STATE);
@@ -163,7 +170,7 @@ class UiLayoutLifecycleServiceTest {
         .rootComponentType("praxis-dynamic-page").rootComponentId("incident-master-detail").createdBy("author").createdAt(Instant.now()).build();
     when(releases.findByIdAndTenantIdAndEnvironment(releaseId, "tenant-a", "lab")).thenReturn(Optional.of(otherRoot));
 
-    assertThatThrownBy(() -> service.publish(scope, releaseId, UUID.randomUUID(), "publisher", "publish procurement"))
+    assertThatThrownBy(() -> service.publish(invocation(scope), releaseId, UUID.randomUUID(), "publish procurement", null))
         .isInstanceOf(UiLayoutLifecycleException.class)
         .extracting(error -> ((UiLayoutLifecycleException) error).getCode())
         .isEqualTo(UiLayoutLifecycleException.Code.NOT_FOUND);
@@ -181,7 +188,7 @@ class UiLayoutLifecycleServiceTest {
     when(members.findByReleaseIdOrderByMemberOrder(releaseId)).thenReturn(fixed);
     when(heads.findForUpdate("tenant-a", "lab", root.componentType(), root.componentId())).thenReturn(Optional.of(head));
 
-    UiLayoutReleaseHead moved = service.publish(scope, releaseId, head.getHeadEtag(), "publisher", "publish procurement");
+    UiLayoutReleaseHead moved = service.publish(invocation(scope), releaseId, head.getHeadEtag(), "publish procurement", null);
 
     assertThat(moved.getActiveReleaseId()).isEqualTo(releaseId);
     verify(heads).saveAndFlush(head);
@@ -195,7 +202,7 @@ class UiLayoutLifecycleServiceTest {
     when(heads.findForUpdate("tenant-a", "lab", root.componentType(), root.componentId())).thenReturn(Optional.of(head));
     when(releases.findByIdAndTenantIdAndEnvironment(releaseId, "tenant-a", "lab")).thenReturn(Optional.of(release(releaseId)));
 
-    service.withdraw(scope, head.getHeadEtag(), "publisher", "withdraw procurement");
+    service.withdraw(invocation(scope), head.getHeadEtag(), "withdraw procurement", null);
 
     assertThat(head.getActiveReleaseId()).isNull();
     verify(heads).save(head);
@@ -209,20 +216,20 @@ class UiLayoutLifecycleServiceTest {
     UiLayoutReleaseHead head = head(oldRelease, UUID.randomUUID());
     when(heads.findForUpdate("tenant-a", "lab", root.componentType(), root.componentId())).thenReturn(Optional.of(head));
     when(releases.findByIdAndTenantIdAndEnvironment(oldRelease, "tenant-a", "lab")).thenReturn(Optional.of(release(oldRelease)));
-    service.withdraw(scope, head.getHeadEtag(), "publisher", "withdraw procurement");
+    service.withdraw(invocation(scope), head.getHeadEtag(), "withdraw procurement", null);
     UUID current = head.getHeadEtag();
     when(releases.findByIdAndTenantIdAndEnvironment(nextRelease, "tenant-a", "lab")).thenReturn(Optional.of(release(nextRelease)));
     when(reviews.findByReleaseId(nextRelease)).thenReturn(Optional.of(review(nextRelease, "APPROVED")));
     when(members.findByReleaseIdOrderByMemberOrder(nextRelease)).thenReturn(List.of(member(nextRelease, 0, root)));
 
-    assertThatThrownBy(() -> service.publish(scope, nextRelease, null, "publisher", "republish procurement"))
+    assertThatThrownBy(() -> service.publish(invocation(scope), nextRelease, null, "republish procurement", null))
         .isInstanceOf(UiLayoutLifecycleException.class).extracting(error -> ((UiLayoutLifecycleException) error).getCode())
         .isEqualTo(UiLayoutLifecycleException.Code.PRECONDITION_FAILED);
-    assertThatThrownBy(() -> service.publish(scope, nextRelease, UUID.randomUUID(), "publisher", "republish procurement"))
+    assertThatThrownBy(() -> service.publish(invocation(scope), nextRelease, UUID.randomUUID(), "republish procurement", null))
         .isInstanceOf(UiLayoutLifecycleException.class).extracting(error -> ((UiLayoutLifecycleException) error).getCode())
         .isEqualTo(UiLayoutLifecycleException.Code.PRECONDITION_FAILED);
 
-    assertThat(service.publish(scope, nextRelease, current, "publisher", "republish procurement").getActiveReleaseId()).isEqualTo(nextRelease);
+    assertThat(service.publish(invocation(scope), nextRelease, current, "republish procurement", null).getActiveReleaseId()).isEqualTo(nextRelease);
   }
 
   @Test
@@ -298,7 +305,7 @@ class UiLayoutLifecycleServiceTest {
     when(members.findByReleaseIdOrderByMemberOrder(releaseId)).thenReturn(List.of(member(releaseId, 0, root), member(releaseId, 1, new UiLayoutTarget("praxis-table", "procurement-lines"))));
     service = withValidator((candidate, releaseMembers) -> { throw new UiLayoutLifecycleException(UiLayoutLifecycleException.Code.VALIDATION_FAILED, "schema changed"); });
 
-    assertThatThrownBy(() -> service.rollback(scope, releaseId, head.getHeadEtag(), "publisher", "rollback procurement"))
+    assertThatThrownBy(() -> service.rollback(invocation(scope), releaseId, head.getHeadEtag(), "rollback procurement", null))
         .isInstanceOf(UiLayoutLifecycleException.class)
         .extracting(error -> ((UiLayoutLifecycleException) error).getCode())
         .isEqualTo(UiLayoutLifecycleException.Code.VALIDATION_FAILED);
@@ -309,7 +316,7 @@ class UiLayoutLifecycleServiceTest {
     ObjectMapper mapper = new ObjectMapper();
     return new UiLayoutLifecycleService(definitions, revisions, assignments, drafts, releases, members,
         reviews, approvals, heads, events, revisionAllocationLock, new CanonicalJsonHashService(mapper), mapper,
-        (operation, actor, tenant, unit, environment, target) -> true, validator, Clock.systemUTC());
+        (operation, actor, tenant, unit, environment, target) -> true, validator, Clock.systemUTC(), null);
   }
 
   private UiLayoutDraft draft(UUID etag, String state) {

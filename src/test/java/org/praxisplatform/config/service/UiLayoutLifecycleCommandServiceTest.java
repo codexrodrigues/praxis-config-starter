@@ -402,7 +402,7 @@ class UiLayoutLifecycleCommandServiceTest {
         mock(UiLayoutReleaseMemberRepository.class), mock(UiLayoutReleaseReviewRepository.class),
         mock(UiLayoutReleaseApprovalRepository.class), mock(UiLayoutReleaseHeadRepository.class),
         mock(UiLayoutReleaseEventRepository.class), (tenantId, environment, target) -> {}, hashes, mapper,
-        (release, members) -> {}, provider, admission, structure, source, lock, metadataStore, metadataGate, transactions, (budgetOperation, budgetInvocation) -> java.time.Duration.ofMinutes(1));
+        (release, members) -> {}, provider, admission, structure, source, lock, metadataStore, metadataGate, transactions, (budgetOperation, budgetInvocation) -> java.time.Duration.ofMinutes(1), null);
   }
 
   @Test void formLiteralNullStopsBeforeRevisionAndDraftWritesEvenWithPermissiveHost() throws Exception {
@@ -427,7 +427,7 @@ class UiLayoutLifecycleCommandServiceTest {
         mock(UiLayoutReleaseReviewRepository.class), mock(UiLayoutReleaseApprovalRepository.class), mock(UiLayoutReleaseHeadRepository.class),
         mock(UiLayoutReleaseEventRepository.class), (t,e,target) -> {}, hashes, mapper, (r,m) -> {},
         (p,c,r) -> invocation, (o,i) -> {}, validator(), (i, validation) -> seed, (t,e,r,a,k) -> {}, metadataStore, metadataGate,
-        new TransactionTemplate(manager), (budgetOperation, budgetInvocation) -> java.time.Duration.ofMinutes(1));
+        new TransactionTemplate(manager), (budgetOperation, budgetInvocation) -> java.time.Duration.ofMinutes(1), null);
     assertThatThrownBy(() -> service.createRevision(principal, "ctx-1", form, draft.getId(), draft.getDraftEtag().toString(),
         new UiLayoutLifecycleCommandService.RevisionInput(java.util.UUID.randomUUID(), form, "{\"kind\":\"praxis.dynamic-form.editor\",\"version\":1,\"config\":{\"title\":null}}", "test-only")))
         .isInstanceOfSatisfying(UiLayoutLifecycleException.class, error -> assertThat(error.getCode()).isEqualTo(UiLayoutLifecycleException.Code.VALIDATION_FAILED));

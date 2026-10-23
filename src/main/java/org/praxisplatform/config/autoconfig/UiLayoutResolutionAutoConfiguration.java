@@ -286,7 +286,8 @@ public class UiLayoutResolutionAutoConfiguration {
             UiLayoutBaselineMetadataAdmission metadataAdmission,
             @Qualifier("configNamedParameterJdbcTemplate") NamedParameterJdbcTemplate configJdbc,
             @Qualifier("uiLayoutLifecycleConfigTransactionOperations") TransactionOperations transactions, UiLayoutValidationBudgetPolicy budgetPolicy,
-            @Autowired(required = false) org.praxisplatform.config.service.PageCreationService pages) {
+            @Autowired(required = false) org.praxisplatform.config.service.PageCreationService pages,
+            @Autowired(required = false) org.praxisplatform.config.service.PageCreationHost pageHost) {
         if (pages != null) {
             invocations = pages.invocationProvider(invocations);
             admission = pages.lifecycleAdmission(admission);
@@ -298,7 +299,7 @@ public class UiLayoutResolutionAutoConfiguration {
         }
         return UiLayoutLifecycleCommandService.create(definitions, revisions, assignments, drafts, releases, members, reviews,
                 approvals, heads, events, allocationLock, hashes, objectMapper,
-                releaseValidator, invocations, admission, structure, workspaceSource, creationLock, configJdbc, metadataAdmission, transactions, budgetPolicy);
+                releaseValidator, invocations, admission, structure, workspaceSource, creationLock, configJdbc, metadataAdmission, transactions, budgetPolicy, pageHost);
     }
 
     @Bean

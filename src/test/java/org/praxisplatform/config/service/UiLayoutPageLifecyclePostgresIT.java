@@ -144,7 +144,7 @@ class UiLayoutPageLifecyclePostgresIT {
     commands=UiLayoutLifecycleCommandService.create(repo(UiLayoutDefinitionRepository.class),repo(UiLayoutRevisionRepository.class),repo(UiLayoutAssignmentRevisionRepository.class),repo(UiLayoutDraftRepository.class),
         repo(UiLayoutReleaseRepository.class),repo(UiLayoutReleaseMemberRepository.class),repo(UiLayoutReleaseReviewRepository.class),repo(UiLayoutReleaseApprovalRepository.class),repo(UiLayoutReleaseHeadRepository.class),repo(UiLayoutReleaseEventRepository.class),
         new JdbcUiLayoutRevisionAllocationLock(named),hashes,JSON,(release,contributions)->assertThat(contributions).hasSize(1),provider,admission,structure,source,
-        new JdbcUiLayoutDraftCreationLock(named),named,(i,t,d,s,b,m)->{},transactions,(op,i)->Duration.ofSeconds(40));
+        new JdbcUiLayoutDraftCreationLock(named),named,(i,t,d,s,b,m)->{},transactions,(op,i)->Duration.ofSeconds(40), null);
     reads=new UiLayoutLifecycleReadService(provider,admission,repo(UiLayoutDraftRepository.class),repo(UiLayoutReleaseRepository.class),repo(UiLayoutReleaseReviewRepository.class),repo(UiLayoutReleaseHeadRepository.class),
         repo(UiLayoutDefinitionRepository.class),repo(UiLayoutRevisionRepository.class),repo(UiLayoutAssignmentRevisionRepository.class),JSON,hashes,structure,(op,i)->Duration.ofSeconds(40));
   }
@@ -182,17 +182,19 @@ class UiLayoutPageLifecyclePostgresIT {
     UUID release=UUID.fromString(frozen.release().releaseRef());
     var submitted=commands.submit(principal,"p1-context",root,release,frozen.review().reviewEtag());
     commands.approve(principal,"p1-context",root,release,submitted.reviewEtag(),"🧭".repeat(1024));
-    var published=commands.publish(principal,"p1-context",root,UiLayoutLifecycleCommandService.HeadWriteCondition.firstPublish(),release,"🧭".repeat(1024));
-    assertThat(published.activeReleaseRef()).isEqualTo(release.toString());
+    // P1's host has no P2 catalog/integrity owner. Its frozen evidence remains readable, but
+    // new page-head transitions are deliberately closed until the host adopts that contract.
+    assertThatThrownBy(() -> commands.publish(principal,"p1-context",root,UiLayoutLifecycleCommandService.HeadWriteCondition.firstPublish(),release,"🧭".repeat(1024)))
+        .isInstanceOf(UiLayoutLifecycleException.class).extracting("code").isEqualTo(UiLayoutLifecycleException.Code.SOURCE_UNAVAILABLE);
     assertThat(jdbc.queryForObject("select count(*) from ui_layout_release_member where release_id=?",Integer.class,release)).isEqualTo(1);
     assertThat(reads.draft(principal,"p1-context",root,draftId).frozenReleaseRef()).isEqualTo(release.toString());
     assertThat(jdbc.queryForObject("select min(char_length(created_reason)) from ui_layout_revision r join ui_layout_definition d on d.id=r.definition_id where d.component_id=?",Integer.class,root.componentId())).isEqualTo(1024);
     revoked=true;
     assertThat(reads.draft(principal,"p1-context",root,draftId).frozenReleaseRef()).isEqualTo(release.toString());
     assertThatThrownBy(this::create).isInstanceOf(UiLayoutLifecycleException.class);
-    assertThatThrownBy(()->commands.rollback(principal,"p1-context",root,UiLayoutLifecycleCommandService.HeadWriteCondition.match(published.headEtag()),release,"denied restoration"))
+    assertThatThrownBy(()->commands.rollback(principal,"p1-context",root,UiLayoutLifecycleCommandService.HeadWriteCondition.match(UUID.randomUUID().toString()),release,"denied restoration"))
         .isInstanceOf(UiLayoutLifecycleException.class);
-    assertThat(jdbc.queryForObject("select active_release_id from ui_layout_release_head where root_component_id=?",UUID.class,root.componentId())).isEqualTo(release);
+    assertThat(jdbc.queryForObject("select count(*) from ui_layout_release_head where root_component_id=?",Integer.class,root.componentId())).isZero();
   }
 
   @Test void finalAdmissionRevocationRollsBackDraftAndMetadataTogether() {

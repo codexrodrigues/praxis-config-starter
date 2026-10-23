@@ -30,20 +30,27 @@ final class UiLayoutFrozenWorkspaceResolver {
   }
 
   Snapshot resolve(UiLayoutLifecycleInvocation invocation, UUID releaseId, Consumer<UiLayoutTarget> targetAdmission) {
+    return resolve(invocation, releaseId, targetAdmission, null);
+  }
+
+  Snapshot resolve(UiLayoutLifecycleInvocation invocation, UUID releaseId,
+      Consumer<UiLayoutTarget> targetAdmission, UiLayoutFrozenRecordBatch batch) {
     UiLayoutTarget root = invocation.rootTarget();
     try {
-      UiLayoutRelease release = releases.findByIdAndTenantIdAndEnvironment(releaseId,
-          invocation.tenantId(), invocation.environment()).orElseThrow(() -> failure(UiLayoutLifecycleException.Code.NOT_FOUND));
+      UiLayoutRelease release = (batch == null ? releases.findByIdAndTenantIdAndEnvironment(releaseId,
+          invocation.tenantId(), invocation.environment()) : Optional.ofNullable(batch.releases().get(releaseId))).orElseThrow(() -> failure(UiLayoutLifecycleException.Code.NOT_FOUND));
       if (!releaseId.equals(release.getId()) || !sameScope(invocation, release.getTenantId(), release.getEnvironment(),
           release.getRootComponentType(), release.getRootComponentId())) throw failure(UiLayoutLifecycleException.Code.NOT_FOUND);
       if (release.getSourceDraftId() == null) throw failure(UiLayoutLifecycleException.Code.SOURCE_UNAVAILABLE);
-      UiLayoutDraft draft = drafts.findByIdAndTenantIdAndEnvironmentAndRootComponentTypeAndRootComponentId(
+      UiLayoutDraft draft = (batch == null ? drafts.findByIdAndTenantIdAndEnvironmentAndRootComponentTypeAndRootComponentId(
           release.getSourceDraftId(), invocation.tenantId(), invocation.environment(), root.componentType(), root.componentId())
+          : Optional.ofNullable(batch.drafts().get(release.getSourceDraftId())))
           .orElseThrow(() -> failure(UiLayoutLifecycleException.Code.SOURCE_UNAVAILABLE));
       if (!release.getSourceDraftId().equals(draft.getId()) || !sameScope(invocation, draft.getTenantId(),
           draft.getEnvironment(), draft.getRootComponentType(), draft.getRootComponentId())
           || !"RELEASED".equals(draft.getState()) || draft.getDraftEtag() == null) throw failure(UiLayoutLifecycleException.Code.INVALID_STATE);
-      UiLayoutRelease sourceRelease = releases.findBySourceDraftId(draft.getId())
+      UiLayoutRelease sourceRelease = (batch == null ? releases.findBySourceDraftId(draft.getId())
+          : Optional.ofNullable(batch.sourceRelease(draft.getId())))
           .orElseThrow(() -> failure(UiLayoutLifecycleException.Code.INVALID_STATE));
       if (!releaseId.equals(sourceRelease.getId()) || !draft.getId().equals(sourceRelease.getSourceDraftId())
           || !sameScope(invocation, sourceRelease.getTenantId(), sourceRelease.getEnvironment(),
@@ -63,7 +70,8 @@ final class UiLayoutFrozenWorkspaceResolver {
         if (state.selectedRevision() == null || state.selectedAssignment() == null) throw failure(UiLayoutLifecycleException.Code.INVALID_STATE);
         targetAdmission.accept(state.target());
       }
-      List<UiLayoutReleaseMember> pinned = members.findByReleaseIdOrderByMemberOrder(releaseId);
+      List<UiLayoutReleaseMember> pinned = batch == null ? members.findByReleaseIdOrderByMemberOrder(releaseId)
+          : batch.members().get(releaseId);
       if (pinned == null || pinned.size() != document.targets().size()) throw failure(UiLayoutLifecycleException.Code.INVALID_STATE);
       for (int i = 0; i < pinned.size(); i++) {
         var state = document.targets().get(i);
@@ -76,7 +84,7 @@ final class UiLayoutFrozenWorkspaceResolver {
             || !Objects.equals(member.getContributionKey(), state.selectedAssignment().contributionKey())) {
           throw failure(UiLayoutLifecycleException.Code.INVALID_STATE);
         }
-        var patch = selections.verifyHistorical(invocation, state);
+        var patch = selections.verifyHistorical(invocation, state, batch);
         patches.add(patch);
       }
       return new Snapshot(releaseId, draft.getId(), draft.getDraftEtag(), document, List.copyOf(patches));

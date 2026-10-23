@@ -102,11 +102,15 @@ public class UiLayoutLifecycleCommandService {
       UiLayoutLifecycleInvocationProvider invocations, UiLayoutLifecycleAdmission admission,
       UiLayoutLifecycleStructureValidator structure, UiLayoutDraftWorkspaceSource workspaceSource,
       UiLayoutDraftCreationLock creationLock, NamedParameterJdbcTemplate configJdbc,
-      UiLayoutBaselineMetadataAdmission metadataAdmission, TransactionOperations transactions, UiLayoutValidationBudgetPolicy budgetPolicy) {
+      UiLayoutBaselineMetadataAdmission metadataAdmission, TransactionOperations transactions, UiLayoutValidationBudgetPolicy budgetPolicy, PageCreationHost pageHost) {
     if (configJdbc == null || metadataAdmission == null) throw new IllegalArgumentException("Config metadata storage and admission are required.");
+    var metadataStore = new JdbcUiLayoutMetadataCaptureStore(configJdbc, mapper, hashes, transactions);
+    var headIntegrity = pageHost == null ? null : new UiLayoutPageGroupHeadIntegrity(pageHost,
+        new UiLayoutPageGroupHeadStore(configJdbc, transactions, heads), admission, structure, metadataStore,
+        metadataAdmission, releases, drafts, members, revisions, definitions, assignments, mapper, hashes);
     return assemble(definitions, revisions, assignments, drafts, releases, members, reviews, approvals, heads, events,
         allocationLock, hashes, mapper, releaseValidator, invocations, admission, structure, workspaceSource, creationLock,
-        new JdbcUiLayoutMetadataCaptureStore(configJdbc, mapper, hashes, transactions), metadataAdmission, transactions, budgetPolicy);
+        metadataStore, metadataAdmission, transactions, budgetPolicy, headIntegrity);
   }
 
   /** Internal composition seam; production factory always installs the canonical Config JDBC store. */
@@ -118,10 +122,10 @@ public class UiLayoutLifecycleCommandService {
       UiLayoutLifecycleInvocationProvider invocations, UiLayoutLifecycleAdmission admission,
       UiLayoutLifecycleStructureValidator structure, UiLayoutDraftWorkspaceSource workspaceSource,
       UiLayoutDraftCreationLock creationLock, UiLayoutMetadataCapturePersistence metadataStore,
-      UiLayoutBaselineMetadataAdmission metadataAdmission, TransactionOperations transactions, UiLayoutValidationBudgetPolicy budgetPolicy) {
+      UiLayoutBaselineMetadataAdmission metadataAdmission, TransactionOperations transactions, UiLayoutValidationBudgetPolicy budgetPolicy, UiLayoutPageGroupHeadIntegrity headIntegrity) {
     UiLayoutLifecycleService core = new UiLayoutLifecycleService(definitions, revisions, assignments, drafts, releases, members,
         reviews, approvals, heads, events, allocationLock, hashes, mapper, (operation, actor, tenant, unit, environment, target) -> true,
-        releaseValidator, java.time.Clock.systemUTC());
+        releaseValidator, java.time.Clock.systemUTC(), headIntegrity);
     return new UiLayoutLifecycleCommandService(core, invocations, admission, structure, drafts, reviews, heads, mapper, transactions,
         releases, members, assignments, revisions, definitions, hashes, workspaceSource, creationLock, metadataStore, metadataAdmission, budgetPolicy);
   }
@@ -434,14 +438,14 @@ public class UiLayoutLifecycleCommandService {
     UiLayoutValidationContext validation = beginValidation(invocation, UiLayoutLifecycleOperation.PUBLISH_RELEASE, UiLayoutValidationPurpose.FROZEN_RELEASE);
     return inAuthorizedConfigTransaction(principal, contextVersion, root, invocation,
         UiLayoutLifecycleOperation.PUBLISH_RELEASE, validation, status -> { UUID expected = validateHeadCondition(invocation, root, condition, true); structure.validateFrozenRelease(invocation, frozenRelease(invocation, root, releaseId, validation), validation);
-      UiLayoutReleaseHead head = validation.call(invocation, () -> core.publish(scope(invocation), releaseId, expected, invocation.actorRef(), required(reason, "reason"))); return head(root, head); });
+      UiLayoutReleaseHead head = validation.call(invocation, () -> core.publish(invocation, releaseId, expected, required(reason, "reason"), validation)); return head(root, head); });
   }
 
   public UiLayoutReleaseHeadReceipt withdraw(Principal principal, String contextVersion, UiLayoutTarget root, HeadWriteCondition condition, String reason) {
     UiLayoutLifecycleInvocation invocation = invoke(principal, contextVersion, root, UiLayoutLifecycleOperation.WITHDRAW_RELEASE);
     UiLayoutValidationContext validation = beginValidation(invocation, UiLayoutLifecycleOperation.WITHDRAW_RELEASE, UiLayoutValidationPurpose.AUTHORING);
     return inAuthorizedConfigTransaction(principal, contextVersion, root, invocation,
-        UiLayoutLifecycleOperation.WITHDRAW_RELEASE, validation, status -> { UiLayoutReleaseHead head = validation.call(invocation, () -> core.withdraw(scope(invocation), validateHeadCondition(invocation, root, condition, false), invocation.actorRef(), required(reason, "reason"))); return head(root, head); });
+        UiLayoutLifecycleOperation.WITHDRAW_RELEASE, validation, status -> { UiLayoutReleaseHead head = validation.call(invocation, () -> core.withdraw(invocation, validateHeadCondition(invocation, root, condition, false), required(reason, "reason"), validation)); return head(root, head); });
   }
 
   public UiLayoutReleaseHeadReceipt rollback(Principal principal, String contextVersion, UiLayoutTarget root, HeadWriteCondition condition,
@@ -449,7 +453,7 @@ public class UiLayoutLifecycleCommandService {
     UiLayoutLifecycleInvocation invocation = invoke(principal, contextVersion, root, UiLayoutLifecycleOperation.ROLLBACK_RELEASE);
     UiLayoutValidationContext validation = beginValidation(invocation, UiLayoutLifecycleOperation.ROLLBACK_RELEASE, UiLayoutValidationPurpose.FROZEN_RELEASE);
     return inAuthorizedConfigTransaction(principal, contextVersion, root, invocation,
-        UiLayoutLifecycleOperation.ROLLBACK_RELEASE, validation, status -> { structure.validateFrozenRelease(invocation, frozenRelease(invocation, root, releaseId, validation), validation); UiLayoutReleaseHead head = validation.call(invocation, () -> core.rollback(scope(invocation), releaseId, validateHeadCondition(invocation, root, condition, false), invocation.actorRef(), required(reason, "reason"))); return head(root, head); });
+        UiLayoutLifecycleOperation.ROLLBACK_RELEASE, validation, status -> { structure.validateFrozenRelease(invocation, frozenRelease(invocation, root, releaseId, validation), validation); UiLayoutReleaseHead head = validation.call(invocation, () -> core.rollback(invocation, releaseId, validateHeadCondition(invocation, root, condition, false), required(reason, "reason"), validation)); return head(root, head); });
   }
 
   /** Internal construction seam; the public factory always uses mandatory server budget policy. */
@@ -465,11 +469,6 @@ public class UiLayoutLifecycleCommandService {
       UiLayoutLifecycleInvocation invocation = invocations.resolve(principal, contextVersion.trim(), root);
       if (invocation == null || !contextVersion.trim().equals(invocation.contextVersion()) || !root.equals(invocation.rootTarget())) {
         throw new UiLayoutLifecycleException(UiLayoutLifecycleException.Code.CONTEXT_STALE, "Lifecycle context changed before the operation.");
-      }
-      if (UiLayoutNavigationGroupsRevisionReproduction.TYPE.equals(root.componentType())
-          && (operation == UiLayoutLifecycleOperation.PUBLISH_RELEASE || operation == UiLayoutLifecycleOperation.ROLLBACK_RELEASE
-              || operation == UiLayoutLifecycleOperation.WITHDRAW_RELEASE)) {
-        throw new UiLayoutLifecycleException(UiLayoutLifecycleException.Code.SOURCE_UNAVAILABLE, "Navigation group head transitions require the page/group integrity owner.");
       }
       admission.require(operation, invocation);
       return invocation;
