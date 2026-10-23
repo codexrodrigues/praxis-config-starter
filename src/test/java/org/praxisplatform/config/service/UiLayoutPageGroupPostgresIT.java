@@ -796,6 +796,9 @@ class UiLayoutPageGroupPostgresIT extends UiLayoutPageGroupPostgresFixture {
         .isInstanceOf(UiLayoutLifecycleException.class).extracting("code").isEqualTo(UiLayoutLifecycleException.Code.DENIED);
 
     assertThat(selectedCopyDenied.get()).isEqualTo(1);
+    var withdrawnCopy = host.commands.withdraw(bob, bob.version(), copied.target(),
+        UiLayoutLifecycleCommandService.HeadWriteCondition.match(copiedHead.headEtag()), "Prepare valid republish with current dependency");
+    assertThat(headState(copied.target()).get("active_release_id")).isNull();
     var beforeDeniedDependency = headState(copied.target());
     long copiedEvents = eventCount(copied.target());
     var dependencyDenied = new java.util.concurrent.atomic.AtomicInteger();
@@ -805,11 +808,16 @@ class UiLayoutPageGroupPostgresIT extends UiLayoutPageGroupPostgresFixture {
         throw denied();
       }
     };
-    assertThatThrownBy(() -> publish(bob, copied.target(), copiedRelease, copiedHead.headEtag()))
+    assertThatThrownBy(() -> publish(bob, copied.target(), copiedRelease, withdrawnCopy.headEtag()))
         .isInstanceOf(UiLayoutLifecycleException.class).extracting("code").isEqualTo(UiLayoutLifecycleException.Code.DENIED);
     assertThat(dependencyDenied.get()).isPositive();
     assertThat(headState(copied.target())).isEqualTo(beforeDeniedDependency);
     assertThat(eventCount(copied.target())).isEqualTo(copiedEvents);
+    assertThat(headState(original.target())).isEqualTo(originalHead);
+    host.metadataCallback = (invocation, target) -> {};
+    publish(bob, copied.target(), copiedRelease, withdrawnCopy.headEtag());
+    assertThat(headState(copied.target()).get("active_release_id")).isEqualTo(copiedRelease);
+    assertThat(eventCount(copied.target())).isEqualTo(copiedEvents + 1);
     assertThat(headState(original.target())).isEqualTo(originalHead);
     assertNoOrphans();
   }
