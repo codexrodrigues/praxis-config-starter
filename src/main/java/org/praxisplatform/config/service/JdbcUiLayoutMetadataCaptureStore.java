@@ -138,7 +138,8 @@ final class JdbcUiLayoutMetadataCaptureStore implements UiLayoutMetadataCaptureP
       var key = RowKey.of(expected);
       String raw = ConfigTransactionReadSet.read(this, transactionGuard, key, () -> {
         // Without a synchronization there is no retained proof, so the existing full guard applies.
-        if (!org.springframework.transaction.support.TransactionSynchronizationManager.isSynchronizationActive()) transaction();
+        if (!org.springframework.transaction.support.TransactionSynchronizationManager.isActualTransactionActive()
+            || !org.springframework.transaction.support.TransactionSynchronizationManager.isSynchronizationActive()) transaction();
         var stored = jdbc.query("SELECT * FROM " + TABLE + " WHERE " + SCOPE
             + " AND component_type=:component_type AND component_id=:component_id", scopeParameters(expected),
             (row, index) -> ConfigImmutableSqlRow.capture(row, ROW_COLUMNS));

@@ -83,6 +83,25 @@ class JdbcUiLayoutMetadataCaptureStoreTest {
         when(row.getString(1)).thenReturn(workspace);
         return List.of(reader.mapRow(row, 0));
       }
+      if (sql.contains("requested.ordinal")) {
+        var parameters = (SqlParameterSource) call.getArgument(1);
+        var rawRows = new ArrayList<Map.Entry<Integer, String>>();
+        for (int index = 0; parameters.hasValue("draft" + index); index++) {
+          int ordinal = index;
+          var matched = rows.stream().filter(row -> java.util.Objects.equals(row.get("source_draft_ref"), parameters.getValue("draft" + ordinal))
+              && java.util.Objects.equals(row.get("component_id"), parameters.getValue("id" + ordinal))).findFirst();
+          String raw = matched.map(row -> {
+            var object = mapper.createObjectNode();
+            row.forEach((key, value) -> object.put(key, value == null ? null : value.toString()));
+            return object.toString();
+          }).orElse(null);
+          rawRows.add(new java.util.AbstractMap.SimpleImmutableEntry<>(ordinal, raw));
+        }
+        if (sql.contains("AS weight")) return rawRows.stream().map(row -> Map.entry(row.getKey(),
+            row.getValue() == null ? 0L : (long) row.getValue().getBytes(java.nio.charset.StandardCharsets.UTF_8).length)).toList();
+        var ordinals = (List<Integer>) parameters.getValue("retained_ordinals");
+        return rawRows.stream().filter(row -> ordinals.contains(row.getKey())).toList();
+      }
       var parameters = (SqlParameterSource) call.getArgument(1);
       var results = new ArrayList<Object>();
       for (var values : rows) {
@@ -104,6 +123,58 @@ class JdbcUiLayoutMetadataCaptureStoreTest {
   @AfterEach void release() {
     if (TransactionSynchronizationManager.hasResource(dataSource)) TransactionSynchronizationManager.unbindResource(dataSource);
     TransactionSynchronizationManager.setActualTransactionActive(false);
+    if (TransactionSynchronizationManager.isSynchronizationActive()) TransactionSynchronizationManager.clearSynchronization();
+  }
+
+  private void admitReadSet() throws Exception {
+    var statement = mock(java.sql.PreparedStatement.class);
+    var result = mock(java.sql.ResultSet.class);
+    when(connection.prepareStatement("SELECT current_setting('transaction_isolation')")).thenReturn(statement);
+    when(statement.executeQuery()).thenAnswer(call -> { when(result.next()).thenReturn(true, false); return result; });
+    when(result.getString(1)).thenReturn("read committed");
+    TransactionSynchronizationManager.initSynchronization();
+  }
+
+  @Test void prefetchRetainsRawOnlyAndCurrentConsumptionRechecksBindingAndAuthority() throws Exception {
+    var original = values().getFirst();
+    append();
+    admitReadSet();
+    var key = JdbcUiLayoutMetadataCaptureStore.RowKey.of(original.binding());
+    assertThat(store.prefetch(List.of(key))).isEqualTo(1);
+    clearInvocations(jdbc, connection);
+    var first = store.read(invocation, original.binding(), (current, capture) -> {});
+    ((com.fasterxml.jackson.databind.node.ObjectNode) first.baselineDocument()).put("privateMutation", true);
+    var second = store.read(invocation, original.binding(), (current, capture) -> {});
+    assertThat(second).isNotSameAs(first);
+    assertThat(second.baselineDocument().has("privateMutation")).isFalse();
+    verify(jdbc, never()).query(anyString(), any(SqlParameterSource.class), any(RowMapper.class));
+    verify(connection, never()).getTransactionIsolation();
+    var binding = original.binding();
+    var wrongBinding = new UiLayoutMetadataCapture.Binding(binding.sourceDraftRef(), binding.scope(),
+        "another-source", binding.authoring(), binding.baselineContentHash());
+    assertThatThrownBy(() -> store.read(invocation, wrongBinding, (current, capture) -> {}))
+        .isInstanceOf(UiLayoutLifecycleException.class);
+    assertThatThrownBy(() -> store.read(invocation, binding, (current, capture) -> {
+      throw new UiLayoutLifecycleException(UiLayoutLifecycleException.Code.DENIED, "revoked now");
+    })).isInstanceOf(UiLayoutLifecycleException.class);
+  }
+
+  @Test void prefetchDoesNotParsePrivateCorruptMetadataButAdmittedReadRejectsIt() throws Exception {
+    append();
+    rows.getFirst().put("baseline_document_text", "{not JSON");
+    rows.getFirst().put("raw_schema_hash", "0".repeat(64));
+    admitReadSet();
+    var expected = capture(root).binding();
+    assertThat(store.prefetch(List.of(JdbcUiLayoutMetadataCaptureStore.RowKey.of(expected)))).isEqualTo(1);
+    assertCode(() -> store.read(invocation, expected, (current, capture) -> {}), UiLayoutLifecycleException.Code.INVALID_STATE);
+  }
+
+  @Test void activeSynchronizationWithoutActualTransactionCannotReadMetadata() throws Exception {
+    admitReadSet();
+    TransactionSynchronizationManager.setActualTransactionActive(false);
+    assertCode(() -> store.read(invocation, capture(root).binding(), (current, capture) -> {}),
+        UiLayoutLifecycleException.Code.SOURCE_UNAVAILABLE);
+    verify(jdbc, never()).query(anyString(), any(SqlParameterSource.class), any(RowMapper.class));
   }
 
   private UiLayoutDraftWorkspaceSeed.TargetSeed seed(UiLayoutTarget target) {

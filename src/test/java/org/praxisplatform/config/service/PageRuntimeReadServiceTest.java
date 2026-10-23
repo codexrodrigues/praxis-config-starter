@@ -37,6 +37,8 @@ class PageRuntimeReadServiceTest {
   final EffectiveUiAudienceProvider audiences = mock(EffectiveUiAudienceProvider.class);
   final UiLayoutLifecycleStructureValidator structure = mock(UiLayoutLifecycleStructureValidator.class);
   Duration budget = Duration.ofMinutes(1);
+  String selectorOrganization;
+  final Set<UUID> corruptMetadata = new HashSet<>();
   final List<PageRuntimeStore.Head> heads = new ArrayList<>();
   final Set<UiLayoutTarget> denied = new HashSet<>();
   final AtomicInteger vectorReads = new AtomicInteger();
@@ -181,6 +183,7 @@ class PageRuntimeReadServiceTest {
     for (String column : List.of("assembly_input_hash", "resource_ref", "operation_path", "operation_method",
         "schema_type", "source_schema_ref", "normalizer_ref", "projector_ref", "assembly_input_version",
         "assembler_ref", "assembly_input_text")) row.putNull(column);
+    if (corruptMetadata.contains(binding.sourceDraftRef())) row.put("baseline_document_text", "{private broken JSON");
     return row.toString();
   }
 
@@ -316,6 +319,29 @@ class PageRuntimeReadServiceTest {
         .isEqualTo(UiLayoutResolutionException.Code.PUBLICATION_SNAPSHOT_CHANGED);
   }
 
+  @Test void deniedAndSelectorIncompatibleMetadataRemainUnconsumedUntilAdmitted() {
+    addGroups(true);
+    var publicPage = addPage("30000000-0000-4000-8000-000000000001", 1, "Public");
+    selectorOrganization = "private-organization";
+    var privatePage = addPage("30000000-0000-4000-8000-000000000002", 2, "Private");
+    UUID privateDraft = releaseRows.get(privatePage.release()).getSourceDraftId();
+    var first = service.catalog(() -> "actor", "c1", null, 50);
+    var firstNavigation = navigation(groupId.toString(), null, 50);
+    corruptMetadata.add(privateDraft);
+    var incompatible = service.catalog(() -> "actor", "c1", null, 50);
+    assertThat(incompatible.receiptEtag()).isEqualTo(first.receiptEtag());
+    assertThat(navigation(groupId.toString(), null, 50).receiptEtag()).isEqualTo(firstNavigation.receiptEtag());
+    denied.add(privatePage.root());
+    assertThat(service.catalog(() -> "actor", "c1", null, 50).receiptEtag()).isEqualTo(first.receiptEtag());
+    denied.clear();
+    audience = new EffectiveUiAudience("tenant", "test", "actor", "private-organization", null, null, Set.of(), "c1");
+    assertThatThrownBy(() -> service.catalog(() -> "actor", "c1", null, 50)).extracting("code")
+        .isEqualTo(UiLayoutLifecycleException.Code.SOURCE_UNAVAILABLE);
+    assertThatThrownBy(() -> service.published(() -> "actor", "c1", privatePage.pageId())).extracting("code")
+        .isEqualTo(UiLayoutLifecycleException.Code.SOURCE_UNAVAILABLE);
+    assertThat(first.items()).extracting(PageCatalogEntry::pageId).containsExactly(publicPage.pageId());
+  }
+
   @Test void vectorPhantomAndHeadABAInvalidateTheOperation() {
     var group = addGroups(true);
     vectorHook = () -> { if (vectorReads.get() == 2) replaceHead(group); };
@@ -374,7 +400,7 @@ class PageRuntimeReadServiceTest {
         new UiLayoutDraftWorkspaceDocument.WorkingDocument(hash, document),
         new UiLayoutDraftWorkspaceDocument.RevisionSelection(revision, 1, patchHash, "praxis.ui-layout/v1", UUID.randomUUID()),
         new UiLayoutDraftWorkspaceDocument.AssignmentSelection(UUID.randomUUID(), revision, "TENANT",
-            new UiLayoutAudienceSelectorCommand("tenant", null, null, null, null, null), (short) 0, "page", UUID.randomUUID()));
+            new UiLayoutAudienceSelectorCommand("tenant", selectorOrganization, null, null, null, null), (short) 0, "page", UUID.randomUUID()));
     UUID draftId = UUID.randomUUID(), definitionId = UUID.randomUUID();
     var workspace = new UiLayoutDraftWorkspaceDocument(UiLayoutDraftWorkspaceDocument.SCHEMA_VERSION,
         List.of(state), UUID.randomUUID());
