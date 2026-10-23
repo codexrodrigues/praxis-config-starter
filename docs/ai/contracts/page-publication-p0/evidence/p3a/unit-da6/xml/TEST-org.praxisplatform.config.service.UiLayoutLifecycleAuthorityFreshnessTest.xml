@@ -1,0 +1,43 @@
+<testsuite xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="https://maven.apache.org/surefire/maven-surefire-plugin/xsd/surefire-test-report.xsd" version="3.0.2" name="org.praxisplatform.config.service.UiLayoutLifecycleAuthorityFreshnessTest" time="0.505" tests="38" errors="0" skipped="0" failures="0" flakes="0">
+  <testcase name="contextChangeBetweenResolutionAndTransactionStopsEveryMutationBeforeWork(Mutation)[1]" classname="org.praxisplatform.config.service.UiLayoutLifecycleAuthorityFreshnessTest" time="0.422">
+    <system-out>Standard Commons Logging discovery in action with spring-jcl: please remove commons-logging.jar from classpath in order to avoid potential conflicts
+</system-out>
+  </testcase>
+  <testcase name="contextChangeBetweenResolutionAndTransactionStopsEveryMutationBeforeWork(Mutation)[2]" classname="org.praxisplatform.config.service.UiLayoutLifecycleAuthorityFreshnessTest" time="0.002" />
+  <testcase name="contextChangeBetweenResolutionAndTransactionStopsEveryMutationBeforeWork(Mutation)[3]" classname="org.praxisplatform.config.service.UiLayoutLifecycleAuthorityFreshnessTest" time="0.002" />
+  <testcase name="contextChangeBetweenResolutionAndTransactionStopsEveryMutationBeforeWork(Mutation)[4]" classname="org.praxisplatform.config.service.UiLayoutLifecycleAuthorityFreshnessTest" time="0.001" />
+  <testcase name="contextChangeBetweenResolutionAndTransactionStopsEveryMutationBeforeWork(Mutation)[5]" classname="org.praxisplatform.config.service.UiLayoutLifecycleAuthorityFreshnessTest" time="0.0" />
+  <testcase name="contextChangeBetweenResolutionAndTransactionStopsEveryMutationBeforeWork(Mutation)[6]" classname="org.praxisplatform.config.service.UiLayoutLifecycleAuthorityFreshnessTest" time="0.001" />
+  <testcase name="contextChangeBetweenResolutionAndTransactionStopsEveryMutationBeforeWork(Mutation)[7]" classname="org.praxisplatform.config.service.UiLayoutLifecycleAuthorityFreshnessTest" time="0.001" />
+  <testcase name="contextChangeBetweenResolutionAndTransactionStopsEveryMutationBeforeWork(Mutation)[8]" classname="org.praxisplatform.config.service.UiLayoutLifecycleAuthorityFreshnessTest" time="0.001" />
+  <testcase name="revocationAfterReturnStillRollsBackTheAmbientTransaction" classname="org.praxisplatform.config.service.UiLayoutLifecycleAuthorityFreshnessTest" time="0.002" />
+  <testcase name="expiredCallbackDuringMutationRollsBackBeforeReturn" classname="org.praxisplatform.config.service.UiLayoutLifecycleAuthorityFreshnessTest" time="0.017" />
+  <testcase name="technicalAdmissionFailureDuringWorkIsSanitizedAndRollsBack" classname="org.praxisplatform.config.service.UiLayoutLifecycleAuthorityFreshnessTest" time="0.002" />
+  <testcase name="fullInvocationChangesDuringWorkRollbackTheHead(ContextChange)[1]" classname="org.praxisplatform.config.service.UiLayoutLifecycleAuthorityFreshnessTest" time="0.002" />
+  <testcase name="fullInvocationChangesDuringWorkRollbackTheHead(ContextChange)[2]" classname="org.praxisplatform.config.service.UiLayoutLifecycleAuthorityFreshnessTest" time="0.001" />
+  <testcase name="fullInvocationChangesDuringWorkRollbackTheHead(ContextChange)[3]" classname="org.praxisplatform.config.service.UiLayoutLifecycleAuthorityFreshnessTest" time="0.0" />
+  <testcase name="fullInvocationChangesDuringWorkRollbackTheHead(ContextChange)[4]" classname="org.praxisplatform.config.service.UiLayoutLifecycleAuthorityFreshnessTest" time="0.0" />
+  <testcase name="fullInvocationChangesDuringWorkRollbackTheHead(ContextChange)[5]" classname="org.praxisplatform.config.service.UiLayoutLifecycleAuthorityFreshnessTest" time="0.0" />
+  <testcase name="fullInvocationChangesDuringWorkRollbackTheHead(ContextChange)[6]" classname="org.praxisplatform.config.service.UiLayoutLifecycleAuthorityFreshnessTest" time="0.0" />
+  <testcase name="revocationDuringWorkRollsBackTheHead" classname="org.praxisplatform.config.service.UiLayoutLifecycleAuthorityFreshnessTest" time="0.0" />
+  <testcase name="expiredBudgetAtActualOuterCommitRollsBackAndClosesTheAttempt" classname="org.praxisplatform.config.service.UiLayoutLifecycleAuthorityFreshnessTest" time="0.002" />
+  <testcase name="successfulParticipatingCommandKeepsAttemptUntilOuterCompletion" classname="org.praxisplatform.config.service.UiLayoutLifecycleAuthorityFreshnessTest" time="0.002" />
+  <testcase name="caughtRevocationCannotCommitAfterAuthorityIsRestoredInTheAmbientTransaction" classname="org.praxisplatform.config.service.UiLayoutLifecycleAuthorityFreshnessTest" time="0.001" />
+  <testcase name="revocationBetweenResolutionAndTransactionStopsEveryMutationBeforeWork(Mutation)[1]" classname="org.praxisplatform.config.service.UiLayoutLifecycleAuthorityFreshnessTest" time="0.001" />
+  <testcase name="revocationBetweenResolutionAndTransactionStopsEveryMutationBeforeWork(Mutation)[2]" classname="org.praxisplatform.config.service.UiLayoutLifecycleAuthorityFreshnessTest" time="0.0" />
+  <testcase name="revocationBetweenResolutionAndTransactionStopsEveryMutationBeforeWork(Mutation)[3]" classname="org.praxisplatform.config.service.UiLayoutLifecycleAuthorityFreshnessTest" time="0.0" />
+  <testcase name="revocationBetweenResolutionAndTransactionStopsEveryMutationBeforeWork(Mutation)[4]" classname="org.praxisplatform.config.service.UiLayoutLifecycleAuthorityFreshnessTest" time="0.0" />
+  <testcase name="revocationBetweenResolutionAndTransactionStopsEveryMutationBeforeWork(Mutation)[5]" classname="org.praxisplatform.config.service.UiLayoutLifecycleAuthorityFreshnessTest" time="0.0" />
+  <testcase name="revocationBetweenResolutionAndTransactionStopsEveryMutationBeforeWork(Mutation)[6]" classname="org.praxisplatform.config.service.UiLayoutLifecycleAuthorityFreshnessTest" time="0.001" />
+  <testcase name="revocationBetweenResolutionAndTransactionStopsEveryMutationBeforeWork(Mutation)[7]" classname="org.praxisplatform.config.service.UiLayoutLifecycleAuthorityFreshnessTest" time="0.001" />
+  <testcase name="revocationBetweenResolutionAndTransactionStopsEveryMutationBeforeWork(Mutation)[8]" classname="org.praxisplatform.config.service.UiLayoutLifecycleAuthorityFreshnessTest" time="0.001" />
+  <testcase name="ambientTransactionRechecksFullInvocationBeforeItsActualCommit(ContextChange)[1]" classname="org.praxisplatform.config.service.UiLayoutLifecycleAuthorityFreshnessTest" time="0.001" />
+  <testcase name="ambientTransactionRechecksFullInvocationBeforeItsActualCommit(ContextChange)[2]" classname="org.praxisplatform.config.service.UiLayoutLifecycleAuthorityFreshnessTest" time="0.001" />
+  <testcase name="ambientTransactionRechecksFullInvocationBeforeItsActualCommit(ContextChange)[3]" classname="org.praxisplatform.config.service.UiLayoutLifecycleAuthorityFreshnessTest" time="0.0" />
+  <testcase name="ambientTransactionRechecksFullInvocationBeforeItsActualCommit(ContextChange)[4]" classname="org.praxisplatform.config.service.UiLayoutLifecycleAuthorityFreshnessTest" time="0.0" />
+  <testcase name="ambientTransactionRechecksFullInvocationBeforeItsActualCommit(ContextChange)[5]" classname="org.praxisplatform.config.service.UiLayoutLifecycleAuthorityFreshnessTest" time="0.001" />
+  <testcase name="ambientTransactionRechecksFullInvocationBeforeItsActualCommit(ContextChange)[6]" classname="org.praxisplatform.config.service.UiLayoutLifecycleAuthorityFreshnessTest" time="0.001" />
+  <testcase name="missingTransactionSynchronizationFailsBeforeAnyPersistence" classname="org.praxisplatform.config.service.UiLayoutLifecycleAuthorityFreshnessTest" time="0.001" />
+  <testcase name="readOnlyTransactionFailsBeforeAnyPersistence" classname="org.praxisplatform.config.service.UiLayoutLifecycleAuthorityFreshnessTest" time="0.001" />
+  <testcase name="unchangedAuthorityCommitsOneHeadMutationAndReleasesTransactionResources" classname="org.praxisplatform.config.service.UiLayoutLifecycleAuthorityFreshnessTest" time="0.001" />
+</testsuite>

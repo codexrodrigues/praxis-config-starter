@@ -1,0 +1,29 @@
+<testsuite xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="https://maven.apache.org/surefire/maven-surefire-plugin/xsd/surefire-test-report.xsd" version="3.0.2" name="org.praxisplatform.config.service.UiLayoutPageGroupSnapshotContractTest" time="0.687" tests="6" errors="0" skipped="0" failures="1" flakes="0">
+  <testcase name="foreignDescriptorCannotBypassTheGroupsContract(String)[1]" classname="org.praxisplatform.config.service.UiLayoutPageGroupSnapshotContractTest" time="0.108" />
+  <testcase name="foreignDescriptorCannotBypassTheGroupsContract(String)[2]" classname="org.praxisplatform.config.service.UiLayoutPageGroupSnapshotContractTest" time="0.012" />
+  <testcase name="foreignDescriptorCannotBypassTheGroupsContract(String)[3]" classname="org.praxisplatform.config.service.UiLayoutPageGroupSnapshotContractTest" time="0.011" />
+  <testcase name="foreignDescriptorCannotMakeMalformedGroupsLookLikeAnEmptyOrUniqueSet(String)[1]" classname="org.praxisplatform.config.service.UiLayoutPageGroupSnapshotContractTest" time="0.009" />
+  <testcase name="foreignDescriptorCannotMakeMalformedGroupsLookLikeAnEmptyOrUniqueSet(String)[2]" classname="org.praxisplatform.config.service.UiLayoutPageGroupSnapshotContractTest" time="0.009" />
+  <testcase name="correlatedNativeGroupsReachTheLockBoundary" classname="org.praxisplatform.config.service.UiLayoutPageGroupSnapshotContractTest" time="0.05">
+    <failure message="&#10;Expecting actual:&#10;  org.praxisplatform.config.service.UiLayoutLifecycleException: Native revision does not preserve authored presence or a reset targets an absent property.&#10; at org.praxisplatform.config.service.UiLayoutAuthoredPresence.invalid(UiLayoutAuthoredPresence.java:26)&#10; at org.praxisplatform.config.service.UiLayoutAuthoredPresence.lambda$require$0(UiLayoutAuthoredPresence.java:12)&#10; at java.base/java.util.LinkedHashMap$LinkedEntrySet.forEach(LinkedHashMap.java:945)&#10; ...(87 remaining lines not displayed - this can be changed with Assertions.setMaxStackTraceElementsDisplayed)&#10;and:&#10;  java.lang.IllegalStateException: Test reached physical root lock&#10; at org.praxisplatform.config.service.UiLayoutPageGroupSnapshotContractTest.correlatedNativeGroupsReachTheLockBoundary(UiLayoutPageGroupSnapshotContractTest.java:81)&#10; at java.base/jdk.internal.reflect.DirectMethodHandleAccessor.invoke(DirectMethodHandleAccessor.java:103)&#10; at java.base/java.lang.reflect.Method.invoke(Method.java:580)&#10; ...(73 remaining lines not displayed - this can be changed with Assertions.setMaxStackTraceElementsDisplayed)&#10;to refer to the same object" type="java.lang.AssertionError">java.lang.AssertionError: 
+
+Expecting actual:
+  org.praxisplatform.config.service.UiLayoutLifecycleException: Native revision does not preserve authored presence or a reset targets an absent property.
+	at org.praxisplatform.config.service.UiLayoutAuthoredPresence.invalid(UiLayoutAuthoredPresence.java:26)
+	at org.praxisplatform.config.service.UiLayoutAuthoredPresence.lambda$require$0(UiLayoutAuthoredPresence.java:12)
+	at java.base/java.util.LinkedHashMap$LinkedEntrySet.forEach(LinkedHashMap.java:945)
+	...(87 remaining lines not displayed - this can be changed with Assertions.setMaxStackTraceElementsDisplayed)
+and:
+  java.lang.IllegalStateException: Test reached physical root lock
+	at org.praxisplatform.config.service.UiLayoutPageGroupSnapshotContractTest.correlatedNativeGroupsReachTheLockBoundary(UiLayoutPageGroupSnapshotContractTest.java:81)
+	at java.base/jdk.internal.reflect.DirectMethodHandleAccessor.invoke(DirectMethodHandleAccessor.java:103)
+	at java.base/java.lang.reflect.Method.invoke(Method.java:580)
+	...(73 remaining lines not displayed - this can be changed with Assertions.setMaxStackTraceElementsDisplayed)
+to refer to the same object
+	at org.praxisplatform.config.service.UiLayoutPageGroupSnapshotContractTest.correlatedNativeGroupsReachTheLockBoundary(UiLayoutPageGroupSnapshotContractTest.java:83)
+	at java.base/java.lang.reflect.Method.invoke(Method.java:580)
+	at java.base/java.util.ArrayList.forEach(ArrayList.java:1596)
+	at java.base/java.util.ArrayList.forEach(ArrayList.java:1596)
+</failure>
+  </testcase>
+</testsuite>

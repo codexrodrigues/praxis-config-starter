@@ -1,0 +1,8 @@
+<testsuite xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="https://maven.apache.org/surefire/maven-surefire-plugin/xsd/surefire-test-report.xsd" version="3.0.2" name="org.praxisplatform.config.service.UiLayoutPageGroupSnapshotContractTest" time="0.701" tests="6" errors="0" skipped="0" failures="0" flakes="0">
+  <testcase name="foreignDescriptorCannotBypassTheGroupsContract(String)[1]" classname="org.praxisplatform.config.service.UiLayoutPageGroupSnapshotContractTest" time="0.118" />
+  <testcase name="foreignDescriptorCannotBypassTheGroupsContract(String)[2]" classname="org.praxisplatform.config.service.UiLayoutPageGroupSnapshotContractTest" time="0.012" />
+  <testcase name="foreignDescriptorCannotBypassTheGroupsContract(String)[3]" classname="org.praxisplatform.config.service.UiLayoutPageGroupSnapshotContractTest" time="0.012" />
+  <testcase name="foreignDescriptorCannotMakeMalformedGroupsLookLikeAnEmptyOrUniqueSet(String)[1]" classname="org.praxisplatform.config.service.UiLayoutPageGroupSnapshotContractTest" time="0.011" />
+  <testcase name="foreignDescriptorCannotMakeMalformedGroupsLookLikeAnEmptyOrUniqueSet(String)[2]" classname="org.praxisplatform.config.service.UiLayoutPageGroupSnapshotContractTest" time="0.012" />
+  <testcase name="correlatedNativeGroupsReachTheLockBoundary" classname="org.praxisplatform.config.service.UiLayoutPageGroupSnapshotContractTest" time="0.058" />
+</testsuite>

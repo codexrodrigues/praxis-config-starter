@@ -193,8 +193,10 @@ class ConfigTransactionReadSetTest {
     try {
       transaction.executeWithoutResult(
           status -> {
+            assertThat(guard.require().getConnection()).isSameAs(actual);
             assertThat(read("key")).isPresent();
             when(entityTransaction.getRollbackOnly()).thenReturn(true);
+            assertThatThrownBy(guard::require).isInstanceOf(UiLayoutLifecycleException.class);
             assertThatThrownBy(() -> read("key")).isInstanceOf(UiLayoutLifecycleException.class);
             when(entityTransaction.getRollbackOnly()).thenReturn(false);
             doAnswer(
@@ -203,6 +205,7 @@ class ConfigTransactionReadSetTest {
                             .execute(mock(Connection.class)))
                 .when(session)
                 .doReturningWork(any());
+            assertThatThrownBy(guard::require).isInstanceOf(UiLayoutLifecycleException.class);
             assertThatThrownBy(() -> read("key")).isInstanceOf(UiLayoutLifecycleException.class);
           });
     } finally {

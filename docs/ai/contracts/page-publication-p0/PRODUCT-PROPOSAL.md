@@ -1,6 +1,8 @@
 # Páginas derivadas e publicação corporativa na Praxis
 
-Pesquisa e proposta de produto — revisada em 22/10/2026. Estado: decisões arquiteturais e sequência técnica definidas no [plano canônico](TECHNICAL-PLAN.md); P0 formalizado localmente com schema/corpus/revisão; implementação de runtime e hosts não iniciada. Esta proposta é `docs-apenas`. A implementação será `arquitetural`, `transversal` e `contrato-publico`; os contratos descritos como novos ainda não existem no produto.
+**Registro histórico da pesquisa/proposta — 22/10/2026.** Estado naquele corte: decisões arquiteturais e sequência técnica definidas no [plano canônico](TECHNICAL-PLAN.md); P0 formalizado localmente com schema/corpus/revisão; implementação de runtime e hosts não iniciada. Esta proposta é `docs-apenas`. A implementação será `arquitetural`, `transversal` e `contrato-publico`; os contratos descritos como novos ainda não existem no produto.
+
+Estado posterior ao planejamento P0: Config P1/P2 foram integrados; P3-A entrega a integridade transacional de páginas/grupos, com fontes e gates em [P3A-IMPLEMENTATION](P3A-IMPLEMENTATION.md). P3-B e adoção HTTP/UI dos hosts continuam etapas posteriores. O plano original abaixo permanece como proveniência; não representa o estado atual de toda a implementação.
 
 ## Recomendação
 
@@ -8,7 +10,7 @@ Transformar a experiência de “salvar uma configuração em outra rota” em u
 
 O ponto de entrada recomendado é **Criar página a partir desta**, na própria página, quando ela expuser uma composição authorável. O Page Builder permanece o editor. Um painel de disponibilização mostra nome, endereço, público, ícone e posição no menu com prévia real do shell. A gestão posterior fica em uma biblioteca pesquisável de páginas.
 
-Reutilizar o protocolo corporativo existente de drafts, aprovação e releases, **evoluindo sua admissão para o documento nativo de página**. Hoje o compilador auditado aceita documentos nativos de Table e Dynamic Form, não a composição do Page Builder. A página será um único target estável; sua estrutura e os conteúdos de componentes internos serão versionados no documento agregado. O registro de targets do lifecycle permanece estável. O [plano técnico](TECHNICAL-PLAN.md) define identidade, cópia, codecs, publicação, navegação, recuperação e migração.
+Reutilizar o protocolo corporativo existente de drafts, aprovação e releases, **evoluindo sua admissão para o documento nativo de página**. No inventário original da proposta, o compilador auditado aceitava documentos nativos de Table e Dynamic Form, não a composição do Page Builder. Os incrementos Config posteriores estão nas entregas P1/P2/P3-A vinculadas acima. A página será um único target estável; sua estrutura e os conteúdos de componentes internos serão versionados no documento agregado. O registro de targets do lifecycle permanece estável. O [plano técnico](TECHNICAL-PLAN.md) define identidade, cópia, codecs, publicação, navegação, recuperação e migração.
 
 ## Problema observado
 

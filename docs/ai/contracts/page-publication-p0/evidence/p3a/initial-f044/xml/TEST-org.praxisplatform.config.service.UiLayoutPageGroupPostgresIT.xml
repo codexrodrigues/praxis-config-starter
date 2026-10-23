@@ -1,0 +1,112 @@
+<testsuite xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="https://maven.apache.org/surefire/maven-surefire-plugin/xsd/surefire-test-report.xsd" version="3.0.2" name="org.praxisplatform.config.service.UiLayoutPageGroupPostgresIT" time="501.227" tests="6" errors="1" skipped="0" failures="2" flakes="0">
+  <testcase name="staleManagedHeadAcceptsCurrentEtagAndRejectsTheOldValidator" classname="org.praxisplatform.config.service.UiLayoutPageGroupPostgresIT" time="89.508">
+    <error message="Row was updated or deleted by another transaction (or unsaved-value mapping was incorrect): [org.praxisplatform.config.domain.UiLayoutReleaseHead#475714e1-fbf8-4e2e-b9f1-807f67b40401]" type="jakarta.persistence.OptimisticLockException">jakarta.persistence.OptimisticLockException: Row was updated or deleted by another transaction (or unsaved-value mapping was incorrect): [org.praxisplatform.config.domain.UiLayoutReleaseHead#475714e1-fbf8-4e2e-b9f1-807f67b40401]
+	at org.hibernate.internal.ExceptionConverterImpl.wrapStaleStateException(ExceptionConverterImpl.java:209)
+	at org.hibernate.internal.ExceptionConverterImpl.convert(ExceptionConverterImpl.java:95)
+	at org.hibernate.query.spi.AbstractSelectionQuery.list(AbstractSelectionQuery.java:151)
+	at org.hibernate.query.spi.AbstractSelectionQuery.getSingleResult(AbstractSelectionQuery.java:275)
+	at org.springframework.data.jpa.repository.query.JpaQueryExecution$SingleEntityExecution.doExecute(JpaQueryExecution.java:226)
+	at org.springframework.data.jpa.repository.query.JpaQueryExecution.execute(JpaQueryExecution.java:95)
+	at org.springframework.data.jpa.repository.query.AbstractJpaQuery.doExecute(AbstractJpaQuery.java:160)
+	at org.springframework.data.jpa.repository.query.AbstractJpaQuery.execute(AbstractJpaQuery.java:148)
+	at org.springframework.data.repository.core.support.RepositoryMethodInvoker.doInvoke(RepositoryMethodInvoker.java:170)
+	at org.springframework.data.repository.core.support.RepositoryMethodInvoker.invoke(RepositoryMethodInvoker.java:158)
+	at org.springframework.data.repository.core.support.QueryExecutorMethodInterceptor.doInvoke(QueryExecutorMethodInterceptor.java:170)
+	at org.springframework.data.repository.core.support.QueryExecutorMethodInterceptor.invoke(QueryExecutorMethodInterceptor.java:149)
+	at org.springframework.aop.framework.ReflectiveMethodInvocation.proceed(ReflectiveMethodInvocation.java:184)
+	at org.springframework.data.projection.DefaultMethodInvokingMethodInterceptor.invoke(DefaultMethodInvokingMethodInterceptor.java:69)
+	at org.springframework.aop.framework.ReflectiveMethodInvocation.proceed(ReflectiveMethodInvocation.java:184)
+	at org.springframework.data.jpa.repository.support.CrudMethodMetadataPostProcessor$CrudMethodMetadataPopulatingMethodInterceptor.invoke(CrudMethodMetadataPostProcessor.java:136)
+	at org.springframework.aop.framework.ReflectiveMethodInvocation.proceed(ReflectiveMethodInvocation.java:184)
+	at org.springframework.aop.framework.JdkDynamicAopProxy.invoke(JdkDynamicAopProxy.java:223)
+	at jdk.proxy2/jdk.proxy2.$Proxy101.findForUpdate(Unknown Source)
+	at org.praxisplatform.config.service.UiLayoutPageGroupHeadStore.lockAndRefreshHead(UiLayoutPageGroupHeadStore.java:50)
+	at org.praxisplatform.config.service.UiLayoutPageGroupHeadIntegrity.require(UiLayoutPageGroupHeadIntegrity.java:84)
+	at org.praxisplatform.config.service.UiLayoutLifecycleService.requireHeadIntegrity(UiLayoutLifecycleService.java:262)
+	at org.praxisplatform.config.service.UiLayoutLifecycleService.publish(UiLayoutLifecycleService.java:225)
+	at org.praxisplatform.config.service.UiLayoutLifecycleCommandService.lambda$publish$33(UiLayoutLifecycleCommandService.java:440)
+	at org.praxisplatform.config.service.UiLayoutValidationContext.call(UiLayoutValidationContext.java:28)
+	at org.praxisplatform.config.service.UiLayoutLifecycleCommandService.lambda$publish$34(UiLayoutLifecycleCommandService.java:440)
+	at org.praxisplatform.config.service.UiLayoutLifecycleCommandService.lambda$inAuthorizedConfigTransaction$40(UiLayoutLifecycleCommandService.java:501)
+	at org.praxisplatform.config.service.UiLayoutValidationContext.call(UiLayoutValidationContext.java:28)
+	at org.praxisplatform.config.service.UiLayoutLifecycleCommandService.lambda$inAuthorizedConfigTransaction$42(UiLayoutLifecycleCommandService.java:501)
+	at org.praxisplatform.config.service.UiLayoutLifecycleCommandService.lambda$inConfigTransactionWithStatus$13(UiLayoutLifecycleCommandService.java:287)
+	at org.springframework.transaction.support.TransactionTemplate.execute(TransactionTemplate.java:140)
+	at org.praxisplatform.config.service.UiLayoutLifecycleCommandService.inConfigTransactionWithStatus(UiLayoutLifecycleCommandService.java:286)
+	at org.praxisplatform.config.service.UiLayoutLifecycleCommandService.inAuthorizedConfigTransaction(UiLayoutLifecycleCommandService.java:486)
+	at org.praxisplatform.config.service.UiLayoutLifecycleCommandService.publish(UiLayoutLifecycleCommandService.java:438)
+	at org.praxisplatform.config.service.UiLayoutPageGroupPostgresIT.publish(UiLayoutPageGroupPostgresIT.java:335)
+	at org.praxisplatform.config.service.UiLayoutPageGroupPostgresIT.lambda$staleManagedHeadAcceptsCurrentEtagAndRejectsTheOldValidator$4(UiLayoutPageGroupPostgresIT.java:118)
+	at org.springframework.transaction.support.TransactionTemplate.execute(TransactionTemplate.java:140)
+	at org.praxisplatform.config.service.UiLayoutPageGroupPostgresIT.staleManagedHeadAcceptsCurrentEtagAndRejectsTheOldValidator(UiLayoutPageGroupPostgresIT.java:112)
+	at java.base/java.lang.reflect.Method.invoke(Method.java:580)
+	at java.base/java.util.ArrayList.forEach(ArrayList.java:1596)
+	at java.base/java.util.ArrayList.forEach(ArrayList.java:1596)
+Caused by: org.hibernate.StaleObjectStateException: Row was updated or deleted by another transaction (or unsaved-value mapping was incorrect): [org.praxisplatform.config.domain.UiLayoutReleaseHead#475714e1-fbf8-4e2e-b9f1-807f67b40401]
+	at org.hibernate.sql.results.graph.entity.internal.EntityInitializerImpl.checkVersion(EntityInitializerImpl.java:1253)
+	at org.hibernate.sql.results.graph.entity.internal.EntityInitializerImpl.upgradeLockMode(EntityInitializerImpl.java:1218)
+	at org.hibernate.sql.results.graph.entity.internal.EntityInitializerImpl.resolveInstance(EntityInitializerImpl.java:1108)
+	at org.hibernate.sql.results.graph.entity.internal.EntityInitializerImpl.resolveKey(EntityInitializerImpl.java:587)
+	at org.hibernate.sql.results.graph.entity.internal.EntityInitializerImpl.resolveKey(EntityInitializerImpl.java:457)
+	at org.hibernate.sql.results.graph.entity.internal.EntityInitializerImpl.resolveKey(EntityInitializerImpl.java:97)
+	at org.hibernate.sql.results.internal.StandardRowReader.coordinateInitializers(StandardRowReader.java:235)
+	at org.hibernate.sql.results.internal.StandardRowReader.readRow(StandardRowReader.java:141)
+	at org.hibernate.sql.results.spi.ListResultsConsumer.read(ListResultsConsumer.java:249)
+	at org.hibernate.sql.results.spi.ListResultsConsumer.consume(ListResultsConsumer.java:201)
+	at org.hibernate.sql.results.spi.ListResultsConsumer.consume(ListResultsConsumer.java:35)
+	at org.hibernate.sql.exec.internal.JdbcSelectExecutorStandardImpl.doExecuteQuery(JdbcSelectExecutorStandardImpl.java:224)
+	at org.hibernate.sql.exec.internal.JdbcSelectExecutorStandardImpl.executeQuery(JdbcSelectExecutorStandardImpl.java:102)
+	at org.hibernate.sql.exec.spi.JdbcSelectExecutor.executeQuery(JdbcSelectExecutor.java:91)
+	at org.hibernate.sql.exec.spi.JdbcSelectExecutor.list(JdbcSelectExecutor.java:165)
+	at org.hibernate.query.sqm.internal.ConcreteSqmSelectQueryPlan.lambda$new$1(ConcreteSqmSelectQueryPlan.java:149)
+	at org.hibernate.query.sqm.internal.ConcreteSqmSelectQueryPlan.withCacheableSqmInterpretation(ConcreteSqmSelectQueryPlan.java:439)
+	at org.hibernate.query.sqm.internal.ConcreteSqmSelectQueryPlan.performList(ConcreteSqmSelectQueryPlan.java:359)
+	at org.hibernate.query.sqm.internal.QuerySqmImpl.doList(QuerySqmImpl.java:364)
+	at org.hibernate.query.spi.AbstractSelectionQuery.list(AbstractSelectionQuery.java:143)
+	... 38 more
+</error>
+    <system-out>Standard Commons Logging discovery in action with spring-jcl: please remove commons-logging.jar from classpath in order to avoid potential conflicts
+P3-A Neon project=ancient-leaf-72055027 branch=br-holy-water-a4ihmkkj endpoint=ep-hidden-bread-a4x3zddv.us-east-1.aws.neon.tech role=p3a_group_511_runtime schema=p3a_group_511_20261022 PostgreSQL=17.11 (11592b3) TLS=TLSv1.3 peer=CN=*.us-east-1.aws.neon.tech
+22:18:20.633 [main] INFO org.hibernate.Version -- HHH000412: Hibernate ORM core version 6.6.53.Final
+22:18:20.655 [main] INFO org.hibernate.cache.internal.RegionFactoryInitiator -- HHH000026: Second-level cache disabled
+22:18:22.933 [main] INFO org.hibernate.orm.connections.pooling -- HHH10001005: Database info:
+	Database JDBC URL [Connecting through datasource 'org.praxisplatform.config.service.UiLayoutPageGroupPostgresFixture$1@72f9f27c']
+	Database driver: undefined/unknown
+	Database version: 17.11
+	Autocommit mode: undefined/unknown
+	Isolation level: undefined/unknown
+	Minimum pool size: undefined/unknown
+	Maximum pool size: undefined/unknown
+22:18:23.108 [main] INFO org.hibernate.validator.internal.util.Version -- HV000001: Hibernate Validator 8.0.3.Final
+22:18:23.397 [main] INFO org.hibernate.engine.transaction.jta.platform.internal.JtaPlatformInitiator -- HHH000489: No JTA platform available (set 'hibernate.transaction.jta.platform' to enable JTA platform integration)
+22:18:25.919 [main] INFO org.springframework.data.jpa.repository.query.QueryEnhancerFactory -- Hibernate is in classpath; If applicable, HQL parser will be used.
+</system-out>
+  </testcase>
+  <testcase name="groupsAndCatalogPagePublishThroughTheRealOwnerAndBlockDanglingReferences" classname="org.praxisplatform.config.service.UiLayoutPageGroupPostgresIT" time="133.148">
+    <system-out>P3-A page-publish wallMs=16508 SQL=62 jdbcMs=8978
+</system-out>
+  </testcase>
+  <testcase name="pageStructureCallbackCannotRevokeReadHeadOfGroupsAndStillCommit" classname="org.praxisplatform.config.service.UiLayoutPageGroupPostgresIT" time="99.221" />
+  <testcase name="lastAdmissionCannotReplaceGroupsMappingWithoutChangingContextVersion" classname="org.praxisplatform.config.service.UiLayoutPageGroupPostgresIT" time="36.888" />
+  <testcase name="lastMetadataCallbackCannotRevokeFinalPageStructureAndStillCommit" classname="org.praxisplatform.config.service.UiLayoutPageGroupPostgresIT" time="97.486">
+    <failure message="&#10;Expecting code to raise a throwable." type="java.lang.AssertionError">java.lang.AssertionError: 
+
+Expecting code to raise a throwable.
+	at org.praxisplatform.config.service.UiLayoutPageGroupPostgresIT.lastMetadataCallbackCannotRevokeFinalPageStructureAndStillCommit(UiLayoutPageGroupPostgresIT.java:145)
+	at java.base/java.lang.reflect.Method.invoke(Method.java:580)
+	at java.base/java.util.ArrayList.forEach(ArrayList.java:1596)
+	at java.base/java.util.ArrayList.forEach(ArrayList.java:1596)
+</failure>
+  </testcase>
+  <testcase name="serverCommitFailureRollsBackHeadEtagEventAndDeferredOrphan" classname="org.praxisplatform.config.service.UiLayoutPageGroupPostgresIT" time="32.311">
+    <failure message="&#10;expected: &quot;23503&quot;&#10; but was: null" type="org.opentest4j.AssertionFailedError">org.opentest4j.AssertionFailedError: 
+
+expected: "23503"
+ but was: null
+	at org.praxisplatform.config.service.UiLayoutPageGroupPostgresIT.serverCommitFailureRollsBackHeadEtagEventAndDeferredOrphan(UiLayoutPageGroupPostgresIT.java:98)
+	at java.base/java.lang.reflect.Method.invoke(Method.java:580)
+	at java.base/java.util.ArrayList.forEach(ArrayList.java:1596)
+	at java.base/java.util.ArrayList.forEach(ArrayList.java:1596)
+</failure>
+  </testcase>
+</testsuite>

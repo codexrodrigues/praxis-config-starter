@@ -31,15 +31,28 @@ class UiLayoutWorkspaceSelectionVerifier {
     return verify(invocation, state, true);
   }
 
-  private JsonNode verify(UiLayoutLifecycleInvocation invocation, UiLayoutDraftWorkspaceDocument.TargetState state, boolean historical) {
+  JsonNode verifyHistorical(UiLayoutLifecycleInvocation invocation,
+      UiLayoutDraftWorkspaceDocument.TargetState state, UiLayoutFrozenRecordBatch batch) {
+    return verify(invocation, state, true, batch);
+  }
+
+  private JsonNode verify(UiLayoutLifecycleInvocation invocation,
+      UiLayoutDraftWorkspaceDocument.TargetState state, boolean historical) {
+    return verify(invocation, state, historical, null);
+  }
+
+  private JsonNode verify(UiLayoutLifecycleInvocation invocation,
+      UiLayoutDraftWorkspaceDocument.TargetState state, boolean historical, UiLayoutFrozenRecordBatch batch) {
     UiLayoutDraftWorkspaceDocument.RevisionSelection selectedRevision = state.selectedRevision();
     if (selectedRevision == null) {
       if (state.selectedAssignment() != null) throw invalid("Workspace assignment has no selected revision.");
       return null;
     }
-    UiLayoutRevision revision = revisions.findById(selectedRevision.revisionRef())
+    UiLayoutRevision revision = (batch == null ? revisions.findById(selectedRevision.revisionRef())
+        : java.util.Optional.ofNullable(batch.revisions().get(selectedRevision.revisionRef())))
         .orElseThrow(() -> invalid("Workspace selected revision is unavailable."));
-    UiLayoutDefinition definition = definitions.findById(revision.getDefinitionId())
+    UiLayoutDefinition definition = (batch == null ? definitions.findById(revision.getDefinitionId())
+        : java.util.Optional.ofNullable(batch.definitions().get(revision.getDefinitionId())))
         .orElseThrow(() -> invalid("Workspace selected definition is unavailable."));
     if (historical && (!selectedRevision.revisionRef().equals(revision.getId())
         || !revision.getDefinitionId().equals(definition.getId()))) {
@@ -62,7 +75,8 @@ class UiLayoutWorkspaceSelectionVerifier {
     }
     UiLayoutDraftWorkspaceDocument.AssignmentSelection selectedAssignment = state.selectedAssignment();
     if (selectedAssignment == null) return patch;
-    UiLayoutAssignmentRevision assignment = assignments.findById(selectedAssignment.assignmentRevisionRef())
+    UiLayoutAssignmentRevision assignment = (batch == null ? assignments.findById(selectedAssignment.assignmentRevisionRef())
+        : java.util.Optional.ofNullable(batch.assignments().get(selectedAssignment.assignmentRevisionRef())))
         .orElseThrow(() -> invalid("Workspace selected assignment is unavailable."));
     if (historical && (!selectedAssignment.assignmentRevisionRef().equals(assignment.getId())
         || !invocation.tenantId().equals(selectedAssignment.selector().tenant()))) {

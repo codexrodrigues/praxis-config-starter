@@ -518,6 +518,13 @@ class PageCreationPostgresIT {
         };
     host =
         new PageCreationHost() {
+          public UiLayoutTarget navigationGroupsRoot(PageCreationContext current) {
+            var i = current.invocation();
+            var root = groupRoots.get(new GroupScope(i.tenantId(), current.applicationId(), i.environment(), current.routeNamespace()));
+            if (root == null) throw new UiLayoutLifecycleException(UiLayoutLifecycleException.Code.DENIED, "Unregistered groups scope");
+            return root;
+          }
+
           public PageCreationContext resolve(java.security.Principal p, String v) {
             if (!p.getName().equals(actor) || !v.equals(version))
               throw new UiLayoutLifecycleException(

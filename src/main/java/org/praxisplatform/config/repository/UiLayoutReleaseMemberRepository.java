@@ -7,4 +7,5 @@ import org.springframework.data.jpa.repository.JpaRepository;
 
 public interface UiLayoutReleaseMemberRepository extends JpaRepository<UiLayoutReleaseMember, UUID> {
   List<UiLayoutReleaseMember> findByReleaseIdOrderByMemberOrder(UUID releaseId);
+  List<UiLayoutReleaseMember> findByReleaseIdInOrderByReleaseIdAscMemberOrderAsc(java.util.Collection<UUID> releaseIds);
 }
