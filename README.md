@@ -700,3 +700,7 @@ Operational PostgreSQL/producer/Table-delivery proof remains pending.
 ## Política de CI e publicação
 
 Validação local durante desenvolvimento; Actions apenas no fechamento necessário de versões. Consulte [ACTIONS-RELEASE-POLICY.md](ACTIONS-RELEASE-POLICY.md) para gatilhos, gates e recuperação.
+
+## Publicação governada de páginas
+
+Criação/cópia de páginas e identidade estão descritas em [P2](docs/ai/contracts/page-publication-p0/P2-IMPLEMENTATION.md). A integridade transacional entre heads independentes de páginas e grupos, requisitos do host e provas Neon estão em [P3-A](docs/ai/contracts/page-publication-p0/P3A-IMPLEMENTATION.md). Adoção dos hosts e catálogo HTTP de navegação seguem etapas próprias.

@@ -48,7 +48,7 @@ O runtime não é owner, superuser, createdb, createrole ou bypassrls; não pode
 
 O codec P1-D integrado valida a seed antes da primeira escrita, a projeção e a reprodução de revisões/frozen. As capturas de metadata do root são revalidadas em revisão/freeze e no commit; a última extensão é seguida pela revalidação do contexto/autoridade. Histórico preserva evidência original e não recaptura fonte.
 
-A resolução usa o mapping host existente, com um único app-shell UUID estável por tenant/app/environment/namespace. Shape UUID sozinho não é registro. O teste operacional exerce o provider real via commands, reuso estável, segundo UUID e dimensões desconhecidas. `UiLayoutLifecycleService` bloqueia publish/withdraw/rollback de app-shell até P3-A, inclusive chamadas diretas com policy e validator permissivos e sem PageCreationHost. Não há flag de ativação.
+A resolução usa o mapping host existente, com um único app-shell UUID estável por tenant/app/environment/namespace. Shape UUID sozinho não é registro. O teste operacional exerce o provider real via commands, reuso estável, segundo UUID e dimensões desconhecidas. No corte P2, `UiLayoutLifecycleService` bloqueava publish/withdraw/rollback de app-shell, inclusive chamadas diretas permissivas. [P3-A](P3A-IMPLEMENTATION.md) entrega posteriormente o owner obrigatório de integridade; sua ausência mantém a negação para páginas e grupos. Não há flag de ativação.
 
 ## Validação e limites
 

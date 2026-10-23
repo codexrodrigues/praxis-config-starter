@@ -4,8 +4,7 @@ Implementação de [#509](https://github.com/codexrodrigues/praxis-config-starte
 com costuras compartilhadas entregues no [PR #517](https://github.com/codexrodrigues/praxis-config-starter/pull/517).
 A fonte de código/testes comprovada é `fef0cb2cf31ad0bd9be6fc0424dcdf41b92283f0`.
 Os resultados finais e os limites estão em [P2-IMPLEMENTATION](P2-IMPLEMENTATION.md).
-Revisão e integração são registradas no PR; este documento não antecipa merge nem
-habilita hosts ou mudanças de head de grupos antes de P3-A.
+Este documento registra o corte P1-D/P2: naquele momento, mudanças de head de grupos permaneciam bloqueadas. A evolução posterior do owner de integridade, sem habilitar hosts, está em [P3A-IMPLEMENTATION](P3A-IMPLEMENTATION.md).
 
 ## Inventário e impacto
 
@@ -17,7 +16,7 @@ Classificação `contrato-publico`, com fonte canônica Config e perfil fechado 
 | Draft, revisão, review, ETag e metadata admission | `ja-suportado-mal-nomeado-ou-mal-materializado`: integrar o lifecycle existente. |
 | Root estável por tenant/app/environment/namespace | `ja-suportado-mal-nomeado-ou-mal-materializado`: explicitar a invariável no mapping host de `UiLayoutLifecycleInvocationProvider` e exercitá-la operacionalmente. Validar UUID não registra uma composição. |
 | Ícone e fonte concretamente admitidos | `suportado-parcialmente`: usar structure/source/metadata SPIs atuais; o schema não atesta o catálogo do host. |
-| Integridade entre grupos e páginas em mudança de head | `lacuna-real-de-contrato`: pertence a P3-A; as transições continuam fechadas. |
+| Integridade entre grupos e páginas em mudança de head | `lacuna-real-de-contrato` no inventário P1-D: entregue posteriormente no owner P3-A; o corte P1-D/P2 mantinha transições fechadas. |
 
 O plano isolou o codec, integrou-o sequencialmente no escritor P2, validou as costuras
 sem PageCreationHost e submeteu os dois recortes à revisão independente. Consumidores
@@ -47,9 +46,7 @@ rejeita um segundo UUID e rejeita tenant/app/environment/namespace desconhecidos
 Isso não instala um cadastro paralelo. Host sem fonte/root/ícones admitidos deve negar;
 os defaults dos SPIs permanecem fechados.
 
-`UiLayoutLifecycleService` bloqueia publish, withdraw e rollback de app-shell até
-P3-A, incluindo chamadas diretas com policy/validator permissivos e sem PageCreationHost.
-Não há flag temporária para contornar esse gate. V70 também sela UPDATE/DELETE de
+No corte P1-D/P2, `UiLayoutLifecycleService` bloqueava publish, withdraw e rollback de app-shell, inclusive chamadas diretas permissivas. P3-A substitui esse bloqueio pelo owner obrigatório de integridade para páginas e grupos; sem owner, as transições continuam negadas. Não há flag temporária. V70 também sela UPDATE/DELETE de
 qualquer draft já RELEASED e impede TRUNCATE, usando a função canônica de imutabilidade.
 A escrita final DRAFT→RELEASED permanece permitida; reviews/heads mantêm seus próprios
 registros. O documento congelado e as capturas embutidas não são reescritos.

@@ -1,0 +1,94 @@
+[INFO] Scanning for projects...
+[INFO] 
+[INFO] -----------< io.github.codexrodrigues:praxis-config-starter >-----------
+[INFO] Building Praxis Config Starter 0.1.0-rc.166
+[INFO]   from pom.xml
+[INFO] --------------------------------[ jar ]---------------------------------
+[INFO] 
+[INFO] --- resources:3.3.1:resources (default-resources) @ praxis-config-starter ---
+[INFO] Copying 0 resource from src/main/resources to target/classes
+[INFO] Copying 85 resources from src/main/resources to target/classes
+[INFO] 
+[INFO] --- compiler:3.11.0:compile (default-compile) @ praxis-config-starter ---
+[INFO] Nothing to compile - all classes are up to date
+[INFO] 
+[INFO] --- resources:3.3.1:testResources (default-testResources) @ praxis-config-starter ---
+[INFO] Copying 7 resources from src/test/resources to target/test-classes
+[INFO] 
+[INFO] --- compiler:3.11.0:testCompile (default-testCompile) @ praxis-config-starter ---
+[INFO] Nothing to compile - all classes are up to date
+[INFO] 
+[INFO] --- surefire:3.5.6:test (default-test) @ praxis-config-starter ---
+[INFO] Using auto detected provider org.apache.maven.surefire.junitplatform.JUnitPlatformProvider
+[INFO] 
+[INFO] -------------------------------------------------------
+[INFO]  T E S T S
+[INFO] -------------------------------------------------------
+[INFO] Running org.praxisplatform.config.service.UiLayoutPageGroupDensityPostgresIT
+Standard Commons Logging discovery in action with spring-jcl: please remove commons-logging.jar from classpath in order to avoid potential conflicts
+P3-A Neon project=ancient-leaf-72055027 branch=br-holy-water-a4ihmkkj endpoint=ep-hidden-bread-a4x3zddv.us-east-1.aws.neon.tech role=p3a_group_511_runtime schema=p3a_group_511_20261022 PostgreSQL=17.11 (11592b3) TLS=TLSv1.3 peer=CN=*.us-east-1.aws.neon.tech
+23:00:28.111 [main] INFO org.hibernate.Version -- HHH000412: Hibernate ORM core version 6.6.53.Final
+23:00:28.127 [main] INFO org.hibernate.cache.internal.RegionFactoryInitiator -- HHH000026: Second-level cache disabled
+23:00:30.360 [main] INFO org.hibernate.orm.connections.pooling -- HHH10001005: Database info:
+	Database JDBC URL [Connecting through datasource 'org.praxisplatform.config.service.UiLayoutPageGroupPostgresFixture$1@2e66bc32']
+	Database driver: undefined/unknown
+	Database version: 17.11
+	Autocommit mode: undefined/unknown
+	Isolation level: undefined/unknown
+	Minimum pool size: undefined/unknown
+	Maximum pool size: undefined/unknown
+23:00:30.523 [main] INFO org.hibernate.validator.internal.util.Version -- HV000001: Hibernate Validator 8.0.3.Final
+23:00:30.774 [main] INFO org.hibernate.engine.transaction.jta.platform.internal.JtaPlatformInitiator -- HHH000489: No JTA platform available (set 'hibernate.transaction.jta.platform' to enable JTA platform integration)
+23:00:33.233 [main] INFO org.springframework.data.jpa.repository.query.QueryEnhancerFactory -- Hibernate is in classpath; If applicable, HQL parser will be used.
+P3-A synthetic seed pages=1000 workspaceEncodedInputBytes=7194991 ledgerStoredBytes=5931994 rootMetadataBytes=494000 wallMs=88911 runtime=true triggers=true
+P3-A density case=all-1000-valid catalogPages=1000 budgetMs=40000 wallMs=40787 SQL=187 jdbcMs=29164 isolationCalls=58 isolationMs=8793 attemptedPageQueries=22 loadedWorkspaceIdentitiesPerPass={1=704} loadedWorkspaceBytesPerPass={1=5196215} managedBaseline=12 managedPeak=204 managedAtLastBatchStart=12 knownWorkspaceEncodedInputBytesPerFullPass=7194991 freshRollbackChecked=true outcome=org.praxisplatform.config.service.UiLayoutLifecycleException: Lifecycle validation attempt is no longer active.
+[ERROR] Tests run: 1, Failures: 1, Errors: 0, Skipped: 0, Time elapsed: 234.0 s <<< FAILURE! -- in org.praxisplatform.config.service.UiLayoutPageGroupDensityPostgresIT
+[ERROR] org.praxisplatform.config.service.UiLayoutPageGroupDensityPostgresIT.thousandCorrelatedPagesAreScannedCompletelyWithALastPageSentinel -- Time elapsed: 222.3 s <<< FAILURE!
+org.opentest4j.AssertionFailedError: 
+
+expected: 
+  null
+ but was: 
+  org.praxisplatform.config.service.UiLayoutLifecycleException: Lifecycle validation attempt is no longer active.
+  	at org.praxisplatform.config.service.UiLayoutValidationAttempt.requireActive(UiLayoutValidationAttempt.java:65)
+  	at org.praxisplatform.config.service.UiLayoutValidationContext.require(UiLayoutValidationContext.java:20)
+  	at org.praxisplatform.config.service.UiLayoutValidationContext.call(UiLayoutValidationContext.java:29)
+  	...(88 remaining lines not displayed - this can be changed with Assertions.setMaxStackTraceElementsDisplayed)
+	at org.praxisplatform.config.service.UiLayoutPageGroupDensityPostgresIT.thousandCorrelatedPagesAreScannedCompletelyWithALastPageSentinel(UiLayoutPageGroupDensityPostgresIT.java:39)
+	at java.base/java.lang.reflect.Method.invoke(Method.java:580)
+	at java.base/java.util.ArrayList.forEach(ArrayList.java:1596)
+	at java.base/java.util.ArrayList.forEach(ArrayList.java:1596)
+
+[INFO] 
+[INFO] Results:
+[INFO] 
+[ERROR] Failures: 
+[ERROR]   UiLayoutPageGroupDensityPostgresIT.thousandCorrelatedPagesAreScannedCompletelyWithALastPageSentinel:39 
+expected: 
+  null
+ but was: 
+  org.praxisplatform.config.service.UiLayoutLifecycleException: Lifecycle validation attempt is no longer active.
+  	at org.praxisplatform.config.service.UiLayoutValidationAttempt.requireActive(UiLayoutValidationAttempt.java:65)
+  	at org.praxisplatform.config.service.UiLayoutValidationContext.require(UiLayoutValidationContext.java:20)
+  	at org.praxisplatform.config.service.UiLayoutValidationContext.call(UiLayoutValidationContext.java:29)
+  	...(88 remaining lines not displayed - this can be changed with Assertions.setMaxStackTraceElementsDisplayed)
+[INFO] 
+[ERROR] Tests run: 1, Failures: 1, Errors: 0, Skipped: 0
+[INFO] 
+[INFO] ------------------------------------------------------------------------
+[INFO] BUILD FAILURE
+[INFO] ------------------------------------------------------------------------
+[INFO] Total time:  03:54 min
+[INFO] Finished at: 2026-10-22T23:04:15-03:00
+[INFO] ------------------------------------------------------------------------
+[ERROR] Failed to execute goal org.apache.maven.plugins:maven-surefire-plugin:3.5.6:test (default-test) on project praxis-config-starter: There are test failures.
+[ERROR] 
+[ERROR] See <CONFIG_WORKTREE>/target/surefire-reports for the individual test results.
+[ERROR] See dump files (if any exist) [date].dump, [date]-jvmRun[N].dump and [date].dumpstream.
+[ERROR] -> [Help 1]
+[ERROR] 
+[ERROR] To see the full stack trace of the errors, re-run Maven with the -e switch.
+[ERROR] Re-run Maven using the -X switch to enable full debug logging.
+[ERROR] 
+[ERROR] For more information about the errors and possible solutions, please read the following articles:
+[ERROR] [Help 1] http://cwiki.apache.org/confluence/display/MAVEN/MojoFailureException

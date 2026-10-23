@@ -1,0 +1,57 @@
+[INFO] Scanning for projects...
+[INFO] 
+[INFO] -----------< io.github.codexrodrigues:praxis-config-starter >-----------
+[INFO] Building Praxis Config Starter 0.1.0-rc.166
+[INFO]   from pom.xml
+[INFO] --------------------------------[ jar ]---------------------------------
+[INFO] 
+[INFO] --- resources:3.3.1:resources (default-resources) @ praxis-config-starter ---
+[INFO] Copying 0 resource from src/main/resources to target/classes
+[INFO] Copying 85 resources from src/main/resources to target/classes
+[INFO] 
+[INFO] --- compiler:3.11.0:compile (default-compile) @ praxis-config-starter ---
+[INFO] Nothing to compile - all classes are up to date
+[INFO] 
+[INFO] --- resources:3.3.1:testResources (default-testResources) @ praxis-config-starter ---
+[INFO] Copying 7 resources from src/test/resources to target/test-classes
+[INFO] 
+[INFO] --- compiler:3.11.0:testCompile (default-testCompile) @ praxis-config-starter ---
+[INFO] Nothing to compile - all classes are up to date
+[INFO] 
+[INFO] --- surefire:3.5.6:test (default-test) @ praxis-config-starter ---
+[INFO] Using auto detected provider org.apache.maven.surefire.junitplatform.JUnitPlatformProvider
+[INFO] 
+[INFO] -------------------------------------------------------
+[INFO]  T E S T S
+[INFO] -------------------------------------------------------
+[INFO] Running org.praxisplatform.config.service.UiLayoutPageGroupDensityPostgresIT
+Standard Commons Logging discovery in action with spring-jcl: please remove commons-logging.jar from classpath in order to avoid potential conflicts
+P3-A Neon project=ancient-leaf-72055027 branch=br-holy-water-a4ihmkkj endpoint=ep-hidden-bread-a4x3zddv.us-east-1.aws.neon.tech role=p3a_group_511_runtime schema=p3a_group_511_20261022 PostgreSQL=17.11 (11592b3) TLS=TLSv1.3 peer=CN=*.us-east-1.aws.neon.tech
+23:23:48.733 [main] INFO org.hibernate.Version -- HHH000412: Hibernate ORM core version 6.6.53.Final
+23:23:48.752 [main] INFO org.hibernate.cache.internal.RegionFactoryInitiator -- HHH000026: Second-level cache disabled
+23:23:50.964 [main] INFO org.hibernate.orm.connections.pooling -- HHH10001005: Database info:
+	Database JDBC URL [Connecting through datasource 'org.praxisplatform.config.service.UiLayoutPageGroupPostgresFixture$1@2e66bc32']
+	Database driver: undefined/unknown
+	Database version: 17.11
+	Autocommit mode: undefined/unknown
+	Isolation level: undefined/unknown
+	Minimum pool size: undefined/unknown
+	Maximum pool size: undefined/unknown
+23:23:51.124 [main] INFO org.hibernate.validator.internal.util.Version -- HV000001: Hibernate Validator 8.0.3.Final
+23:23:51.381 [main] INFO org.hibernate.engine.transaction.jta.platform.internal.JtaPlatformInitiator -- HHH000489: No JTA platform available (set 'hibernate.transaction.jta.platform' to enable JTA platform integration)
+23:23:53.793 [main] INFO org.springframework.data.jpa.repository.query.QueryEnhancerFactory -- Hibernate is in classpath; If applicable, HQL parser will be used.
+P3-A synthetic seed pages=1000 workspaceEncodedInputBytes=7195000 ledgerStoredBytes=5932000 rootMetadataBytes=494000 wallMs=90450 runtime=true triggers=true
+P3-A density case=all-1000-valid catalogPages=1000 batchSize=128 budgetMs=40000 wallMs=35688 SQL=165 jdbcMs=25032 isolationCalls=52 isolationMs=7425 attemptedPageQueries=18 loadedWorkspaceIdentitiesPerPass={1=1000, 2=1000} loadedWorkspaceBytesPerPass={1=7381000, 2=7381000} maxBatchLoadedWorkspaceTextBytes=944768 revisionPatchTextBytesLoadedDuringPass={1=621000, 2=621000} maxBatchLoadedPatchTextBytes=79488 managedBaseline=12 managedPeak=782 managedAtLastBatchStart=14 knownWorkspaceEncodedInputBytesPerFullPass=7195000 freshRollbackChecked=false outcome=accepted
+P3-A density case=last-page-blocks catalogPages=1000 batchSize=128 budgetMs=40000 wallMs=21724 SQL=89 jdbcMs=14714 isolationCalls=30 isolationMs=4548 attemptedPageQueries=8 loadedWorkspaceIdentitiesPerPass={1=1000} loadedWorkspaceBytesPerPass={1=7381000} maxBatchLoadedWorkspaceTextBytes=944768 revisionPatchTextBytesLoadedDuringPass={1=621000} maxBatchLoadedPatchTextBytes=79488 managedBaseline=12 managedPeak=780 managedAtLastBatchStart=12 knownWorkspaceEncodedInputBytesPerFullPass=7195000 freshRollbackChecked=true outcome=org.praxisplatform.config.service.UiLayoutLifecycleException: The page/group publication dependencies are not satisfied.
+[INFO] Tests run: 1, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 261.7 s -- in org.praxisplatform.config.service.UiLayoutPageGroupDensityPostgresIT
+[INFO] 
+[INFO] Results:
+[INFO] 
+[INFO] Tests run: 1, Failures: 0, Errors: 0, Skipped: 0
+[INFO] 
+[INFO] ------------------------------------------------------------------------
+[INFO] BUILD SUCCESS
+[INFO] ------------------------------------------------------------------------
+[INFO] Total time:  04:22 min
+[INFO] Finished at: 2026-10-22T23:28:03-03:00
+[INFO] ------------------------------------------------------------------------

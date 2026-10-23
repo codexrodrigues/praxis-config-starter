@@ -1,6 +1,8 @@
 # Plano canônico — páginas derivadas nos hosts Praxis
 
-22/10/2026. Complementa e corrige a [proposta de produto](PRODUCT-PROPOSAL.md). **P0 formalizado e revisado localmente; implementação de runtime/hosts não iniciada.** As decisões abaixo são o destino da evolução, não descrição de APIs já disponíveis. O desenho inicial foi `docs-apenas`; o P0 é uma formalização de `contrato-publico` com schemas, corpus e testes focais. Implementar runtime exige mudanças arquiteturais e transversais.
+**Registro histórico do plano/P0 — 22/10/2026.** Complementa e corrige a [proposta de produto](PRODUCT-PROPOSAL.md). **P0 formalizado e revisado localmente; implementação de runtime/hosts não iniciada.** As decisões abaixo são o destino da evolução, não descrição de APIs já disponíveis. O desenho inicial foi `docs-apenas`; o P0 é uma formalização de `contrato-publico` com schemas, corpus e testes focais. Implementar runtime exige mudanças arquiteturais e transversais.
+
+Estado posterior ao planejamento P0: Config P1/P2 foram integrados; P3-A entrega a integridade transacional de páginas/grupos, com fontes e gates em [P3A-IMPLEMENTATION](P3A-IMPLEMENTATION.md). P3-B e adoção HTTP/UI dos hosts continuam etapas posteriores. O plano original abaixo permanece como proveniência; não representa o estado atual de toda a implementação.
 
 ## 1. Resultado e limites do incremento
 
@@ -139,7 +141,7 @@ Páginas do exemplo gravadas como `published-page:<uuid>` em `ui_user_config` ex
 | P5 — demonstração e migração | Hero + exemplo Angular + Quickstart: adapters, migração local/importação e prova corporativa | Mesmo fluxo com limites explícitos; atualização da página existente, múltiplos menus, reload direto, histórico e recuperação verificáveis. |
 | P6 — documentação e adoção | Landing, recipes, corpus HTTP e skills | Provas aprovadas na árvore/dependências atuais; exemplos e guidance canônicos atualizados antes de anunciar a capacidade. |
 
-Responsabilidades são por dono canônico, não atribuições de processos em execução. P0 foi formalizado em checkout isolado de Config; P1–P6 não iniciados. O P0 mantém as decisões arquiteturais e explicita o perfil de admissão inicial e a extensão childSources para filhos novos, sem wiring local antecipado. Qualquer impossibilidade concreta futura exige ADR antes de contorno local.
+Responsabilidades são por dono canônico, não atribuições de processos em execução. **Registro histórico do corte P0:** formalizado em checkout isolado de Config; naquele corte P1–P6 não haviam iniciado. O estado posterior está registrado acima e nas entregas por fase. O P0 mantém as decisões arquiteturais e explicita o perfil de admissão inicial e a extensão childSources para filhos novos, sem wiring local antecipado. Qualquer impossibilidade concreta futura exige ADR antes de contorno local.
 
 ## 8. Matriz mínima de aceite
 

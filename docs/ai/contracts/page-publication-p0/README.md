@@ -1,9 +1,11 @@
 # Publicação de páginas — contrato P0
 
-22/10/2026. **Especificação normativa para implementação; nenhuma API nova está ativa.**
+22/10/2026. **Especificação normativa; registro histórico P0, quando nenhuma API nova estava ativa.**
 Classificação: `contrato-publico`, com impacto arquitetural/transversal. P0 altera somente
 especificação, corpus e testes de contrato. Não modifica produção, hosts, banco ou release.
 O schema tem versão de documento 1; `p0` identifica o pacote de planejamento, não uma API paralela.
+
+Estado posterior ao planejamento P0: Config P1/P2 foram integrados; P3-A entrega a integridade transacional de páginas/grupos, com fontes e gates em [P3A-IMPLEMENTATION](P3A-IMPLEMENTATION.md). P3-B e adoção HTTP/UI dos hosts continuam etapas posteriores. O plano original abaixo permanece como proveniência; não representa o estado atual de toda a implementação.
 
 ## Planejamento e entrega
 

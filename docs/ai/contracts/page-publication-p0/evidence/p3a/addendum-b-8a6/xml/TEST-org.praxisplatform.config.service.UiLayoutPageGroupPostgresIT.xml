@@ -1,0 +1,33 @@
+<testsuite xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="https://maven.apache.org/surefire/maven-surefire-plugin/xsd/surefire-test-report.xsd" version="3.0.2" name="org.praxisplatform.config.service.UiLayoutPageGroupPostgresIT" time="1072.429" tests="5" errors="0" skipped="0" failures="1" flakes="0">
+  <testcase name="groupLockScopeIncludesApplicationTenantEnvironmentNamespaceButNotUnitOrActor" classname="org.praxisplatform.config.service.UiLayoutPageGroupPostgresIT" time="87.314">
+    <failure message="[Extracted: code] &#10;expected: NOT_FOUND&#10; but was: DENIED" type="org.opentest4j.AssertionFailedError">org.opentest4j.AssertionFailedError: 
+[Extracted: code] 
+expected: NOT_FOUND
+ but was: DENIED
+	at org.praxisplatform.config.service.UiLayoutPageGroupPostgresIT.groupLockScopeIncludesApplicationTenantEnvironmentNamespaceButNotUnitOrActor(UiLayoutPageGroupPostgresIT.java:639)
+	at java.base/java.lang.reflect.Method.invoke(Method.java:580)
+	at java.base/java.util.ArrayList.forEach(ArrayList.java:1596)
+	at java.base/java.util.ArrayList.forEach(ArrayList.java:1596)
+</failure>
+    <system-out>Standard Commons Logging discovery in action with spring-jcl: please remove commons-logging.jar from classpath in order to avoid potential conflicts
+P3-A Neon project=ancient-leaf-72055027 branch=br-holy-water-a4ihmkkj endpoint=ep-hidden-bread-a4x3zddv.us-east-1.aws.neon.tech role=p3a_group_511_runtime schema=p3a_group_511_20261022 PostgreSQL=17.11 (11592b3) TLS=TLSv1.3 peer=CN=*.us-east-1.aws.neon.tech
+23:39:38.755 [main] INFO org.hibernate.Version -- HHH000412: Hibernate ORM core version 6.6.53.Final
+23:39:38.772 [main] INFO org.hibernate.cache.internal.RegionFactoryInitiator -- HHH000026: Second-level cache disabled
+23:39:41.006 [main] INFO org.hibernate.orm.connections.pooling -- HHH10001005: Database info:
+	Database JDBC URL [Connecting through datasource 'org.praxisplatform.config.service.UiLayoutPageGroupPostgresFixture$1@77a074b4']
+	Database driver: undefined/unknown
+	Database version: 17.11
+	Autocommit mode: undefined/unknown
+	Isolation level: undefined/unknown
+	Minimum pool size: undefined/unknown
+	Maximum pool size: undefined/unknown
+23:39:41.172 [main] INFO org.hibernate.validator.internal.util.Version -- HV000001: Hibernate Validator 8.0.3.Final
+23:39:41.422 [main] INFO org.hibernate.engine.transaction.jta.platform.internal.JtaPlatformInitiator -- HHH000489: No JTA platform available (set 'hibernate.transaction.jta.platform' to enable JTA platform integration)
+23:39:43.820 [main] INFO org.springframework.data.jpa.repository.query.QueryEnhancerFactory -- Hibernate is in classpath; If applicable, HQL parser will be used.
+</system-out>
+  </testcase>
+  <testcase name="historicalPublishedCopyKeepsFixedContentAndPublishesWithoutAncestorReadGrants" classname="org.praxisplatform.config.service.UiLayoutPageGroupPostgresIT" time="263.457" />
+  <testcase name="privatePageInAnotherUnitStillPreventsGroupRemoval" classname="org.praxisplatform.config.service.UiLayoutPageGroupPostgresIT" time="170.805" />
+  <testcase name="rollbackRestoresTheWholePageAndItsBindingsWithoutChangingOtherHeads" classname="org.praxisplatform.config.service.UiLayoutPageGroupPostgresIT" time="352.233" />
+  <testcase name="uncataloguedNativePageCannotPublishAndAnUnattributedActiveHeadBlocksGroupAdoption" classname="org.praxisplatform.config.service.UiLayoutPageGroupPostgresIT" time="186.821" />
+</testsuite>

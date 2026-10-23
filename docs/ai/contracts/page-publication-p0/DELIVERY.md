@@ -410,3 +410,7 @@ revisor é o coordenador distinto do autor. P0 #506 e refinamento #514 integrado
 registrados por SHA, sob revisão independente; detalhes, fontes, recursos e limites em [P1-A-IMPLEMENTATION.md](P1-A-IMPLEMENTATION.md).
 Sem P1-D/P2, migração adicional, host de páginas ou release. Skills canônicas sob responsabilidade
 do coordenador; nenhum arquivo compartilhado de skills foi editado por este trabalhador.
+
+## Registro posterior P2/P3-A — 23/10/2026
+
+P1-D/P2 foram integrados no Config em `78e914fdc1f03c7abf7e201fd2d2a79fc561f26f` (PR517). P3-A #511 usa worktree e Neon exclusivos, escritor `p2_catalog`, revisão independente do coordenador/peer e rastreio no PR518. [P3A-IMPLEMENTATION](P3A-IMPLEMENTATION.md) contém fontes, gates, limitações, recursos e skills. P3-B/hosts/UI/migração permanecem posteriores; nenhum deploy/release é inferido desse registro.
