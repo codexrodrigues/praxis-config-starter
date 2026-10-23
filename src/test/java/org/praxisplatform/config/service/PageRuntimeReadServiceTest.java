@@ -156,6 +156,12 @@ class PageRuntimeReadServiceTest {
         .isEqualTo(UiLayoutResolutionException.Code.INVALID_PUBLICATION_CURSOR);
   }
 
+  @Test void malformedHostGroupsRootIsUnavailableRatherThanAnInvalidCallerCursor() {
+    when(host.navigationGroupsRoot(any())).thenReturn(new UiLayoutTarget("praxis-app-shell", "private-invalid-host-root"));
+    assertThatThrownBy(() -> navigation(null, null, 50)).extracting("code")
+        .isEqualTo(UiLayoutLifecycleException.Code.SOURCE_UNAVAILABLE);
+  }
+
   @Test void authorizedEmptyGroupsWitnessTheirHeadButDeniedGroupsRevealNoHead() {
     var group = addGroups(false);
     var first = navigation(null, null, 50);

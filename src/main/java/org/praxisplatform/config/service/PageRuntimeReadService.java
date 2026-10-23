@@ -265,7 +265,11 @@ public final class PageRuntimeReadService {
       this.groupsRoot = navigation ? call(() -> host.navigationGroupsRoot(context)) : null;
       if (navigation) {
         if (groupsRoot == null || !UiLayoutNavigationGroupsRevisionReproduction.TYPE.equals(groupsRoot.componentType())) throw unavailable();
-        strictUuid(groupsRoot.componentId());
+        try {
+          strictUuid(groupsRoot.componentId());
+        } catch (UiLayoutResolutionException invalidHostIdentity) {
+          throw unavailable();
+        }
         requireTarget(groupsRoot);
       }
       this.vector = call(() -> store.vector(context, page, groupsRoot));
