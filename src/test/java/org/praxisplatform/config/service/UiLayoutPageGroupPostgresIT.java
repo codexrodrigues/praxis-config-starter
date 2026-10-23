@@ -210,6 +210,91 @@ class UiLayoutPageGroupPostgresIT extends UiLayoutPageGroupPostgresFixture {
     return new UiLayoutLifecycleException(UiLayoutLifecycleException.Code.DENIED, "Current fixture policy denied.");
   }
 
+  enum Removal { OMIT, ROLLBACK, WITHDRAW }
+
+  static java.util.stream.Stream<org.junit.jupiter.params.provider.Arguments> races() {
+    return Arrays.stream(Removal.values()).flatMap(removal -> java.util.stream.Stream.of(
+        org.junit.jupiter.params.provider.Arguments.of(removal, false),
+        org.junit.jupiter.params.provider.Arguments.of(removal, true)));
+  }
+
+  @org.junit.jupiter.params.ParameterizedTest(name = "page versus {0}, groupsWin={1}")
+  @org.junit.jupiter.params.provider.MethodSource("races")
+  void controlledPageAndGroupTransitionsShareTheReferenceLock(Removal removal, boolean groupsWin) throws Exception {
+    UUID group = UUID.randomUUID();
+    UUID empty = groupRelease();
+    var emptyHead = publish(host.alice, host.groups, empty, null);
+    UUID withGroup = groupRelease(group);
+    var initialGroupHead = publish(host.alice, host.groups, withGroup, emptyHead.headEtag());
+    UUID removalRelease = removal == Removal.OMIT ? groupRelease() : empty;
+    var page = newPage(host.alice);
+    UUID pageRelease = pageRelease(host.alice, page, "Controlled race", group);
+    java.util.concurrent.Callable<UiLayoutReleaseHeadReceipt> pageAction = () -> publish(host.alice, page.target(), pageRelease, null);
+    java.util.concurrent.Callable<UiLayoutReleaseHeadReceipt> groupAction = () -> removeGroups(removal, removalRelease, initialGroupHead.headEtag());
+    var lockAcquired = new java.util.concurrent.CountDownLatch(1);
+    var releaseWinner = new java.util.concurrent.CountDownLatch(1);
+    var winningConnection = new java.util.concurrent.atomic.AtomicReference<java.sql.Connection>();
+    var losingConnection = new java.util.concurrent.atomic.AtomicReference<java.sql.Connection>();
+    var key = new java.util.concurrent.atomic.AtomicReference<Map<Integer, Object>>();
+    var loserAttempts = new java.util.concurrent.atomic.AtomicInteger();
+    probe = new SqlProbe() {
+      @Override public void before(java.sql.Connection connection, String sql, Map<Integer, Object> binds) {
+        if (!sql.contains("pg_try_advisory_xact_lock") || !Thread.currentThread().getName().equals("p3-loser")) return;
+        if (losingConnection.compareAndSet(null, connection)) {
+          assertThat(connection).isNotSameAs(winningConnection.get());
+          assertThat(binds).isEqualTo(key.get());
+          loserAttempts.incrementAndGet();
+        }
+      }
+      @Override public void after(java.sql.Connection connection, String sql, Map<Integer, Object> binds, Object result) throws Exception {
+        if (!sql.contains("pg_try_advisory_xact_lock") || !Thread.currentThread().getName().equals("p3-winner")
+            || !winningConnection.compareAndSet(null, connection)) return;
+        key.set(binds);
+        lockAcquired.countDown();
+        if (!releaseWinner.await(45, java.util.concurrent.TimeUnit.SECONDS)) throw new AssertionError("bounded winner barrier expired");
+      }
+    };
+    var executor = java.util.concurrent.Executors.newFixedThreadPool(2);
+    try {
+      var winner = executor.submit(() -> {
+        Thread.currentThread().setName("p3-winner");
+        return (groupsWin ? groupAction : pageAction).call();
+      });
+      assertThat(lockAcquired.await(45, java.util.concurrent.TimeUnit.SECONDS)).isTrue();
+      var loser = executor.submit(() -> {
+        Thread.currentThread().setName("p3-loser");
+        return catchThrowable(() -> (groupsWin ? pageAction : groupAction).call());
+      });
+      Throwable conflict = loser.get(60, java.util.concurrent.TimeUnit.SECONDS);
+      assertThat(conflict).isInstanceOf(UiLayoutLifecycleException.class).extracting("code")
+          .isEqualTo(UiLayoutLifecycleException.Code.PRECONDITION_FAILED);
+      assertThat(loserAttempts.get()).isEqualTo(1);
+      releaseWinner.countDown();
+      winner.get(60, java.util.concurrent.TimeUnit.SECONDS);
+    } finally {
+      releaseWinner.countDown();
+      executor.shutdownNow();
+      assertThat(executor.awaitTermination(60, java.util.concurrent.TimeUnit.SECONDS)).isTrue();
+      probe = null;
+    }
+    assertNoOrphans();
+    assertThatThrownBy(() -> (groupsWin ? pageAction : groupAction).call())
+        .isInstanceOf(UiLayoutLifecycleException.class).extracting("code")
+        .isEqualTo(UiLayoutLifecycleException.Code.INVALID_RELEASE);
+    assertNoOrphans();
+    if (groupsWin) assertThat(headState(page.target())).isEmpty();
+    else assertThat(headState(host.groups).get("active_release_id")).isEqualTo(withGroup);
+  }
+
+  private UiLayoutReleaseHeadReceipt removeGroups(Removal removal, UUID release, String etag) {
+    var condition = UiLayoutLifecycleCommandService.HeadWriteCondition.match(etag);
+    return switch (removal) {
+      case OMIT -> publish(host.alice, host.groups, release, etag);
+      case ROLLBACK -> host.commands.rollback(host.alice, host.alice.version(), host.groups, condition, release, "Controlled removal");
+      case WITHDRAW -> host.commands.withdraw(host.alice, host.alice.version(), host.groups, condition, "Controlled removal");
+    };
+  }
+
   private PageCreationReceipt newPage(Actor actor) {
     return host.pages.create(actor, actor.version(), new PageCreationCommand(UUID.randomUUID(),
         new PageSourceReference.Native("fixture:page", "r1"), "Created page")).receipt();

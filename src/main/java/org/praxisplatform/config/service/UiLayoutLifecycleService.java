@@ -233,7 +233,9 @@ class UiLayoutLifecycleService {
     Scope scope = scope(invocation);
     requirePolicy(UiLayoutLifecycleOperation.WITHDRAW_RELEASE, scope, actor);
     reason = requireReason(reason);
-    UiLayoutReleaseHead head = head(scope); requireHeadCondition(condition, head, false);
+    UiLayoutReleaseHead head = heads.findForUpdate(scope.tenantId(), scope.environment(),
+        scope.rootTarget().componentType(), scope.rootTarget().componentId()).orElse(null);
+    requireHeadCondition(condition, head, false);
     UUID previous = head.getActiveReleaseId();
     if (previous == null) fail(UiLayoutLifecycleException.Code.INVALID_STATE, "There is no active release to withdraw.");
     head.setActiveReleaseId(null); head.setHeadEtag(UUID.randomUUID()); head.setUpdatedAt(Instant.now(clock)); heads.save(head);

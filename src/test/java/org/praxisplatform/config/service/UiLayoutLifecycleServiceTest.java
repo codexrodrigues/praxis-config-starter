@@ -77,6 +77,19 @@ class UiLayoutLifecycleServiceTest {
   }
 
   @Test
+  void withdrawWithoutHeadRequiresAnExistingStrongValidator() {
+    when(heads.findForUpdate(scope.tenantId(), scope.environment(), scope.rootTarget().componentType(),
+        scope.rootTarget().componentId())).thenReturn(Optional.empty());
+    for (var condition : java.util.List.of(condition(UUID.randomUUID()), condition(null))) {
+      assertThatThrownBy(() -> service.withdraw(invocation(scope), condition, "withdraw absent", null))
+          .isInstanceOf(UiLayoutLifecycleException.class).extracting("code")
+          .isEqualTo(UiLayoutLifecycleException.Code.PRECONDITION_FAILED);
+    }
+    verify(heads, never()).save(any());
+    verify(events, never()).save(any());
+  }
+
+  @Test
   void pageAndGroupHeadTransitionsAreClosedWithoutPageHostEvenWithPermissivePolicyAndValidator() {
     for (String type : List.of("praxis-app-shell", "praxis-dynamic-page")) {
     var groups = new UiLayoutLifecycleService.Scope("tenant-a", "unit", "lab",

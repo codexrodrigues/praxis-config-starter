@@ -17,6 +17,7 @@ import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 /** Host-attested invertible registration plus the real Config auto-configuration. */
 final class UiLayoutPageGroupHostFixture implements AutoCloseable {
   record Scope(String tenant, String application, String environment, String namespace) {}
+  record PhysicalRoot(String tenant, String environment, UiLayoutTarget root) {}
   record Actor(String name, String unit, String version, Scope scope) implements Principal {
     public String getName() { return name; }
   }
@@ -25,7 +26,7 @@ final class UiLayoutPageGroupHostFixture implements AutoCloseable {
   final UiLayoutTarget groups;
   final Map<String, Actor> actors = new ConcurrentHashMap<>();
   final Map<Scope, UiLayoutTarget> groupRoots = new ConcurrentHashMap<>();
-  final Map<UiLayoutTarget, Scope> inverseRoots = new ConcurrentHashMap<>();
+  final Map<PhysicalRoot, Scope> inverseRoots = new ConcurrentHashMap<>();
   final AnnotationConfigApplicationContext application = new AnnotationConfigApplicationContext();
   final ObjectNode sourcePage;
   final UiLayoutLifecycleCommandService commands;
@@ -92,14 +93,14 @@ final class UiLayoutPageGroupHostFixture implements AutoCloseable {
       public PageCreationContext resolveLifecycle(UiLayoutLifecycleInvocation invocation) {
         var actor = current(invocation);
         if ("praxis-app-shell".equals(invocation.rootTarget().componentType())
-            && !actor.scope().equals(inverseRoots.get(invocation.rootTarget()))) throw denied();
+            && !actor.scope().equals(inverseRoots.get(physical(actor.scope(), invocation.rootTarget())))) throw denied();
         return new PageCreationContext(actor.scope().application(), actor.scope().namespace(), invocation);
       }
       public UiLayoutTarget navigationGroupsRoot(PageCreationContext context) {
         var actor = current(context.invocation());
         if (!actor.scope().application().equals(context.applicationId()) || !actor.scope().namespace().equals(context.routeNamespace())) throw denied();
         var root = groupRoots.get(actor.scope());
-        if (root == null || !actor.scope().equals(inverseRoots.get(root))) throw denied();
+        if (root == null || !actor.scope().equals(inverseRoots.get(physical(actor.scope(), root)))) throw denied();
         return root;
       }
       public void require(PageCreationOperation operation, PageCreationContext context, PageSourceReference reference) {
@@ -166,8 +167,11 @@ final class UiLayoutPageGroupHostFixture implements AutoCloseable {
   Actor addActor(String name, String unit, String version, Scope scope) {
     var actor = new Actor(name, unit, version, scope); actors.put(name, actor); return actor;
   }
+  private static PhysicalRoot physical(Scope scope, UiLayoutTarget root) {
+    return new PhysicalRoot(scope.tenant(), scope.environment(), root);
+  }
   void bindGroups(Scope scope, UiLayoutTarget root) {
-    var previous = inverseRoots.putIfAbsent(root, scope);
+    var previous = inverseRoots.putIfAbsent(physical(scope, root), scope);
     if (previous != null && !previous.equals(scope)) throw denied();
     groupRoots.put(scope, root);
   }
