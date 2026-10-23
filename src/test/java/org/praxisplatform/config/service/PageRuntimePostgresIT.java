@@ -346,6 +346,8 @@ class PageRuntimePostgresIT extends PageRuntimePostgresFixture {
         UiLayoutLifecycleCommandService.HeadWriteCondition.match(originalHead.headEtag()), "Retire source head");
     var sourceAfter = headState(original.target());
     var copiedAfter = headState(copied.target());
+    assertThat(sourceAfter.get("active_release_id")).isNull();
+    assertThat(copiedAfter.get("active_release_id")).isEqualTo(copiedRelease);
     long events = eventCount();
     var selectedSourceChecks = new AtomicInteger();
     host.pageGrant = (operation, context, reference) -> {
