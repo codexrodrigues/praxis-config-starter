@@ -56,15 +56,16 @@ class OperationalPolicyContractTest {
     }
 
     @Test
-    void legacyPolicyWithoutEffectIsConservativelyBlocked() throws Exception {
-        DomainRuleDefinition definition = definition("approval_policy", RESOURCE, "legacy", "{}", null);
+    void rejectsOperationalPolicyWithoutExplicitEffect() throws Exception {
+        DomainRuleDefinition definition = definition("approval_policy", RESOURCE, "missing-effect", "{}", null);
         ObjectNode payload = approvalPayload(definition, null);
 
-        OperationalPolicyContract.projectEffect(definition, approvalTarget(), payload);
-
-        assertThat(payload.at("/approvalPolicy/effect").isMissingNode()).isTrue();
-        assertThat(OperationalPolicyContract.validate(definition, approvalTarget(), payload))
-                .isEqualTo(OperationalPolicyResolution.Effect.BLOCK);
+        assertThatThrownBy(() -> OperationalPolicyContract.projectEffect(definition, approvalTarget(), payload))
+                .isInstanceOf(ConfigurationIngestionException.class)
+                .hasMessageContaining("require explicit effect BLOCK or ALLOW");
+        assertThatThrownBy(() -> OperationalPolicyContract.validate(definition, approvalTarget(), payload))
+                .isInstanceOf(ConfigurationIngestionException.class)
+                .hasMessageContaining("require explicit effect BLOCK or ALLOW");
     }
 
     @Test

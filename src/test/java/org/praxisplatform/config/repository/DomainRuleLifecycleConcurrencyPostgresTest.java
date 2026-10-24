@@ -542,7 +542,7 @@ class DomainRuleLifecycleConcurrencyPostgresTest {
     }
 
     @Test
-    void aVerifiableLegacyPolicyWithoutEffectStillBlocksAndOldUnverifiableHashIsInconsistent() throws Exception {
+    void aPolicyWithoutExplicitEffectOrWithUnverifiableHashIsInconsistent() throws Exception {
         Scope scope = scope();
         UUID policy = policy(scope, approvalTarget(), "BLOCK", false);
         var mapper = new ObjectMapper().enable(com.fasterxml.jackson.databind.DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS);
@@ -559,16 +559,15 @@ class DomainRuleLifecycleConcurrencyPostgresTest {
                 materialization.setSourceHash(org.praxisplatform.config.service.DomainRuleMaterializationFingerprint.sha256(
                         definition, approvalTarget().targetLayer(), approvalTarget().targetArtifactType(),
                         approvalTarget().targetArtifactKey(), null, null, payload));
-                // Historical import fixture, deliberately outside the new explicit-effect writer.
                 materialization.setStatus("applied");
                 materialization.setEverApplied(true);
                 definitions.save(definition);
                 materializations.save(materialization);
             } catch (Exception exception) { throw new IllegalStateException(exception); }
         });
-        var legacy = resolution(scope, approvalTarget());
-        assertThat(legacy.resolutionState()).isEqualTo(OperationalPolicyResolution.State.ELIGIBLE_APPLIED_HEAD);
-        assertThat(legacy.policy().effect()).isEqualTo(OperationalPolicyResolution.Effect.BLOCK);
+        var missingEffect = resolution(scope, approvalTarget());
+        assertThat(missingEffect.resolutionState()).isEqualTo(OperationalPolicyResolution.State.INCONSISTENT_OR_UNAVAILABLE);
+        assertThat(missingEffect.policy()).isNull();
         jdbc.update("update domain_rule_materialization set source_hash='legacy:unverifiable' where id=?", policy);
         assertThat(resolution(scope, approvalTarget()).resolutionState()).isEqualTo(OperationalPolicyResolution.State.INCONSISTENT_OR_UNAVAILABLE);
     }

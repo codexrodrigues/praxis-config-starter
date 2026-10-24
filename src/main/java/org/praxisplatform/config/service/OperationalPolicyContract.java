@@ -6,7 +6,7 @@ import java.util.Set;
 import org.praxisplatform.config.domain.DomainRuleDefinition;
 import org.praxisplatform.config.exception.ConfigurationIngestionException;
 
-/** Validates the explicit operational effect in the existing policy projections. */
+/** Validates the explicit operational effect in the canonical policy projections. */
 final class OperationalPolicyContract {
     private static final Set<String> IDENTITY_AND_COPY = Set.of("ruleKey", "ruleVersion", "resourceKey", "actionId",
             "serviceKey", "contextKey", "message", "severity", "validationMessageTemplate", "effect", "parameters");
@@ -17,11 +17,11 @@ final class OperationalPolicyContract {
     static void projectEffect(DomainRuleDefinition definition, OperationalPolicyTarget target, ObjectNode payload) {
         JsonNode parameters = DomainRuleMaterializationFingerprint.parse(definition.getParameters());
         JsonNode declared = parameters.path(target.family().slot);
-        if (declared.has("effect")) {
-            if (!declared.isObject()) throw invalid();
-            ((ObjectNode) payload.path(target.family().slot)).set("effect", declared.get("effect"));
+        if (!declared.isObject() || !declared.has("effect")) {
+            throw new ConfigurationIngestionException("New operational policy publications require explicit effect BLOCK or ALLOW");
         }
-        if (declared.has("effect")) validate(definition, target, payload);
+        ((ObjectNode) payload.path(target.family().slot)).set("effect", declared.get("effect"));
+        validate(definition, target, payload);
     }
 
     static OperationalPolicyResolution.Effect validate(DomainRuleDefinition definition, OperationalPolicyTarget target, JsonNode payload) {
@@ -41,17 +41,20 @@ final class OperationalPolicyContract {
                     || !target.actionId().equals(action.path("actionId").asText())
                     || !target.actionId().equals(policy.path("actionId").asText())) throw invalid();
         }
-        // Specialized legacy policies never imply permission in the operational gate.
-        if (!policy.has("effect")) return OperationalPolicyResolution.Effect.BLOCK;
+        if (!policy.has("effect")) {
+            throw new ConfigurationIngestionException("New operational policy publications require explicit effect BLOCK or ALLOW");
+        }
         if (!policy.path("effect").isTextual()) throw invalid();
         OperationalPolicyResolution.Effect effect;
         try { effect = OperationalPolicyResolution.Effect.valueOf(policy.path("effect").textValue()); }
         catch (IllegalArgumentException ex) { throw invalid(); }
+        JsonNode parameters = DomainRuleMaterializationFingerprint.parse(definition.getParameters());
+        if (!parameters.isObject()) throw invalid();
+        JsonNode declared = parameters.path(family.slot);
+        if (!declared.isObject() || !effect.name().equals(declared.path("effect").asText())) throw invalid();
         if (effect == OperationalPolicyResolution.Effect.ALLOW) {
             if (!DomainRuleMaterializationFingerprint.parse(definition.getCondition()).isNull()) throw invalid();
             policy.fieldNames().forEachRemaining(key -> { if (!IDENTITY_AND_COPY.contains(key)) throw invalid(); });
-            JsonNode parameters = DomainRuleMaterializationFingerprint.parse(definition.getParameters());
-            if (!parameters.isObject()) throw invalid();
             parameters.fieldNames().forEachRemaining(key -> {
                 if (!PARAMETER_COPY.contains(key) && !family.slot.equals(key)) throw invalid();
             });
@@ -65,8 +68,6 @@ final class OperationalPolicyContract {
                 if ((action.has("resourceKey") && !target.resourceKey().equals(action.path("resourceKey").asText()))
                         || (action.has("actionId") && !java.util.Objects.equals(target.actionId(), action.path("actionId").asText()))) throw invalid();
             }
-            JsonNode declared = parameters.path(family.slot);
-            if (!declared.isObject() || !"ALLOW".equals(declared.path("effect").asText())) throw invalid();
             declared.fieldNames().forEachRemaining(key -> {
                 if (!Set.of("effect", "message", "severity", "validationMessageTemplate").contains(key)) throw invalid();
             });

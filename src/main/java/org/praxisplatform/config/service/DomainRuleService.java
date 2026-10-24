@@ -3045,14 +3045,10 @@ public class DomainRuleService {
             String key, JsonNode payload) {
         if (!OperationalPolicyTarget.Family.supports(layer, type)) return;
         var target = new OperationalPolicyTarget(layer, type, key);
-        if (!payload.path(target.family().slot).has("effect")) {
-            throw new ConfigurationIngestionException("New operational policy publications require explicit effect BLOCK or ALLOW");
-        }
         OperationalPolicyContract.validate(definition, target, payload);
         JsonNode expected = operationalProjection(definition, target);
-        if (!expected.path(target.family().slot).has("effect")
-                || !org.praxisplatform.rules.digest.PraxisCanonicalJson.canonicalize(expected)
-                    .equals(org.praxisplatform.rules.digest.PraxisCanonicalJson.canonicalize(payload))) {
+        if (!org.praxisplatform.rules.digest.PraxisCanonicalJson.canonicalize(expected)
+                .equals(org.praxisplatform.rules.digest.PraxisCanonicalJson.canonicalize(payload))) {
             throw new ConfigurationIngestionException("Operational policy payload must match its canonical definition projection");
         }
     }
