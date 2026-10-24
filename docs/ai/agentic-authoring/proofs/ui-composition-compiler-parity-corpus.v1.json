@@ -44,10 +44,10 @@
         {
           "id": "ui-composition-plan-compiler",
           "sourcePath": "src/main/java/org/praxisplatform/config/ai/authoring/AgenticAuthoringUiCompositionPlanCompiler.java",
-          "sourceGitBlob": "148dd6fe8bfe2b8c55f2534425fdddf90be4fe1a",
+          "sourceGitBlob": "ac27160274627f8d14a37cdda4b583d08f300b36",
           "artifacts": [
-            { "path": "target/classes/org/praxisplatform/config/ai/authoring/AgenticAuthoringUiCompositionPlanCompiler.class", "sha256": "273e37cea2a79328f6015683e4a712e199f2bd8ad99c4a277b8497f608b2e289" },
-            { "path": "target/classes/org/praxisplatform/config/ai/authoring/AgenticAuthoringUiCompositionPlanCompiler$CompileResult.class", "sha256": "99097eabfde48eca720c994c7528b49eb73641c33745e2d753af4f6b174fcfd4" },
+            { "path": "target/classes/org/praxisplatform/config/ai/authoring/AgenticAuthoringUiCompositionPlanCompiler.class", "sha256": "64ac151733544ff151fff79ffd8fd04a32d2d1b94a3a1d063675ec6cd4d98dcb" },
+            { "path": "target/classes/org/praxisplatform/config/ai/authoring/AgenticAuthoringUiCompositionPlanCompiler$CompileResult.class", "sha256": "f5aa3070eded1293e2d7e71d639781c56524651ba5f103b7bed6d36cf60f68ff" },
             { "path": "target/classes/org/praxisplatform/config/ai/authoring/AgenticAuthoringUiCompositionPlanCompiler$CompilerDiagnostic.class", "sha256": "cfda8d236f33df826382334c532b07d26848b4eddd1e3ad79fdc4178dbc7de50" },
             { "path": "target/classes/org/praxisplatform/config/ai/authoring/AgenticAuthoringUiCompositionPlanCompiler$MasterDetailAnalysis.class", "sha256": "ef33e72dd3049e0610bf4e0af526429ef75954bc426f7a562da2dfe3b2d89c3c" },
             { "path": "target/classes/org/praxisplatform/config/ai/authoring/AgenticAuthoringUiCompositionPlanCompiler$MasterDetailWidget.class", "sha256": "3c4b6026163a5ed5aa7acba3d729f9fdfcac944b395331d6f33a583a466d957b" },
@@ -182,7 +182,7 @@
         "org.praxisplatform.config.dto.AiRegistryTemplateRevision -> org.praxisplatform.config.dto.AiRegistryTemplateRevision$AiRegistryTemplateRevisionBuilder",
         "org.praxisplatform.config.dto.AiRegistryTemplateRevision$AiRegistryTemplateRevisionBuilder -> org.praxisplatform.config.dto.AiRegistryTemplateRevision"
       ],
-      "closureSha256": "14ddcb2a40d892d58b2485724ee9bcc5a41471aec4676a49106433789387c79f"
+      "closureSha256": "5e0658cb23161fb93f7dd61cc87bdc9b62758b84e7a6ff9308e3a21dbd5a6ee0"
     }
   },
   "targetProfiles": {

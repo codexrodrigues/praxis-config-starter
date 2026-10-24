@@ -4766,8 +4766,25 @@ class AgenticAuthoringPreviewServiceTest {
                 .isEqualTo("requestSearch");
         assertThat(compiledPage.at("/composition/links/1/from/ref/port").asText())
                 .isEqualTo("selectionChange");
-        assertThat(compiledPage.at("/composition/links/2/to/ref/port").asText())
-                .isEqualTo("initialValue");
+        JsonNode compiledLinks = compiledPage.at("/composition/links");
+        assertThat(compiledLinks).hasSize(4);
+        assertThat(compiledLinks).extracting((JsonNode link) -> link.path("id").asText()).containsExactly(
+                "funcionarios-filter.requestSearch->funcionarios-master.queryContext",
+                "funcionarios-master.selectionChange->state.selectedItem",
+                "funcionarios-master.selectionChange->state.selectedResourceId",
+                "state.selectedResourceId->funcionarios-detail.resourceId");
+        assertThat(compiledLinks.at("/1/transform/steps/0/config/path").asText())
+                .isEqualTo("payload.selectedRows.0");
+        assertThat(compiledLinks.at("/2/transform/steps/0/config/path").asText())
+                .isEqualTo("payload.resourceIdentity.key.value");
+        for (int index : List.of(1, 2)) {
+            assertThat(compiledLinks.path(index).path("transform").has("fallbackValue")).isTrue();
+            assertThat(compiledLinks.path(index).at("/transform/fallbackValue").isNull()).isTrue();
+        }
+        assertThat(compiledLinks.at("/3/from/ref/path").asText()).isEqualTo("selectedResourceId");
+        assertThat(compiledLinks.at("/3/to/ref/port").asText()).isEqualTo("resourceId");
+        assertThat(compiledLinks.at("/3/policy/missingValuePolicy").asText()).isEqualTo("propagate-undefined");
+        assertThat(compiledLinks.path(3).has("condition")).isFalse();
         assertThat(compiledPage.at("/widgets/1/definition/inputs/config/actions/row/discovery/enabled").asBoolean())
                 .isTrue();
         assertThat(compiledPage.at("/widgets/1/definition/inputs/config/actions/collection/discovery/enabled").asBoolean())
