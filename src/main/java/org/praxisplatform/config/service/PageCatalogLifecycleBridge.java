@@ -81,9 +81,11 @@ final class PageCatalogLifecycleBridge {
     }
   }
 
-  void requireCreation(PageCreationContext context, PageSourceReference source) {
+  void requireCreation(Principal principal, String version,
+      PageCreationContext expected, PageSourceReference source) {
     try {
-      host.requireCreation(context, source);
+      var current = host.requireCreation(principal, version, expected, source);
+      if (!expected.equals(current)) throw failure(UiLayoutLifecycleException.Code.CONTEXT_STALE);
     } catch (RuntimeException e) {
       throw UiLayoutMetadataAdmissionFailure.sanitized(e, "Page creation authority is unavailable.");
     }
@@ -131,7 +133,7 @@ final class PageCatalogLifecycleBridge {
             default -> true;
           }) {
         var creation = record.orElseThrow();
-        verify(context(invocation, creation), creation);
+        verify(verificationContext(invocation, creation), creation);
         sameNamespace(admittedPageContext(pages, operation, invocation), creation);
       }
     };
@@ -144,7 +146,7 @@ final class PageCatalogLifecycleBridge {
         var record = registered(invocation);
         if (record.isEmpty()) return nativeSource.capture(invocation, validation);
         var value = record.orElseThrow();
-        verify(context(invocation, value), value, validation.attempt());
+        verify(verificationContext(invocation, value), value, validation.attempt());
         return new UiLayoutDraftWorkspaceSeed(List.of(outputSeed(value, invocation)));
       }
 
@@ -174,7 +176,7 @@ final class PageCatalogLifecycleBridge {
                   .orElseThrow(() -> failure(UiLayoutLifecycleException.Code.VALIDATION_FAILED));
           if (!sameSeedOrigin(expected, seed))
             throw failure(UiLayoutLifecycleException.Code.VALIDATION_FAILED);
-          verify(context(invocation, value), value, validation.attempt());
+          verify(verificationContext(invocation, value), value, validation.attempt());
         } else nativeSource.requirePageChildEvidence(invocation, page, seed, validation);
       }
     };
@@ -211,7 +213,7 @@ final class PageCatalogLifecycleBridge {
             }
           }
         if (!match) throw failure(UiLayoutLifecycleException.Code.VALIDATION_FAILED);
-        verify(context(invocation, value), value);
+        verify(verificationContext(invocation, value), value);
       } else metadata.require(invocation, target, descriptor, sourceRef, baseline, seed);
     };
   }
@@ -404,15 +406,13 @@ final class PageCatalogLifecycleBridge {
     var seed = snapshot.baseline();
     if (!isPage(seed.target())) throw failure(UiLayoutLifecycleException.Code.VALIDATION_FAILED);
     var invocation = context.forTarget(seed.target());
-    boolean jointNative = source instanceof PageSourceReference.Native
-        && !isGenerated(seed.metadata())
-        && seed.pageChildren().stream().noneMatch(child -> isGenerated(child.metadata()));
+    boolean jointNative = whollyNative(source, snapshot);
     if (source instanceof PageSourceReference.Native origin) {
       if (snapshot.sourceDraftId() != null || !same(seed.document(), snapshot.document()))
         throw failure(UiLayoutLifecycleException.Code.INVALID_STATE);
       try {
         chain.check();
-        if (jointNative) host.requireNativeProvenance(context, origin, seed);
+        if (jointNative) requireNativeProvenance(context, origin, seed);
         else host.requireNative(context, origin, seed);
         chain.check();
       } catch (RuntimeException e) {
@@ -493,7 +493,7 @@ final class PageCatalogLifecycleBridge {
         throw failure(UiLayoutLifecycleException.Code.INVALID_STATE);
       if (jointNative) {
         try {
-          validation.run(invocation, () -> host.requireNativeProvenance(
+          validation.run(invocation, () -> requireNativeProvenance(
               context, (PageSourceReference.Native) source, seed));
         } catch (RuntimeException e) {
           throw UiLayoutMetadataAdmissionFailure.sanitized(
@@ -501,6 +501,19 @@ final class PageCatalogLifecycleBridge {
         }
       }
     }
+  }
+
+  private static boolean whollyNative(PageSourceReference source,
+      PageCreationEvidence.SourceSnapshot snapshot) {
+    return source instanceof PageSourceReference.Native
+        && !isGenerated(snapshot.baseline().metadata())
+        && snapshot.baseline().pageChildren().stream().noneMatch(child -> isGenerated(child.metadata()));
+  }
+
+  private void requireNativeProvenance(PageCreationContext expected,
+      PageSourceReference.Native source, UiLayoutDraftWorkspaceSeed.TargetSeed seed) {
+    var current = host.requireNativeProvenance(expected, source, seed);
+    if (!expected.equals(current)) throw failure(UiLayoutLifecycleException.Code.CONTEXT_STALE);
   }
 
   private void requireOriginalMetadata(
@@ -619,8 +632,14 @@ final class PageCatalogLifecycleBridge {
     return result;
   }
 
-  private PageCreationContext context(
+  private PageCreationContext verificationContext(
       UiLayoutLifecycleInvocation invocation, PageCreationEvidence value) {
+    if (whollyNative(value.command().source(), value.original())) {
+      // Comparison values only. verifySource must freshly attest FULL lifecycle registration
+      // together with provenance before any extension or I/O, and again after extensions.
+      return new PageCreationContext(value.observation().applicationId(),
+          value.observation().routeNamespace(), invocation);
+    }
     var current = currentContext(invocation);
     sameNamespace(current, value);
     return current;

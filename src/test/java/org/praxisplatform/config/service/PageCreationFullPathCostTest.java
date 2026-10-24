@@ -53,6 +53,17 @@ class PageCreationFullPathCostTest {
     assertThat(fixture.rolledBack).isTrue();
   }
 
+  @Test void finalJointCreationContextDriftPreventsCommitWithoutRetargetingProvisionalWrites() throws Exception {
+    var fixture = new Fixture();
+    fixture.driftBeforeCommit = true;
+    assertThatThrownBy(() -> fixture.pages.create(() -> "alice", "c1", fixture.command))
+        .extracting("code").isEqualTo(UiLayoutLifecycleException.Code.CONTEXT_STALE);
+    assertThat(fixture.draft).isNotNull();
+    assertThat(fixture.metadataRows).isNotEmpty();
+    assertThat(fixture.committed).isFalse();
+    assertThat(fixture.rolledBack).isTrue();
+  }
+
   record Event(String boundary, String phase, List<String> callPath) {}
   private static final class Fixture {
     final ObjectMapper mapper = new ObjectMapper().findAndRegisterModules();
@@ -76,7 +87,7 @@ class PageCreationFullPathCostTest {
     UiLayoutLifecycleReadService reads;
     UiLayoutDraft draft;
     String ledger;
-    boolean committed, rolledBack, denyBeforeCommit;
+    boolean committed, rolledBack, denyBeforeCommit, driftBeforeCommit;
 
     Fixture() throws Exception {
       var connection = mock(Connection.class);
@@ -134,12 +145,16 @@ class PageCreationFullPathCostTest {
         }
         public UiLayoutTarget navigationGroupsRoot(PageCreationContext current) { throw new AssertionError("Not a groups operation"); }
         public void require(PageCreationOperation op, PageCreationContext current, PageSourceReference source) { record("HOST_REQUIRE_" + op, true); }
-        public void requireCreation(PageCreationContext current, PageSourceReference source) { record("HOST_REQUIRE_CREATION", true); }
+        public PageCreationContext requireCreation(java.security.Principal principal, String version, PageCreationContext current, PageSourceReference source) {
+          record("HOST_REQUIRE_CREATION", true);
+          return driftBeforeCommit && events.getLast().phase().equals("BEFORE_COMMIT")
+              ? new PageCreationContext("foreign", "/pages", invocation(anchor)) : context(invocation(anchor));
+        }
         public UiLayoutDraftWorkspaceSeed.TargetSeed captureNative(PageCreationContext current, PageSourceReference.Native source) {
           record("HOST_CAPTURE_NATIVE", true); return nativeSeed;
         }
-        public void requireNativeProvenance(PageCreationContext current, PageSourceReference.Native source, UiLayoutDraftWorkspaceSeed.TargetSeed captured) {
-          record("HOST_REQUIRE_NATIVE_PROVENANCE", true);
+        public PageCreationContext requireNativeProvenance(PageCreationContext current, PageSourceReference.Native source, UiLayoutDraftWorkspaceSeed.TargetSeed captured) {
+          record("HOST_REQUIRE_NATIVE_PROVENANCE", true); return context(current.invocation());
         }
         public void requireNative(PageCreationContext current, PageSourceReference.Native source, UiLayoutDraftWorkspaceSeed.TargetSeed captured) {
           record("HOST_REQUIRE_NATIVE", true);
@@ -234,7 +249,7 @@ class PageCreationFullPathCostTest {
           || event.boundary().startsWith("LIFECYCLE_") || event.boundary().startsWith("PAGE_LIFECYCLE_") || event.boundary().startsWith("NATIVE_")).count();
       var report = new LinkedHashMap<String,Object>();
       report.put("kind", "synthetic-complete-canonical-operation-not-latency-proof");
-      report.put("baseline", "v0.1.0-rc.172 + verified evidence ownership + joint page lifecycle"); report.put("nativeChildren", 1);
+      report.put("baseline", "v0.1.0-rc.173 + joint creation/provenance context attestation"); report.put("nativeChildren", 1);
       report.put("authorityUnits", units); report.put("modeledCurrentObservationsAtTwoPerUnit", 2 * units);
       report.put("counts", counts()); report.put("events", events);
       report.put("modeledAuthorityMillisAt250PerUnit", 250 * units);

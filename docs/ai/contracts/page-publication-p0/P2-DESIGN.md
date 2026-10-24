@@ -59,23 +59,34 @@ API mínima aprovada e implementada:
 - `PageCreationHost.require(PageCreationOperation operation, PageCreationContext context, PageSourceReference source)`:
   enum CREATE_PAGE / READ_CREATION / READ_SOURCE / COPY_SOURCE. source nula apenas quando a operação
   não seleciona origem. Lifecycle admission de leitura/edição/review/publicação continua o SPI existente.
-- `PageCreationHost.requireCreation(PageCreationContext context, PageSourceReference source)` é obrigatório,
-  sem default, e exige conjuntamente CREATE_PAGE, READ_SOURCE e COPY_SOURCE sobre contexto e origem
-  exatos. O host executa as três políticas puras numa janela atual de autoridade; não executa trabalho
+- `PageCreationHost.requireCreation(Principal principal, String version, PageCreationContext expected, PageSourceReference source) -> PageCreationContext` é obrigatório,
+  sem default, e exige toda a política de `resolve(principal, version)` junto com CREATE_PAGE,
+  READ_SOURCE e COPY_SOURCE sobre contexto e origem exatos. Principal/version são os inputs
+  originais; expected não é credencial e não pode substituir a identidade explícita por actor
+  histórico ou thread. Config exige `expected.equals(retorno)`, incluindo application, namespace
+  e invocation completa, e rejeita null sem trocar escopo. O host executa todas as políticas puras
+  numa janela atual de autoridade e retorna a atestação somente após a observação final; não executa trabalho
   Config nem retém o resultado entre chamadas. No Quickstart, a janela usa uma transação operacional
   e duas observações atuais, antes/depois das políticas, com locks e checks de expiração preservados.
   A revogação concorrente serializa contra essa unidade; isso muda a linearização das três admissões
   independentes anteriores, não promete reproduzir os mesmos interleavings. Os seis checkpoints de
   criação (antes/depois do lock, antes/depois da verificação final e seus equivalentes beforeCommit)
-  permanecem. As demais admissões continuam segundo as unidades explícitas descritas abaixo.
+  permanecem. A resolução inicial e a revalidação independente após I/O do receipt permanecem.
+  A resolução e as políticas passam a linearizar nessa janela conjunta; não se implementa o método
+  chamando os callbacks públicos em transações separadas. As demais admissões continuam abaixo.
   Implementadores do SPI beta precisam adotar o método junto com o novo Config; não há fallback.
 - `PageCreationHost.captureNative(PageCreationContext context, PageSourceReference source) -> UiLayoutDraftWorkspaceSeed.TargetSeed`:
   apenas registered-native exata. Reutiliza seed existente com root e evidência de filhos; fonte publicada
   é resolvida pelo Config, jamais pelo host via JSON solto.
-- `PageCreationHost.requireNativeProvenance(context, Native source, TargetSeed captured)` é obrigatório.
+- `PageCreationHost.requireNativeProvenance(context, Native source, TargetSeed captured) -> PageCreationContext` é obrigatório.
   Config o seleciona somente quando a origem é Native e os metadados da raiz e de todos os filhos
   não são gerados pelo Config. O host admite conjuntamente produtor/dependências de domínio,
-  metadata da raiz, origem exata de cada filho e metadata de cada filho. No Quickstart, todas
+  metadata da raiz, origem exata de cada filho e metadata de cada filho, junto com TODA política
+  de `resolveLifecycle(context.invocation())`, incluindo restrições customizadas de registro.
+  O retorno deve coincidir integralmente com o contexto esperado e só sai após a observação final.
+  Nos23 contextos pós-catálogo da fixture Native, ledger fornece application/namespace apenas
+  para comparação; a primeira proveniência os reatesta antes de qualquer extensão/I/O. Os15
+  contextos pré-catálogo permanecem independentes. No Quickstart, todas
   essas políticas puras rodam dentro de uma transação operacional, entre duas observações frescas
   de SESSION/membership, com expiração/coerência e locks preservados. Config chama antes e depois
   dos validadores estruturais e mantém reprodução, sintaxe, identidade e cobertura exata dos filhos.
