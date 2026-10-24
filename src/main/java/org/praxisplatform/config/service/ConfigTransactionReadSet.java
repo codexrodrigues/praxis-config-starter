@@ -18,6 +18,7 @@ final class ConfigTransactionReadSet implements TransactionSynchronization {
   private final Connection connection;
   private final LinkedHashMap<Object, String> values = new LinkedHashMap<>(16, 0.75f, true);
   private long bytes;
+  private boolean reusable = true;
 
   private ConfigTransactionReadSet(Object owner, ConnectionHolder holder) {
     this.owner = owner;
@@ -36,10 +37,12 @@ final class ConfigTransactionReadSet implements TransactionSynchronization {
     }
     ConfigTransactionReadSet readSet = admitted(owner, guard);
     guard.requireImmutableReadTransaction(readSet.holder, readSet.connection);
-    String cached = readSet.values.get(key);
+    readSet.reusable &= guard.mayReuseImmutableReads();
+    String cached = readSet.reusable ? readSet.values.get(key) : null;
     if (cached != null) return Optional.of(cached);
     Optional<String> loaded = loader.get();
     guard.requireImmutableReadTransaction(readSet.holder, readSet.connection);
+    readSet.reusable &= guard.mayReuseImmutableReads();
     if (loaded.isPresent()) readSet.retain(key, loaded.orElseThrow());
     return loaded;
   }
@@ -49,8 +52,10 @@ final class ConfigTransactionReadSet implements TransactionSynchronization {
       Supplier<Prefetched> loader) {
     ConfigTransactionReadSet readSet = admitted(owner, guard);
     guard.requireImmutableReadTransaction(readSet.holder, readSet.connection);
+    readSet.reusable &= guard.mayReuseImmutableReads();
     Prefetched loaded = loader.get();
     guard.requireImmutableReadTransaction(readSet.holder, readSet.connection);
+    readSet.reusable &= guard.mayReuseImmutableReads();
     long total = loaded.values().values().stream().mapToLong(ConfigTransactionReadSet::size).sum();
     if (loaded.consumed() < 1 || loaded.consumed() > MAX_ENTRIES
         || loaded.values().size() > loaded.consumed() || total > MAX_BYTES) {
@@ -82,6 +87,7 @@ final class ConfigTransactionReadSet implements TransactionSynchronization {
   }
 
   private void retain(Object key, String value) {
+    if (!reusable) return;
     long size = size(value);
     if (size > MAX_BYTES) return;
     String previous = values.remove(key);
@@ -102,12 +108,16 @@ final class ConfigTransactionReadSet implements TransactionSynchronization {
   @Override
   public void savepointRollback(Object savepoint) {
     // A savepoint rollback retains the synchronization list, but rows loaded since the
-    // savepoint may no longer exist. Invalidate bytes without renewing transaction proof.
+    // savepoint may no longer exist. This callback precedes the physical rollback;
+    // later synchronizations can re-enter a read. Do not retain their pre-rollback
+    // bytes, or reuse isolation proof, for the rest of the transaction.
+    reusable = false;
     clear();
   }
 
   @Override
   public void afterCompletion(int status) {
+    reusable = false;
     clear();
   }
 

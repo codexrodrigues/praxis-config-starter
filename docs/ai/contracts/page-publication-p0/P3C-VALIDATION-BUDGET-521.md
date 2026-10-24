@@ -112,3 +112,58 @@ e seguir o release compatível oficial. A negativa local c2 permanece válida; n
 há promessa de SLA local. A integração Quickstart 463 ainda exige Config público,
 POM sem override, nova prova pública e documentação/guidance finalizadas. Menu,
 cópia, browser e deploy não foram aceitos por este ensaio.
+
+## Correção de custo da prova de isolamento — 24/10/2026
+
+Classificação: `arquitetural`, restrita à infraestrutura transacional interna do
+Config. Inventário: `ja-suportado-mal-nomeado-ou-mal-materializado`; o readset já
+fixava READ COMMITTED com `SELECT current_setting('transaction_isolation')`, mas
+os demais guards repetiam `getTransactionIsolation()` (SHOW no PgJDBC). A fonte
+canônica é `ConfigJdbcTransactionGuard`, consumida pelos ledgers de catálogo,
+runtime, grupos de página e metadata. Não há novo SPI, DTO, endpoint ou grant.
+
+O guard compartilha a prova pela sincronização da transação, datasource, holder e
+conexão exatos. Cada acesso continua verificando transação ativa, autocommit,
+rollback-only e identidade física JPA. `REQUIRES_NEW` suspende a prova; completion
+encerra sua validade. Sem sincronização, permanece a inspeção JDBC fresca anterior.
+A primeira prova só permite reutilização quando a lista de sincronizações ainda
+está vazia; com callbacks anteriores, mantém leituras frescas pelo restante da
+transação. Isso cobre o primeiro acesso ocorrido dentro de um callback já em
+execução. `PageCreationService.transaction` chama `store.requireTransaction()`
+antes de registrar suas sincronizações, preservando a otimização na transação nova
+normal; participação em uma transação com callbacks prévios é conservadora.
+O readset usa o mesmo guard. Nenhuma chamada de autorização, observação de SESSION,
+lock, callback de extensão ou deadline de 40 segundos foi removida ou relaxada.
+
+`savepointRollback` ocorre antes do rollback físico. Por isso, após esse callback,
+proof e readset abandonam a reutilização pelo restante da transação: isolamento
+é consultado em cada acesso, bytes são recarregados e não são retidos. Isso impede
+que uma sincronização posterior reentre e preserve prova ou bytes pré-rollback.
+Novos owners de readset também consultam a elegibilidade da prova compartilhada
+antes/depois do loader: criação durante callback não restaura a retenção. Prefetch
+continua verificando seus limites e a quantidade consumida.
+
+Validação focal sem banco, em `bcb67869` mais este diff: 167 testes em dez classes,
+zero falhas, erros ou skips. Comandos:
+
+```sh
+mvn -q -Dtest=ConfigTransactionReadSetTest,ConfigTransactionAbortTest,JdbcUiLayoutMetadataCaptureStoreTest,PageCatalogLifecycleBridgeTest,PageRuntimeReadServiceTest test
+mvn -q -Dtest=PageCreationHttpTest,PageCreationCodecTest,PageRuntimeCursorTest,UiLayoutLifecycleAuthorityFreshnessTest,UiLayoutLifecycleCommandServiceTest test
+```
+
+O teste de consumo simula vinte ciclos com dois guards, `require`, flush, refresh
+e dois owners de readset: uma consulta SELECT de isolamento e zero getters de
+isolamento. Há provas adversariais de reentrada no rollback, troca de holder/JPA,
+autocommit, isolamento incorreto, falha SQL, suspensão e término de transação.
+São contagens determinísticas em JDBC simulado, não medição de latência ou prova
+de isolamento PostgreSQL real. Os resultados C5 já coletados (312 snapshots em
+31,052s; requisição CREATE503 em40,579s) continuam evidência histórica do gargalo;
+este patch não mediu a contribuição dos SHOW nessa requisição nem demonstrou
+criação Hero abaixo de40s. Não foi repetido Neon/HTTP, publicado ou implantado.
+
+Revisão independente do diff atribuída a `creation_boundary_review`, com aceite
+pendente do parecer final. Skills: `atualizar-existente`, porque o guidance em
+`praxis-config-runtime-persistence/references/governed-layout-integrity.md`
+ensinava limpeza de bytes sem renovação de admissão após savepoint. Sua atualização
+canônica é coordenada separadamente no mesmo incremento. Angular, corpus HTTP e
+payloads de examples não mudam; nenhuma sincronização desses derivados é necessária.

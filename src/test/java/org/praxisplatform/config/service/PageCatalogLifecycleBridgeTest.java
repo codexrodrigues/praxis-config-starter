@@ -267,6 +267,7 @@ class PageCatalogLifecycleBridgeTest {
         new org.springframework.jdbc.datasource.ConnectionHolder(mock(java.sql.Connection.class));
     when(guard.admitImmutableReadTransaction()).thenReturn(holder);
     when(guard.requireImmutableReadTransaction(any(), any())).thenReturn(holder);
+    when(guard.mayReuseImmutableReads()).thenReturn(true);
     doAnswer(
             call ->
                 ConfigTransactionReadSet.read(

@@ -28,7 +28,63 @@ final class ConfigJdbcTransactionGuard {
   }
 
   ConnectionHolder require() {
-    return requireConnection(true);
+    // Without synchronization there is no transaction lifetime in which to retain proof.
+    if (!TransactionSynchronizationManager.isSynchronizationActive()) return requireConnection(true);
+    ConnectionHolder holder = requireConnection(false);
+    Connection connection = holder.getConnection();
+    for (var synchronization : TransactionSynchronizationManager.getSynchronizations()) {
+      if (synchronization instanceof IsolationProof proof && proof.dataSource == dataSource) {
+        if (proof.completed || proof.holder != holder || proof.connection != connection) throw unavailable();
+        if (!proof.pinned || !proof.reusable) pinIsolation(holder, connection, proof);
+        return holder;
+      }
+    }
+    var proof = new IsolationProof(dataSource, holder, connection,
+        TransactionSynchronizationManager.getSynchronizations().isEmpty());
+    pinIsolation(holder, connection, proof);
+    TransactionSynchronizationManager.registerSynchronization(proof);
+    return holder;
+  }
+
+  private void pinIsolation(ConnectionHolder holder, Connection connection, IsolationProof proof) {
+    // PostgreSQL rejects isolation changes after a SELECT. SHOW does not pin that invariant.
+    try (var statement = connection.prepareStatement("SELECT current_setting('transaction_isolation')");
+        var result = statement.executeQuery()) {
+      if (!result.next() || !"read committed".equals(result.getString(1)) || result.next()) {
+        throw unavailable();
+      }
+    } catch (Exception exception) {
+      throw unavailable();
+    }
+    requireIdentity(holder, connection);
+    proof.pinned = true;
+  }
+
+  /** Infrastructure proof only: authority and immutable records have independent lifetimes. */
+  private static final class IsolationProof implements TransactionSynchronization {
+    final DataSource dataSource;
+    final ConnectionHolder holder;
+    final Connection connection;
+    boolean pinned;
+    boolean completed;
+    boolean reusable;
+
+    IsolationProof(DataSource dataSource, ConnectionHolder holder, Connection connection, boolean reusable) {
+      this.dataSource = dataSource;
+      this.holder = holder;
+      this.connection = connection;
+      // A first access from an already-running synchronization cannot receive that
+      // callback. Only enlist before all other callbacks to retain proof safely.
+      this.reusable = reusable;
+    }
+
+    // Spring invokes this before the physical rollback. A later synchronization may
+    // re-enter a ledger here, so no newly acquired proof can survive this boundary.
+    @Override public void savepointRollback(Object savepoint) {
+      pinned = false;
+      reusable = false;
+    }
+    @Override public void afterCompletion(int status) { pinned = false; completed = true; }
   }
 
   /** Flush local ORM writes before an authoritative JDBC read in this exact Config transaction. */
@@ -101,32 +157,36 @@ final class ConfigJdbcTransactionGuard {
     return holder.getEntityManager();
   }
 
-  /** A PostgreSQL SELECT pins transaction isolation; SHOW alone does not. */
+  /** Uses the same pinned isolation proof as other ledgers in this Config transaction. */
   ConnectionHolder admitImmutableReadTransaction() {
-    ConnectionHolder holder = requireConnection(false);
-    Connection connection = holder.getConnection();
-    requireImmutableReadTransaction(holder, connection);
-    try (var statement =
-            connection.prepareStatement("SELECT current_setting('transaction_isolation')");
-        var result = statement.executeQuery()) {
-      if (!result.next() || !"read committed".equals(result.getString(1)) || result.next()) {
-        throw unavailable();
-      }
-    } catch (Exception exception) {
-      throw unavailable();
-    }
-    return requireImmutableReadTransaction(holder, connection);
+    if (!TransactionSynchronizationManager.isSynchronizationActive()) throw unavailable();
+    return require();
   }
 
-  /** Only the admitted read set may reuse isolation proof, in its exact active transaction. */
+  /** Recheck identity; after savepoint rollback, inspect isolation freshly on every access. */
   ConnectionHolder requireImmutableReadTransaction(
+      ConnectionHolder expectedHolder, Connection expectedConnection) {
+    requireIdentity(expectedHolder, expectedConnection);
+    return require();
+  }
+
+  /** Called only after an identity check; new read-set owners inherit rollback invalidation. */
+  boolean mayReuseImmutableReads() {
+    for (var synchronization : TransactionSynchronizationManager.getSynchronizations()) {
+      if (synchronization instanceof IsolationProof proof && proof.dataSource == dataSource) {
+        return proof.pinned && !proof.completed && proof.reusable;
+      }
+    }
+    return false;
+  }
+
+  private ConnectionHolder requireIdentity(
       ConnectionHolder expectedHolder, Connection expectedConnection) {
     try {
       ConnectionHolder currentHolder = requireConnection(false);
       if (!TransactionSynchronizationManager.isSynchronizationActive()
           || currentHolder != expectedHolder
-          || currentHolder.getConnection() != expectedConnection
-          || (entityManagerFactory != null && !isJpaConnection(expectedConnection))) {
+          || currentHolder.getConnection() != expectedConnection) {
         throw unavailable();
       }
       return currentHolder;

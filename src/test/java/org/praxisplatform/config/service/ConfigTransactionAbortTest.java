@@ -31,6 +31,14 @@ class ConfigTransactionAbortTest {
     when(source.getConnection()).thenReturn(connection);
     when(connection.getAutoCommit()).thenReturn(false);
     when(connection.getTransactionIsolation()).thenReturn(Connection.TRANSACTION_READ_COMMITTED);
+    var statement = mock(java.sql.PreparedStatement.class);
+    var result = mock(java.sql.ResultSet.class);
+    when(connection.prepareStatement("SELECT current_setting('transaction_isolation')")).thenReturn(statement);
+    when(statement.executeQuery()).thenAnswer(call -> {
+      when(result.next()).thenReturn(true, false);
+      return result;
+    });
+    when(result.getString(1)).thenReturn("read committed");
     var metadata = mock(DatabaseMetaData.class);
     when(metadata.supportsSavepoints()).thenReturn(true);
     when(connection.getMetaData()).thenReturn(metadata);
