@@ -1,0 +1,57 @@
+{
+  "baseCommit": "7f63d5cc2b449657f11fc59d27176bac3477d8ad",
+  "branch": "codex/published-page-copy-source",
+  "sourceState": "Six-file uncommitted implementation; production/test bytes unchanged throughout focal run. Only implementation documentation result was completed afterward.",
+  "sourceFiles": {
+    "docs/ai/contracts/page-publication-p0/P3B-DESIGN.md": "13c449366fcc655e5b2607edae9b51c557c0e15fa8d017db9cf27b811dfa7808",
+    "docs/ai/contracts/page-publication-p0/P3B-IMPLEMENTATION.md": "7fd4194e497266085fb518ddc09cdf47df7c5d965b57f4f9d5361804e2686250",
+    "src/main/java/org/praxisplatform/config/dto/PublishedPageResponse.java": "51977a667cedc178dbbf0288aad615554e4d4c98bf635a99089bcb6bc2a0ef8c",
+    "src/main/java/org/praxisplatform/config/service/PageRuntimeReadService.java": "c432e07e2bad7c929dcb990cd03bf56382d2ce7b0a42bb68afd52804a61c495b",
+    "src/test/java/org/praxisplatform/config/controller/PageRuntimeHttpTest.java": "0c609a3732666a0e206d654aaf06dc4dec052fb5e97f3a273973b6e1909572f8",
+    "src/test/java/org/praxisplatform/config/service/PageRuntimeReadServiceTest.java": "faee0425bc7abe0667e99f554dd1824ff9a5b4e33b607e32ded7831fd691db95"
+  },
+  "command": [
+    "mvn",
+    "-B",
+    "-Dmaven.repo.local=/tmp/praxis-page-p3b-512-m2",
+    "-Dtest=PageRuntimeReadServiceTest,PageRuntimeHttpTest",
+    "-Dgroups=unit",
+    "-DfailIfNoTests=true",
+    "test"
+  ],
+  "exitCode": 0,
+  "mavenTotalSeconds": 19.319,
+  "scope": "Only named @Tag(unit) owner/controller mocks; no DB, install, publication or deploy.",
+  "suites": [
+    {
+      "name": "org.praxisplatform.config.controller.PageRuntimeHttpTest",
+      "tests": "8",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "1.142"
+    },
+    {
+      "name": "org.praxisplatform.config.service.PageRuntimeReadServiceTest",
+      "tests": "13",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "2.584"
+    }
+  ],
+  "files": {
+    "TEST-org.praxisplatform.config.controller.PageRuntimeHttpTest.xml": {
+      "originalSha256": "e21893b289b2029064a7df2b4b6d0cc595dcf4fe3f73e251325fbc6a8c400a8c",
+      "exportedSha256": "2459980d4c687274ae910ba927c1d36ec79351f2b0775df30ed3e6cc0049fe8d"
+    },
+    "TEST-org.praxisplatform.config.service.PageRuntimeReadServiceTest.xml": {
+      "originalSha256": "74e4b118ab9ece34620ff0ce7826d4cf13604a843b723c73339e2565db0753b2",
+      "exportedSha256": "a300024360226c089867e7bcfd687134ed86698fdcc98f647665795ce045fb21"
+    },
+    "maven.log": {
+      "originalSha256": "e368d2bc6e534c8bd7039bf0a7564d6acbb43b1fafdeb5260dabfc9c4c5c5c23",
+      "exportedSha256": "4da01b6209d5145768de026855b7520cb08958880be753da63f9d35118d44908"
+    }
+  }
+}

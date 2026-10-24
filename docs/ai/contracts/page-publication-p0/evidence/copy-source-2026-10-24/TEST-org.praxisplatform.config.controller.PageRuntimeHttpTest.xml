@@ -1,0 +1,52 @@
+<testsuite xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="https://maven.apache.org/surefire/maven-surefire-plugin/xsd/surefire-test-report.xsd" version="3.0.2" name="org.praxisplatform.config.controller.PageRuntimeHttpTest" time="1.142" tests="8" errors="0" skipped="0" failures="0" flakes="0">
+  <testcase name="malformedProviderOutputIsUnavailableRatherThanBlamingTheCaller" classname="org.praxisplatform.config.controller.PageRuntimeHttpTest" time="0.608">
+    <system-out>Standard Commons Logging discovery in action with spring-jcl: please remove commons-logging.jar from classpath in order to avoid potential conflicts
+09:29:35.932 [main] INFO org.hibernate.validator.internal.util.Version -- HV000001: Hibernate Validator 8.0.3.Final
+09:29:36.096 [main] INFO org.springframework.mock.web.MockServletContext -- Initializing Spring TestDispatcherServlet ''
+09:29:36.097 [main] INFO org.springframework.test.web.servlet.TestDispatcherServlet -- Initializing Servlet ''
+09:29:36.098 [main] INFO org.springframework.test.web.servlet.TestDispatcherServlet -- Completed initialization in 0 ms
+</system-out>
+  </testcase>
+  <testcase name="navigationMapsOwnerFailuresAndNeverReturnsPrivateErrorDetails" classname="org.praxisplatform.config.controller.PageRuntimeHttpTest" time="0.023">
+    <system-out>09:29:36.354 [main] INFO org.springframework.mock.web.MockServletContext -- Initializing Spring TestDispatcherServlet ''
+09:29:36.354 [main] INFO org.springframework.test.web.servlet.TestDispatcherServlet -- Initializing Servlet ''
+09:29:36.354 [main] INFO org.springframework.test.web.servlet.TestDispatcherServlet -- Completed initialization in 0 ms
+</system-out>
+  </testcase>
+  <testcase name="timestampIsNotStrongIdentityAndCurrentAuthorityAlwaysPrecedes304" classname="org.praxisplatform.config.controller.PageRuntimeHttpTest" time="0.038">
+    <system-out>09:29:36.378 [main] INFO org.springframework.mock.web.MockServletContext -- Initializing Spring TestDispatcherServlet ''
+09:29:36.378 [main] INFO org.springframework.test.web.servlet.TestDispatcherServlet -- Initializing Servlet ''
+09:29:36.378 [main] INFO org.springframework.test.web.servlet.TestDispatcherServlet -- Completed initialization in 0 ms
+</system-out>
+  </testcase>
+  <testcase name="finalHostProjectionOwnsItsReceiptInsteadOfReusingAFragment" classname="org.praxisplatform.config.controller.PageRuntimeHttpTest" time="0.022">
+    <system-out>09:29:36.415 [main] INFO org.springframework.mock.web.MockServletContext -- Initializing Spring TestDispatcherServlet ''
+09:29:36.415 [main] INFO org.springframework.test.web.servlet.TestDispatcherServlet -- Initializing Servlet ''
+09:29:36.415 [main] INFO org.springframework.test.web.servlet.TestDispatcherServlet -- Completed initialization in 0 ms
+</system-out>
+  </testcase>
+  <testcase name="parametersAndMissingContextAreSanitizedBeforeProviders" classname="org.praxisplatform.config.controller.PageRuntimeHttpTest" time="0.012">
+    <system-out>09:29:36.437 [main] INFO org.springframework.mock.web.MockServletContext -- Initializing Spring TestDispatcherServlet ''
+09:29:36.437 [main] INFO org.springframework.test.web.servlet.TestDispatcherServlet -- Initializing Servlet ''
+09:29:36.437 [main] INFO org.springframework.test.web.servlet.TestDispatcherServlet -- Completed initialization in 0 ms
+</system-out>
+  </testcase>
+  <testcase name="conditionalReadsUseCanonicalWeakParsingAfterOwnerResolution" classname="org.praxisplatform.config.controller.PageRuntimeHttpTest" time="0.025">
+    <system-out>09:29:36.449 [main] INFO org.springframework.mock.web.MockServletContext -- Initializing Spring TestDispatcherServlet ''
+09:29:36.449 [main] INFO org.springframework.test.web.servlet.TestDispatcherServlet -- Initializing Servlet ''
+09:29:36.449 [main] INFO org.springframework.test.web.servlet.TestDispatcherServlet -- Completed initialization in 0 ms
+</system-out>
+  </testcase>
+  <testcase name="invalidProviderNodeOrNullChildCannotReturn200Or304" classname="org.praxisplatform.config.controller.PageRuntimeHttpTest" time="0.009">
+    <system-out>09:29:36.474 [main] INFO org.springframework.mock.web.MockServletContext -- Initializing Spring TestDispatcherServlet ''
+09:29:36.474 [main] INFO org.springframework.test.web.servlet.TestDispatcherServlet -- Initializing Servlet ''
+09:29:36.474 [main] INFO org.springframework.test.web.servlet.TestDispatcherServlet -- Completed initialization in 0 ms
+</system-out>
+  </testcase>
+  <testcase name="publishedCopySourceSerializesAsTheExistingExactCreationSelector" classname="org.praxisplatform.config.controller.PageRuntimeHttpTest" time="0.032">
+    <system-out>09:29:36.484 [main] INFO org.springframework.mock.web.MockServletContext -- Initializing Spring TestDispatcherServlet ''
+09:29:36.484 [main] INFO org.springframework.test.web.servlet.TestDispatcherServlet -- Initializing Servlet ''
+09:29:36.484 [main] INFO org.springframework.test.web.servlet.TestDispatcherServlet -- Completed initialization in 0 ms
+</system-out>
+  </testcase>
+</testsuite>
