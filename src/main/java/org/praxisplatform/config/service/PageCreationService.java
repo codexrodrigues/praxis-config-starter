@@ -289,14 +289,7 @@ public final class PageCreationService {
       PageCreationCommand command,
       UiLayoutValidationContext validation) {
     validation.run(
-        context.invocation(),
-        () -> bridge.require(PageCreationOperation.CREATE_PAGE, context, null));
-    validation.run(
-        context.invocation(),
-        () -> bridge.require(PageCreationOperation.READ_SOURCE, context, command.source()));
-    validation.run(
-        context.invocation(),
-        () -> bridge.require(PageCreationOperation.COPY_SOURCE, context, command.source()));
+        context.invocation(), () -> bridge.requireCreation(context, command.source()));
   }
 
   private void commitCheck(

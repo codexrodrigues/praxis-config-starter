@@ -97,6 +97,9 @@ final class PageRuntimeHostFixture implements AutoCloseable {
         assertThat(seed.document()).isEqualTo(UiLayoutPageRevisionReproduction.children(sourcePage).get(seed.request().widgetKey()));
       }
     };
+    UiLayoutBaselineMetadataAdmission metadataAdmission = (invocation, target, descriptor, reference, baseline, evidence) -> {
+      current(invocation); metadataCallback.accept(invocation, target);
+    };
     PageCreationHost host = new PageCreationHost() {
       public PageCreationContext resolve(Principal principal, String version) {
         var actor = current(principal, version);
@@ -120,10 +123,20 @@ final class PageRuntimeHostFixture implements AutoCloseable {
         current(context.invocation());
         pageGrant.require(operation, context, reference);
       }
+      public void requireCreation(PageCreationContext context, PageSourceReference source) {
+        require(PageCreationOperation.CREATE_PAGE, context, null);
+        require(PageCreationOperation.READ_SOURCE, context, source);
+        require(PageCreationOperation.COPY_SOURCE, context, source);
+      }
       public UiLayoutDraftWorkspaceSeed.TargetSeed captureNative(PageCreationContext context, PageSourceReference.Native reference) {
         assertThat(reference).isEqualTo(new PageSourceReference.Native("fixture:page", "r1"));
         nativeCaptures.incrementAndGet();
         return nativePageSeed(context.invocation());
+      }
+      public void requireNativeProvenance(PageCreationContext context, PageSourceReference.Native origin,
+          UiLayoutDraftWorkspaceSeed.TargetSeed captured) {
+        PageNativeProvenanceTestPolicies.require(context, captured,
+            () -> requireNative(context, origin, captured), source, metadataAdmission);
       }
       public void requireNative(PageCreationContext context, PageSourceReference.Native reference,
           UiLayoutDraftWorkspaceSeed.TargetSeed captured) {
@@ -156,9 +169,7 @@ final class PageRuntimeHostFixture implements AutoCloseable {
     });
     application.registerBean(UiLayoutLifecycleStructureValidator.class, () -> structure);
     application.registerBean(UiLayoutDraftWorkspaceSource.class, () -> source);
-    application.registerBean(UiLayoutBaselineMetadataAdmission.class, () -> (invocation, target, descriptor, reference, baseline, evidence) -> {
-      current(invocation); metadataCallback.accept(invocation, target);
-    });
+    application.registerBean(UiLayoutBaselineMetadataAdmission.class, () -> metadataAdmission);
     application.registerBean(UiLayoutValidationBudgetPolicy.class, () -> (operation, invocation) -> { budgetCallback.accept(operation, invocation); return budget; });
     application.registerBean(UiLayoutReleaseValidator.class, () -> (release, members) -> {});
     application.registerBean(UiLayoutRevisionAllocationLock.class, () -> new JdbcUiLayoutRevisionAllocationLock(named));

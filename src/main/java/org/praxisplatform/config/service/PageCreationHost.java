@@ -32,8 +32,35 @@ public interface PageCreationHost {
   void require(
       PageCreationOperation operation, PageCreationContext context, PageSourceReference source);
 
+  /**
+   * Admit one creation decision: CREATE_PAGE, READ_SOURCE and COPY_SOURCE must all hold for the
+   * exact current context and source. This is one joint current-authority observation window,
+   * not three independently reusable grants. A host may evaluate its three pure policies under
+   * the same locked authority snapshot, with fresh observation/expiry checks before and after
+   * that policy. Revocation racing the joint decision serializes at this window's completion.
+   * Never retain the decision across calls, execute Config work in this callback, or omit a policy.
+   * Config calls again at every creation checkpoint, including before actual commit.
+   */
+  void requireCreation(PageCreationContext context, PageSourceReference source);
+
   UiLayoutDraftWorkspaceSeed.TargetSeed captureNative(
       PageCreationContext context, PageSourceReference.Native source);
+
+  /**
+   * Joint admission of a wholly host-native page: current producer/domain dependencies, root
+   * metadata, every child's exact source and every child's metadata must all be authorized for
+   * this complete historical capture. Config selects this seam only for Native origins whose
+   * root and all child metadata are not Config-generated; it owns that classification.
+   * The host evaluates all policies in one current-authority window, with fresh observation and
+   * expiry/coherence checks around them. No grant is retained between calls. Config invokes this
+   * before and after structural extensions and still checks exact reproduction and child identity.
+   * This does not grant access to published or Config-generated origins. Mixed captures retain
+   * requireNative plus the independent metadata/child admissions and Config provenance checks.
+   */
+  void requireNativeProvenance(
+      PageCreationContext context,
+      PageSourceReference.Native source,
+      UiLayoutDraftWorkspaceSeed.TargetSeed captured);
 
   /**
    * Admit the actual producer and current domain dependencies of the complete old capture. This is
