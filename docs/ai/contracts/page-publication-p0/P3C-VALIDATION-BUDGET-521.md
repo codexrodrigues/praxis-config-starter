@@ -168,3 +168,113 @@ o prazo Hero, Neon, adoção no host ou release. Skills: `atualizar-existente`, 
 ensinava limpeza de bytes sem renovação de admissão após savepoint. Sua atualização
 canônica é coordenada separadamente no mesmo incremento. Angular, corpus HTTP e
 payloads de examples não mudam; nenhuma sincronização desses derivados é necessária.
+
+
+## Admissão conjunta de criação — etapa de custo, 24/10/2026
+
+Classificação `contrato-publico`/`transversal`. Inventário: as três políticas já
+existem; a `lacuna-real-de-contrato` é uma unidade SPI explícita que permita ao host
+autorizar conjuntamente CREATE_PAGE, READ_SOURCE e COPY_SOURCE sem três transações.
+Dono: `PageCreationHost.requireCreation`, com ponte e checkpoints em Config;
+consumidor: `QuickstartPageHost`, fixtures implementadoras e decorator diagnóstico.
+Não mudam DTOs, HTTP, schema, Angular ou corpus; o SPI Java beta exige adoção conjunta.
+
+O Quickstart avalia as três políticas puras na mesma `authorizeCurrent`. Mantém duas
+observações frescas, SESSION/membership locks, expiração e coerência pós-política.
+A unidade tem uma linearização conjunta; revogação entre suas políticas espera seu
+fim, enquanto entre checkpoints/I/O continua sendo observada. Não há cache de grants.
+Config mantém os seis checkpoints e os checks de budget na entrada/saída da unidade.
+As admissões de captura, proveniência, metadata, filhos e extensões não foram agrupadas.
+
+Prova offline: 24 testes Config (`PageCreationAdmissionCheckpointTest`,
+`PageCatalogLifecycleBridgeTest`, `PageCreationHttpTest`, `PageCreationAutoConfigurationTest`)
+e 46 Quickstart (`QuickstartPageHostTest`, `QuickstartPageNeonDiagnosticsTest`,
+`EnterpriseRuntimeConfigurationTest`), zero falhas/erros/skips. A fixture Config executa
+sequenciamento real de completion Spring com armazenamento sintético; uma negativa
+em qualquer checkpoint 1–6 impede commit e retorno bem-sucedido, inclusive após receipt
+provisório. Isso não prova rollback PostgreSQL. O teste host usa serviço de autorização
+real e transação sintética: três chamadas isoladas fazem 6 snapshots/3 commits;
+a unidade faz 2 snapshots/1 commit, com negativas e erro na segunda observação.
+
+Dependência privada usada apenas em testes: `io.github.codexrodrigues:praxis-config-starter:0.1.0-creation-admission-SNAPSHOT`.
+O POM público permanece rc170. Nenhum banco, HTTP, release ou deploy foi executado.
+C5 (Config169) e Hero com Config170 (503 em41,085s; lookup404) permanecem negativos.
+Os oito HOST_REQUIRE de C5 são compatíveis com só os dois checkpoints iniciais mais
+READ/COPY da captura: esta etapa reduz quatro admissões nesse prefixo, não demonstra
+criação completa abaixo de40s. A redução integral desta unidade em uma criação
+completa é18→6 transações e36→12 snapshots; o fanout de proveniência continua pendente.
+
+
+## Proveniência nativa conjunta — segunda etapa de custo, 24/10/2026
+
+Classificação `contrato-publico`/`transversal`. Inventário: Config já conhece a origem,
+metadados e conjunto exato de filhos; Quickstart já valida produtor, metadata da raiz,
+origem e metadata do filho em `QuickstartPageDocuments.requirePage`. A lacuna real é a
+unidade SPI que permita realizar essas políticas puras dentro da mesma admissão atual.
+`PageCreationHost.requireNativeProvenance` é o dono canônico; não há novo DTO ou camada
+de evidência. Todos os implementadores de host, fixtures e decorator foram atualizados.
+
+Config escolhe a unidade somente para Native com raiz e todos os filhos não gerados.
+São duas chamadas independentes, antes e depois dos validadores estruturais. Checks de
+reprodução, sintaxe, correlação e conjunto exato dos filhos permanecem em Config. Cada
+chamada Quickstart usa duas observações frescas, sob os locks operacionais existentes;
+não há cache de grants, redução do orçamento de observações nem eliminação de checkpoint
+após extensão. A linearização é conjunta para as políticas da unidade, não idêntica aos
+interleavings anteriores. Captura Native com raiz ou filho gerado mantém o caminho
+anterior completo e a recursão Config. A origem Published não seleciona esta unidade;
+somente seus ancestrais efetivamente Native podem ser elegíveis.
+
+O diagnóstico acrescenta `HOST_REQUIRE_NATIVE_PROVENANCE`; não reclassifica recibos
+históricos. Para uma proveniência Native com um filho, os quatro callbacks anteriores
+se tornam duas unidades, com quatro observações atuais no total em vez de oito. No
+prefixo histórico C5 houve 21 verificações, correspondentes a 42 admissões/84 observações
+a menos nesse trecho sob a nova forma. É contagem estrutural, não medição de latência,
+nem previsão de sucesso em 40s. O número total de verificações de uma criação completa
+continua sem medida. C5 e o Hero rc170 continuam negativos e não foram repetidos.
+
+Provas focais finais: Config 99 testes em sete classes e Quickstart 49 em três classes,
+zero falhas/erros/skips. Os testes são offline, com transações e armazenamento sintéticos;
+nenhuma prova PostgreSQL/Neon,
+HTTP, release ou deploy é reivindicada. Skills runtime-persistence e security-config:
+`atualizar-existente`, com dono separado no mesmo incremento. Não mudam HTTP, DTOs,
+payloads, corpus ou Angular; nenhum derivado dessas superfícies requer sincronização.
+
+
+Comandos finais (JDK21; GAV privado somente para o consumidor):
+
+```sh
+mvn -o -q -Dtest=PageCreationAdmissionCheckpointTest,PageCatalogLifecycleBridgeTest,PageCreationHttpTest,PageCreationAutoConfigurationTest test
+mvn -o -q -Dtest=PageRuntimeReadServiceTest,UiLayoutLifecycleAuthorityFreshnessTest,UiLayoutLifecycleCommandServiceTest test
+mvn -o -q -Dpraxis.config.version=0.1.0-creation-admission-SNAPSHOT -Dtest=QuickstartPageHostTest,QuickstartPageNeonDiagnosticsTest,EnterpriseRuntimeConfigurationTest test
+```
+
+Os testes exercitam os seis checkpoints de criação com falha em cada posição e impedem
+commit/resultado sintético; produtor, metadata raiz, origem do filho e metadata do filho
+adulterados; duas observações por unidade; conflito/expiração pós-políticas; revogação
+por qualquer validador estrutural observada na segunda admissão; orçamento na entrada
+e saída de ambas as admissões; raiz gerada com recursão e filho gerado sem ledger rejeitado.
+A fixture de metadados continua consumindo o orçamento original compartilhado.
+
+Baseline Config `3666986eb1c8029bf2304688e205fbffc879985a`, Quickstart
+`687a1fda274bb38c1f3ff3feedbd17392c17a0f6`, mais este incremento. O rebuild privado offline
+usou `-DskipTests -Dmaven.javadoc.skip=true -Dmaven.source.skip=true install` com troca
+temporária/restaurada somente da versão do POM. SHA256 do JAR privado desta árvore:
+`6c31b1b9d8251766d8f563fb3dc4562de7f93b196c8f65b0bb69d9e3587e004a`.
+O POM público não mudou. Relatórios XML ficam em `target/surefire-reports` de cada
+worktree `page-creation-admission-unit`. Revisão independente `creation_boundary_review`:
+APTO técnico às etapas 1+2, com XML 29 Config +49 Quickstart conferidos; consumidores
+adicionais Config somaram70 testes passando. `git diff --check` passa nos dois repos.
+Isso não é aprovação de SLA, banco remoto, release ou adoção operacional.
+
+
+Integração local posterior: rebase sem conflitos sobre Config
+`0eaf2f747f49a67e263c449613bc42c2f1d4c2e4` (rc171) e Quickstart `1f1e7327`.
+`git range-diff` confirmou patch idêntico antes/depois nos dois repositórios. O avanço
+Config toca somente authoring/intent/compiler e versão POM; Quickstart acrescenta
+apenas documentação/evidências. Os 99+49 testes acima continuam atribuídos à base
+rc170, sem reexecução automática. O rebuild integrado privado, com testes pulados,
+passou; novo JAR SHA256 `f0986f6252ff759fe6252d69038de36dd6ef582c37acc9b16171606b712f386c`.
+Não houve instalação/publicação sob coordenadas rc170/rc171.
+O consumidor integrado também passou `mvn -o -q
+-Dpraxis.config.version=0.1.0-creation-admission-SNAPSHOT -DskipTests test-compile`.
+Esse resultado comprova compilação na nova composição; não é nova execução dos testes.

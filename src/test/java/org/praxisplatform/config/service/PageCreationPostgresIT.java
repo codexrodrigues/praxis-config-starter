@@ -576,6 +576,11 @@ class PageCreationPostgresIT {
                   UiLayoutLifecycleException.Code.DENIED, "Grant denied");
           }
 
+          public void requireCreation(PageCreationContext context, PageSourceReference source) {
+            require(PageCreationOperation.CREATE_PAGE, context, null);
+            require(PageCreationOperation.READ_SOURCE, context, source);
+            require(PageCreationOperation.COPY_SOURCE, context, source);
+          }
           public UiLayoutDraftWorkspaceSeed.TargetSeed captureNative(
               PageCreationContext c, PageSourceReference.Native selected) {
             captures.incrementAndGet();
@@ -644,6 +649,11 @@ class PageCreationPostgresIT {
                 children);
           }
 
+          public void requireNativeProvenance(PageCreationContext context, PageSourceReference.Native origin,
+              UiLayoutDraftWorkspaceSeed.TargetSeed captured) {
+            PageNativeProvenanceTestPolicies.require(context, captured,
+                () -> requireNative(context, origin, captured), source, metadata);
+          }
           public void requireNative(
               PageCreationContext c,
               PageSourceReference.Native selected,

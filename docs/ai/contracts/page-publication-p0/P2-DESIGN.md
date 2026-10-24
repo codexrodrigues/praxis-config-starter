@@ -59,9 +59,30 @@ API mínima aprovada e implementada:
 - `PageCreationHost.require(PageCreationOperation operation, PageCreationContext context, PageSourceReference source)`:
   enum CREATE_PAGE / READ_CREATION / READ_SOURCE / COPY_SOURCE. source nula apenas quando a operação
   não seleciona origem. Lifecycle admission de leitura/edição/review/publicação continua o SPI existente.
+- `PageCreationHost.requireCreation(PageCreationContext context, PageSourceReference source)` é obrigatório,
+  sem default, e exige conjuntamente CREATE_PAGE, READ_SOURCE e COPY_SOURCE sobre contexto e origem
+  exatos. O host executa as três políticas puras numa janela atual de autoridade; não executa trabalho
+  Config nem retém o resultado entre chamadas. No Quickstart, a janela usa uma transação operacional
+  e duas observações atuais, antes/depois das políticas, com locks e checks de expiração preservados.
+  A revogação concorrente serializa contra essa unidade; isso muda a linearização das três admissões
+  independentes anteriores, não promete reproduzir os mesmos interleavings. Os seis checkpoints de
+  criação (antes/depois do lock, antes/depois da verificação final e seus equivalentes beforeCommit)
+  permanecem. As demais admissões continuam segundo as unidades explícitas descritas abaixo.
+  Implementadores do SPI beta precisam adotar o método junto com o novo Config; não há fallback.
 - `PageCreationHost.captureNative(PageCreationContext context, PageSourceReference source) -> UiLayoutDraftWorkspaceSeed.TargetSeed`:
   apenas registered-native exata. Reutiliza seed existente com root e evidência de filhos; fonte publicada
   é resolvida pelo Config, jamais pelo host via JSON solto.
+- `PageCreationHost.requireNativeProvenance(context, Native source, TargetSeed captured)` é obrigatório.
+  Config o seleciona somente quando a origem é Native e os metadados da raiz e de todos os filhos
+  não são gerados pelo Config. O host admite conjuntamente produtor/dependências de domínio,
+  metadata da raiz, origem exata de cada filho e metadata de cada filho. No Quickstart, todas
+  essas políticas puras rodam dentro de uma transação operacional, entre duas observações frescas
+  de SESSION/membership, com expiração/coerência e locks preservados. Config chama antes e depois
+  dos validadores estruturais e mantém reprodução, sintaxe, identidade e cobertura exata dos filhos.
+  A unidade muda a linearização das políticas; revogação concorrente serializa contra a unidade,
+  nunca é cacheada entre chamadas. Não autoriza origem publicada nem gerada. O host não decide
+  elegibilidade por marcadores privados do Config. Capturas mistas mantêm integralmente o caminho
+  requireNative + metadata/filhos independentes + correlação recursiva Config; published permanece.
 - `PageCreationHost.requireNative(PageCreationContext context, PageSourceReference source, UiLayoutDraftWorkspaceSeed.TargetSeed captured)`:
   re-admite a captura completa antiga sem buscar latest; valida vínculo sourceId/revision com seed e
   fonte original. Reutiliza `UiLayoutBaselineMetadataAdmission` e `UiLayoutDraftWorkspaceSource.requirePageChild`

@@ -81,6 +81,14 @@ final class PageCatalogLifecycleBridge {
     }
   }
 
+  void requireCreation(PageCreationContext context, PageSourceReference source) {
+    try {
+      host.requireCreation(context, source);
+    } catch (RuntimeException e) {
+      throw UiLayoutMetadataAdmissionFailure.sanitized(e, "Page creation authority is unavailable.");
+    }
+  }
+
   UiLayoutLifecycleInvocationProvider invocations(UiLayoutLifecycleInvocationProvider delegate) {
     return (principal, version, root) -> {
       if (!isPage(root)) return delegate.resolve(principal, version, root);
@@ -391,12 +399,16 @@ final class PageCatalogLifecycleBridge {
     var seed = snapshot.baseline();
     if (!isPage(seed.target())) throw failure(UiLayoutLifecycleException.Code.VALIDATION_FAILED);
     var invocation = context.forTarget(seed.target());
+    boolean jointNative = source instanceof PageSourceReference.Native
+        && !isGenerated(seed.metadata())
+        && seed.pageChildren().stream().noneMatch(child -> isGenerated(child.metadata()));
     if (source instanceof PageSourceReference.Native origin) {
       if (snapshot.sourceDraftId() != null || !same(seed.document(), snapshot.document()))
         throw failure(UiLayoutLifecycleException.Code.INVALID_STATE);
       try {
         chain.check();
-        host.requireNative(context, origin, seed);
+        if (jointNative) host.requireNativeProvenance(context, origin, seed);
+        else host.requireNative(context, origin, seed);
         chain.check();
       } catch (RuntimeException e) {
         throw UiLayoutMetadataAdmissionFailure.sanitized(
@@ -437,7 +449,7 @@ final class PageCatalogLifecycleBridge {
           seed.patch(),
           projection.compilePatch(),
           validation);
-      validation.run(invocation, () -> requireOriginalMetadata(
+      if (!jointNative) validation.run(invocation, () -> requireOriginalMetadata(
           context,
           invocation,
           seed.target(),
@@ -468,7 +480,7 @@ final class PageCatalogLifecycleBridge {
             throw failure(UiLayoutLifecycleException.Code.INVALID_STATE);
           // The source page creation was already traversed above for a published source.
           if (!(source instanceof PageSourceReference.Published)) verify(context, record, chain);
-        } else {
+        } else if (!jointNative) {
           validation.run(invocation, () -> nativeSource.requirePageChild(invocation, seed.target(), child, validation));
           var childTarget =
               new UiLayoutTarget(
@@ -487,6 +499,15 @@ final class PageCatalogLifecycleBridge {
       }
       if (!keys.equals(children.keySet()))
         throw failure(UiLayoutLifecycleException.Code.INVALID_STATE);
+      if (jointNative) {
+        try {
+          validation.run(invocation, () -> host.requireNativeProvenance(
+              context, (PageSourceReference.Native) source, seed));
+        } catch (RuntimeException e) {
+          throw UiLayoutMetadataAdmissionFailure.sanitized(
+              e, "Native page provenance admission is unavailable.");
+        }
+      }
     }
   }
 

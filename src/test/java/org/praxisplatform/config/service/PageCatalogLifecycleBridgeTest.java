@@ -30,6 +30,7 @@ class PageCatalogLifecycleBridgeTest {
   private final PageCreationHost host = mock(PageCreationHost.class);
   private final UiLayoutDraftWorkspaceSource nativeSource =
       mock(UiLayoutDraftWorkspaceSource.class);
+  private final UiLayoutLifecycleStructureValidator structure = mock(UiLayoutLifecycleStructureValidator.class);
   private final UiLayoutBaselineMetadataAdmission metadata =
       mock(UiLayoutBaselineMetadataAdmission.class);
   private final Map<UUID, PageCreationEvidence> records = new HashMap<>();
@@ -52,6 +53,14 @@ class PageCatalogLifecycleBridgeTest {
 
   @BeforeEach
   void setup() {
+    doAnswer(call -> {
+      PageCreationContext current = call.getArgument(0);
+      PageSourceReference.Native origin = call.getArgument(1);
+      UiLayoutDraftWorkspaceSeed.TargetSeed captured = call.getArgument(2);
+      PageNativeProvenanceTestPolicies.require(current, captured,
+          () -> host.requireNative(current, origin, captured), nativeSource, metadata);
+      return null;
+    }).when(host).requireNativeProvenance(any(), any(), any());
     when(host.resolveLifecycle(any()))
         .thenAnswer(call -> new PageCreationContext("app", "/pages", call.getArgument(0)));
     when(store.byPage(any(), any()))
@@ -77,7 +86,7 @@ class PageCatalogLifecycleBridgeTest {
             hashes,
             nativeSource,
             metadata,
-            mock(UiLayoutLifecycleStructureValidator.class),
+            structure,
             frozen,
             captures,
             mapper,
@@ -255,6 +264,100 @@ class PageCatalogLifecycleBridgeTest {
   }
 
   @Test
+  void pureNativeJointProvenanceBracketsEveryStructuralExtension() throws Exception {
+    var creation = nativeCreation();
+    var order = new ArrayList<String>();
+    doAnswer(call -> { order.add("provenance"); return null; }).when(host).requireNativeProvenance(any(), any(), any());
+    doAnswer(call -> { order.add("target"); return null; }).when(structure).validateTarget(any(), any(), any());
+    doAnswer(call -> { order.add("baseline"); return null; }).when(structure).validateAuthoringBaseline(any(), any(), any(), any(), any());
+    doAnswer(call -> { order.add("revision"); return null; }).when(structure).validateAuthoringRevision(any(), any(), any(), any(), any(), any(), any(), any(), any());
+    verifyInOwner(creation);
+    assertThat(order).containsExactly("provenance", "target", "baseline", "revision", "provenance");
+    verifyNoInteractions(metadata, nativeSource);
+    verify(host, never()).requireNative(any(), any(), any());
+  }
+
+  @Test
+  void revocationByAnyStructuralExtensionIsObservedByFinalJointAdmission() throws Exception {
+    var creation = nativeCreation();
+    for (int boundary = 0; boundary < 3; boundary++) {
+      reset(structure);
+      clearInvocations(host);
+      var revoked = new java.util.concurrent.atomic.AtomicBoolean();
+      doAnswer(call -> {
+        if (revoked.get()) throw new UiLayoutLifecycleException(UiLayoutLifecycleException.Code.DENIED, "revoked by extension");
+        return null;
+      }).when(host).requireNativeProvenance(any(), any(), any());
+      org.mockito.stubbing.Answer<Void> revoke = call -> { revoked.set(true); return null; };
+      if (boundary == 0) doAnswer(revoke).when(structure).validateTarget(any(), any(), any());
+      if (boundary == 1) doAnswer(revoke).when(structure).validateAuthoringBaseline(any(), any(), any(), any(), any());
+      if (boundary == 2) doAnswer(revoke).when(structure).validateAuthoringRevision(any(), any(), any(), any(), any(), any(), any(), any(), any());
+      assertThatThrownBy(() -> verifyInOwner(creation)).isInstanceOfSatisfying(UiLayoutLifecycleException.class,
+          failure -> assertThat(failure.getCode()).isEqualTo(UiLayoutLifecycleException.Code.DENIED));
+      verify(host, times(2)).requireNativeProvenance(any(), any(), any());
+    }
+  }
+
+  @Test
+  void nativeAggregateChecksTheOriginalBudgetAtEntryAndAfterEachAdmission() throws Exception {
+    var creation = nativeCreation();
+    for (int expireAt : List.of(0, 1, 2)) {
+      clearInvocations(host, structure);
+      var clock = new AtomicLong();
+      var calls = new java.util.concurrent.atomic.AtomicInteger();
+      doAnswer(call -> {
+        if (calls.incrementAndGet() == expireAt) clock.set(Duration.ofSeconds(2).toNanos());
+        return null;
+      }).when(host).requireNativeProvenance(any(), any(), any());
+      try (var attempt = new UiLayoutValidationAttempt(context.invocation(),
+          UiLayoutLifecycleOperation.CREATE_DRAFT, Duration.ofSeconds(1), clock::get);
+          var scope = UiLayoutValidationScope.bind(attempt)) {
+        if (expireAt == 0) clock.set(Duration.ofSeconds(2).toNanos());
+        assertThatThrownBy(() -> bridge.verify(context, creation, attempt))
+            .isInstanceOfSatisfying(UiLayoutLifecycleException.class,
+                failure -> assertThat(failure.getCode()).isEqualTo(UiLayoutLifecycleException.Code.SOURCE_UNAVAILABLE));
+        assertThat(calls.get()).isEqualTo(expireAt);
+        assertThat(attempt.remainingBudget()).isZero();
+        if (expireAt < 2) verifyNoInteractions(structure);
+      }
+    }
+  }
+
+  @Test
+  void generatedRootInNativeWrapperKeepsConfigRecursionAndIndependentAdmissions() throws Exception {
+    var original = nativeCreation();
+    var published = publish(original);
+    var wrapper = new PageSourceReference.Native("fixture:mixed-root", "r1");
+    var mixed = creation(wrapper, new PageCreationEvidence.SourceSnapshot(
+        published.snapshot().baseline(), published.snapshot().document(), null), UUID.randomUUID(), null);
+    verifyInOwner(mixed);
+    verify(host).requireNative(eq(context), eq(wrapper), any());
+    verify(host, never()).requireNativeProvenance(any(), eq(wrapper), any());
+    verify(store, atLeastOnce()).byPage(context, original.pageId());
+    verify(host, times(2)).requireNativeProvenance(eq(context), eq((PageSourceReference.Native) original.command().source()), any());
+  }
+
+  @Test
+  void generatedChildCannotUseNativeAggregateToBypassMissingConfigProvenance() throws Exception {
+    var original = nativeCreation();
+    var old = original.original().baseline();
+    var child = old.pageChildren().getFirst();
+    var generated = bridge.outputSeed(original).pageChildren().getFirst().metadata();
+    var metadata = new UiLayoutBaselineMetadataSeed(generated.source(), generated.reproduction(),
+        generated.observation(), child.document().toString());
+    var changedChild = new UiLayoutPageChildSeed(child.request(), child.authoring(), child.patch(), child.sourceRef(), child.document(), metadata);
+    var seed = new UiLayoutDraftWorkspaceSeed.TargetSeed(old.target(), old.authoring(), old.patch(), old.sourceRef(),
+        old.document(), old.metadata(), List.of(changedChild));
+    var wrapper = new PageSourceReference.Native("fixture:mixed-child", "r1");
+    var mixed = creation(wrapper, new PageCreationEvidence.SourceSnapshot(seed, seed.document(), null), UUID.randomUUID(), null);
+    assertThatThrownBy(() -> verifyInOwner(mixed)).isInstanceOfSatisfying(UiLayoutLifecycleException.class,
+        failure -> assertThat(failure.getCode()).isEqualTo(UiLayoutLifecycleException.Code.INVALID_STATE));
+    verify(host).requireNative(eq(context), eq(wrapper), any());
+    verify(host, never()).requireNativeProvenance(any(), any(), any());
+    verify(store).byPage(context, UUID.fromString(seed.target().componentId()));
+  }
+
+  @Test
   void immutablePublishedBytesAreReusedButCurrentNativeAdmissionIsNot() throws Exception {
     var original = nativeCreation();
     var published = publish(original);
@@ -292,7 +395,7 @@ class PageCatalogLifecycleBridgeTest {
               failure ->
                   assertThat(failure.getCode()).isEqualTo(UiLayoutLifecycleException.Code.DENIED));
       verify(frozen, times(1)).resolve(any(), eq(published.reference().releaseId()), any());
-      verify(host, times(3)).requireNative(any(), any(), any());
+      verify(host, times(5)).requireNative(any(), any(), any());
     } finally {
       for (var synchronization :
           org.springframework.transaction.support.TransactionSynchronizationManager
@@ -732,10 +835,12 @@ class PageCatalogLifecycleBridgeTest {
             })
         .when(metadata)
         .require(any(), any(), any(), any(), any(), any());
-    assertThatThrownBy(() -> bridge.verify(context, copied, attempt))
-        .isInstanceOf(UiLayoutLifecycleException.class);
-    assertThat(attempt.remainingBudget()).isZero();
-    assertThatThrownBy(() -> bridge.verify(context, copied, attempt))
-        .isInstanceOf(UiLayoutLifecycleException.class);
+    try (attempt; var scope = UiLayoutValidationScope.bind(attempt)) {
+      assertThatThrownBy(() -> bridge.verify(context, copied, attempt))
+          .isInstanceOf(UiLayoutLifecycleException.class);
+      assertThat(attempt.remainingBudget()).isZero();
+      assertThatThrownBy(() -> bridge.verify(context, copied, attempt))
+          .isInstanceOf(UiLayoutLifecycleException.class);
+    }
   }
 }
