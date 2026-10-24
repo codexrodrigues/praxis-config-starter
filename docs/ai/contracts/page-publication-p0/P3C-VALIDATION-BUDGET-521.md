@@ -161,8 +161,9 @@ de isolamento PostgreSQL real. Os resultados C5 já coletados (312 snapshots em
 este patch não mediu a contribuição dos SHOW nessa requisição nem demonstrou
 criação Hero abaixo de40s. Não foi repetido Neon/HTTP, publicado ou implantado.
 
-Revisão independente do diff atribuída a `creation_boundary_review`, com aceite
-pendente do parecer final. Skills: `atualizar-existente`, porque o guidance em
+Revisão independente: `creation_boundary_review` aprovou tecnicamente o diff e
+conferiu os relatórios XML (167/0/0/0) e `git diff --check`. Esse parecer não aprova
+o prazo Hero, Neon, adoção no host ou release. Skills: `atualizar-existente`, porque o guidance em
 `praxis-config-runtime-persistence/references/governed-layout-integrity.md`
 ensinava limpeza de bytes sem renovação de admissão após savepoint. Sua atualização
 canônica é coordenada separadamente no mesmo incremento. Angular, corpus HTTP e
