@@ -278,3 +278,50 @@ Não houve instalação/publicação sob coordenadas rc170/rc171.
 O consumidor integrado também passou `mvn -o -q
 -Dpraxis.config.version=0.1.0-creation-admission-SNAPSHOT -DskipTests test-compile`.
 Esse resultado comprova compilação na nova composição; não é nova execução dos testes.
+
+## Percurso completo rc172 e plano de ownership de evidências — 24/10/2026
+
+Novo negativo operacional informado pelo coordenador: Hero com Config172 retornou503
+SOURCE_UNAVAILABLE em40,790s; não foi repetido por este trabalhador. C5 continua um
+prefixo interrompido de Config169, não uma medida do percurso completo rc172.
+
+`PageCreationFullPathCostTest`, baseline `eb5e492c68b87550f480ddb2129033f96589a20f`,
+executa criação real pelo PageCreationService, bridge, lifecycle command/read/core,
+stores JDBC e readset, com Spring DataSourceTransactionManager. Connection, JDBC
+transport e repositórios JPA são doubles; não há banco. A fonte tem uma página Native
+com um filho Form. Os2testes passam, incluindo negativa na primeira autoridade de
+beforeCommit após escritas provisórias e sem commit físico simulado.
+
+Contagem completa:218unidades de autoridade (180body+38beforeCommit), sendo
+resolve19, resolveLifecycle87, requireCreation6, READ_SOURCE1, COPY_SOURCE1,
+captureNative1, nativeProvenance84, lifecycleCREATE16 eREAD3. As84admissões Native
+correspondem a42travessias: metadata19, child10, lifecycle8, workspaceCapture1 e
+captura/criação/commitCheck4. Transporte simulado:1SELECT de isolamento,2leituras de
+ledger,1leitura de metadata,1owner-read,3inserts,2draft-lookups,1draft-write e1commit.
+
+As436observações são somente modelo2x por unidade, não chamadas medidas ao reader
+Quickstart. O exemplo de250ms/unidade é peso arbitrário de sensibilidade (54,5s),
+não medição, extrapolação quantitativa de C5 ou previsão SLA. A fixture não usa sleeps.
+Relatório reproduzível: `target/page-creation-full-path-cost.json`, contendo contagem
+e caminhos de métodos sem identidades/credenciais/conteúdo. Comando focal:
+`mvn -o -q -Dtest=PageCreationFullPathCostTest test`.
+
+Plano aprovado antes de editar produção (`contrato-publico`/`transversal`): corrigir
+ownership existente de validação de evidências, sem reter grants. O store package-private
+passa a declarar `readVerified`; JDBC continua validando binding/integridade e duas
+admissões no codec, eliminando a segunda verificação consecutiva nos callers. Todos
+os stores de teste devem respeitar esse contrato. No verificador de filhos, retirar
+somente a admissão explícita imediatamente anterior à primeira admissão do codec,
+preservando os dois checks deste. A seam pública do source passa a admitir fonte e
+metadata completas do filho numa unidade explícita; o bridge Config correlaciona o
+filho exato e percorre sua criação uma vez. Não há alias de compatibilidade ou grant
+cache. Consumidor Quickstart e todas as fixtures precisam migrar no mesmo incremento.
+
+Inventário: o store já entrega evidência verificada, mas o caller repete o mesmo codec
+sem I/O entre ambos (`ja-suportado-mal-materializado`); source e metadata possuem todos
+os dados do filho, mas falta a unidade canônica de admissão conjunta
+(`lacuna-real-de-contrato`). HTTP/DTOs/Angular/corpus não mudam. Skills persistence e
+security-config exigem revisão no mesmo ciclo. Testes mínimos: corrupção/binding,
+negação em ambos os checks, fonte/metadata de filho adulteradas, generated/mixed/
+published e nova contagem completa. A previsão estrutural218→158 precisa ser medida
+na fixture após implementação e ainda não estabelece margem operacional em40s.
