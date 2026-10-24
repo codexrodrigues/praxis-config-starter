@@ -143,7 +143,7 @@ class ConfigTransactionReadSetTest {
   }
 
   @Test
-  void nestedSavepointRollbackDiscardsPositiveBytesWithoutRenewingTransactionAdmission()
+  void nestedSavepointRollbackDiscardsBytesAndRequiresFreshIsolationForRemainingTransaction()
       throws Exception {
     Connection actual = connection();
     var metadata = mock(java.sql.DatabaseMetaData.class);
@@ -167,7 +167,8 @@ class ConfigTransactionReadSetTest {
           assertThat(read("before")).contains("value-4");
         });
     verify(actual).rollback(any(java.sql.Savepoint.class));
-    verify(actual, times(1)).prepareStatement("SELECT current_setting('transaction_isolation')");
+    // Two reads after rollback each check before and after their loaders.
+    verify(actual, times(5)).prepareStatement("SELECT current_setting('transaction_isolation')");
     verify(actual, never()).getTransactionIsolation();
   }
 
@@ -295,6 +296,263 @@ class ConfigTransactionReadSetTest {
           });
     }
     assertThat(loads.get()).isZero();
+  }
+
+  @Test
+  void distinctLedgerGuardsFlushRefreshAndReadOwnersShareOnePinnedIsolationProof() throws Exception {
+    Connection actual = connection();
+    when(source.getConnection()).thenReturn(actual);
+    var factory = mock(jakarta.persistence.EntityManagerFactory.class);
+    var entityManager = mock(jakarta.persistence.EntityManager.class);
+    var entityTransaction = mock(jakarta.persistence.EntityTransaction.class);
+    var session = mock(org.hibernate.Session.class);
+    var entityHolder = new org.springframework.orm.jpa.EntityManagerHolder(entityManager);
+    entityHolder.setSynchronizedWithTransaction(true);
+    when(entityManager.getTransaction()).thenReturn(entityTransaction);
+    when(entityTransaction.isActive()).thenReturn(true);
+    when(entityManager.unwrap(org.hibernate.Session.class)).thenReturn(session);
+    doAnswer(call -> ((org.hibernate.jdbc.ReturningWork<?>) call.getArgument(0)).execute(actual))
+        .when(session).doReturningWork(any());
+    var manager = new org.springframework.orm.jpa.JpaTransactionManager();
+    manager.setEntityManagerFactory(factory);
+    manager.setDataSource(source);
+    var operations = new TransactionTemplate(manager);
+    guard = new ConfigJdbcTransactionGuard(source, operations);
+    var secondLedger = new ConfigJdbcTransactionGuard(source, operations);
+    Object entity = new Object();
+    TransactionSynchronizationManager.bindResource(factory, entityHolder);
+    try {
+      transaction.executeWithoutResult(status -> {
+        for (int iteration = 0; iteration < 20; iteration++) {
+          guard.require();
+          secondLedger.require();
+          guard.flush();
+          secondLedger.refresh(entity);
+          read(owner, "page", () -> Optional.of("page evidence"));
+          ConfigTransactionReadSet.read(secondLedger, secondLedger, "metadata", () -> Optional.of("metadata evidence"));
+        }
+      });
+    } finally {
+      TransactionSynchronizationManager.unbindResource(factory);
+    }
+    verify(entityManager, times(20)).flush();
+    verify(entityManager, times(20)).refresh(entity, jakarta.persistence.LockModeType.PESSIMISTIC_WRITE);
+    verify(actual, times(1)).prepareStatement("SELECT current_setting('transaction_isolation')");
+    verify(actual, never()).getTransactionIsolation();
+  }
+
+  @Test
+  void isolationProofIsSuspendedAndCannotLeakToANewTransactionOnTheSameConnection() throws Exception {
+    Connection first = connection();
+    Connection second = connection();
+    when(source.getConnection()).thenReturn(first, second, first);
+    var nested = new TransactionTemplate(transaction.getTransactionManager());
+    nested.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+    transaction.executeWithoutResult(status -> {
+      guard.require();
+      nested.executeWithoutResult(inner -> {
+        guard.require();
+        guard.require();
+      });
+      guard.require();
+    });
+    transaction.executeWithoutResult(status -> guard.require());
+    verify(first, times(2)).prepareStatement("SELECT current_setting('transaction_isolation')");
+    verify(second, times(1)).prepareStatement("SELECT current_setting('transaction_isolation')");
+    verify(first, never()).getTransactionIsolation();
+    verify(second, never()).getTransactionIsolation();
+  }
+
+  @Test
+  void savepointBeforeFirstPinRequiresFreshIsolationBeforeReloadingEvidence() throws Exception {
+    Connection actual = connection();
+    var metadata = mock(java.sql.DatabaseMetaData.class);
+    when(metadata.supportsSavepoints()).thenReturn(true);
+    when(actual.getMetaData()).thenReturn(metadata);
+    when(actual.setSavepoint(anyString())).thenReturn(mock(java.sql.Savepoint.class));
+    when(source.getConnection()).thenReturn(actual);
+    var nested = new TransactionTemplate(transaction.getTransactionManager());
+    nested.setPropagationBehavior(TransactionDefinition.PROPAGATION_NESTED);
+    var statement = actual.prepareStatement("SELECT current_setting('transaction_isolation')");
+    clearInvocations(actual);
+    transaction.executeWithoutResult(status -> {
+      nested.executeWithoutResult(inner -> {
+        assertThat(read("inside")).contains("value-1");
+        inner.setRollbackOnly();
+      });
+      try {
+        var changed = mock(java.sql.ResultSet.class);
+        when(changed.next()).thenReturn(true, false);
+        when(changed.getString(1)).thenReturn("repeatable read");
+        when(statement.executeQuery()).thenReturn(changed);
+      } catch (Exception exception) { throw new AssertionError(exception); }
+      assertThatThrownBy(() -> read("inside")).isInstanceOf(UiLayoutLifecycleException.class);
+      assertThat(loads).hasValue(1);
+      status.setRollbackOnly();
+    });
+    verify(actual, times(2)).prepareStatement("SELECT current_setting('transaction_isolation')");
+    verify(actual, never()).getTransactionIsolation();
+  }
+
+  @Test
+  void pinnedIsolationNeverMasksAutocommitOrReplacedHolder() throws Exception {
+    Connection actual = connection();
+    when(source.getConnection()).thenReturn(actual);
+    transaction.executeWithoutResult(status -> {
+      guard.require();
+      try {
+        when(actual.getAutoCommit()).thenReturn(true);
+        assertThatThrownBy(guard::require).isInstanceOf(UiLayoutLifecycleException.class);
+        when(actual.getAutoCommit()).thenReturn(false);
+        var original = (ConnectionHolder) TransactionSynchronizationManager.unbindResource(source);
+        var replacement = new ConnectionHolder(actual);
+        replacement.setSynchronizedWithTransaction(true);
+        TransactionSynchronizationManager.bindResource(source, replacement);
+        assertThatThrownBy(guard::require).isInstanceOf(UiLayoutLifecycleException.class);
+        TransactionSynchronizationManager.unbindResource(source);
+        TransactionSynchronizationManager.bindResource(source, original);
+      } catch (Exception exception) { throw new AssertionError(exception); }
+      guard.require();
+    });
+    verify(actual, times(1)).prepareStatement("SELECT current_setting('transaction_isolation')");
+  }
+
+  @Test
+  void reentryFromLaterSavepointCallbackCannotRepinProofAcrossThePhysicalRollback() throws Exception {
+    Connection actual = connection();
+    var metadata = mock(java.sql.DatabaseMetaData.class);
+    when(metadata.supportsSavepoints()).thenReturn(true);
+    when(actual.getMetaData()).thenReturn(metadata);
+    when(actual.setSavepoint(anyString())).thenReturn(mock(java.sql.Savepoint.class));
+    when(source.getConnection()).thenReturn(actual);
+    var nested = new TransactionTemplate(transaction.getTransactionManager());
+    nested.setPropagationBehavior(TransactionDefinition.PROPAGATION_NESTED);
+    var statement = actual.prepareStatement("SELECT current_setting('transaction_isolation')");
+    clearInvocations(actual);
+    var physicallyRolledBack = new java.util.concurrent.atomic.AtomicBoolean();
+    doAnswer(call -> {
+      physicallyRolledBack.set(true);
+      var changed = mock(java.sql.ResultSet.class);
+      when(changed.next()).thenReturn(true, false);
+      when(changed.getString(1)).thenReturn("repeatable read");
+      when(statement.executeQuery()).thenReturn(changed);
+      return null;
+    }).when(actual).rollback(any(java.sql.Savepoint.class));
+    transaction.executeWithoutResult(status -> {
+      nested.executeWithoutResult(inner -> {
+        guard.require();
+        TransactionSynchronizationManager.registerSynchronization(
+            new org.springframework.transaction.support.TransactionSynchronization() {
+              @Override public void savepointRollback(Object savepoint) {
+                assertThat(physicallyRolledBack).isFalse();
+                guard.require();
+              }
+            });
+        inner.setRollbackOnly();
+      });
+      assertThat(physicallyRolledBack).isTrue();
+      assertThatThrownBy(guard::require).isInstanceOf(UiLayoutLifecycleException.class);
+      status.setRollbackOnly();
+    });
+    verify(actual, times(3)).prepareStatement("SELECT current_setting('transaction_isolation')");
+    verify(actual, never()).getTransactionIsolation();
+  }
+
+  @Test
+  void laterSavepointCallbackCannotRetainPreRollbackBytesForSubsequentReadsOrPrefetch() throws Exception {
+    Connection actual = connection();
+    var metadata = mock(java.sql.DatabaseMetaData.class);
+    when(metadata.supportsSavepoints()).thenReturn(true);
+    when(actual.getMetaData()).thenReturn(metadata);
+    when(actual.setSavepoint(anyString())).thenReturn(mock(java.sql.Savepoint.class));
+    when(source.getConnection()).thenReturn(actual);
+    var nested = new TransactionTemplate(transaction.getTransactionManager());
+    nested.setPropagationBehavior(TransactionDefinition.PROPAGATION_NESTED);
+    var physicallyRolledBack = new java.util.concurrent.atomic.AtomicBoolean();
+    Object lateOwner = new Object();
+    doAnswer(call -> { physicallyRolledBack.set(true); return null; })
+        .when(actual).rollback(any(java.sql.Savepoint.class));
+    transaction.executeWithoutResult(status -> {
+      nested.executeWithoutResult(inner -> {
+        assertThat(read("record")).contains("value-1");
+        TransactionSynchronizationManager.registerSynchronization(
+            new org.springframework.transaction.support.TransactionSynchronization() {
+              @Override public void savepointRollback(Object savepoint) {
+                assertThat(physicallyRolledBack).isFalse();
+                assertThat(read("record")).contains("value-2");
+                ConfigTransactionReadSet.prefetch(owner, guard, () -> new ConfigTransactionReadSet.Prefetched(
+                    1, java.util.Map.of("prefetched", "pre-rollback bytes")));
+                ConfigTransactionReadSet.prefetch(lateOwner, guard, () -> new ConfigTransactionReadSet.Prefetched(
+                    1, java.util.Map.of("late", "late pre-rollback bytes")));
+                assertThat(read(lateOwner, "read", () -> Optional.of("late read before rollback")))
+                    .contains("late read before rollback");
+              }
+            });
+        inner.setRollbackOnly();
+      });
+      assertThat(physicallyRolledBack).isTrue();
+      assertThat(read("record")).contains("value-3");
+      assertThat(read("record")).contains("value-4");
+      assertThat(read("prefetched")).contains("value-5");
+      assertThat(ConfigTransactionReadSet.prefetch(owner, guard,
+          () -> new ConfigTransactionReadSet.Prefetched(1, java.util.Map.of("next", "post-rollback bytes"))))
+          .isEqualTo(1);
+      assertThat(read("next")).contains("value-6");
+      assertThat(read(lateOwner, "late", () -> Optional.of("after rollback"))).contains("after rollback");
+      assertThat(read(lateOwner, "read", () -> Optional.of("after rollback"))).contains("after rollback");
+    });
+  }
+
+  @Test
+  void firstAccessInsideSavepointCallbackCannotCreateReusableProofOrBytes() throws Exception {
+    Connection actual = connection();
+    var metadata = mock(java.sql.DatabaseMetaData.class);
+    when(metadata.supportsSavepoints()).thenReturn(true);
+    when(actual.getMetaData()).thenReturn(metadata);
+    when(actual.setSavepoint(anyString())).thenReturn(mock(java.sql.Savepoint.class));
+    when(source.getConnection()).thenReturn(actual);
+    var nested = new TransactionTemplate(transaction.getTransactionManager());
+    nested.setPropagationBehavior(TransactionDefinition.PROPAGATION_NESTED);
+    var physicallyRolledBack = new java.util.concurrent.atomic.AtomicBoolean();
+    doAnswer(call -> { physicallyRolledBack.set(true); return null; })
+        .when(actual).rollback(any(java.sql.Savepoint.class));
+    transaction.executeWithoutResult(status -> {
+      TransactionSynchronizationManager.registerSynchronization(
+          new org.springframework.transaction.support.TransactionSynchronization() {
+            @Override public void savepointRollback(Object savepoint) {
+              assertThat(physicallyRolledBack).isFalse();
+              assertThat(read("record")).contains("value-1");
+            }
+          });
+      nested.executeWithoutResult(inner -> inner.setRollbackOnly());
+      assertThat(physicallyRolledBack).isTrue();
+      assertThat(read("record")).contains("value-2");
+      assertThat(read("record")).contains("value-3");
+      assertThat(guard.mayReuseImmutableReads()).isFalse();
+    });
+    // One initial admission plus entry/return checks on three uncached reads.
+    verify(actual, times(7)).prepareStatement("SELECT current_setting('transaction_isolation')");
+    verify(actual, never()).getTransactionIsolation();
+  }
+
+  @Test
+  void guardWithoutSynchronizationInspectsIsolationFreshAndRetainsNoProof() throws Exception {
+    Connection actual = connection();
+    var holder = new ConnectionHolder(actual);
+    holder.setSynchronizedWithTransaction(true);
+    TransactionSynchronizationManager.bindResource(source, holder);
+    TransactionSynchronizationManager.setActualTransactionActive(true);
+    try {
+      guard.require();
+      when(actual.getTransactionIsolation()).thenReturn(Connection.TRANSACTION_REPEATABLE_READ);
+      assertThatThrownBy(guard::require).isInstanceOf(UiLayoutLifecycleException.class);
+      assertThatThrownBy(guard::admitImmutableReadTransaction).isInstanceOf(UiLayoutLifecycleException.class);
+    } finally {
+      TransactionSynchronizationManager.unbindResource(source);
+      TransactionSynchronizationManager.setActualTransactionActive(false);
+    }
+    verify(actual, times(2)).getTransactionIsolation();
+    verify(actual, never()).prepareStatement(anyString());
   }
 
   @Test
