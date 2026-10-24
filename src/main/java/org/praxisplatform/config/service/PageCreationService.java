@@ -144,7 +144,7 @@ public final class PageCreationService {
                           principal, contextVersion, currentContext, originalCreation, validation),
                       false);
                 }
-                var originalSource = bridge.capture(currentContext, command.source(), attempt);
+                var originalSource = bridge.capture(principal, contextVersion, currentContext, command.source(), attempt);
                 UUID pageId = UUID.randomUUID();
                 UUID draftId = UUID.randomUUID();
                 var transformed =

@@ -219,12 +219,13 @@ final class PageCatalogLifecycleBridge {
   }
 
   PageCreationEvidence.SourceSnapshot capture(
-      PageCreationContext context, PageSourceReference source, UiLayoutValidationAttempt outer) {
+      Principal principal, String version, PageCreationContext context,
+      PageSourceReference source, UiLayoutValidationAttempt outer) {
     var chain = new Chain(outer);
     chain.check();
-    require(PageCreationOperation.READ_SOURCE, context, source);
-    chain.check();
-    require(PageCreationOperation.COPY_SOURCE, context, source);
+    // Fresh joint authority after creation-key lookup, before any source I/O or extension.
+    // Preserve the caller credential; expected context is correlation, never authority.
+    requireCreation(principal, version, context, source);
     chain.check();
     PageCreationEvidence.SourceSnapshot snapshot;
     if (source instanceof PageSourceReference.Native origin) {

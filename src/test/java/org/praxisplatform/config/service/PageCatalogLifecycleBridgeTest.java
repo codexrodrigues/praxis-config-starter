@@ -69,6 +69,7 @@ class PageCatalogLifecycleBridgeTest {
           () -> host.requireNative(current, origin, captured), nativeSource, metadata);
       return host.resolveLifecycle(((PageCreationContext) call.getArgument(0)).invocation());
     }).when(host).requireNativeProvenance(any(), any(), any());
+    when(host.requireCreation(any(), any(), any(), any())).thenAnswer(call -> call.getArgument(2));
     when(host.resolveLifecycle(any()))
         .thenAnswer(call -> new PageCreationContext("app", "/pages", call.getArgument(0)));
     when(store.byPage(any(), any()))
@@ -683,8 +684,29 @@ class PageCatalogLifecycleBridgeTest {
             UiLayoutLifecycleOperation.CREATE_DRAFT,
             UiLayoutValidationPurpose.AUTHORING);
     try (var attempt = validation.attempt()) {
-      assertThatThrownBy(() -> bridge.capture(context, published.reference(), attempt))
+      assertThatThrownBy(() -> bridge.capture(() -> "alice", "c1", context, published.reference(), attempt))
           .isInstanceOf(UiLayoutLifecycleException.class);
+    }
+  }
+
+  @Test
+  void captureJointWindowRetainsDeadlineChecksBeforeAndAfterAuthority() {
+    for (boolean closeDuringAdmission : List.of(false, true)) {
+      clearInvocations(host, store, frozen, captures, structure);
+      var attempt = UiLayoutValidationAttempt.start(context.invocation(),
+          UiLayoutLifecycleOperation.CREATE_DRAFT, Duration.ofSeconds(40));
+      java.security.Principal principal = () -> "alice";
+      var source = new PageSourceReference.Published(UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID());
+      when(host.requireCreation(same(principal), eq("c1"), eq(context), eq(source))).thenAnswer(call -> {
+        attempt.close(); return context;
+      });
+      if (!closeDuringAdmission) attempt.close();
+      try (attempt) {
+        assertThatThrownBy(() -> bridge.capture(principal, "c1", context, source, attempt))
+            .extracting("code").isEqualTo(UiLayoutLifecycleException.Code.SOURCE_UNAVAILABLE);
+      }
+      verify(host, times(closeDuringAdmission ? 1 : 0)).requireCreation(same(principal), eq("c1"), eq(context), eq(source));
+      verifyNoInteractions(store, frozen, captures, structure);
     }
   }
 
