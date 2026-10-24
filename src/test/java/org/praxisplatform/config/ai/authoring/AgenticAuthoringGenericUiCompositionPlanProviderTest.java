@@ -11,6 +11,7 @@ import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
+import org.springframework.test.util.ReflectionTestUtils;
 
 @Tag("unit")
 class AgenticAuthoringGenericUiCompositionPlanProviderTest {
@@ -801,12 +802,15 @@ class AgenticAuthoringGenericUiCompositionPlanProviderTest {
                 "openai",
                 "gpt-5.6-terra",
                 "test-key",
+                null,
                 intent(
                         "create",
                         "page",
                         "create_artifact",
                         "/api/operations/missoes",
-                        visualizationDecision)))
+                        visualizationDecision),
+                "session-1", "turn-1", List.of(), null, List.of(),
+                typedWorkspaceContext()))
                 .orElseThrow();
 
         JsonNode plan = result.uiCompositionPlan();
@@ -3069,6 +3073,174 @@ class AgenticAuthoringGenericUiCompositionPlanProviderTest {
                 null,
                 List.of(),
                 contextHints);
+    }
+
+    @Test
+    void masterDetailUsesTheExactVerifiedItemResponseInsteadOfTheDocumentaryCollectionGet() {
+        ObjectNode context = typedWorkspaceContext();
+        JsonNode before = context.deepCopy();
+        AgenticAuthoringUiCompositionPlanResult result = provider.plan(workspaceRequest(context)).orElseThrow();
+
+        assertThat(result.valid()).isTrue();
+        JsonNode plan = result.uiCompositionPlan();
+        JsonNode detail = findWidgetInputs(plan, "praxis-dynamic-form", "detail");
+        String verifiedSchema = context.at("/verifiedDomainOperations/entries/1/schemaUrl").asText();
+        assertThat(detail.path("schemaUrl").asText()).isEqualTo(verifiedSchema);
+        assertThat(detail.path("resourcePath").asText()).isEqualTo("/api/operations/missoes");
+        assertThat(detail.path("mode").asText()).isEqualTo("view");
+        assertThat(detail.has("submitUrl")).isFalse();
+        assertThat(detail.has("submitMethod")).isFalse();
+        assertThat(findWidgetInputs(plan, "praxis-table", "master").path("resourcePath").asText())
+                .isEqualTo("/api/operations/missoes");
+        assertThat(plan.path("bindings")).hasSize(2);
+        assertThat(plan.at("/bindings/1/to/port").asText()).isEqualTo("initialValue");
+        assertThat(plan.at("/bindings/1/from/path").asText()).isEqualTo("selectedItem");
+        assertThat(plan.path("sourceRefs")).extracting(JsonNode::asText).contains(verifiedSchema);
+        assertThat(plan.at("/diagnostics/resourceWorkspaceGrounding/operations/1/sourceRelease").asText())
+                .isEqualTo("approved-binding-release-a");
+        assertThat(context).isEqualTo(before);
+
+        ObjectNode basePatch = objectMapper.createObjectNode().put("profileId", "ui-composition-plan");
+        var compiled = new AgenticAuthoringUiCompositionPlanCompiler(objectMapper).compile(plan, basePatch);
+        assertThat(compiled.valid()).withFailMessage("%s", compiled.failureCodes()).isTrue();
+        JsonNode page = compiled.compiledFormPatch().at("/patch/page");
+        assertThat(page.at("/widgets/1/definition/inputs/schemaUrl").asText()).isEqualTo(verifiedSchema);
+        assertThat(page.at("/widgets/1/definition/inputs").has("submitUrl")).isFalse();
+        assertThat(page.at("/composition/links")).hasSize(2);
+    }
+
+    @Test
+    void masterDetailDoesNotBorrowACollectionCreateUpdateOrActionSchemaWhenItemReadIsMissing() {
+        ObjectNode context = typedWorkspaceContext();
+        ArrayNode entries = (ArrayNode) context.at("/verifiedDomainOperations/entries");
+        entries.remove(1);
+        // Even an allowed action is not the resource's read-only detail projection.
+        ObjectNode action = entries.addObject();
+        ObjectNode actionContext = verifiedDomainOperations("schemas.filtered+resource.capabilities+schemas.actions",
+                "/api/operations/missoes", "operations.missoes", true);
+        action.setAll((ObjectNode) actionContext.at("/verifiedDomainOperations/entries/3"));
+        updateWorkspaceOperationCount(context);
+        assertWorkspaceDetailBlocked(context);
+    }
+
+    @Test
+    void masterDetailFailsClosedForAmbiguousVerifiedItemResponses() {
+        ObjectNode context = typedWorkspaceContext();
+        ArrayNode entries = (ArrayNode) context.at("/verifiedDomainOperations/entries");
+        ObjectNode alternative = ((ObjectNode) entries.get(1)).deepCopy();
+        alternative.put("bindingKey", "alternative-detail");
+        alternative.put("apiPath", "/api/operations/missoes/{missionId}");
+        alternative.put("schemaUrl", "/schemas/filtered?path=/api/operations/missoes/{missionId}&operation=get&schemaType=response");
+        entries.add(alternative);
+        updateWorkspaceOperationCount(context);
+        assertWorkspaceDetailBlocked(context);
+    }
+
+    @Test
+    void masterDetailRejectsACompleteDetailProjectionForAnotherResource() {
+        ObjectNode context = typedWorkspaceContext();
+        ObjectNode detail = (ObjectNode) context.at("/verifiedDomainOperations/entries/1");
+        detail.put("resourcePath", "/api/human-resources/funcionarios");
+        detail.put("resourceKey", "human-resources.funcionarios");
+        detail.put("apiPath", "/api/human-resources/funcionarios/{id}");
+        detail.put("schemaUrl", "/schemas/filtered?path=/api/human-resources/funcionarios/{id}&operation=get&schemaType=response");
+        assertWorkspaceDetailBlocked(context);
+    }
+
+    @Test
+    void masterDetailRequiresTheAdmittedV2EnvelopeAndExactOperationCount() {
+        assertWorkspaceDetailBlocked(objectMapper.createObjectNode());
+        ObjectNode untrusted = typedWorkspaceContext();
+        ((ObjectNode) untrusted.path("verifiedDomainOperations")).put("source", "frontend-claims");
+        assertWorkspaceDetailBlocked(untrusted);
+        ObjectNode wrongCount = typedWorkspaceContext();
+        ((ObjectNode) wrongCount.path("verifiedDomainOperations")).put("operationCount", 1);
+        assertWorkspaceDetailBlocked(wrongCount);
+    }
+
+    @Test
+    void masterDetailDoesNotAcceptUnverifiedForbiddenOrRequestSchemaItemOperations() {
+        for (String rejectedCase : List.of("request", "post", "workflow_action", "unverified", "forbidden", "identity", "collection")) {
+            ObjectNode context = typedWorkspaceContext();
+            ObjectNode detail = (ObjectNode) context.at("/verifiedDomainOperations/entries/1");
+            switch (rejectedCase) {
+                case "request" -> detail.put("schemaType", "request");
+                case "post" -> detail.put("apiMethod", "post");
+                case "workflow_action" -> detail.put("kind", "workflow_action");
+                case "unverified" -> detail.put("verificationMode", "frontend");
+                case "forbidden" -> ((ObjectNode) detail.path("availability")).put("allowed", false);
+                case "identity" -> detail.put("resourceKey", "operations.other");
+                case "collection" -> detail.put("operationId", "all");
+                default -> throw new AssertionError(rejectedCase);
+            }
+            assertWorkspaceDetailBlocked(context);
+        }
+    }
+
+    private void assertWorkspaceDetailBlocked(ObjectNode context) {
+        AgenticAuthoringUiCompositionPlanResult result = provider.plan(workspaceRequest(context)).orElseThrow();
+        assertThat(result.valid()).isFalse();
+        assertThat(result.failureCodes()).containsExactly(
+                AgenticAuthoringSemanticMaterializationPolicy.RESOURCE_WORKSPACE_GROUNDING_REQUIRED_FAILURE);
+        assertThat(result.uiCompositionPlan().has("widgets")).isFalse();
+        assertThat(result.compiledFormPatch().path("patch").isEmpty()).isTrue();
+    }
+
+    private AgenticAuthoringPlanRequest workspaceRequest(ObjectNode context) {
+        // Same structural selection as R6: the documentary resource is not a verified GET operation.
+        AgenticAuthoringCandidate documentary = new AgenticAuthoringCandidate(
+                "/api/operations/missoes", "get",
+                "/schemas/filtered?path=/api/operations/missoes&operation=get&schemaType=response",
+                "/api/operations/missoes", "get", .9,
+                "domain_catalog grounded resource selection", List.of("domain_catalog"),
+                AgenticAuthoringEvidenceBundle.of("domain_catalog", List.of(
+                        new AgenticAuthoringEvidenceBundle.Evidence("domain_catalog", "domain_catalog_grounding",
+                                "operations.missoes", "Documentary resource selection", .9, List.of(),
+                                "tenant", "local", "documentary-release-b"))));
+        var visualization = new AgenticAuthoringVisualizationDecision(
+                "praxis-agentic-authoring-visualization-decision.v1", "mission_workspace",
+                "resource-master-detail", "praxis-table", List.of(), false, true,
+                "llm-authored-semantic-decision");
+        var resolution = intentWithCandidates("create", "page", "create_artifact", documentary,
+                List.of(documentary), visualization);
+        return new AgenticAuthoringPlanRequest("Materialize o workspace selecionado.", "openai", "test-model", "test-key",
+                null, resolution, "session-1", "turn-1", List.of(), null, List.of(), context);
+    }
+
+    private ObjectNode typedWorkspaceContext() {
+        String resource = "/api/operations/missoes";
+        var operations = List.of(
+                workspaceOperation(resource, "post", "create", "request"),
+                workspaceOperation(resource + "/{id}", "get", "byId", "response"),
+                workspaceOperation(resource + "/{id}", "put", "update", "request"),
+                workspaceOperation(resource + "/all", "get", "all", "response"));
+        var stream = new AgenticAuthoringTurnStreamRequest("Materialize o workspace selecionado.", "praxis-ui-angular",
+                "praxis-dynamic-page-builder", "/page-builder-ia", null, null, "openai", null, null,
+                "session-1", "turn-1", null, null, null, objectMapper.createObjectNode(), null, null);
+        var engine = new AgenticAuthoringTurnEngine(null, null, objectMapper,
+                new AgenticAuthoringCurrentPageAnalyzer(objectMapper), null);
+        AgenticAuthoringTurnStreamRequest admitted = ReflectionTestUtils.invokeMethod(
+                engine, "withVerifiedOperationContext", stream, operations);
+        return (ObjectNode) admitted.contextHints();
+    }
+
+    private AgenticAuthoringOperationalBindingVerificationService.OperationProjection workspaceOperation(
+            String path, String method, String operationId, String schemaType) {
+        String schema = "http://127.0.0.1:8088/schemas/filtered?path="
+                + java.net.URLEncoder.encode(path, java.nio.charset.StandardCharsets.UTF_8)
+                + "&operation=" + method + "&schemaType=" + schemaType;
+        return new AgenticAuthoringOperationalBindingVerificationService.OperationProjection(
+                "operations.missoes.workspace", "binding:" + operationId, "resource_operation", "operations.missoes",
+                "/api/operations/missoes", path, method, schemaType, schema,
+                "http://127.0.0.1:8088/api/operations/missoes/capabilities", operationId, "", "", "principal_capability",
+                new AgenticAuthoringOperationalBindingVerificationService.AvailabilityProjection(
+                        true, "", "resource_capabilities"), "approved-binding-release-a",
+                List.of("schema-grounding-verified", "resource-capabilities-verified"));
+    }
+
+    private void updateWorkspaceOperationCount(ObjectNode context) {
+        ((ObjectNode) context.path("verifiedDomainOperations"))
+                .put("operationCount", context.at("/verifiedDomainOperations/entries").size());
     }
 
     private ObjectNode verifiedDomainOperations(

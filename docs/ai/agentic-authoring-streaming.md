@@ -1179,6 +1179,20 @@ canonicos sao `requestSearch -> queryContext` e
 continua responsavel por schema e option sources metadata-driven, e os widgets
 continuam responsaveis por loading, vazio e erro.
 
+No blueprint semanticamente resolvido como `resource-master-detail`, o schema do
+Dynamic Form em `mode=view` vem da unica leitura de item `GET` / `response` admitida
+no envelope v2 para aquele recurso. O provider preserva a URL exata verificada e
+nao atribui endpoint de escrita ao detalhe. O candidato documental do recurso nao
+substitui essa operacao: nao se fabrica um GET da colecao nem um `/{id}` por
+convencao. Sem leitura de item univoca e autorizada, o resultado falha fechado com
+`semantic-preview-resource-workspace-grounding-required`, antes de compilar widgets.
+A verificacao de tenant, ambiente, release atual e evidencia ativa continua no
+`AgenticAuthoringDomainBindingService` e no verifier com o principal da requisicao;
+o TurnEngine descarta o envelope do cliente e serializa as `OperationProjection`
+admitidas. Nao ha novos campos de escopo no envelope v2 nem transferencia da
+release documental para o binding operacional. Esse bloqueio nao amplia a admissao
+dos outros layouts legados, perfis ou listas.
+
 Comandos nao sao convertidos em `api.post` ou `api.patch` pelo Java. O envelope interno
 `praxis-agentic-authoring-verified-domain-operations.v2` separa operacoes autorizadas por
 resource capabilities de actions estruturalmente publicadas em `/schemas/actions`. Para cada
