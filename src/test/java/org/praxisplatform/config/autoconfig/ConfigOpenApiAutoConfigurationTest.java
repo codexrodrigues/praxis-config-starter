@@ -35,7 +35,10 @@ class ConfigOpenApiAutoConfigurationTest {
         assertThat(resolved.schema.get$ref()).isEqualTo("#/components/schemas/UiLayoutRevisionCommandRequest");
         var request = resolved.referencedSchemas.get("UiLayoutRevisionCommandRequest");
         assertThat(request.getAdditionalProperties()).isEqualTo(false);
-        assertThat(request.getProperties()).containsOnlyKeys("commandRef", "target", "authoringDocument", "reason");
+        assertThat(request.getProperties()).containsOnlyKeys("commandRef", "target", "authoringDocument", "reason", "childSources");
+        var childSources = (io.swagger.v3.oas.models.media.Schema<?>) request.getProperties().get("childSources");
+        assertThat(childSources.getType()).isEqualTo("array");
+        assertThat(childSources.getItems().get$ref()).isEqualTo("#/components/schemas/UiLayoutPageChildSource");
         assertThat(resolved.referencedSchemas.get("JsonNode").getAdditionalProperties()).isNull();
         var target = converters.resolveAsResolvedSchema(new AnnotatedType(UiLayoutTarget.class));
         assertThat(target.schema.getAdditionalProperties()).isNull();

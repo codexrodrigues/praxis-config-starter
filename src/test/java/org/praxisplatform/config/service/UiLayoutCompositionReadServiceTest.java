@@ -18,9 +18,23 @@ import org.praxisplatform.config.dto.UiLayoutTarget;
 @Tag("unit")
 class UiLayoutCompositionReadServiceTest {
   private static final Principal PRINCIPAL = () -> "reader";
-  private static final UiLayoutTarget ROOT = new UiLayoutTarget("praxis-dynamic-page", "procurement-master-detail");
+  // Generic Form/Table composition keeps external members; published pages own one UUID root.
+  private static final UiLayoutTarget ROOT = new UiLayoutTarget("praxis-dynamic-form", "procurement-master-detail");
   private static final UiLayoutTarget CHILD = new UiLayoutTarget("praxis-table", "procurement-lines");
   private final ObjectMapper mapper = new ObjectMapper();
+
+  @Test
+  void pageAndAppShellRegistrationsRequireOneStableUuidRoot() {
+    for (String type : List.of("praxis-dynamic-page", "praxis-app-shell")) {
+      var root = new UiLayoutTarget(type, "11111111-1111-4111-8111-111111111111");
+      assertThat(new UiLayoutCompositionRegistration(root, List.of(root)).targets()).containsExactly(root);
+      assertThatThrownBy(() -> new UiLayoutCompositionRegistration(root, List.of(root, CHILD)))
+          .isInstanceOf(IllegalArgumentException.class);
+      var logicalRoot = new UiLayoutTarget(type, "procurement-master-detail");
+      assertThatThrownBy(() -> new UiLayoutCompositionRegistration(logicalRoot, List.of(logicalRoot)))
+          .isInstanceOf(IllegalArgumentException.class);
+    }
+  }
 
   @Test
   void withdrawnHeadKeepsTheRegisteredRootAndChildOnPermittedBaseline() {
