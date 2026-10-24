@@ -144,6 +144,207 @@ class AgenticAuthoringTurnStreamServiceTest {
     }
 
     @Test
+    void realMvcSseKeepsHeartbeatIdAbsentAndPreservesPersistedReplayCursors() throws Exception {
+        UUID streamId = UUID.randomUUID();
+        UUID firstId = UUID.randomUUID();
+        UUID resultId = UUID.randomUUID();
+        AiTurnEventEnvelope first = AiTurnEventEnvelope.builder()
+                .eventId(firstId).streamId(streamId).seq(3L).type("status")
+                .payload(objectMapper.createObjectNode().put("state", "processing")).build();
+        AiTurnEventEnvelope heartbeat = AiTurnEventEnvelope.builder()
+                .eventId(null).streamId(streamId).seq(-1L).type("heartbeat")
+                .payload(objectMapper.createObjectNode().put("state", "alive")).build();
+        AiTurnEventEnvelope result = AiTurnEventEnvelope.builder()
+                .eventId(resultId).streamId(streamId).seq(4L).type("result")
+                .payload(objectMapper.createObjectNode().put("canApply", false)).build();
+        AgenticAuthoringTurnStreamService service = service();
+        try {
+            var mvc = org.springframework.test.web.servlet.setup.MockMvcBuilders.standaloneSetup(
+                    new SseTransportProbe(service, List.of(first, heartbeat, result))).build();
+            var started = mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders
+                            .get("/sse-transport-probe"))
+                    .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.request().asyncStarted())
+                    .andReturn();
+            String body = mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders
+                            .asyncDispatch(started))
+                    .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.status().isOk())
+                    .andReturn().getResponse().getContentAsString().replace("\r\n", "\n");
+            String[] frames = body.split("\n\n");
+            org.assertj.core.api.Assertions.assertThat(frames).hasSize(3);
+            org.assertj.core.api.Assertions.assertThat(frames[0]).contains("id:" + firstId, "event:status");
+            org.assertj.core.api.Assertions.assertThat(frames[1]).contains("event:heartbeat").doesNotContain("id:");
+            org.assertj.core.api.Assertions.assertThat(frames[2]).contains("id:" + resultId, "event:result");
+            long[] expectedSeq = {3L, -1L, 4L};
+            for (int index = 0; index < frames.length; index++) {
+                String data = frames[index].lines().filter(line -> line.startsWith("data:"))
+                        .findFirst().orElseThrow().substring(5);
+                JsonNode envelope = objectMapper.readTree(data);
+                org.assertj.core.api.Assertions.assertThat(envelope.path("seq").asLong()).isEqualTo(expectedSeq[index]);
+                org.assertj.core.api.Assertions.assertThat(envelope.path("streamId").asText())
+                        .isEqualTo(streamId.toString());
+                if (index == 1) org.assertj.core.api.Assertions.assertThat(envelope.path("eventId").isNull()).isTrue();
+            }
+            org.assertj.core.api.Assertions.assertThat(heartbeat.getEventId()).isNull();
+            org.assertj.core.api.Assertions.assertThat(heartbeat.getSeq()).isEqualTo(-1L);
+            org.mockito.Mockito.verifyNoInteractions(turnEventService);
+        } finally {
+            service.shutdown();
+        }
+    }
+
+    /** Exercises the real owner send method and Spring MVC emitter/converters, without a DB or send mock. */
+    @org.springframework.web.bind.annotation.RestController
+    static class SseTransportProbe {
+        private final AgenticAuthoringTurnStreamService service;
+        private final List<AiTurnEventEnvelope> events;
+        SseTransportProbe(AgenticAuthoringTurnStreamService service, List<AiTurnEventEnvelope> events) {
+            this.service = service;
+            this.events = events;
+        }
+        @org.springframework.web.bind.annotation.GetMapping(
+                value = "/sse-transport-probe", produces = org.springframework.http.MediaType.TEXT_EVENT_STREAM_VALUE)
+        public org.springframework.web.servlet.mvc.method.annotation.SseEmitter events() {
+            var emitter = new org.springframework.web.servlet.mvc.method.annotation.SseEmitter();
+            events.forEach(event -> ReflectionTestUtils.invokeMethod(service, "send", emitter, event));
+            emitter.complete();
+            return emitter;
+        }
+    }
+
+    @Test
+    void progressWatchdogCannotCompleteAnEmitterWhileTerminalPersistenceIsReserved() throws Exception {
+        UUID streamId = UUID.randomUUID();
+        UUID threadId = UUID.randomUUID();
+        UUID turnId = UUID.randomUUID();
+        AiPrincipalContext principal = new AiPrincipalContext("tenant", "user", "local", true);
+        AgenticAuthoringTurnStreamService service = service();
+        var emitter = org.mockito.Mockito.mock(org.springframework.web.servlet.mvc.method.annotation.SseEmitter.class);
+        var initial = AiTurnEventEnvelope.builder().streamId(streamId).seq(1L).type("status").build();
+        var result = AiTurnEventEnvelope.builder().eventId(UUID.randomUUID()).streamId(streamId)
+                .threadId(threadId).turnId(turnId).seq(2L).type("result")
+                .payload(objectMapper.createObjectNode().put("canApply", true)).build();
+        ReflectionTestUtils.setField(service, "latestEventByStream",
+                new java.util.concurrent.ConcurrentHashMap<>(Map.of(streamId, initial)));
+        var emitters = java.util.concurrent.ConcurrentHashMap
+                .<org.springframework.web.servlet.mvc.method.annotation.SseEmitter>newKeySet();
+        emitters.add(emitter);
+        ReflectionTestUtils.setField(service, "emittersByStream",
+                new java.util.concurrent.ConcurrentHashMap<>(Map.of(streamId, emitters)));
+        var originalScheduler = (java.util.concurrent.ScheduledExecutorService)
+                ReflectionTestUtils.getField(service, "scheduler");
+        originalScheduler.shutdownNow();
+        var scheduler = org.mockito.Mockito.mock(java.util.concurrent.ScheduledExecutorService.class);
+        ReflectionTestUtils.setField(service, "scheduler", scheduler);
+        var scheduled = org.mockito.Mockito.mock(java.util.concurrent.ScheduledFuture.class);
+        ArgumentCaptor<Runnable> progress = ArgumentCaptor.forClass(Runnable.class);
+        when(scheduler.scheduleAtFixedRate(progress.capture(), eq(8L), eq(8L), eq(TimeUnit.SECONDS)))
+                .thenReturn(scheduled);
+        ReflectionTestUtils.invokeMethod(service, "scheduleProcessingProgress", principal, streamId, threadId, turnId);
+        when(turnEventService.isTerminalType(anyString()))
+                .thenAnswer(invocation -> isTerminal(invocation.getArgument(0, String.class)));
+        CountDownLatch persistenceEntered = new CountDownLatch(1);
+        CountDownLatch releasePersistence = new CountDownLatch(1);
+        when(turnEventService.appendEvent(eq(principal), eq(streamId), eq(threadId), eq(turnId), eq("result"), any()))
+                .thenAnswer(invocation -> {
+                    persistenceEntered.countDown();
+                    if (!releasePersistence.await(5, TimeUnit.SECONDS)) {
+                        throw new IllegalStateException("Test persistence latch was not released");
+                    }
+                    return result;
+                });
+        ExecutorService writer = Executors.newSingleThreadExecutor();
+        CountDownLatch watchdogFinished = new CountDownLatch(1);
+        Thread watchdog = new Thread(() -> {
+            try { progress.getValue().run(); }
+            finally { watchdogFinished.countDown(); }
+        }, "terminal-delivery-watchdog-test");
+        try {
+            Future<?> append = writer.submit(() -> ReflectionTestUtils.invokeMethod(service, "appendAndEmit",
+                    principal, streamId, threadId, turnId, "result", Map.of("canApply", true)));
+            org.assertj.core.api.Assertions.assertThat(persistenceEntered.await(2, TimeUnit.SECONDS)).isTrue();
+            watchdog.start();
+            // Observe either the old premature completion or contention on the exact
+            // append monitor. No scheduling sleep or production timeout controls this test.
+            var threads = java.lang.management.ManagementFactory.getThreadMXBean();
+            boolean waitingForAppend = false;
+            long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(2);
+            while (watchdogFinished.getCount() != 0 && System.nanoTime() < deadline) {
+                var info = threads.getThreadInfo(watchdog.threadId());
+                if (info != null && info.getThreadState() == Thread.State.BLOCKED
+                        && info.getLockInfo() != null
+                        && info.getLockInfo().getIdentityHashCode() == System.identityHashCode(service)) {
+                    waitingForAppend = true;
+                    break;
+                }
+                Thread.onSpinWait();
+            }
+            verify(emitter, never()).complete();
+            org.assertj.core.api.Assertions.assertThat(waitingForAppend)
+                    .as("watchdog must await terminal persistence and delivery, not a reserved flag").isTrue();
+            releasePersistence.countDown();
+            append.get(2, TimeUnit.SECONDS);
+            org.assertj.core.api.Assertions.assertThat(watchdogFinished.await(2, TimeUnit.SECONDS)).isTrue();
+            var ordered = org.mockito.Mockito.inOrder(emitter);
+            ordered.verify(emitter).send(any(org.springframework.web.servlet.mvc.method.annotation.SseEmitter.SseEventBuilder.class));
+            ordered.verify(emitter).complete();
+            verify(turnEventService, times(1)).appendEvent(
+                    eq(principal), eq(streamId), eq(threadId), eq(turnId), eq("result"), any());
+        } finally {
+            releasePersistence.countDown();
+            watchdog.join(2000L);
+            writer.shutdownNow();
+            service.shutdown();
+        }
+    }
+
+    @Test
+    void failedTerminalPersistenceClearsReservationWithoutAutomaticRetryOrEmitterCompletion() {
+        UUID streamId = UUID.randomUUID();
+        UUID threadId = UUID.randomUUID();
+        UUID turnId = UUID.randomUUID();
+        AiPrincipalContext principal = new AiPrincipalContext("tenant", "user", "local", true);
+        AgenticAuthoringTurnStreamService service = service();
+        var emitter = org.mockito.Mockito.mock(org.springframework.web.servlet.mvc.method.annotation.SseEmitter.class);
+        var initial = AiTurnEventEnvelope.builder().streamId(streamId).seq(1L).type("status").build();
+        var result = AiTurnEventEnvelope.builder().eventId(UUID.randomUUID()).streamId(streamId)
+                .threadId(threadId).turnId(turnId).seq(2L).type("result").build();
+        ReflectionTestUtils.setField(service, "latestEventByStream",
+                new java.util.concurrent.ConcurrentHashMap<>(Map.of(streamId, initial)));
+        var emitters = java.util.concurrent.ConcurrentHashMap
+                .<org.springframework.web.servlet.mvc.method.annotation.SseEmitter>newKeySet();
+        emitters.add(emitter);
+        ReflectionTestUtils.setField(service, "emittersByStream",
+                new java.util.concurrent.ConcurrentHashMap<>(Map.of(streamId, emitters)));
+        when(turnEventService.isTerminalType(anyString()))
+                .thenAnswer(invocation -> isTerminal(invocation.getArgument(0, String.class)));
+        org.mockito.Mockito.lenient().when(turnEventService.findLastEvent(streamId)).thenReturn(Optional.of(initial));
+        var failure = new IllegalStateException("simulated terminal persistence failure");
+        when(turnEventService.appendEvent(eq(principal), eq(streamId), eq(threadId), eq(turnId), eq("result"), any()))
+                .thenThrow(failure).thenReturn(result);
+        try {
+            org.assertj.core.api.Assertions.assertThatThrownBy(() -> ReflectionTestUtils.invokeMethod(
+                    service, "appendAndEmit", principal, streamId, threadId, turnId, "result", Map.of()))
+                    .isSameAs(failure);
+            verify(turnEventService, times(1)).appendEvent(
+                    eq(principal), eq(streamId), eq(threadId), eq(turnId), eq("result"), any());
+            verify(emitter, never()).complete();
+            Boolean terminal = ReflectionTestUtils.invokeMethod(service, "terminalReached", streamId);
+            org.assertj.core.api.Assertions.assertThat(terminal).isFalse();
+            // A separate explicit append is possible; the owner never silently retries.
+            ReflectionTestUtils.invokeMethod(service, "appendAndEmit",
+                    principal, streamId, threadId, turnId, "result", Map.of());
+            verify(turnEventService, times(2)).appendEvent(
+                    eq(principal), eq(streamId), eq(threadId), eq(turnId), eq("result"), any());
+            verify(emitter).send(any(org.springframework.web.servlet.mvc.method.annotation.SseEmitter.SseEventBuilder.class));
+            verify(emitter).complete();
+        } catch (java.io.IOException failureToSend) {
+            throw new AssertionError(failureToSend);
+        } finally {
+            service.shutdown();
+        }
+    }
+
+    @Test
     void startEventUsesCuratedContextBundleMessage() throws Exception {
         UUID threadId = UUID.randomUUID();
         AiPrincipalContext principalContext = new AiPrincipalContext("tenant", "user", "local", true);

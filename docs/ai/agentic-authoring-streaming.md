@@ -19,6 +19,18 @@ O fluxo agentic authoring do Page Builder possui endpoints sincronicos:
 - `POST /api/praxis/config/ai/authoring/page-preview`
 - `POST /api/praxis/config/ai/authoring/page-apply`
 
+A intenção primária exige resolução semântica governada. Uma falha do provider ou
+resposta não resolvida não pode ser recuperada por palavras do prompt ou ranking
+de candidatos para fabricar `create/page`, selecionar recurso ou emitir quick
+replies com contexto executável de autoria. O resultado permanece bloqueado
+(`provider_error` na falha do provider; clarificação na intenção não resolvida),
+sem seleção e sem continuação determinística. Os diagnósticos devem corresponder
+à saída efetivamente retornada. Na reclassificação entre autoria e catálogo,
+a tupla resolvida pela LLM não deve ser substituída por palavras do prompt;
+grounding e validação de campos continuam sob os contratos canônicos. A prova
+desta correção não representa auditoria lexical integral dos demais caminhos
+históricos do resolver.
+
 O diagnostico `llmDiagnostics` e opt-in e serve para auditoria/debug do prompt,
 context bundle e tool catalog de um turno ja concluido. Ele nao substitui stream.
 
@@ -623,6 +635,12 @@ O envelope efêmero mantém `eventId=null` e `seq=-1`. No wire SSE, o produtor
 omite o campo `id` por completo: não chama `SseEventBuilder.id(null)`, não envia
 um `id` vazio e não fabrica um cursor para o heartbeat. Somente eventos
 persistidos publicam seu identificador como `id` e avançam o cursor de replay.
+
+A reserva interna de um terminal não significa entrega. O watchdog consulta a
+terminalidade sob o mesmo monitor do append: persistir o evento, atualizar o tail,
+enviar aos emitters e só então concluir o stream. Assim ele não fecha uma resposta
+SSE enquanto o resultado ainda aguarda confirmação do event store. Se a persistência
+falhar, a reserva é liberada e a exceção continua propagada, sem retry automático.
 
 No produtor local ativo, checagens internas de terminalidade e o watchdog usam a
 projecao em memoria do ultimo evento que ja foi confirmado pelo event store. A
