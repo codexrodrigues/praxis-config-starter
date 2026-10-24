@@ -136,7 +136,7 @@ class UiLayoutPageLifecyclePostgresIT {
         }catch(Exception e){throw new IllegalStateException(e);}
       }
       public UiLayoutPageChildSeed capturePageChild(UiLayoutLifecycleInvocation i,UiLayoutTarget p,UiLayoutPageChildSource request,UiLayoutValidationContext v){return sources.get(request.widgetKey());}
-      public void requirePageChild(UiLayoutLifecycleInvocation i,UiLayoutTarget p,UiLayoutPageChildSeed seed,UiLayoutValidationContext v){
+      public void requirePageChildEvidence(UiLayoutLifecycleInvocation i,UiLayoutTarget p,UiLayoutPageChildSeed seed,UiLayoutValidationContext v){
         if(revoked||!seed.equals(sources.get(seed.request().widgetKey())))throw new UiLayoutLifecycleException(UiLayoutLifecycleException.Code.DENIED,"Synthetic source revoked");
       }
     };

@@ -54,6 +54,14 @@ class PageCatalogLifecycleBridgeTest {
   @BeforeEach
   void setup() {
     doAnswer(call -> {
+      UiLayoutLifecycleInvocation current = call.getArgument(0);
+      UiLayoutPageChildSeed child = call.getArgument(2);
+      var target = new UiLayoutTarget(child.document().path("kind").asText().equals("praxis.dynamic-form.editor")
+          ? "praxis-dynamic-form" : "praxis-table", child.request().widgetKey());
+      metadata.require(current, target, child.authoring(), child.sourceRef(), child.document(), child.metadata());
+      return null;
+    }).when(nativeSource).requirePageChildEvidence(any(), any(), any(), any());
+    doAnswer(call -> {
       PageCreationContext current = call.getArgument(0);
       PageSourceReference.Native origin = call.getArgument(1);
       UiLayoutDraftWorkspaceSeed.TargetSeed captured = call.getArgument(2);
@@ -73,11 +81,13 @@ class PageCatalogLifecycleBridgeTest {
         .thenAnswer(call -> snapshots.containsKey(call.getArgument(1)));
     when(frozen.resolve(any(), any(), any()))
         .thenAnswer(call -> snapshots.get(call.getArgument(1)));
-    when(captures.read(any(), any(), any()))
+    when(captures.readVerified(any(), any(), any()))
         .thenAnswer(
-            call ->
-                captured.get(
-                    ((UiLayoutMetadataCapture.Binding) call.getArgument(1)).sourceDraftRef()));
+            call -> {
+              UiLayoutMetadataCapture.Binding binding = call.getArgument(1);
+              return new UiLayoutMetadataCaptureCodec(mapper, hashes).verifyAndRead(call.getArgument(0), binding,
+                  captured.get(binding.sourceDraftRef()), call.getArgument(2));
+            });
     bridge =
         new PageCatalogLifecycleBridge(
             host,
@@ -91,6 +101,18 @@ class PageCatalogLifecycleBridgeTest {
             captures,
             mapper,
             (operation, invocation) -> Duration.ofSeconds(30));
+  }
+
+  private PageLifecycleAdmission joint(UiLayoutLifecycleAdmission policy) {
+    return new PageLifecycleAdmission() {
+      public void require(UiLayoutLifecycleOperation operation, UiLayoutLifecycleInvocation invocation) {
+        policy.require(operation, invocation);
+      }
+      public PageCreationContext requirePage(UiLayoutLifecycleOperation operation, UiLayoutLifecycleInvocation invocation) {
+        policy.require(operation, invocation);
+        return host.resolveLifecycle(invocation);
+      }
+    };
   }
 
   private PageCreationEvidence nativeCreation() throws Exception {
@@ -189,7 +211,7 @@ class PageCatalogLifecycleBridgeTest {
             UiLayoutValidationPurpose.AUTHORING);
     var children =
         new UiLayoutPageChildCaptures(hashes)
-            .initial(invocation, creation.draftId(), seed, nativeSource, metadata, validation);
+            .initial(invocation, creation.draftId(), seed, nativeSource, validation);
     var binding =
         new UiLayoutMetadataCapture.Binding(
             creation.draftId(),
@@ -261,6 +283,120 @@ class PageCatalogLifecycleBridgeTest {
 
   private void verifyInOwner(PageCreationEvidence creation) {
     withOwner(context.invocation(), () -> bridge.verify(context, creation));
+  }
+
+  @Test
+  void generatedChildJointAdmissionRequiresExactPageSourceAndMetadataBeforeTraversal() throws Exception {
+    var creation = nativeCreation();
+    records.put(creation.pageId(), creation);
+    var output = bridge.outputSeed(creation);
+    var child = output.pageChildren().getFirst();
+    var invocation = context.forTarget(creation.target());
+    java.util.function.BiConsumer<UiLayoutTarget, UiLayoutPageChildSeed> admit = (page, candidate) -> {
+      try (var attempt = UiLayoutValidationAttempt.start(invocation, UiLayoutLifecycleOperation.CREATE_DRAFT, Duration.ofSeconds(30));
+          var scope = UiLayoutValidationScope.bind(attempt)) {
+        bridge.workspaceSource().requirePageChildEvidence(invocation, page, candidate,
+            new UiLayoutValidationContext(attempt, UiLayoutValidationPurpose.AUTHORING));
+      }
+    };
+    admit.accept(output.target(), child);
+    clearInvocations(host);
+    var metadata = child.metadata();
+    var changedMetadata = new UiLayoutBaselineMetadataSeed(metadata.source(), metadata.reproduction(),
+        metadata.observation(), metadata.rawInputText() + " ");
+    var wrongSource = new UiLayoutPageChildSeed(child.request(), child.authoring(), child.patch(),
+        "another-source", child.document(), metadata);
+    var wrongMetadata = new UiLayoutPageChildSeed(child.request(), child.authoring(), child.patch(),
+        child.sourceRef(), child.document(), changedMetadata);
+    var wrongDescriptor = new UiLayoutPageChildSeed(child.request(),
+        new UiLayoutAuthoringDocumentDescriptor(child.authoring().documentType(), "another-schema", "1"),
+        child.patch(), child.sourceRef(), child.document(), metadata);
+    var changedDocument = child.document();
+    ((com.fasterxml.jackson.databind.node.ObjectNode) changedDocument).put("another", true);
+    var wrongDocument = new UiLayoutPageChildSeed(child.request(), child.authoring(), child.patch(),
+        child.sourceRef(), changedDocument, metadata);
+    for (var invalid : List.of(wrongSource, wrongMetadata, wrongDescriptor, wrongDocument)) {
+      assertThatThrownBy(() -> admit.accept(output.target(), invalid))
+          .isInstanceOfSatisfying(UiLayoutLifecycleException.class,
+              error -> assertThat(error.getCode()).isEqualTo(UiLayoutLifecycleException.Code.VALIDATION_FAILED));
+    }
+    assertThatThrownBy(() -> admit.accept(context.invocation().rootTarget(), child))
+        .isInstanceOfSatisfying(UiLayoutLifecycleException.class,
+            error -> assertThat(error.getCode()).isEqualTo(UiLayoutLifecycleException.Code.VALIDATION_FAILED));
+    verify(host, never()).requireNativeProvenance(any(), any(), any());
+  }
+
+  @Test
+  void jointLifecycleRejectsPlainDelegateAndKeepsNonPagePolicy() {
+    assertThatThrownBy(() -> bridge.admission((op, inv) -> {})).isInstanceOf(IllegalArgumentException.class);
+    var policy = mock(UiLayoutLifecycleAdmission.class);
+    var nonPage = context.forTarget(new UiLayoutTarget("praxis-app-shell", UUID.randomUUID().toString()));
+    bridge.admission(joint(policy)).require(UiLayoutLifecycleOperation.READ_DRAFT, nonPage);
+    verify(policy).require(UiLayoutLifecycleOperation.READ_DRAFT, nonPage);
+    verifyNoInteractions(store, host);
+  }
+
+  @Test
+  void unknownPageStillAdmitsCustomOperationBeforeCatalogLookup() {
+    var invocation = context.forTarget(new UiLayoutTarget("praxis-dynamic-page", UUID.randomUUID().toString()));
+    var order = new ArrayList<String>();
+    var denied = new java.util.concurrent.atomic.AtomicBoolean(true);
+    var admission = bridge.admission(joint((op, inv) -> {
+      order.add("operation");
+      if (denied.get()) throw new UiLayoutLifecycleException(UiLayoutLifecycleException.Code.DENIED, "custom domain policy");
+    }));
+    when(store.byPage(any(), any())).thenAnswer(call -> { order.add("catalog"); return Optional.empty(); });
+    assertThatThrownBy(() -> admission.require(UiLayoutLifecycleOperation.READ_DRAFT, invocation))
+        .isInstanceOfSatisfying(UiLayoutLifecycleException.class,
+            error -> assertThat(error.getCode()).isEqualTo(UiLayoutLifecycleException.Code.DENIED));
+    assertThat(order).containsExactly("operation");
+    verifyNoInteractions(store);
+    denied.set(false); order.clear();
+    admission.require(UiLayoutLifecycleOperation.READ_DRAFT, invocation);
+    assertThat(order).containsExactly("operation", "catalog");
+  }
+
+  @Test
+  void jointLifecycleRejectsMissingOrMismatchedContextBeforeContentAndForeignNamespaceAfterLookup() throws Exception {
+    var creation = nativeCreation(); records.put(creation.pageId(), creation);
+    var invocation = context.forTarget(creation.target());
+    var policy = mock(PageLifecycleAdmission.class);
+    var admission = bridge.admission(policy);
+    for (var mismatch : java.util.Arrays.asList(null, context)) {
+      when(policy.requirePage(any(), any())).thenReturn(mismatch);
+      assertThatThrownBy(() -> admission.require(UiLayoutLifecycleOperation.READ_DRAFT, invocation))
+          .isInstanceOfSatisfying(UiLayoutLifecycleException.class,
+              error -> assertThat(error.getCode()).isEqualTo(UiLayoutLifecycleException.Code.CONTEXT_STALE));
+      verifyNoInteractions(store);
+    }
+    for (var foreign : List.of(new PageCreationContext("other-app", "/pages", invocation),
+        new PageCreationContext("app", "/other", invocation))) {
+      when(policy.requirePage(any(), any())).thenReturn(foreign);
+      assertThatThrownBy(() -> admission.require(UiLayoutLifecycleOperation.READ_DRAFT, invocation))
+          .isInstanceOfSatisfying(UiLayoutLifecycleException.class,
+              error -> assertThat(error.getCode()).isEqualTo(UiLayoutLifecycleException.Code.DENIED));
+    }
+    verify(host, never()).requireNativeProvenance(any(), any(), any());
+  }
+
+  @Test
+  void jointLifecycleKeepsFinalOperationDenialAfterOriginTraversal() throws Exception {
+    var creation = nativeCreation(); records.put(creation.pageId(), creation);
+    var invocation = context.forTarget(creation.target());
+    var calls = new java.util.concurrent.atomic.AtomicInteger();
+    var admission = bridge.admission(joint((op, inv) -> {
+      if (calls.incrementAndGet() == 2)
+        throw new UiLayoutLifecycleException(UiLayoutLifecycleException.Code.DENIED, "final domain revocation");
+    }));
+    org.springframework.transaction.support.TransactionSynchronizationManager.setActualTransactionActive(true);
+    try {
+      assertThatThrownBy(() -> withOwner(invocation, UiLayoutLifecycleOperation.EDIT_DRAFT,
+          () -> admission.require(UiLayoutLifecycleOperation.EDIT_DRAFT, invocation)))
+          .isInstanceOfSatisfying(UiLayoutLifecycleException.class,
+              error -> assertThat(error.getCode()).isEqualTo(UiLayoutLifecycleException.Code.DENIED));
+      assertThat(calls.get()).isEqualTo(2);
+      verify(host, times(2)).requireNativeProvenance(any(), any(), any());
+    } finally { org.springframework.transaction.support.TransactionSynchronizationManager.clear(); }
   }
 
   @Test
@@ -487,9 +623,9 @@ class PageCatalogLifecycleBridgeTest {
         nativeSource, metadata, mock(UiLayoutLifecycleStructureValidator.class), frozen, captures,
         mapper, (operation, invocation) -> Duration.ofSeconds(30));
     var allowed = new java.util.concurrent.atomic.AtomicBoolean();
-    var admission = actualBridge.admission((operation, invocation) -> {
+    var admission = actualBridge.admission(joint((operation, invocation) -> {
       if (!allowed.get()) throw new UiLayoutLifecycleException(UiLayoutLifecycleException.Code.DENIED, "private policy");
-    });
+    }));
     transactions.executeWithoutResult(status -> {
       assertThat(actualStore.prefetch(context, List.of(creation.pageId()))).isEqualTo(1);
       assertThat(actualStore.byPage(context, creation.pageId())).contains(creation);
@@ -553,12 +689,12 @@ class PageCatalogLifecycleBridgeTest {
         .when(metadata)
         .require(any(), any(), any(), any(), any(), any());
     var admission =
-        bridge.admission(
+        bridge.admission(joint(
             (op, invocation) -> {
               if (revoked.get())
                 throw new UiLayoutLifecycleException(
                     UiLayoutLifecycleException.Code.DENIED, "Revoked during provenance");
-            });
+            }));
     org.springframework.transaction.support.TransactionSynchronizationManager
         .setActualTransactionActive(true);
     try {
@@ -594,7 +730,7 @@ class PageCatalogLifecycleBridgeTest {
     assertThatThrownBy(
             () ->
                 withOwner(invocation, UiLayoutLifecycleOperation.READ_DRAFT, () -> bridge
-                    .admission((op, inv) -> {})
+                    .admission(joint((op, inv) -> {}))
                     .require(UiLayoutLifecycleOperation.READ_DRAFT, invocation)))
         .isInstanceOfSatisfying(
             UiLayoutLifecycleException.class,
@@ -625,7 +761,7 @@ class PageCatalogLifecycleBridgeTest {
             () ->
                 bridge
                     .workspaceSource()
-                    .requirePageChild(
+                    .requirePageChildEvidence(
                         context.forTarget(value.target()),
                         seed.target(),
                         seed.pageChildren().getFirst(),
@@ -758,7 +894,7 @@ class PageCatalogLifecycleBridgeTest {
     records.put(creation.pageId(), creation);
     var invocation = context.forTarget(creation.target());
     var seed = bridge.outputSeed(creation);
-    var admission = bridge.admission((operation, current) -> {});
+    var admission = bridge.admission(joint((operation, current) -> {}));
     var generatedMetadata = bridge.metadataAdmission();
     // Both SPI entry points must borrow their initiating operation, including across source roots.
     for (boolean throughAdmission : List.of(true, false)) {
@@ -772,7 +908,7 @@ class PageCatalogLifecycleBridgeTest {
       doAnswer(call -> { metadataCalls.incrementAndGet(); clock.addAndGet(Duration.ofSeconds(60).toNanos()); return null; })
           .when(metadata).require(any(), any(), any(), any(), any(), any());
       doAnswer(call -> { childCalls.incrementAndGet(); return null; })
-          .when(nativeSource).requirePageChild(any(), any(), any(), any());
+          .when(nativeSource).requirePageChildEvidence(any(), any(), any(), any());
       Runnable callback = throughAdmission
           ? () -> admission.require(UiLayoutLifecycleOperation.EDIT_DRAFT, invocation)
           : () -> generatedMetadata.require(invocation, seed.target(), seed.authoring(),

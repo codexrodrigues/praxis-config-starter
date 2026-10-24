@@ -31,10 +31,14 @@ Na revisão, `childSources` contém somente as keys novas, com `registered-nativ
 O cliente nunca fornece documento-fonte, hash de captura, admissão ou atestado. O servidor resolve
 exatamente a revisão pedida por `capturePageChild`; resposta com request divergente é rejeitada.
 
-O host deve implementar `requirePageChild` vinculando **o request completo** à fonte versionada,
-documento, descriptor e reprodução efetivamente admitidos sob o invocation corrente. Verificar
-somente a existência de uma key não satisfaz esse SPI. Os defaults negam operação. A admissão de
-metadata existente continua obrigatória e complementar; nenhuma das duas substitui a outra.
+O host deve implementar `requirePageChildEvidence` vinculando **o request completo** à fonte versionada,
+documento, descriptor, reprodução e metadata completas sob o invocation corrente. A unidade reúne
+essas políticas numa janela de autoridade atual; não busca latest nem reutiliza grants de outra chamada.
+Verificar somente a existência de uma key não satisfaz esse SPI. O default nega operação.
+Esta migração beta substitui `requirePageChild` e o segundo callback separado de metadata do filho:
+todos os hosts devem migrar; não existe alias ou fallback que preserve implementação incompleta.
+O codec exige essa unidade antes e depois da verificação pura da captura. A admissão de metadata
+raiz e de outras superfícies permanece independente.
 
 A captura usa o codec de metadata existente, vinculada a tenant/environment, UUID do draft, único
 root externo e key interna. `captureText` é texto server-owned para preservar bytes/ordem histórica

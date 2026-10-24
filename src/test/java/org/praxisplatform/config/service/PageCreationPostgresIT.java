@@ -401,12 +401,17 @@ class PageCreationPostgresIT {
                 UiLayoutLifecycleException.Code.DENIED, "Fixture root unavailable");
           return invocation(t);
         };
-    UiLayoutLifecycleAdmission admission =
-        (operation, i) -> {
+    PageLifecycleAdmission admission = new PageLifecycleAdmission() {
+        public void require(UiLayoutLifecycleOperation operation, UiLayoutLifecycleInvocation i) {
           if (operation == UiLayoutLifecycleOperation.READ_DRAFT && denyDraft)
             throw new UiLayoutLifecycleException(
                 UiLayoutLifecycleException.Code.DENIED, "Draft visibility revoked");
-        };
+        }
+        public PageCreationContext requirePage(UiLayoutLifecycleOperation operation, UiLayoutLifecycleInvocation i) {
+          require(operation, i);
+          return host.resolveLifecycle(i);
+        }
+    };
     UiLayoutLifecycleStructureValidator structure =
         new UiLayoutLifecycleStructureValidator() {
           public void validateTarget(
@@ -455,38 +460,6 @@ class PageCreationPostgresIT {
             assertThat(t).hasSize(1);
           }
         };
-    UiLayoutDraftWorkspaceSource source =
-        new UiLayoutDraftWorkspaceSource() {
-          public UiLayoutDraftWorkspaceSeed capture(
-              UiLayoutLifecycleInvocation i, UiLayoutValidationContext v) {
-            if (!groupsFixture) throw new UnsupportedOperationException();
-            return new UiLayoutDraftWorkspaceSeed(
-                List.of(
-                    new UiLayoutDraftWorkspaceSeed.TargetSeed(
-                        ANCHOR,
-                        new UiLayoutAuthoringDocumentDescriptor(
-                            "praxis.navigation-groups.editor", "fixture:groups", "1"),
-                        UiLayoutPageRevisionReproductionTest.PATCH,
-                        "fixture:groups",
-                        groupDocument,
-                        metadata(i, groupDocument))));
-          }
-
-          public void requirePageChild(
-              UiLayoutLifecycleInvocation i,
-              UiLayoutTarget p,
-              UiLayoutPageChildSeed seed,
-              UiLayoutValidationContext v) {
-            if (denyDependency)
-              throw new UiLayoutLifecycleException(
-                  UiLayoutLifecycleException.Code.DENIED, "Dependency revoked");
-            var expected =
-                UiLayoutPageRevisionReproduction.children(document).get(seed.request().widgetKey());
-            assertThat(seed.document()).isEqualTo(expected);
-            assertThat(seed.request().source().sourceId())
-                .isEqualTo("fixture:" + seed.request().widgetKey());
-          }
-        };
     UiLayoutBaselineMetadataAdmission metadata =
         (i, t, d, s, b, m) -> {
           if ("last-metadata-context".equals(fault) || "last-metadata-copy".equals(fault)) {
@@ -515,6 +488,41 @@ class PageCreationPostgresIT {
           if ("capture".equals(fault) && !t.equals(SOURCE))
             throw new UiLayoutLifecycleException(
                 UiLayoutLifecycleException.Code.DENIED, "Injected metadata failure");
+        };
+    UiLayoutDraftWorkspaceSource source =
+        new UiLayoutDraftWorkspaceSource() {
+          public UiLayoutDraftWorkspaceSeed capture(
+              UiLayoutLifecycleInvocation i, UiLayoutValidationContext v) {
+            if (!groupsFixture) throw new UnsupportedOperationException();
+            return new UiLayoutDraftWorkspaceSeed(
+                List.of(
+                    new UiLayoutDraftWorkspaceSeed.TargetSeed(
+                        ANCHOR,
+                        new UiLayoutAuthoringDocumentDescriptor(
+                            "praxis.navigation-groups.editor", "fixture:groups", "1"),
+                        UiLayoutPageRevisionReproductionTest.PATCH,
+                        "fixture:groups",
+                        groupDocument,
+                        metadata(i, groupDocument))));
+          }
+
+          public void requirePageChildEvidence(
+              UiLayoutLifecycleInvocation i,
+              UiLayoutTarget p,
+              UiLayoutPageChildSeed seed,
+              UiLayoutValidationContext v) {
+            if (denyDependency)
+              throw new UiLayoutLifecycleException(
+                  UiLayoutLifecycleException.Code.DENIED, "Dependency revoked");
+            var expected =
+                UiLayoutPageRevisionReproduction.children(document).get(seed.request().widgetKey());
+            assertThat(seed.document()).isEqualTo(expected);
+            assertThat(seed.request().source().sourceId())
+                .isEqualTo("fixture:" + seed.request().widgetKey());
+            var target = new UiLayoutTarget(seed.authoring().documentType().equals("praxis.dynamic-form.editor")
+                ? "praxis-dynamic-form" : "praxis-table", seed.request().widgetKey());
+            metadata.require(i, target, seed.authoring(), seed.sourceRef(), seed.document(), seed.metadata());
+          }
         };
     host =
         new PageCreationHost() {

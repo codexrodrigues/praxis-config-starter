@@ -142,9 +142,9 @@ class JdbcUiLayoutMetadataCaptureStoreTest {
     var key = JdbcUiLayoutMetadataCaptureStore.RowKey.of(original.binding());
     assertThat(store.prefetch(List.of(key))).isEqualTo(1);
     clearInvocations(jdbc, connection);
-    var first = store.read(invocation, original.binding(), (current, capture) -> {});
+    var first = store.readVerified(invocation, original.binding(), (current, capture) -> {});
     ((com.fasterxml.jackson.databind.node.ObjectNode) first.baselineDocument()).put("privateMutation", true);
-    var second = store.read(invocation, original.binding(), (current, capture) -> {});
+    var second = store.readVerified(invocation, original.binding(), (current, capture) -> {});
     assertThat(second).isNotSameAs(first);
     assertThat(second.baselineDocument().has("privateMutation")).isFalse();
     verify(jdbc, never()).query(anyString(), any(SqlParameterSource.class), any(RowMapper.class));
@@ -152,9 +152,9 @@ class JdbcUiLayoutMetadataCaptureStoreTest {
     var binding = original.binding();
     var wrongBinding = new UiLayoutMetadataCapture.Binding(binding.sourceDraftRef(), binding.scope(),
         "another-source", binding.authoring(), binding.baselineContentHash());
-    assertThatThrownBy(() -> store.read(invocation, wrongBinding, (current, capture) -> {}))
+    assertThatThrownBy(() -> store.readVerified(invocation, wrongBinding, (current, capture) -> {}))
         .isInstanceOf(UiLayoutLifecycleException.class);
-    assertThatThrownBy(() -> store.read(invocation, binding, (current, capture) -> {
+    assertThatThrownBy(() -> store.readVerified(invocation, binding, (current, capture) -> {
       throw new UiLayoutLifecycleException(UiLayoutLifecycleException.Code.DENIED, "revoked now");
     })).isInstanceOf(UiLayoutLifecycleException.class);
   }
@@ -166,13 +166,13 @@ class JdbcUiLayoutMetadataCaptureStoreTest {
     admitReadSet();
     var expected = capture(root).binding();
     assertThat(store.prefetch(List.of(JdbcUiLayoutMetadataCaptureStore.RowKey.of(expected)))).isEqualTo(1);
-    assertCode(() -> store.read(invocation, expected, (current, capture) -> {}), UiLayoutLifecycleException.Code.INVALID_STATE);
+    assertCode(() -> store.readVerified(invocation, expected, (current, capture) -> {}), UiLayoutLifecycleException.Code.INVALID_STATE);
   }
 
   @Test void activeSynchronizationWithoutActualTransactionCannotReadMetadata() throws Exception {
     admitReadSet();
     TransactionSynchronizationManager.setActualTransactionActive(false);
-    assertCode(() -> store.read(invocation, capture(root).binding(), (current, capture) -> {}),
+    assertCode(() -> store.readVerified(invocation, capture(root).binding(), (current, capture) -> {}),
         UiLayoutLifecycleException.Code.SOURCE_UNAVAILABLE);
     verify(jdbc, never()).query(anyString(), any(SqlParameterSource.class), any(RowMapper.class));
   }
@@ -218,7 +218,7 @@ class JdbcUiLayoutMetadataCaptureStoreTest {
     var value = codec.seal(original.captureRef(), original.binding(), baseline, metadata.source(), metadata.reproduction(),
         metadata.observation(), metadata.rawInputText());
     store.append(status, invocation, draft, List.of(value, capture(child)), (current, capture) -> {});
-    assertThat(store.read(invocation, value.binding(), (current, capture) -> {})).isEqualTo(value);
+    assertThat(store.readVerified(invocation, value.binding(), (current, capture) -> {})).isEqualTo(value);
     assertThat(rows.getFirst().get("baseline_document_text")).isEqualTo(value.baselineDocument().toString());
   }
 
@@ -228,15 +228,15 @@ class JdbcUiLayoutMetadataCaptureStoreTest {
     append();
     String original = (String) rows.getFirst().get("baseline_document_text");
     rows.getFirst().put("baseline_document_text", original.replace('"', '\''));
-    assertCode(() -> store.read(invocation, capture(root).binding(), (current, value) -> {}), UiLayoutLifecycleException.Code.INVALID_STATE);
+    assertCode(() -> store.readVerified(invocation, capture(root).binding(), (current, value) -> {}), UiLayoutLifecycleException.Code.INVALID_STATE);
   }
 
   @Test void roundTripsMixedOriginsUnderOneCompositionAndQuota() {
     var nativeValue = nativeCapture(root);
     var structuralValue = capture(child);
     store.append(status, invocation, draft, List.of(nativeValue, structuralValue), (current, value) -> {});
-    assertThat(store.read(invocation, nativeValue.binding(), (current, value) -> {})).isEqualTo(nativeValue);
-    assertThat(store.read(invocation, structuralValue.binding(), (current, value) -> {})).isEqualTo(structuralValue);
+    assertThat(store.readVerified(invocation, nativeValue.binding(), (current, value) -> {})).isEqualTo(nativeValue);
+    assertThat(store.readVerified(invocation, structuralValue.binding(), (current, value) -> {})).isEqualTo(structuralValue);
     assertThat(rows.getFirst().get("operation_path")).isNull();
     assertThat(rows.getFirst().get("normalizer_ref")).isNull();
   }
@@ -246,16 +246,16 @@ class JdbcUiLayoutMetadataCaptureStoreTest {
     var nativeValue = nativeCapture(root);
     store.append(status, invocation, draft, List.of(nativeValue, capture(child)), (current, value) -> {});
     rows.getFirst().put(column, "fabricated");
-    assertCode(() -> store.read(invocation, nativeValue.binding(), (current, value) -> {}), UiLayoutLifecycleException.Code.INVALID_STATE);
+    assertCode(() -> store.readVerified(invocation, nativeValue.binding(), (current, value) -> {}), UiLayoutLifecycleException.Code.INVALID_STATE);
   }
 
   @Test void rejectsUnknownOriginAndNativeFieldsOnOperationRow() {
     append();
     rows.getFirst().put("origin_kind", "UNKNOWN");
-    assertCode(() -> store.read(invocation, capture(root).binding(), (current, value) -> {}), UiLayoutLifecycleException.Code.INVALID_STATE);
+    assertCode(() -> store.readVerified(invocation, capture(root).binding(), (current, value) -> {}), UiLayoutLifecycleException.Code.INVALID_STATE);
     rows.getFirst().put("origin_kind", "OPERATION_SCHEMA");
     rows.getFirst().put("native_document_ref", "foreign");
-    assertCode(() -> store.read(invocation, capture(root).binding(), (current, value) -> {}), UiLayoutLifecycleException.Code.INVALID_STATE);
+    assertCode(() -> store.readVerified(invocation, capture(root).binding(), (current, value) -> {}), UiLayoutLifecycleException.Code.INVALID_STATE);
   }
 
   @Test void roundTripsRawUtf8AndNanosecondsAndExactBinding() {
@@ -263,7 +263,7 @@ class JdbcUiLayoutMetadataCaptureStoreTest {
     var checks = new AtomicInteger();
     store.append(status, invocation, draft, values, (current, value) -> checks.incrementAndGet());
     assertThat(checks.get()).isEqualTo(8);
-    var read = store.read(invocation, values.getFirst().binding(), (current, value) -> checks.incrementAndGet());
+    var read = store.readVerified(invocation, values.getFirst().binding(), (current, value) -> checks.incrementAndGet());
     assertThat(read).isEqualTo(values.getFirst());
     assertThat(checks.get()).isEqualTo(10);
     assertThat(holder.isRollbackOnly()).isFalse();
@@ -375,7 +375,7 @@ class JdbcUiLayoutMetadataCaptureStoreTest {
 
   @Test void persistsAndReadsExactAssemblyInputsWithoutTouchingSchema() {
     append();
-    var stored = store.read(invocation, capture(root).binding(), (current, value) -> {});
+    var stored = store.readVerified(invocation, capture(root).binding(), (current, value) -> {});
     assertThat(((UiLayoutBaselineMetadataSeed.SchemaProjection) stored.reproduction()).assembly())
         .isEqualTo(UiLayoutMetadataTestFixtures.assembly());
     assertThat(rows.getFirst().get("assembly_input_text")).isEqualTo(UiLayoutMetadataTestFixtures.assembly().inputText());
@@ -387,13 +387,13 @@ class JdbcUiLayoutMetadataCaptureStoreTest {
   @ParameterizedTest @ValueSource(strings = {"assembly_input_version", "assembler_ref", "assembly_input_text", "assembly_input_hash"})
   void rejectsIncompleteHistoricalAssemblyWithoutBackfill(String column) {
     append(); rows.getFirst().put(column, null);
-    assertCode(() -> store.read(invocation, capture(root).binding(), (current, value) -> {}), UiLayoutLifecycleException.Code.INVALID_STATE);
+    assertCode(() -> store.readVerified(invocation, capture(root).binding(), (current, value) -> {}), UiLayoutLifecycleException.Code.INVALID_STATE);
     verify(jdbc, times(2)).update(anyString(), any(SqlParameterSource.class));
   }
 
   @Test void rejectsStoredAssemblyCorruption() {
     append(); rows.getFirst().put("assembly_input_text", "{\"changed\":true}");
-    assertCode(() -> store.read(invocation, capture(root).binding(), (current, value) -> {}), UiLayoutLifecycleException.Code.INVALID_STATE);
+    assertCode(() -> store.readVerified(invocation, capture(root).binding(), (current, value) -> {}), UiLayoutLifecycleException.Code.INVALID_STATE);
   }
 
   @Test void requiresCurrentObservationContextAtAppend() {
@@ -447,7 +447,7 @@ class JdbcUiLayoutMetadataCaptureStoreTest {
   }
 
   @Test void missingHistoricalRowDoesNotFallBackToCurrentMetadata() {
-    assertCode(() -> store.read(invocation, capture(root).binding(), (current, value) -> {}),
+    assertCode(() -> store.readVerified(invocation, capture(root).binding(), (current, value) -> {}),
         UiLayoutLifecycleException.Code.INVALID_STATE);
     verify(jdbc, never()).update(anyString(), any(SqlParameterSource.class));
   }
@@ -468,22 +468,35 @@ class JdbcUiLayoutMetadataCaptureStoreTest {
       default -> "another-tenant";
     };
     rows.getFirst().put(column, invalid);
-    assertCode(() -> store.read(invocation, original.binding(), (current, value) -> {}),
+    assertCode(() -> store.readVerified(invocation, original.binding(), (current, value) -> {}),
         UiLayoutLifecycleException.Code.INVALID_STATE);
   }
 
   @Test void crossTenantReadDeniesBeforeQuery() {
     var other = new UiLayoutLifecycleInvocation("actor", "other-tenant", "unit", "lab", "ctx", invocation.composition());
-    assertCode(() -> store.read(other, capture(root).binding(), (current, value) -> {}), UiLayoutLifecycleException.Code.DENIED);
+    assertCode(() -> store.readVerified(other, capture(root).binding(), (current, value) -> {}), UiLayoutLifecycleException.Code.DENIED);
     verify(jdbc, never()).query(anyString(), any(SqlParameterSource.class), any(RowMapper.class));
+  }
+
+  @ParameterizedTest @ValueSource(ints = {1, 2})
+  void verifiedReadOwnsBothCurrentAccessBoundaries(int deniedAt) {
+    var original = capture(root);
+    store.append(status, invocation, draft, List.of(original, capture(child)), (current, value) -> {});
+    var calls = new AtomicInteger();
+    assertCode(() -> store.readVerified(invocation, original.binding(), (current, value) -> {
+      assertThat(value).isEqualTo(original);
+      if (calls.incrementAndGet() == deniedAt)
+        throw new UiLayoutLifecycleException(UiLayoutLifecycleException.Code.DENIED, "revoked");
+    }), UiLayoutLifecycleException.Code.DENIED);
+    assertThat(calls.get()).isEqualTo(deniedAt);
   }
 
   @Test void historicalReadUsesCurrentAuthorizationNotHistoricalContext() {
     var original = capture(root);
     store.append(status, invocation, draft, List.of(original, capture(child)), (current, value) -> {});
     var current = new UiLayoutLifecycleInvocation("another-actor", "tenant", "other-unit", "lab", "new-context", invocation.composition());
-    var read = store.read(current, original.binding(), (context, value) -> assertThat(context).isEqualTo(current));
+    var read = store.readVerified(current, original.binding(), (context, value) -> assertThat(context).isEqualTo(current));
     assertThat(read.observation().contextVersion()).isEqualTo("ctx");
-    assertCode(() -> store.read(current, original.binding(), null), UiLayoutLifecycleException.Code.DENIED);
+    assertCode(() -> store.readVerified(current, original.binding(), null), UiLayoutLifecycleException.Code.DENIED);
   }
 }

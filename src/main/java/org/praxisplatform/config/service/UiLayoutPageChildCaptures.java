@@ -36,7 +36,7 @@ final class UiLayoutPageChildCaptures {
 
   List<UiLayoutPageChildEvidence> initial(UiLayoutLifecycleInvocation invocation, UUID draftId,
       UiLayoutDraftWorkspaceSeed.TargetSeed target, UiLayoutDraftWorkspaceSource source,
-      UiLayoutBaselineMetadataAdmission admission, UiLayoutValidationContext validation) {
+      UiLayoutValidationContext validation) {
     if (!UiLayoutPageRevisionReproduction.TYPE.equals(target.target().componentType())) {
       if (!target.pageChildren().isEmpty()) throw invalid();
       return List.of();
@@ -49,7 +49,7 @@ final class UiLayoutPageChildCaptures {
       var key = seed.request().widgetKey();
       if (!children.containsKey(key) || !keys.add(key)) throw invalid();
       if (!hashes.sha256Exact(children.get(key)).equals(hashes.sha256Exact(seed.document()))) throw invalid();
-      entries.add(seal(invocation, draftId, target.target(), seed, source, admission, validation));
+      entries.add(seal(invocation, draftId, target.target(), seed, source, validation));
     }
     if (!keys.equals(children.keySet())) throw invalid();
     budget(entries);
@@ -58,7 +58,7 @@ final class UiLayoutPageChildCaptures {
 
   List<UiLayoutPageChildEvidence> revision(UiLayoutLifecycleInvocation invocation, UUID draftId,
       UiLayoutDraftWorkspaceDocument.TargetState state, JsonNode candidate, List<UiLayoutPageChildSource> requests,
-      UiLayoutDraftWorkspaceSource source, UiLayoutBaselineMetadataAdmission admission, UiLayoutValidationContext validation) {
+      UiLayoutDraftWorkspaceSource source, UiLayoutValidationContext validation) {
     if (!UiLayoutPageRevisionReproduction.TYPE.equals(state.target().componentType())) {
       if (requests != null || !state.pageChildren().isEmpty()) throw invalid();
       return List.of();
@@ -79,16 +79,16 @@ final class UiLayoutPageChildCaptures {
       try { seed = validation.call(invocation, () -> source.capturePageChild(invocation, state.target(), request, validation)); }
       catch (RuntimeException exception) { throw UiLayoutMetadataAdmissionFailure.sanitized(exception, "Page child source is unavailable."); }
       if (seed == null || !request.equals(seed.request())) throw invalid();
-      evidence.put(request.widgetKey(), seal(invocation, draftId, state.target(), seed, source, admission, validation));
+      evidence.put(request.widgetKey(), seal(invocation, draftId, state.target(), seed, source, validation));
     }
     var result = List.copyOf(evidence.values());
-    verify(invocation, draftId, state.target(), state.baseline().document(), candidate, result, source, admission, validation);
+    verify(invocation, draftId, state.target(), state.baseline().document(), candidate, result, source, validation);
     return result;
   }
 
   void verify(UiLayoutLifecycleInvocation invocation, UUID draftId, UiLayoutTarget page, JsonNode baseline, JsonNode candidate,
       List<UiLayoutPageChildEvidence> entries, UiLayoutDraftWorkspaceSource source,
-      UiLayoutBaselineMetadataAdmission admission, UiLayoutValidationContext validation) {
+      UiLayoutValidationContext validation) {
     if (!UiLayoutPageRevisionReproduction.TYPE.equals(page.componentType())) {
       if (!entries.isEmpty()) throw invalid();
       return;
@@ -101,9 +101,8 @@ final class UiLayoutPageChildCaptures {
           || !invocation.environment().equals(capture.binding().scope().environment())) throw invalid();
       if (!children.containsKey(entry.request().widgetKey())) continue;
       var seed = seed(entry, capture);
-      requireAdmission(invocation, page, seed, source, admission, validation);
       codec.verifyAndRead(invocation, binding(invocation, draftId, page, seed), capture,
-          (current, ignored) -> requireAdmission(current, page, seed, source, admission, validation));
+          (current, ignored) -> requireAdmission(current, page, seed, source, validation));
     }
     validation.require(invocation);
   }
@@ -144,14 +143,14 @@ final class UiLayoutPageChildCaptures {
   }
 
   private UiLayoutPageChildEvidence seal(UiLayoutLifecycleInvocation invocation, UUID draftId, UiLayoutTarget page,
-      UiLayoutPageChildSeed seed, UiLayoutDraftWorkspaceSource source, UiLayoutBaselineMetadataAdmission admission,
+      UiLayoutPageChildSeed seed, UiLayoutDraftWorkspaceSource source,
       UiLayoutValidationContext validation) {
     requireDescriptor(seed);
     codec.requireSeedSyntax(seed.metadata(), seed.document());
     var observation = seed.metadata().observation();
     if (!invocation.actorRef().equals(observation.actorRef()) || !invocation.administrativeUnit().equals(observation.administrativeUnit())
         || !invocation.contextVersion().equals(observation.contextVersion())) throw invalid();
-    requireAdmission(invocation, page, seed, source, admission, validation);
+    requireAdmission(invocation, page, seed, source, validation);
     var capture = codec.seal(UUID.randomUUID(), binding(invocation, draftId, page, seed), seed.document(),
         seed.metadata().source(), seed.metadata().reproduction(), observation, seed.metadata().rawInputText());
     try { return new UiLayoutPageChildEvidence(seed.request(), seed.patch(), JSON.writeValueAsString(capture)); }
@@ -166,10 +165,9 @@ final class UiLayoutPageChildCaptures {
   }
 
   private void requireAdmission(UiLayoutLifecycleInvocation invocation, UiLayoutTarget page, UiLayoutPageChildSeed seed,
-      UiLayoutDraftWorkspaceSource source, UiLayoutBaselineMetadataAdmission admission, UiLayoutValidationContext validation) {
+      UiLayoutDraftWorkspaceSource source, UiLayoutValidationContext validation) {
     try {
-      validation.run(invocation, () -> source.requirePageChild(invocation, page, seed, validation));
-      validation.run(invocation, () -> admission.require(invocation, childTarget(seed), seed.authoring(), seed.sourceRef(), seed.document(), seed.metadata()));
+      validation.run(invocation, () -> source.requirePageChildEvidence(invocation, page, seed, validation));
     } catch (RuntimeException exception) { throw UiLayoutMetadataAdmissionFailure.sanitized(exception, "Page child admission is unavailable."); }
   }
 

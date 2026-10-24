@@ -131,7 +131,7 @@ final class JdbcUiLayoutMetadataCaptureStore implements UiLayoutMetadataCaptureP
   }
 
   /** Exact historical read; no current api_metadata lookup, upsert, backfill or recapture. */
-  @Override public UiLayoutMetadataCapture read(UiLayoutLifecycleInvocation invocation,
+  @Override public UiLayoutMetadataCapture readVerified(UiLayoutLifecycleInvocation invocation,
       UiLayoutMetadataCapture.Binding expected, UiLayoutMetadataCaptureAccess access) {
     try {
       requireScope(invocation, expected);

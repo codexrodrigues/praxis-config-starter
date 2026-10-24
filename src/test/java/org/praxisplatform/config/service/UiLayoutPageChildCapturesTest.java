@@ -25,14 +25,16 @@ class UiLayoutPageChildCapturesTest {
   private final Map<UiLayoutPageChildSource, UiLayoutPageChildSeed> registered = new HashMap<>();
   private final List<UiLayoutPageChildSource> resolutions = new ArrayList<>();
   private boolean revoked;
-  private final UiLayoutBaselineMetadataAdmission admission = (i,t,a,s,b,m) -> { if (revoked) throw new UiLayoutLifecycleException(UiLayoutLifecycleException.Code.DENIED, "Revoked"); };
+  private int admissions;
+  private int denyAt;
   private final UiLayoutDraftWorkspaceSource source = new UiLayoutDraftWorkspaceSource() {
     public UiLayoutDraftWorkspaceSeed capture(UiLayoutLifecycleInvocation i, UiLayoutValidationContext v) { throw new UnsupportedOperationException(); }
     public UiLayoutPageChildSeed capturePageChild(UiLayoutLifecycleInvocation i, UiLayoutTarget p, UiLayoutPageChildSource request, UiLayoutValidationContext v) {
       resolutions.add(request); return registered.get(request);
     }
-    public void requirePageChild(UiLayoutLifecycleInvocation i, UiLayoutTarget p, UiLayoutPageChildSeed seed, UiLayoutValidationContext v) {
-      if (revoked || !registered.containsKey(seed.request())) throw new UiLayoutLifecycleException(UiLayoutLifecycleException.Code.DENIED, "Unknown source");
+    public void requirePageChildEvidence(UiLayoutLifecycleInvocation i, UiLayoutTarget p, UiLayoutPageChildSeed seed, UiLayoutValidationContext v) {
+      admissions++;
+      if (admissions == denyAt || revoked || !seed.equals(registered.get(seed.request()))) throw new UiLayoutLifecycleException(UiLayoutLifecycleException.Code.DENIED, "Unknown source");
     }
   };
   private UiLayoutValidationContext validation() {
@@ -52,7 +54,7 @@ class UiLayoutPageChildCapturesTest {
     var children = UiLayoutPageRevisionReproduction.children(baseline).entrySet().stream().map(e -> register(e.getKey(), e.getValue())).toList();
     var seed = new UiLayoutDraftWorkspaceSeed.TargetSeed(page, UiLayoutPageRevisionReproductionTest.DESCRIPTOR,
         UiLayoutPageRevisionReproductionTest.PATCH, "fixture:page", baseline, metadata(baseline, "fixture:page"), children);
-    return captures.initial(invocation, draft, seed, source, admission, validation());
+    return captures.initial(invocation, draft, seed, source, validation());
   }
   private UiLayoutDraftWorkspaceDocument.TargetState state(JsonNode baseline, JsonNode working, List<UiLayoutPageChildEvidence> evidence) {
     return new UiLayoutDraftWorkspaceDocument.TargetState(page, UiLayoutPageRevisionReproductionTest.DESCRIPTOR, UiLayoutPageRevisionReproductionTest.PATCH,
@@ -66,12 +68,12 @@ class UiLayoutPageChildCapturesTest {
     var recovered = codec.decode(codec.encode(workspace), invocation.composition()).targets().getFirst();
     assertEquals(evidence, recovered.pageChildren());
     var removed = baseline.deepCopy(); ((ObjectNode) removed.at("/config/definition")).putArray("widgets");
-    var retained = captures.revision(invocation, draft, recovered, removed, null, source, admission, validation());
+    var retained = captures.revision(invocation, draft, recovered, removed, null, source, validation());
     assertEquals(evidence, retained);
-    var restored = captures.revision(invocation, draft, state(baseline, removed, retained), baseline, null, source, admission, validation());
+    var restored = captures.revision(invocation, draft, state(baseline, removed, retained), baseline, null, source, validation());
     assertEquals(evidence, restored); assertTrue(resolutions.isEmpty());
     revoked = true;
-    assertThrows(UiLayoutLifecycleException.class, () -> captures.revision(invocation, draft, state(baseline, removed, retained), baseline, null, source, admission, validation()));
+    assertThrows(UiLayoutLifecycleException.class, () -> captures.revision(invocation, draft, state(baseline, removed, retained), baseline, null, source, validation()));
   }
   @Test void newKeysRequireExactServerResolvedSourcesAndKeepB0ForLaterEdits() throws Exception {
     var baseline = UiLayoutPageRevisionReproductionTest.page(); var evidence = initial(baseline);
@@ -80,25 +82,52 @@ class UiLayoutPageChildCapturesTest {
     var added = ((ObjectNode) widgets.get(0)).deepCopy().put("key", "44444444-4444-4444-8444-444444444444"); widgets.add(added);
     var seed = register(added.path("key").asText(), UiLayoutPageRevisionReproduction.nativeChild(added));
     var state = state(baseline, baseline, evidence);
-    assertThrows(UiLayoutLifecycleException.class, () -> captures.revision(invocation, draft, state, candidate, null, source, admission, validation()));
-    assertThrows(UiLayoutLifecycleException.class, () -> captures.revision(invocation, draft, state, candidate, List.of(seed.request(),seed.request()), source, admission, validation()));
-    var accepted = captures.revision(invocation, draft, state, candidate, List.of(seed.request()), source, admission, validation());
+    assertThrows(UiLayoutLifecycleException.class, () -> captures.revision(invocation, draft, state, candidate, null, source, validation()));
+    assertThrows(UiLayoutLifecycleException.class, () -> captures.revision(invocation, draft, state, candidate, List.of(seed.request(),seed.request()), source, validation()));
+    var accepted = captures.revision(invocation, draft, state, candidate, List.of(seed.request()), source, validation());
     assertEquals(3, accepted.size()); assertEquals(List.of(seed.request()), resolutions);
     var changed = candidate.deepCopy(); ((ObjectNode) changed.at("/config/definition/widgets/2/definition/inputs")).put("mode", "edit");
-    assertThrows(UiLayoutLifecycleException.class, () -> captures.revision(invocation, draft, state(baseline,candidate,accepted), changed, null, source, admission, validation()));
-    assertThrows(UiLayoutLifecycleException.class, () -> captures.revision(invocation, draft, state(baseline,candidate,accepted), candidate, List.of(seed.request()), source, admission, validation()));
+    assertThrows(UiLayoutLifecycleException.class, () -> captures.revision(invocation, draft, state(baseline,candidate,accepted), changed, null, source, validation()));
+    assertThrows(UiLayoutLifecycleException.class, () -> captures.revision(invocation, draft, state(baseline,candidate,accepted), candidate, List.of(seed.request()), source, validation()));
   }
   @Test void missingInitialEvidenceAndWrongDraftOrHashAreRejected() throws Exception {
     var baseline = UiLayoutPageRevisionReproductionTest.page();
     var noEvidence = new UiLayoutDraftWorkspaceSeed.TargetSeed(page, UiLayoutPageRevisionReproductionTest.DESCRIPTOR,
         UiLayoutPageRevisionReproductionTest.PATCH, "fixture:page", baseline, metadata(baseline,"fixture:page"));
-    assertThrows(UiLayoutLifecycleException.class, () -> captures.initial(invocation,draft,noEvidence,source,admission,validation()));
+    assertThrows(UiLayoutLifecycleException.class, () -> captures.initial(invocation,draft,noEvidence,source,validation()));
     var evidence = initial(baseline);
     assertEquals(UiLayoutLifecycleException.Code.VALIDATION_FAILED, assertThrows(UiLayoutLifecycleException.class, () -> captures.integrity(UUID.randomUUID(),page,baseline,baseline,evidence)).getCode());
     var first = evidence.getFirst(); var corrupted = (ObjectNode) UiLayoutPageRevisionReproductionTest.JSON.readTree(first.captureText()); corrupted.put("rawInputHash", "0".repeat(64));
     var changed = new ArrayList<>(evidence); changed.set(0,new UiLayoutPageChildEvidence(first.request(),first.patch(),corrupted.toString()));
     assertThrows(UiLayoutLifecycleException.class, () -> captures.integrity(draft,page,baseline,baseline,changed));
   }
+  @Test void childVerifierKeepsBothFreshAdmissionBoundariesWithoutAnExtraPreflight() throws Exception {
+    var baseline = UiLayoutPageRevisionReproductionTest.page();
+    var evidence = initial(baseline);
+    for (int boundary : List.of(1, 2)) {
+      admissions = 0; denyAt = boundary;
+      assertEquals(UiLayoutLifecycleException.Code.DENIED,
+          assertThrows(UiLayoutLifecycleException.class, () -> captures.verify(invocation, draft, page,
+              baseline, baseline, evidence, source, validation())).getCode());
+      assertEquals(boundary, admissions);
+    }
+    admissions = 0; denyAt = 0;
+    captures.verify(invocation, draft, page, baseline, baseline, evidence, source, validation());
+    assertEquals(2 * evidence.size(), admissions);
+  }
+
+  @Test void changedMetadataSourceCannotBorrowTheRegisteredChildAuthority() throws Exception {
+    var baseline = UiLayoutPageRevisionReproductionTest.page();
+    var evidence = initial(baseline);
+    var key = evidence.getFirst().request();
+    var original = registered.get(key);
+    registered.put(key, new UiLayoutPageChildSeed(original.request(), original.authoring(), original.patch(),
+        original.sourceRef(), original.document(), metadata(original.document(), "another-metadata-source")));
+    assertEquals(UiLayoutLifecycleException.Code.DENIED,
+        assertThrows(UiLayoutLifecycleException.class, () -> captures.verify(invocation, draft, page,
+            baseline, baseline, evidence, source, validation())).getCode());
+  }
+
   @Test void clientAttestationAndUnknownPropertiesNeverEnterTheSourceSpi() throws Exception {
     var decoder = new UiLayoutLifecycleRequestDecoder(UiLayoutPageRevisionReproductionTest.JSON);
     ObjectNode command = UiLayoutPageRevisionReproductionTest.JSON.createObjectNode().put("commandRef",UUID.randomUUID().toString()).put("reason","test");

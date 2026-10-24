@@ -83,10 +83,17 @@ API mínima aprovada e implementada:
   nunca é cacheada entre chamadas. Não autoriza origem publicada nem gerada. O host não decide
   elegibilidade por marcadores privados do Config. Capturas mistas mantêm integralmente o caminho
   requireNative + metadata/filhos independentes + correlação recursiva Config; published permanece.
+- `PageLifecycleAdmission.requirePage(operation, invocation)`: o mesmo bean configurado de
+  `UiLayoutLifecycleAdmission` deve implementar este subtipo quando o host compõe páginas.
+  Ele aplica todas as políticas de operação/domínio de `require` e atesta invocation/application/
+  namespace numa janela atual, com observações frescas antes/depois. Não existe segundo provider
+  ou fallback para um delegate plain; composição incompleta falha. Config usa essa unidade antes
+  de consultar qualquer página (mesmo UUID desconhecida) e novamente no final de mutações,
+  preservando reobservação pós-I/O e correlação do ledger. Targets não Page continuam `require`.
 - `PageCreationHost.requireNative(PageCreationContext context, PageSourceReference source, UiLayoutDraftWorkspaceSeed.TargetSeed captured)`:
   re-admite a captura completa antiga sem buscar latest; valida vínculo sourceId/revision com seed e
-  fonte original. Reutiliza `UiLayoutBaselineMetadataAdmission` e `UiLayoutDraftWorkspaceSource.requirePageChild`
-  para metadata/filhos, não os substitui.
+  fonte original. Reutiliza `UiLayoutBaselineMetadataAdmission` e `UiLayoutDraftWorkspaceSource.requirePageChildEvidence`
+  para metadata raiz e evidência completa de cada filho, não os substitui.
 - `PageSourceReference`: union P0 fechada registered-native(sourceId,revision) ou
   published-page(pageId,releaseId,revisionId); JSON sem campos arbitrários.
 - `PageCreationCommand`: creationKey/source/title P0. `PageCreationReceipt`: exatamente receipt P0.
