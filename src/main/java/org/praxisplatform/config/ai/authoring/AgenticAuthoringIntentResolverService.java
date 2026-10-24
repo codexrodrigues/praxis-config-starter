@@ -461,11 +461,19 @@ public class AgenticAuthoringIntentResolverService {
                 refinedCandidates.addAll(contextHintCandidates(request));
                 candidates = deduplicateCandidates(refinedCandidates);
                 if (!emptyCandidateSetBeforeSearch) {
-                    candidates = groundCandidates(
+                    List<AgenticAuthoringCandidate> verifiedOperations = candidates.stream()
+                            .filter(candidate -> verifiedOperationForCandidate(request, candidate) != null)
+                            .toList();
+                    List<AgenticAuthoringCandidate> documentaryCandidates = candidates.stream()
+                            .filter(candidate -> !verifiedOperations.contains(candidate))
+                            .toList();
+                    List<AgenticAuthoringCandidate> grounded = new ArrayList<>(verifiedOperations);
+                    grounded.addAll(groundCandidates(
                             normalize(llmResourceSearchQuery),
-                            candidates,
+                            documentaryCandidates,
                             tenantId,
-                            environment);
+                            environment));
+                    candidates = deduplicateCandidates(grounded);
                 }
                 llmCandidateOptions = candidatesForLlmIntent(prompt, candidates);
                 contextHintCandidate = contextHintCandidate(request, artifactKind, candidates, tenantId, environment);
@@ -1098,6 +1106,11 @@ public class AgenticAuthoringIntentResolverService {
         // ranking evidence that is intentionally unavailable to the initial LLM call.
         // Applying this gate earlier would incorrectly retain a clarification state even
         // when a canonical candidate has subsequently been verified.
+        AgenticAuthoringCandidate verifiedResolvedCollection = verifiedCollectionForResolvedIntent(
+                request, llmIntent, artifactKind, candidates, tenantId, environment);
+        if (!explicitLocalUiComposition && verifiedResolvedCollection != null) {
+            selectedCandidate = verifiedResolvedCollection;
+        }
         boolean unconfirmedAiAuthoredResourceSelection = !unresolvedPrimaryLlmIntent
                 && !explicitLocalUiComposition
                 && hasUnconfirmedAiAuthoredResourceFocus(request, selectedCandidate);
@@ -3232,6 +3245,120 @@ public class AgenticAuthoringIntentResolverService {
                 resolution.providerInvocations());
     }
 
+    private AgenticAuthoringCandidate verifiedCollectionForResolvedIntent(
+            AgenticAuthoringIntentResolutionRequest request,
+            AgenticAuthoringLlmIntentResolution resolution,
+            String artifactKind,
+            List<AgenticAuthoringCandidate> candidates,
+            String tenantId,
+            String environment) {
+        if (resolution == null || !resolution.resolved()
+                || !"create".equals(resolution.operationKind())
+                || !List.of("page", "table").contains(artifactKind)
+                || !artifactKind.equals(resolution.artifactKind())
+                || candidates == null || candidates.isEmpty()) {
+            return null;
+        }
+        AgenticAuthoringResourceSearchFocus focus = resourceDiscoverySearchFocus(request);
+        if (focus == null || !isCanonicalResourceIdentity(focus.primaryBusinessEntity())
+                || valueOrDefault(resolution.selectedResourcePath(), "").isBlank()) {
+            return null;
+        }
+        // This reconciles operations only after the AI chose the resource and artifact.
+        // Documentary candidates stay separate; none inherits a binding's confirmation.
+        List<AgenticAuthoringCandidate> eligible = candidates.stream()
+                .filter(candidate -> resolution.selectedResourcePath().equals(candidate.resourcePath()))
+                .filter(candidate -> canonicalResourceIdentityMatchesCandidate(focus.primaryBusinessEntity(), candidate))
+                .filter(candidate -> hasResourceDiscoveryCandidate(request, candidate))
+                .filter(this::hasVerifiedOperationalBindingEvidence)
+                .filter(candidate -> verifiedOperationForCandidate(request, candidate) != null)
+                .filter(candidate -> candidateHasConsistentSource(candidate,
+                        AgenticAuthoringCandidateProvenancePolicy.DOMAIN_BINDING))
+                .filter(candidate -> {
+                    List<String> scope = candidateEvidenceScope(candidate);
+                    return scope != null && scope.get(0).equals(tenantId) && scope.get(1).equals(environment);
+                })
+                .filter(candidate -> isVerifiedCollectionOperation(candidate, verifiedOperationForCandidate(request, candidate)))
+                .toList();
+        if (eligible.isEmpty() || eligible.stream().map(this::candidateEvidenceScope).distinct().count() != 1) {
+            return null;
+        }
+        // A single canonical collection projection is unambiguous. Multiple verified
+        // collection operations require semantic disambiguation, not a first-match choice.
+        return eligible.size() == 1 ? eligible.get(0) : null;
+    }
+
+    private boolean isVerifiedCollectionOperation(AgenticAuthoringCandidate candidate, JsonNode operation) {
+        if (isCanonicalArtifactEndpointCandidate("table", candidate)) {
+            return true;
+        }
+        return "get".equalsIgnoreCase(candidate.operation()) && operation != null
+                && Set.of("all", "list").contains(jsonText(operation, "operationId"));
+    }
+
+    private JsonNode verifiedOperationForCandidate(
+            AgenticAuthoringIntentResolutionRequest request, AgenticAuthoringCandidate candidate) {
+        if (request == null || request.contextHints() == null || candidate == null
+                || !hasVerifiedOperationalBindingEvidence(candidate)
+                || !candidateHasConsistentSource(candidate, AgenticAuthoringCandidateProvenancePolicy.DOMAIN_BINDING)
+                || candidate.evidenceBundle() == null) {
+            return null;
+        }
+        List<String> scope = candidateEvidenceScope(candidate);
+        if (scope == null || scope.get(0).isBlank() || scope.get(1).isBlank()) {
+            return null;
+        }
+        // The stream boundary strips this envelope from client context and the engine
+        // reconstructs it from the current principal's operational verification tool.
+        JsonNode envelope = request.contextHints().path("verifiedDomainOperations");
+        JsonNode entries = envelope.path("entries");
+        if (!"praxis-agentic-authoring-verified-domain-operations.v2".equals(jsonText(envelope, "schemaVersion"))
+                || !"schemas.filtered+resource.capabilities+schemas.actions".equals(jsonText(envelope, "source"))
+                || !entries.isArray() || !envelope.path("operationCount").canConvertToInt()
+                || envelope.path("operationCount").asInt() != entries.size()) {
+            return null;
+        }
+        for (JsonNode entry : entries) {
+            if (!"resource_operation".equals(jsonText(entry, "kind"))
+                    || !"principal_capability".equals(jsonText(entry, "verificationMode"))
+                    || !entry.path("availability").path("allowed").asBoolean(false)
+                    || !"resource_capabilities".equals(jsonText(entry.path("availability"), "resolution"))
+                    || jsonText(entry, "resourceKey").isBlank() || jsonText(entry, "apiPath").isBlank()
+                    || jsonText(entry, "operationId").isBlank()
+                    || !Objects.equals(candidate.resourcePath(), jsonText(entry, "resourcePath"))
+                    || !sameCandidateMethod(candidate.operation(), jsonText(entry, "apiMethod"))
+                    || !Objects.equals(candidate.schemaUrl(), jsonText(entry, "schemaUrl"))
+                    || !scope.get(2).equals(jsonText(entry, "sourceRelease"))) {
+                continue;
+            }
+            boolean read = "get".equalsIgnoreCase(candidate.operation());
+            if (read ? candidate.submitUrl() != null || candidate.submitMethod() != null
+                    : !Objects.equals(candidate.submitUrl(), jsonText(entry, "apiPath"))
+                            || !sameCandidateMethod(candidate.submitMethod(), jsonText(entry, "apiMethod"))) {
+                continue;
+            }
+            List<AgenticAuthoringEvidenceBundle.Evidence> evidence = candidate.evidenceBundle().evidence();
+            if (hasOperationEvidenceRef(evidence, "domain_knowledge_binding", "retrieved_candidate", jsonText(entry, "bindingKey"))
+                    && hasOperationEvidenceRef(evidence, "/schemas/filtered", "schema_grounding", jsonText(entry, "schemaUrl"))
+                    && hasOperationEvidenceRef(evidence, "capabilities", "operation_grounding", jsonText(entry, "metadataUrl"))
+                    && evidence.stream().anyMatch(item -> "/schemas/filtered".equals(item.source())
+                            && "schema_grounding".equals(item.kind())
+                            && item.matchedTerms().stream().anyMatch(term -> sameCandidateMethod(candidate.operation(), term)))
+                    && evidence.stream().anyMatch(item -> "capabilities".equals(item.source())
+                            && "operation_grounding".equals(item.kind())
+                            && item.matchedTerms().contains(jsonText(entry, "operationId")))) {
+                return entry;
+            }
+        }
+        return null;
+    }
+
+    private boolean hasOperationEvidenceRef(List<AgenticAuthoringEvidenceBundle.Evidence> evidence,
+            String source, String kind, String ref) {
+        return !ref.isBlank() && evidence.stream().anyMatch(item -> source.equals(item.source())
+                && kind.equals(item.kind()) && ref.equals(item.ref()));
+    }
+
     private String constrainedOrientationArtifactKind(
             AgenticAuthoringPreIntentToolPlan semanticOrientation,
             AgenticAuthoringLlmIntentResolution resolution) {
@@ -4274,16 +4401,6 @@ public class AgenticAuthoringIntentResolverService {
             if (operation.isBlank()) {
                 operation = "post";
             }
-            String submitMethod = valueOrDefault(jsonText(candidateNode, "submitMethod"), operation);
-            String submitUrl = canonicalContextSubmitUrl(
-                    resourcePath,
-                    valueOrDefault(jsonText(candidateNode, "submitUrl"), resourcePath),
-                    submitMethod,
-                    artifactKindFromContextCandidate(candidateNode, request));
-            String schemaUrl = canonicalContextSchemaUrl(
-                    jsonText(candidateNode, "schemaUrl"),
-                    submitUrl,
-                    submitMethod);
             double score = candidateNode.path("score").isNumber() ? candidateNode.path("score").asDouble() : 1.0d;
             String reason = valueOrDefault(jsonText(candidateNode, "reason"), "resource discovered by backend tool");
             List<String> evidence = new ArrayList<>();
@@ -4297,6 +4414,25 @@ public class AgenticAuthoringIntentResolverService {
             }
             evidence.add("tool-search-api-resources");
             AgenticAuthoringEvidenceBundle evidenceBundle = evidenceBundle(candidateNode.path("evidenceBundle"));
+            // A verified projection already identifies its operation and schema. Artifact
+            // defaults must not turn a create binding into a collection read (or fill a
+            // read-only binding's deliberately absent mutation endpoint).
+            AgenticAuthoringCandidate rawProjection = new AgenticAuthoringCandidate(normalizePath(resourcePath),
+                    jsonText(candidateNode, "operation"), nullableCandidateText(candidateNode, "schemaUrl"),
+                    nullableCandidateText(candidateNode, "submitUrl"), nullableCandidateText(candidateNode, "submitMethod"),
+                    score, reason, List.copyOf(evidence), evidenceBundle);
+            boolean verifiedProjection = verifiedOperationForCandidate(request, rawProjection) != null;
+            String submitMethod = verifiedProjection
+                    ? nullableCandidateText(candidateNode, "submitMethod")
+                    : valueOrDefault(jsonText(candidateNode, "submitMethod"), operation);
+            String submitUrl = verifiedProjection
+                    ? nullableCandidateText(candidateNode, "submitUrl")
+                    : canonicalContextSubmitUrl(resourcePath,
+                            valueOrDefault(jsonText(candidateNode, "submitUrl"), resourcePath),
+                            submitMethod, artifactKindFromContextCandidate(candidateNode, request));
+            String schemaUrl = verifiedProjection
+                    ? nullableCandidateText(candidateNode, "schemaUrl")
+                    : canonicalContextSchemaUrl(jsonText(candidateNode, "schemaUrl"), submitUrl, submitMethod);
             candidates.add(new AgenticAuthoringCandidate(
                     normalizePath(resourcePath),
                     operation,
@@ -4309,6 +4445,10 @@ public class AgenticAuthoringIntentResolverService {
                     evidenceBundle));
         }
         return deduplicateCandidates(candidates);
+    }
+
+    private String nullableCandidateText(JsonNode candidate, String field) {
+        return candidate.path(field).isTextual() ? candidate.path(field).asText() : null;
     }
 
     private AgenticAuthoringEvidenceBundle evidenceBundle(JsonNode evidenceBundleNode) {
@@ -5099,10 +5239,16 @@ public class AgenticAuthoringIntentResolverService {
         if (scopedBest != null) {
             best = scopedBest;
         }
-        if (alignments.size() == 1) {
+        CandidatePromptAlignment selectedAlignment = best;
+        // Operations of the same resource remain separate grounding alternatives, but
+        // cannot create ambiguity about which business resource the AI focus selected.
+        CandidatePromptAlignment second = alignments.stream()
+                .filter(alignment -> !sameCandidate(alignment.candidate(), selectedAlignment.candidate()))
+                .findFirst()
+                .orElse(null);
+        if (second == null) {
             return best.candidate();
         }
-        CandidatePromptAlignment second = alignments.get(1);
         boolean semanticallySeparated = best.score() >= second.score() + 3;
         boolean rankingSeparated = best.score() > second.score()
                 && best.candidate().score() >= second.candidate().score() + 0.06d;
@@ -5254,6 +5400,10 @@ public class AgenticAuthoringIntentResolverService {
             return false;
         }
         SemanticResourceNeed focusedNeed = resourceSearchFocusNeed(focus, "");
+        if (focusedNeed == SemanticResourceNeed.ANALYTICS
+                && hasPrimaryEntityProjectionScopeLead(focus, focusedCandidate, selectedCandidate)) {
+            return true;
+        }
         boolean focusedProjectionFitsDesiredSurface =
                 focusedNeed == SemanticResourceNeed.PROFILE
                         && hasEvidence(focusedCandidate, SEMANTIC_ROLE_PROFILE_PROJECTION)
@@ -5297,6 +5447,10 @@ public class AgenticAuthoringIntentResolverService {
                     && !hasEvidence(focusedCandidate, SEMANTIC_ROLE_PROFILE_PROJECTION);
         }
         if (effectiveNeed == SemanticResourceNeed.ANALYTICS) {
+            if (hasPrimaryEntityProjectionScopeLead(
+                    resourceDiscoverySearchFocus(request), focusedCandidate, selectedCandidate)) {
+                return false;
+            }
             if (isDedicatedProjectionCandidate(selectedCandidate, SEMANTIC_ROLE_ANALYTICS_PROJECTION)
                     && isMixedOperationalProjectionCandidate(focusedCandidate, SEMANTIC_ROLE_ANALYTICS_PROJECTION)) {
                 return true;
@@ -5412,6 +5566,17 @@ public class AgenticAuthoringIntentResolverService {
         }
         int minimumAlignment = Math.max(1, bestAlignment - PRIMARY_ENTITY_PROJECTION_ALIGNMENT_TOLERANCE);
         return primaryBusinessEntityAlignmentScore(focus, candidate) >= minimumAlignment;
+    }
+
+    private boolean hasPrimaryEntityProjectionScopeLead(
+            AgenticAuthoringResourceSearchFocus focus,
+            AgenticAuthoringCandidate focusedCandidate,
+            AgenticAuthoringCandidate selectedCandidate) {
+        List<AgenticAuthoringCandidate> alternatives = List.of(focusedCandidate, selectedCandidate);
+        // An analytical role refines the AI-authored primary entity. Its role bonus
+        // cannot preserve or prefer an unrelated entity over that existing scope.
+        return isWithinPrimaryEntityProjectionScope(focus, focusedCandidate, alternatives)
+                && !isWithinPrimaryEntityProjectionScope(focus, selectedCandidate, alternatives);
     }
 
     private int resourceSearchFocusAlignmentScore(
@@ -6895,13 +7060,25 @@ public class AgenticAuthoringIntentResolverService {
                         .thenComparing(Comparator.comparingDouble(AgenticAuthoringCandidate::score).reversed()))
                 .collect(
                         java.util.stream.Collectors.toMap(
-                                AgenticAuthoringCandidate::resourcePath,
+                                this::candidateOperationIdentity,
                                 candidate -> candidate,
                                 this::preferredCandidateForSameResource,
                                 java.util.LinkedHashMap::new))
                 .values()
                 .stream()
                 .toList();
+    }
+
+    private CandidateOperationIdentity candidateOperationIdentity(AgenticAuthoringCandidate candidate) {
+        List<String> scope = candidateEvidenceScope(candidate);
+        return new CandidateOperationIdentity(candidate.resourcePath(),
+                valueOrDefault(candidate.operation(), "").toLowerCase(Locale.ROOT), candidate.schemaUrl(),
+                candidate.submitUrl(), valueOrDefault(candidate.submitMethod(), "").toLowerCase(Locale.ROOT),
+                scope == null ? candidate.evidenceBundle() : scope);
+    }
+
+    private record CandidateOperationIdentity(String resourcePath, String operation, String schemaUrl,
+            String submitUrl, String submitMethod, Object scope) {
     }
 
     private AgenticAuthoringCandidate preferredCandidateForSameResource(

@@ -754,6 +754,21 @@ conceito e decisao sem resolucao completa podem ainda estar descobrindo esse alv
 O campo identifica o assunto canonico para grounding; nao autoriza a operacao nem substitui bindings,
 schema ou capabilities.
 
+Bindings de operacoes de recurso correlacionados ao envelope backend `verifiedDomainOperations.v2`
+(`principal_capability`, availability permitida, refs de binding/schema/capabilities e scope coerentes)
+preservam sua projecao exata de operacao, schema e endpoint ao entrar no resolver: a escolha de `page` nao converte um `create` em `/filter/cursor`, nem preenche
+endpoints de mutacao ausentes em uma leitura. Candidatos do mesmo recurso continuam distintos quando
+operacao/schema/submit ou escopo de tenant, ambiente e release diferem; evidencia documental de outro
+release nao recebe os marcadores da verificacao operacional. O refinement documental nao promove nem
+reescreve bundles ja correlacionados a verificacao operacional backend. A lista de apresentacao pode
+continuar resumida pelo recurso selecionado; isso nao reduz as operacoes no grounding semantico.
+Depois da intencao IA resolvida para
+`page`/`table` e da escolha coincidente do recurso, uma unica operacao de colecao verificada no escopo
+atual pode reconciliar a selecao documental. Multiplas colecoes ou releases continuam ambiguos nessa
+reconciliacao; ela nao decide intencao, nao escolhe um recurso pelo texto e nao relaxa o gate de foco.
+A preservacao/preferencia de uma projecao analitica respeita o escopo da entidade primaria ja definido
+no foco IA; o bonus do papel analitico nao pode substituir essa entidade por outro recurso.
+
 O runner production-like pode coletar, apenas em `result.json` de uma execucao falha, attachments
 `praxis.page-builder.governed-state-projection/v1` declarados na matriz canonica. O collector valida
 shape fechado, limites, IDs/tokens e a whitelist de `canonicalAction`; prompts, `contextHints`, paths
