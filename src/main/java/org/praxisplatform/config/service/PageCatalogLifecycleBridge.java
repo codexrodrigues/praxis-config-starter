@@ -49,7 +49,7 @@ final class PageCatalogLifecycleBridge {
     this.hashes = hashes;
     this.nativeSource = nativeSource;
     this.metadata = metadata;
-    this.structure = structure;
+    this.structure = new UiLayoutBoundedStructureValidator(structure);
     this.frozen = frozen;
     this.captures = captures;
     this.captureCodec = new UiLayoutMetadataCaptureCodec(mapper, hashes);
@@ -345,13 +345,7 @@ final class PageCatalogLifecycleBridge {
   }
 
   void verify(PageCreationContext context, PageCreationEvidence value) {
-    var validation =
-        UiLayoutValidationContext.begin(
-            budgets,
-            context.invocation(),
-            UiLayoutLifecycleOperation.CREATE_DRAFT,
-            UiLayoutValidationPurpose.AUTHORING);
-    try (var attempt = validation.attempt()) {
+    try (var attempt = UiLayoutValidationScope.borrow(context.invocation())) {
       verify(context, value, attempt);
     }
   }
@@ -443,7 +437,7 @@ final class PageCatalogLifecycleBridge {
           seed.patch(),
           projection.compilePatch(),
           validation);
-      requireOriginalMetadata(
+      validation.run(invocation, () -> requireOriginalMetadata(
           context,
           invocation,
           seed.target(),
@@ -451,7 +445,7 @@ final class PageCatalogLifecycleBridge {
           seed.sourceRef(),
           seed.document(),
           seed.metadata(),
-          chain);
+          chain));
       var children = UiLayoutPageRevisionReproduction.children(snapshot.document());
       var keys = new HashSet<String>();
       for (var child : seed.pageChildren()) {
@@ -475,20 +469,20 @@ final class PageCatalogLifecycleBridge {
           // The source page creation was already traversed above for a published source.
           if (!(source instanceof PageSourceReference.Published)) verify(context, record, chain);
         } else {
-          nativeSource.requirePageChild(invocation, seed.target(), child, validation);
+          validation.run(invocation, () -> nativeSource.requirePageChild(invocation, seed.target(), child, validation));
           var childTarget =
               new UiLayoutTarget(
                   children.get(key).path("kind").asText().equals("praxis.dynamic-form.editor")
                       ? "praxis-dynamic-form"
                       : "praxis-table",
                   key);
-          metadata.require(
+          validation.run(invocation, () -> metadata.require(
               invocation,
               childTarget,
               child.authoring(),
               child.sourceRef(),
               child.document(),
-              child.metadata());
+              child.metadata()));
         }
       }
       if (!keys.equals(children.keySet()))
@@ -698,7 +692,7 @@ final class PageCatalogLifecycleBridge {
         UiLayoutLifecycleInvocation invocation, UiLayoutLifecycleOperation operation) {
       check();
       return new UiLayoutValidationContext(
-          UiLayoutValidationAttempt.start(invocation, operation, outer.remainingBudget()),
+          outer.correlate(invocation),
           UiLayoutValidationPurpose.AUTHORING);
     }
   }

@@ -9,17 +9,28 @@ import java.util.function.LongSupplier;
 /**
  * Server-owned identity and monotonic validation budget for one lifecycle entry.
  * Not an authority grant, HTTP model, transaction timeout or worker cancellation mechanism.
- * Config callers must create once and pass the same instance through all targets and nested reads.
+ * Config callers create one owning attempt. Internal correlated views preserve its exact clock,
+ * initiating operation, correlation and lifetime across targets and nested reads.
  * Lifecycle callers apply cooperative entry/return and commit checks; blocked work is not interrupted.
  */
 public final class UiLayoutValidationAttempt implements AutoCloseable {
   private final UiLayoutLifecycleInvocation invocation;
-  private final UiLayoutLifecycleOperation operation;
-  private final UUID correlationRef;
-  private final LongSupplier ticker;
-  private final long startedAt;
-  private final long budgetNanos;
-  private final AtomicLong remaining;
+  private final Budget budget;
+  private final boolean owner;
+  private final java.util.concurrent.atomic.AtomicBoolean closed = new java.util.concurrent.atomic.AtomicBoolean();
+
+  /** One monotonic clock and lifetime. Correlated views never allocate another allowance. */
+  private static final class Budget {
+    final UiLayoutLifecycleOperation operation;
+    final UUID correlationRef = UUID.randomUUID();
+    final LongSupplier ticker;
+    final long startedAt, budgetNanos;
+    final AtomicLong remaining;
+    Budget(UiLayoutLifecycleOperation operation, long nanos, LongSupplier ticker) {
+      this.operation = operation; this.ticker = ticker; this.startedAt = ticker.getAsLong();
+      this.budgetNanos = nanos; this.remaining = new AtomicLong(nanos);
+    }
+  }
 
   /** Start with an explicit server-selected budget; no operational default or client correlation is accepted. */
   public static UiLayoutValidationAttempt start(UiLayoutLifecycleInvocation invocation,
@@ -31,21 +42,40 @@ public final class UiLayoutValidationAttempt implements AutoCloseable {
   UiLayoutValidationAttempt(UiLayoutLifecycleInvocation invocation, UiLayoutLifecycleOperation operation,
       Duration budget, LongSupplier ticker) {
     this.invocation = Objects.requireNonNull(invocation, "invocation is required.");
-    this.operation = Objects.requireNonNull(operation, "operation is required.");
+    Objects.requireNonNull(operation, "operation is required.");
     Objects.requireNonNull(budget, "validation budget is required.");
     if (budget.isZero() || budget.isNegative()) throw new IllegalArgumentException("Validation budget must be positive.");
-    try { this.budgetNanos = budget.toNanos(); }
+    final long nanos;
+    try { nanos = budget.toNanos(); }
     catch (ArithmeticException exception) { throw new IllegalArgumentException("Validation budget exceeds monotonic range."); }
-    this.ticker = Objects.requireNonNull(ticker, "monotonic ticker is required.");
-    this.correlationRef = UUID.randomUUID();
-    this.startedAt = ticker.getAsLong();
-    this.remaining = new AtomicLong(budgetNanos);
+    this.budget = new Budget(operation, nanos, Objects.requireNonNull(ticker, "monotonic ticker is required."));
+    this.owner = true;
   }
+
+  private UiLayoutValidationAttempt(UiLayoutLifecycleInvocation invocation, Budget budget) {
+    this.invocation = invocation; this.budget = budget; this.owner = false;
+  }
+
+  /** Internal correlation only; a new target still needs every canonical admission. */
+  UiLayoutValidationAttempt correlate(UiLayoutLifecycleInvocation next) {
+    requireActive();
+    if (next == null || !invocation.actorRef().equals(next.actorRef())
+        || !invocation.tenantId().equals(next.tenantId())
+        || !invocation.administrativeUnit().equals(next.administrativeUnit())
+        || !invocation.environment().equals(next.environment())
+        || !invocation.contextVersion().equals(next.contextVersion())) {
+      throw new UiLayoutLifecycleException(UiLayoutLifecycleException.Code.CONTEXT_STALE,
+          "Nested validation changed the authority correlation.");
+    }
+    return new UiLayoutValidationAttempt(next, budget);
+  }
+
+  boolean sharesBudget(UiLayoutValidationAttempt other) { return other != null && budget == other.budget; }
 
   public UiLayoutLifecycleInvocation invocation() { return invocation; }
   /** Initiating operation, retained even if diagnosis requires a nested historical visibility check. */
-  public UiLayoutLifecycleOperation operation() { return operation; }
-  public UUID correlationRef() { return correlationRef; }
+  public UiLayoutLifecycleOperation operation() { return budget.operation; }
+  public UUID correlationRef() { return budget.correlationRef; }
 
   /**
    * Remaining budget in this process's monotonic clock domain. Never increases or reopens.
@@ -53,10 +83,10 @@ public final class UiLayoutValidationAttempt implements AutoCloseable {
    * A negative elapsed interval is outside that domain and fails closed.
    */
   public Duration remainingBudget() {
-    if (remaining.get() == 0) return Duration.ZERO;
-    long elapsed = ticker.getAsLong() - startedAt;
-    long available = elapsed < 0 || elapsed >= budgetNanos ? 0 : budgetNanos - elapsed;
-    return Duration.ofNanos(remaining.updateAndGet(previous -> Math.min(previous, available)));
+    if (closed.get() || budget.remaining.get() == 0) return Duration.ZERO;
+    long elapsed = budget.ticker.getAsLong() - budget.startedAt;
+    long available = elapsed < 0 || elapsed >= budget.budgetNanos ? 0 : budget.budgetNanos - elapsed;
+    return Duration.ofNanos(budget.remaining.updateAndGet(previous -> Math.min(previous, available)));
   }
 
   /** Call before and after extensions, and before accepting a result. Does not interrupt blocked work. */
@@ -68,5 +98,8 @@ public final class UiLayoutValidationAttempt implements AutoCloseable {
   }
 
   /** Permanently disallow further acceptance; resource/process termination belongs to the executor. */
-  @Override public void close() { remaining.set(0); }
+  @Override public void close() {
+    closed.set(true);
+    if (owner) budget.remaining.set(0);
+  }
 }

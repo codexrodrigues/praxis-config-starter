@@ -25,11 +25,16 @@ public record UiLayoutValidationContext(UiLayoutValidationAttempt attempt, UiLay
   }
   public <T> T call(UiLayoutLifecycleInvocation invocation, Supplier<T> action) {
     require(invocation);
-    try { return action.get(); }
-    finally { require(invocation); }
+    try (var scope = UiLayoutValidationScope.bind(attempt)) {
+      try { return action.get(); }
+      finally { require(invocation); }
+    }
   }
   public void run(UiLayoutLifecycleInvocation invocation, Runnable action) {
     call(invocation, () -> { action.run(); return Boolean.TRUE; });
+  }
+  UiLayoutValidationContext nested(UiLayoutLifecycleInvocation invocation, UiLayoutValidationPurpose purpose) {
+    return new UiLayoutValidationContext(attempt.correlate(invocation), purpose);
   }
   static UiLayoutValidationContext begin(UiLayoutValidationBudgetPolicy policy,
       UiLayoutLifecycleInvocation invocation, UiLayoutLifecycleOperation operation, UiLayoutValidationPurpose purpose) {

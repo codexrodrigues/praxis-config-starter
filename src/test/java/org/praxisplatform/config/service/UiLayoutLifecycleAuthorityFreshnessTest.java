@@ -36,6 +36,26 @@ class UiLayoutLifecycleAuthorityFreshnessTest {
   enum Mutation { REVISION, ASSIGNMENT, FREEZE, SUBMIT, APPROVE, PUBLISH, WITHDRAW, ROLLBACK }
   enum ContextChange { ACTOR, TENANT, UNIT, ENVIRONMENT, VERSION, COMPOSITION }
 
+  @Test void initialAdmissionConsumesTheOwningBudgetBeforeTransactionWork() {
+    Fixture f = new Fixture(); var ticks = new java.util.concurrent.atomic.AtomicLong();
+    var attempt = new UiLayoutValidationAttempt(original(), UiLayoutLifecycleOperation.WITHDRAW_RELEASE,
+        java.time.Duration.ofNanos(10), ticks::get);
+    f.forcedValidation = new UiLayoutValidationContext(attempt, UiLayoutValidationPurpose.AUTHORING);
+    f.onAdmission = () -> {
+      try (var nested = UiLayoutValidationScope.borrow(original())) {
+        assertThat(nested.correlationRef()).isEqualTo(attempt.correlationRef());
+        assertThat(nested.operation()).isEqualTo(UiLayoutLifecycleOperation.WITHDRAW_RELEASE);
+      }
+      ticks.set(10);
+    };
+    denied(() -> f.call(Mutation.WITHDRAW), UiLayoutLifecycleException.Code.SOURCE_UNAVAILABLE);
+    assertThat(f.manager.commits).isZero();
+    assertThat(f.manager.rollbacks).isZero(); // Expired before a Config transaction starts.
+    verifyNoInteractions(f.core);
+    assertThat(attempt.remainingBudget()).isZero();
+    assertThatThrownBy(() -> UiLayoutValidationScope.borrow(original())).isInstanceOf(UiLayoutLifecycleException.class);
+  }
+
   @Test void expiredBudgetAtActualOuterCommitRollsBackAndClosesTheAttempt() {
     Fixture f = new Fixture(); var ticks = new java.util.concurrent.atomic.AtomicLong();
     var attempt = new UiLayoutValidationAttempt(original(), UiLayoutLifecycleOperation.WITHDRAW_RELEASE,
@@ -229,6 +249,7 @@ class UiLayoutLifecycleAuthorityFreshnessTest {
     final java.util.concurrent.atomic.AtomicInteger budgetSelections = new java.util.concurrent.atomic.AtomicInteger();
     UiLayoutValidationContext forcedValidation;
     Runnable afterWrite = () -> {};
+    Runnable onAdmission = () -> {};
 
     Fixture() {
       when(heads.findByTenantIdAndEnvironmentAndRootComponentTypeAndRootComponentId(any(), any(), any(), any()))
@@ -243,6 +264,7 @@ class UiLayoutLifecycleAuthorityFreshnessTest {
     UiLayoutLifecycleCommandService service(TransactionOperations operations) {
       var service = new UiLayoutLifecycleCommandService(core, (principal, version, root) -> current.get(),
           (operation, invocation) -> {
+            onAdmission.run();
             if (technicalFailure.get()) throw new IllegalStateException("private-credential");
             if (revoked.get()) throw new UiLayoutLifecycleException(UiLayoutLifecycleException.Code.DENIED, "revoked");
           }, null, null, null, new ObjectMapper(), operations,
