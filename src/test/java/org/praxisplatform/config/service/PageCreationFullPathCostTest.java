@@ -149,7 +149,7 @@ class PageCreationFullPathCostTest {
         public UiLayoutDraftWorkspaceSeed capture(UiLayoutLifecycleInvocation invocation, UiLayoutValidationContext validation) {
           record("NATIVE_CAPTURE", true); return new UiLayoutDraftWorkspaceSeed(List.of(nativeSeed));
         }
-        public void requirePageChild(UiLayoutLifecycleInvocation invocation, UiLayoutTarget page, UiLayoutPageChildSeed captured, UiLayoutValidationContext validation) {
+        public void requirePageChildEvidence(UiLayoutLifecycleInvocation invocation, UiLayoutTarget page, UiLayoutPageChildSeed captured, UiLayoutValidationContext validation) {
           record("NATIVE_CHILD", true);
         }
       };
@@ -162,7 +162,15 @@ class PageCreationFullPathCostTest {
       pages = new PageCreationService(host, jdbc, transactions, hashes, mapper, nativeSource, metadata, structure,
           budgets, drafts, releases, members, definitions, revisions, assignments, () -> commands, () -> reads);
       var invocationProvider = pages.invocationProvider((p,v,r) -> { record("NATIVE_INVOCATION", true); return invocation(r); });
-      var admission = pages.lifecycleAdmission((o,i) -> record("LIFECYCLE_" + o, true));
+      var admission = pages.lifecycleAdmission(new PageLifecycleAdmission() {
+        public void require(UiLayoutLifecycleOperation operation, UiLayoutLifecycleInvocation invocation) {
+          record("LIFECYCLE_" + operation, true);
+        }
+        public PageCreationContext requirePage(UiLayoutLifecycleOperation operation, UiLayoutLifecycleInvocation invocation) {
+          record("PAGE_LIFECYCLE_" + operation, true);
+          return context(invocation);
+        }
+      });
       commands = UiLayoutLifecycleCommandService.assemble(definitions, revisions, assignments, drafts, releases, members,
           reviews, mock(UiLayoutReleaseApprovalRepository.class), heads, mock(UiLayoutReleaseEventRepository.class),
           (t,e,target) -> {}, hashes, mapper, (r,m) -> {}, invocationProvider, admission, structure, pages.workspaceSource(),
@@ -223,10 +231,10 @@ class PageCreationFullPathCostTest {
     }
     void writeReport() throws Exception {
       long units = events.stream().filter(event -> event.boundary().startsWith("HOST_")
-          || event.boundary().startsWith("LIFECYCLE_") || event.boundary().startsWith("NATIVE_")).count();
+          || event.boundary().startsWith("LIFECYCLE_") || event.boundary().startsWith("PAGE_LIFECYCLE_") || event.boundary().startsWith("NATIVE_")).count();
       var report = new LinkedHashMap<String,Object>();
       report.put("kind", "synthetic-complete-canonical-operation-not-latency-proof");
-      report.put("baseline", "v0.1.0-rc.172"); report.put("nativeChildren", 1);
+      report.put("baseline", "v0.1.0-rc.172 + verified evidence ownership + joint page lifecycle"); report.put("nativeChildren", 1);
       report.put("authorityUnits", units); report.put("modeledCurrentObservationsAtTwoPerUnit", 2 * units);
       report.put("counts", counts()); report.put("events", events);
       report.put("modeledAuthorityMillisAt250PerUnit", 250 * units);

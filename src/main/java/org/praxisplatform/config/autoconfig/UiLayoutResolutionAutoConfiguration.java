@@ -242,7 +242,7 @@ public class UiLayoutResolutionAutoConfiguration {
             name = {"uiLayoutLifecycleConfigTransactionOperations", "configNamedParameterJdbcTemplate"})
     @ConditionalOnMissingBean
     public org.praxisplatform.config.service.PageCreationService pageCreationService(
-            org.praxisplatform.config.service.PageCreationHost host,
+            org.praxisplatform.config.service.PageCreationHost host, UiLayoutLifecycleAdmission admission,
             @Qualifier("configNamedParameterJdbcTemplate") NamedParameterJdbcTemplate jdbc,
             @Qualifier("uiLayoutLifecycleConfigTransactionOperations") TransactionOperations transactions,
             CanonicalJsonHashService hashes, ObjectMapper mapper, UiLayoutDraftWorkspaceSource source,
@@ -252,6 +252,8 @@ public class UiLayoutResolutionAutoConfiguration {
             UiLayoutDefinitionRepository definitions, UiLayoutRevisionRepository revisions, UiLayoutAssignmentRevisionRepository assignments,
             org.springframework.beans.factory.ObjectProvider<UiLayoutLifecycleCommandService> commands,
             org.springframework.beans.factory.ObjectProvider<UiLayoutLifecycleReadService> reads) {
+        if (!(admission instanceof org.praxisplatform.config.service.PageLifecycleAdmission))
+            throw new IllegalArgumentException("Page composition requires the configured PageLifecycleAdmission bean.");
         return new org.praxisplatform.config.service.PageCreationService(host, jdbc, transactions, hashes, mapper,
                 source, metadata, structure, budgets, drafts, releases, members, definitions, revisions,
                 assignments, commands::getObject, reads::getObject);

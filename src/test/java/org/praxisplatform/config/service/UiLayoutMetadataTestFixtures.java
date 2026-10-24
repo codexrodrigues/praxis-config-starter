@@ -34,6 +34,8 @@ final class UiLayoutMetadataTestFixtures {
 
   static class MemoryStore implements UiLayoutMetadataCapturePersistence {
     final Map<UiLayoutMetadataCapture.Binding, UiLayoutMetadataCapture> rows = new LinkedHashMap<>();
+    final UiLayoutMetadataCaptureCodec codec = new UiLayoutMetadataCaptureCodec(
+        UiLayoutPageChildCaptures.evidenceMapper(), new CanonicalJsonHashService(UiLayoutPageChildCaptures.evidenceMapper()));
     int appends;
     int reads;
     @Override public void append(TransactionStatus status, UiLayoutLifecycleInvocation invocation, UUID draft,
@@ -46,13 +48,12 @@ final class UiLayoutMetadataTestFixtures {
         }
       }
     }
-    @Override public UiLayoutMetadataCapture read(UiLayoutLifecycleInvocation invocation,
+    @Override public UiLayoutMetadataCapture readVerified(UiLayoutLifecycleInvocation invocation,
         UiLayoutMetadataCapture.Binding expected, UiLayoutMetadataCaptureAccess access) {
       reads++;
       var value = rows.get(expected);
       if (value == null) throw new UiLayoutLifecycleException(UiLayoutLifecycleException.Code.INVALID_STATE, "Missing fixture capture.");
-      access.require(invocation, value);
-      return value;
+      return codec.verifyAndRead(invocation, expected, value, access);
     }
   }
 }

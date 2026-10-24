@@ -15,10 +15,11 @@ public interface UiLayoutDraftWorkspaceSource {
     throw new UiLayoutLifecycleException(UiLayoutLifecycleException.Code.SOURCE_UNAVAILABLE, "Page child source is unavailable.");
   }
 
-  /** Re-admit the exact registered source and reproduction, including restored/frozen children. No latest lookup.
+  /** Jointly re-admit the exact registered child source, document, reproduction and complete metadata
+   * under one current-authority decision window, including restored/frozen children. No latest lookup.
    * The host must bind seed.request() (kind/sourceId/revision) to the exact admitted source, document and
-   * reproduction; captureText and metadata observation record history and never grant present authority. */
-  default void requirePageChild(UiLayoutLifecycleInvocation invocation,
+   * reproduction and seed.metadata(), including its source and input; captureText and metadata observation record history and never grant present authority. */
+  default void requirePageChildEvidence(UiLayoutLifecycleInvocation invocation,
       org.praxisplatform.config.dto.UiLayoutTarget page, UiLayoutPageChildSeed seed, UiLayoutValidationContext validation) {
     throw new UiLayoutLifecycleException(UiLayoutLifecycleException.Code.SOURCE_UNAVAILABLE, "Page child source admission is unavailable.");
   }

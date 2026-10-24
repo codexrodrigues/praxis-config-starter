@@ -12,7 +12,6 @@ final class UiLayoutNativeSnapshotReader {
   private final UiLayoutLifecycleStructureValidator structure;
   private final UiLayoutMetadataCapturePersistence metadata;
   private final UiLayoutBaselineMetadataAdmission metadataAdmission;
-  private final UiLayoutMetadataCaptureCodec metadataCodec;
   private final UiLayoutDraftWorkspaceSource workspaceSource;
   private final UiLayoutPageChildCaptures pageChildren;
   private final UiLayoutFrozenWorkspaceResolver frozen;
@@ -27,7 +26,6 @@ final class UiLayoutNativeSnapshotReader {
     this.metadata = Objects.requireNonNull(metadata);
     this.metadataAdmission = Objects.requireNonNull(metadataAdmission);
     this.workspaceSource = Objects.requireNonNull(workspaceSource);
-    this.metadataCodec = new UiLayoutMetadataCaptureCodec(mapper, hashes);
     this.pageChildren = new UiLayoutPageChildCaptures(hashes);
     this.frozen = new UiLayoutFrozenWorkspaceResolver(releases, drafts, members, definitions,
         revisions, assignments, mapper, hashes);
@@ -82,10 +80,9 @@ final class UiLayoutNativeSnapshotReader {
           metadataAdmission.require(current, state.target(), state.authoring(), state.baseline().sourceRef(),
               capture.baselineDocument(), new UiLayoutBaselineMetadataSeed(capture.source(), capture.reproduction(),
                   capture.observation(), capture.rawInputText())));
-      var capture = validation.call(invocation, () -> metadata.read(invocation, binding, access));
-      metadataCodec.verifyAndRead(invocation, binding, capture, access);
+      validation.call(invocation, () -> metadata.readVerified(invocation, binding, access));
       pageChildren.verify(invocation, snapshot.draftId(), state.target(), state.baseline().document(),
-          state.working().document(), state.pageChildren(), workspaceSource, metadataAdmission, validation);
+          state.working().document(), state.pageChildren(), workspaceSource, validation);
       // Current metadata and producer callbacks run before the final structural policy check.
       validation.run(invocation, () -> structure.validateFrozenRelease(invocation, List.of(contribution), validation));
       validation.require(invocation);

@@ -890,9 +890,9 @@ class UiLayoutLifecycleHttpRoundTripTest {
             org.praxisplatform.config.dto.UiLayoutPageChildSource request, UiLayoutValidationContext validation) {
           return pageSeeds.get(request.widgetKey());
         }
-        @Override public void requirePageChild(UiLayoutLifecycleInvocation invocation, UiLayoutTarget page,
+        @Override public void requirePageChildEvidence(UiLayoutLifecycleInvocation invocation, UiLayoutTarget page,
             UiLayoutPageChildSeed seed, UiLayoutValidationContext validation) {
-          if (pageRevoked || !pageSeeds.containsKey(seed.request().widgetKey()))
+          if (pageRevoked || !seed.equals(pageSeeds.get(seed.request().widgetKey())))
             throw new UiLayoutLifecycleException(UiLayoutLifecycleException.Code.DENIED, "Fixture child revoked");
           assertConfigWhenActive();
         }

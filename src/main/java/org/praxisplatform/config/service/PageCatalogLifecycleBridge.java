@@ -114,9 +114,14 @@ final class PageCatalogLifecycleBridge {
   }
 
   UiLayoutLifecycleAdmission admission(UiLayoutLifecycleAdmission delegate) {
+    if (!(delegate instanceof PageLifecycleAdmission pages))
+      throw new IllegalArgumentException("Page composition requires the configured PageLifecycleAdmission bean.");
     return (operation, invocation) -> {
-      delegate.require(operation, invocation);
-      var record = registered(invocation);
+      if (!isPage(invocation.rootTarget())) {
+        delegate.require(operation, invocation);
+        return;
+      }
+      var record = registered(invocation, admittedPageContext(pages, operation, invocation));
       if (org.springframework.transaction.support.TransactionSynchronizationManager
               .isActualTransactionActive()
           && record.isPresent()
@@ -127,8 +132,7 @@ final class PageCatalogLifecycleBridge {
           }) {
         var creation = record.orElseThrow();
         verify(context(invocation, creation), creation);
-        delegate.require(operation, invocation);
-        context(invocation, creation);
+        sameNamespace(admittedPageContext(pages, operation, invocation), creation);
       }
     };
   }
@@ -153,7 +157,7 @@ final class PageCatalogLifecycleBridge {
         return nativeSource.capturePageChild(invocation, page, request, validation);
       }
 
-      public void requirePageChild(
+      public void requirePageChildEvidence(
           UiLayoutLifecycleInvocation invocation,
           UiLayoutTarget page,
           UiLayoutPageChildSeed seed,
@@ -162,6 +166,7 @@ final class PageCatalogLifecycleBridge {
         if (isGenerated(seed.metadata())) {
           var value =
               record.orElseThrow(() -> failure(UiLayoutLifecycleException.Code.INVALID_STATE));
+          if (!page.equals(value.target())) throw failure(UiLayoutLifecycleException.Code.VALIDATION_FAILED);
           var expected =
               outputSeed(value).pageChildren().stream()
                   .filter(child -> child.request().equals(seed.request()))
@@ -170,7 +175,7 @@ final class PageCatalogLifecycleBridge {
           if (!sameSeedOrigin(expected, seed))
             throw failure(UiLayoutLifecycleException.Code.VALIDATION_FAILED);
           verify(context(invocation, value), value, validation.attempt());
-        } else nativeSource.requirePageChild(invocation, page, seed, validation);
+        } else nativeSource.requirePageChildEvidence(invocation, page, seed, validation);
       }
     };
   }
@@ -313,7 +318,7 @@ final class PageCatalogLifecycleBridge {
       // Storage verifies immutable historical correlation; authority/reproduction is checked below
       // with the entire chain.
       var capture =
-          captures.read(invocation, binding, (observedInvocation, historicalCapture) -> {});
+          captures.readVerified(invocation, binding, (observedInvocation, historicalCapture) -> {});
       if (value.patches().size() != 1) {
         throw failure(UiLayoutLifecycleException.Code.INVALID_STATE);
       }
@@ -481,20 +486,7 @@ final class PageCatalogLifecycleBridge {
           // The source page creation was already traversed above for a published source.
           if (!(source instanceof PageSourceReference.Published)) verify(context, record, chain);
         } else if (!jointNative) {
-          validation.run(invocation, () -> nativeSource.requirePageChild(invocation, seed.target(), child, validation));
-          var childTarget =
-              new UiLayoutTarget(
-                  children.get(key).path("kind").asText().equals("praxis.dynamic-form.editor")
-                      ? "praxis-dynamic-form"
-                      : "praxis-table",
-                  key);
-          validation.run(invocation, () -> metadata.require(
-              invocation,
-              childTarget,
-              child.authoring(),
-              child.sourceRef(),
-              child.document(),
-              child.metadata()));
+          validation.run(invocation, () -> nativeSource.requirePageChildEvidence(invocation, seed.target(), child, validation));
         }
       }
       if (!keys.equals(children.keySet()))
@@ -615,7 +607,11 @@ final class PageCatalogLifecycleBridge {
   private java.util.Optional<PageCreationEvidence> registered(
       UiLayoutLifecycleInvocation invocation) {
     if (!isPage(invocation.rootTarget())) return java.util.Optional.empty();
-    var current = currentContext(invocation);
+    return registered(invocation, currentContext(invocation));
+  }
+
+  private java.util.Optional<PageCreationEvidence> registered(
+      UiLayoutLifecycleInvocation invocation, PageCreationContext current) {
     var result = store.byPage(current, UUID.fromString(invocation.rootTarget().componentId()));
     if (result.isEmpty() && store.knownPage(UUID.fromString(invocation.rootTarget().componentId())))
       throw failure(UiLayoutLifecycleException.Code.NOT_FOUND);
@@ -628,6 +624,18 @@ final class PageCatalogLifecycleBridge {
     var current = currentContext(invocation);
     sameNamespace(current, value);
     return current;
+  }
+
+  private PageCreationContext admittedPageContext(PageLifecycleAdmission admission,
+      UiLayoutLifecycleOperation operation, UiLayoutLifecycleInvocation invocation) {
+    try {
+      var current = admission.requirePage(operation, invocation);
+      if (current == null || !invocation.equals(current.invocation()))
+        throw failure(UiLayoutLifecycleException.Code.CONTEXT_STALE);
+      return current;
+    } catch (RuntimeException error) {
+      throw UiLayoutMetadataAdmissionFailure.sanitized(error, "Page lifecycle authority is unavailable.");
+    }
   }
 
   private PageCreationContext currentContext(UiLayoutLifecycleInvocation invocation) {

@@ -77,6 +77,7 @@ public final class PageCreationService {
     return bridge.invocations(Objects.requireNonNull(delegate));
   }
 
+  /** The same configured host bean must also own joint page operation/context admission. */
   public UiLayoutLifecycleAdmission lifecycleAdmission(UiLayoutLifecycleAdmission delegate) {
     return bridge.admission(Objects.requireNonNull(delegate));
   }

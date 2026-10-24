@@ -21,6 +21,17 @@ import org.springframework.transaction.support.TransactionOperations;
 @Tag("unit")
 class PageCreationAutoConfigurationTest {
   @Test
+  void pageCompositionRejectsPlainAdmissionRatherThanIgnoringItsPolicies() {
+    runner(PageLifecycleAdmission.class, true)
+        .withBean(UiLayoutLifecycleAdmission.class, UiLayoutLifecycleAdmission::denyAll)
+        .run(context -> {
+          assertThat(context).hasFailed();
+          assertThat(context.getStartupFailure()).hasRootCauseInstanceOf(IllegalArgumentException.class)
+              .hasStackTraceContaining("configured PageLifecycleAdmission bean");
+        });
+  }
+
+  @Test
   void completeHostCreatesOneGraphWithOriginalDelegatesAndBodyGuard() {
     runner(null, true)
         .run(
@@ -130,7 +141,7 @@ class PageCreationAutoConfigurationTest {
     for (Class<?> type :
         List.of(
             UiLayoutLifecycleInvocationProvider.class,
-            UiLayoutLifecycleAdmission.class,
+            PageLifecycleAdmission.class,
             UiLayoutLifecycleStructureValidator.class,
             UiLayoutDraftWorkspaceSource.class,
             UiLayoutBaselineMetadataAdmission.class,

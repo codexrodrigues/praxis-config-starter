@@ -180,7 +180,7 @@ public class UiLayoutLifecycleCommandService {
           UiLayoutNavigationGroupsRevisionReproduction.requireNative(state.target(), state.authoring(),
               state.baseline().document(), state.working().document(), state.patch());
         }
-        var children = pageChildren.initial(invocation, reservedDraftId, seed.targets().get(index), workspaceSource, metadataAdmission, validation);
+        var children = pageChildren.initial(invocation, reservedDraftId, seed.targets().get(index), workspaceSource, validation);
         initialTargets.add(new UiLayoutDraftWorkspaceDocument.TargetState(state.target(), state.authoring(), state.patch(),
             state.baseline(), state.working(), null, null, children));
       }
@@ -247,8 +247,7 @@ public class UiLayoutLifecycleCommandService {
     var storedCaptures = new ArrayList<UiLayoutMetadataCapture>();
     for (int index = 0; index < document.targets().size(); index++) {
       var expected = metadataBinding(invocation, draft.getId(), document.targets().get(index));
-      var stored = validation.call(invocation, () -> metadataStore.read(invocation, expected, (current, capture) -> requireMetadataAccess(current, capture, validation)));
-      metadataCodec.verifyAndRead(invocation, expected, stored, (current, capture) -> requireMetadataAccess(current, capture, validation));
+      var stored = validation.call(invocation, () -> metadataStore.readVerified(invocation, expected, (current, capture) -> requireMetadataAccess(current, capture, validation)));
       if (expectedCaptures != null && !expectedCaptures.get(index).equals(stored)) {
         throw new UiLayoutLifecycleException(UiLayoutLifecycleException.Code.INVALID_STATE, "Metadata evidence changed before return.");
       }
@@ -264,7 +263,7 @@ public class UiLayoutLifecycleCommandService {
     for (var state : document.targets()) captureBytes += UiLayoutPageChildCaptures.bodyBytes(state.pageChildren());
     if (captureBytes > UiLayoutMetadataCaptureCodec.MAX_COMPOSITION_BODY_BYTES) throw invalid("Composition metadata exceeds its capture budget.");
     for (var state : document.targets()) pageChildren.verify(invocation, draft.getId(), state.target(), state.baseline().document(),
-        state.working().document(), state.pageChildren(), workspaceSource, metadataAdmission, validation);
+        state.working().document(), state.pageChildren(), workspaceSource, validation);
   }
 
   private void requireMetadataAccess(UiLayoutLifecycleInvocation invocation, UiLayoutMetadataCapture capture, UiLayoutValidationContext validation) {
@@ -308,7 +307,7 @@ public class UiLayoutLifecycleCommandService {
       UiLayoutJsonBounds.requireDocument(target.baseline().document(), UiLayoutLifecycleException.Code.INVALID_STATE,
           () -> validation.require(invocation));
       structure.validateTarget(invocation, input.target(), validation);
-      var childEvidence = pageChildren.revision(invocation, draftId, target, candidate, input.childSources(), workspaceSource, metadataAdmission, validation);
+      var childEvidence = pageChildren.revision(invocation, draftId, target, candidate, input.childSources(), workspaceSource, validation);
       JsonNode patch = UiLayoutAuthoringProjection.project(input.target(), target.authoring(),
           target.baseline().document(), candidate, target.patch(), () -> validation.require(invocation)).compilePatch();
       workspaceCodec.requireSize(patch, "patchDocument");
@@ -580,7 +579,7 @@ public class UiLayoutLifecycleCommandService {
       UiLayoutDraftWorkspaceDocument.TargetState state, UiLayoutValidationContext validation) {
     if (!UiLayoutPageRevisionReproduction.TYPE.equals(state.target().componentType())) return;
     Runnable check = () -> pageChildren.verify(invocation, draftId, state.target(), state.baseline().document(),
-        state.working().document(), state.pageChildren(), workspaceSource, metadataAdmission, validation);
+        state.working().document(), state.pageChildren(), workspaceSource, validation);
     check.run();
     TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
       @Override public void beforeCommit(boolean readOnly) { check.run(); }

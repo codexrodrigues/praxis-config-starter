@@ -77,6 +77,9 @@ final class UiLayoutPageGroupHostFixture implements AutoCloseable {
         assertThat(targets).containsExactly(invocation.rootTarget());
       }
     };
+    UiLayoutBaselineMetadataAdmission metadataAdmission = (invocation, target, descriptor, reference, baseline, evidence) -> {
+      current(invocation); metadataCallback.accept(invocation, target);
+    };
     UiLayoutDraftWorkspaceSource source = new UiLayoutDraftWorkspaceSource() {
       public UiLayoutDraftWorkspaceSeed capture(UiLayoutLifecycleInvocation invocation, UiLayoutValidationContext validation) {
         var authority = current(invocation);
@@ -87,14 +90,14 @@ final class UiLayoutPageGroupHostFixture implements AutoCloseable {
             new UiLayoutAuthoringDocumentDescriptor("praxis.navigation-groups.editor", "fixture:groups", "1"),
             UiLayoutPageRevisionReproductionTest.PATCH, "fixture:groups", baseline, metadata(invocation, baseline))));
       }
-      public void requirePageChild(UiLayoutLifecycleInvocation invocation, UiLayoutTarget page,
+      public void requirePageChildEvidence(UiLayoutLifecycleInvocation invocation, UiLayoutTarget page,
           UiLayoutPageChildSeed seed, UiLayoutValidationContext validation) {
         validation.require(invocation);
         assertThat(seed.document()).isEqualTo(UiLayoutPageRevisionReproduction.children(sourcePage).get(seed.request().widgetKey()));
+        var target = new UiLayoutTarget(seed.authoring().documentType().equals("praxis.dynamic-form.editor")
+            ? "praxis-dynamic-form" : "praxis-table", seed.request().widgetKey());
+        metadataAdmission.require(invocation, target, seed.authoring(), seed.sourceRef(), seed.document(), seed.metadata());
       }
-    };
-    UiLayoutBaselineMetadataAdmission metadataAdmission = (invocation, target, descriptor, reference, baseline, evidence) -> {
-      current(invocation); metadataCallback.accept(invocation, target);
     };
     PageCreationHost host = new PageCreationHost() {
       public PageCreationContext resolve(Principal principal, String version) {
@@ -153,8 +156,14 @@ final class UiLayoutPageGroupHostFixture implements AutoCloseable {
         () -> UiLayoutPageGroupPostgresFixture.transactions);
     application.registerBean(PageCreationHost.class, () -> host);
     application.registerBean(UiLayoutLifecycleInvocationProvider.class, () -> provider);
-    application.registerBean(UiLayoutLifecycleAdmission.class, () -> (operation, invocation) -> {
-      current(invocation); grant.accept(operation, invocation);
+    application.registerBean(PageLifecycleAdmission.class, () -> new PageLifecycleAdmission() {
+      public void require(UiLayoutLifecycleOperation operation, UiLayoutLifecycleInvocation invocation) {
+        current(invocation); grant.accept(operation, invocation);
+      }
+      public PageCreationContext requirePage(UiLayoutLifecycleOperation operation, UiLayoutLifecycleInvocation invocation) {
+        require(operation, invocation);
+        return host.resolveLifecycle(invocation);
+      }
     });
     application.registerBean(UiLayoutLifecycleStructureValidator.class, () -> structure);
     application.registerBean(UiLayoutDraftWorkspaceSource.class, () -> source);

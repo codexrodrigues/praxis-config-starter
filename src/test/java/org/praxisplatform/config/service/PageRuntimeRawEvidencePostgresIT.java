@@ -105,7 +105,7 @@ class PageRuntimeRawEvidencePostgresIT extends PageRuntimePostgresFixture {
         assertRetained(owner, expected, seed.pageIds().subList(0, 128), metadata);
         int beforeConsume = observed.queries;
         for (UUID page : seed.pageIds().subList(0, 128)) {
-          if (metadata) assertThat(captures.read(host.context(host.alice, rowKeys.get(page).root()).invocation(),
+          if (metadata) assertThat(captures.readVerified(host.context(host.alice, rowKeys.get(page).root()).invocation(),
               bindings.get(page), (invocation, capture) -> {})).isNotNull();
           else assertThat(ledger.byPage(context, page)).isPresent();
         }
@@ -116,7 +116,7 @@ class PageRuntimeRawEvidencePostgresIT extends PageRuntimePostgresFixture {
         assertRetained(owner, expected, seed.pageIds().subList(128, 129), metadata);
         UUID lastSmall = seed.pageIds().get(128);
         int beforeLast = observed.queries;
-        if (metadata) assertThat(captures.read(host.context(host.alice, rowKeys.get(lastSmall).root()).invocation(),
+        if (metadata) assertThat(captures.readVerified(host.context(host.alice, rowKeys.get(lastSmall).root()).invocation(),
             bindings.get(lastSmall), (invocation, capture) -> {})).isNotNull();
         else assertThat(ledger.byPage(context, lastSmall)).isPresent();
         assertThat(observed.queries).isEqualTo(beforeLast);
@@ -140,7 +140,7 @@ class PageRuntimeRawEvidencePostgresIT extends PageRuntimePostgresFixture {
         int beforeNegativeConsumption = observed.queries;
         for (UUID malformed : retainedPages) {
           if (metadata) {
-            assertThatThrownBy(() -> captures.read(host.context(host.alice, rowKeys.get(malformed).root()).invocation(),
+            assertThatThrownBy(() -> captures.readVerified(host.context(host.alice, rowKeys.get(malformed).root()).invocation(),
                 bindings.get(malformed), (invocation, capture) -> {})).isInstanceOf(UiLayoutLifecycleException.class);
           } else {
             assertThatThrownBy(() -> ledger.byPage(context, malformed)).isInstanceOf(UiLayoutLifecycleException.class);
@@ -163,7 +163,7 @@ class PageRuntimeRawEvidencePostgresIT extends PageRuntimePostgresFixture {
               new UiLayoutMetadataCapture.Scope(host.scope.tenant(), host.scope.environment(), absentRoot, absentRoot),
               firstBinding.baselineSourceRef(), firstBinding.authoring(), firstBinding.baselineContentHash());
           for (int attempt = 0; attempt < 2; attempt++)
-            assertThatThrownBy(() -> captures.read(host.context(host.alice, absentRoot).invocation(), missingBinding,
+            assertThatThrownBy(() -> captures.readVerified(host.context(host.alice, absentRoot).invocation(), missingBinding,
                 (invocation, capture) -> {})).isInstanceOf(UiLayoutLifecycleException.class);
         } else {
           assertThat(ledger.byPage(context, absent)).isEmpty();

@@ -325,3 +325,91 @@ security-config exigem revisão no mesmo ciclo. Testes mínimos: corrupção/bin
 negação em ambos os checks, fonte/metadata de filho adulteradas, generated/mixed/
 published e nova contagem completa. A previsão estrutural218→158 precisa ser medida
 na fixture após implementação e ainda não estabelece margem operacional em40s.
+
+
+Etapa 3 implementada sobre rc172: o store `readVerified` é o único dono do codec de
+leitura (duas admissões atuais e binding/integridade), incluindo fixtures; append mantém
+as verificações anteriores/posteriores ao SQL. O codec de filho mantém suas duas admissões,
+sem o preflight duplicado. `requirePageChildEvidence` exige fonte e metadata completas
+na mesma decisão; a implementação Config verifica também a página exata e todas as partes
+do seed gerado antes de percorrer a criação. Quickstart executa a policy completa dentro
+do authorizeCurrent existente, com as duas observações frescas e expiração/coerência.
+
+Nova contagem completa após implementação: 158 unidades, contra 218 da baseline:
+resolveLifecycle 57 (antes 87), nativeProvenance 54 (antes 84), demais unidades e transporte
+simulado inalterados. As 27 travessias restantes continuam checando autoridade atual.
+As 316 observações e 39,5s com peso arbitrário de 250ms são apenas modelos, sem prova de
+reader, transporte ou SLA. Os seis checkpoints de criação permanecem. Não houve novo
+POST, banco, release ou deploy. A redução exige avaliação adicional de margem antes de
+qualquer nova prova operacional.
+
+Validação Config: 135 testes únicos passaram nos XML de `page-creation-cost-map`:
+JdbcUiLayoutMetadataCaptureStoreTest 52; UiLayoutPageChildCapturesTest 7;
+PageCatalogLifecycleBridgeTest 19; UiLayoutLifecycleCommandServiceTest 18;
+PageRuntimeReadServiceTest 13; UiLayoutPageGroupSnapshotContractTest 6;
+UiLayoutLifecycleHttpRoundTripTest 18; PageCreationFullPathCostTest 2.
+Incluem corrupção/binding persistidos, ambas as negativas do codec, metadata do filho
+adulterada, página/source/descriptor/documento/metadata gerados divergentes, caminhos
+mixed/published, revogação por extensão e rollback tardio. Os consumidores Postgres foram
+migrados e compilados; não executados, conforme limite explícito sem novo ensaio Neon.
+
+Consumidor etapa 3: 52 testes Quickstart PASS (host 26, diagnostics 11, wiring 15), com
+`-Dpraxis.config.version=0.1.0-page-evidence-admission-SNAPSHOT`. JAR privado SHA256
+`9d04c099ca8a96263f6e7ed8f20261c27bf334acfb6faa0c2773124b01814c4e`;
+nenhuma coordenada pública sobrescrita. Relatórios da etapa foram preservados em
+`/tmp/praxis-evidence-admission-stage3` antes da próxima mudança.
+
+Plano etapa 4 aprovado antes de editar (`contrato-publico`/`transversal`): o mesmo bean
+UiLayoutLifecycleAdmission configurado deve implementar o subtipo PageLifecycleAdmission,
+que admite toda a política de operação/domínio e devolve contexto de aplicação/namespace
+numa janela atual. A lacuna é o retorno conjunto hoje materializado em duas admissões
+consecutivas sem I/O. Não ignorar/substituir outro delegate: configuração sem subtipo falha.
+Targets Page (inclusive UUID ainda não catalogada) usam requirePage antes de lookup; demais
+targets continuam require. Preservar reobservação pós-byPage, correlação exata de invocation,
+namespace do ledger, verificação de origem e admissão final. Quickstart extrai sua policy
+existente para as duas entradas, sem duplicar vocabulário nem reduzir regras. Todos os cinco
+pontos de composição canônica e fixtures devem consumir o mesmo bean. Validação: plain bean
+rejeitado, custom operation denied, non-page delegation, unknown-page ordering, final denial,
+null/context/namespace mismatch e nova contagem completa; estimativa 158→139 ainda pendente.
+
+
+Etapa 4 implementada e contada na mesma fixture completa: **139 unidades** =119 corpo +20
+beforeCommit. São 19 resolve, 38 resolveLifecycle, 6 requireCreation, 1 READ_SOURCE,
+1 COPY_SOURCE, 1 captureNative, 54 nativeProvenance e 19 PageLifecycleAdmission (16 CREATE_DRAFT
++3 READ_DRAFT). O total mudou de218→158→139; SQL simulado permanece igual. Os278 snapshots
+são modelo2x, e34,75s a250ms/unidade é somente sensibilidade arbitrária. O limite real de40s
+não mudou. A prova Hero rc172 de40,790s continua negativa; a árvore nova ainda não foi usada
+em banco, HTTP operacional, release ou deploy.
+
+Stage4 Config: bridge23, composição5 e checkpoints3 PASS; full path2 PASS na árvore nova.
+Reutilizam-se os demais testes válidos da etapa3, totalizando147 testes únicos Config.
+A composição rejeita o mesmo bean plain, preserva custom domain denial antes do catálogo,
+delega non-page, não pula UUID desconhecida, rejeita null/invocation/namespace divergentes e
+observa revogação final após travessia. A mudança de linearização é explícita: as duas policies
+consecutivas compartilham uma janela, sem reter autoridade após a chamada. JAR privado final:
+`3b39fd7dc668d2f0d9bbca025f0dd06a3752127a6c540f2f6304e23af9c657ba`, coordenada
+`0.1.0-page-evidence-admission-SNAPSHOT`; POM público permanece rc172.
+
+
+Consumidor final: 56 testes Quickstart PASS (QuickstartPageHostTest29,
+QuickstartPageNeonDiagnosticsTest12, EnterpriseRuntimeConfigurationTest15) com o GAV privado
+acima; projetor offline `test_corporate_page_focal.py`14 PASS. O wrapper de diagnóstico preserva
+PageLifecycleAdmission e a identidade do resultado; a policy original e conjunta são comparadas
+em todas as operações/roles, incluindo negação e expiração/coerência na observação posterior.
+Comandos incrementais finais, todos offline e sem banco:
+
+```sh
+mvn -o -q -Dtest=PageCreationFullPathCostTest,PageCatalogLifecycleBridgeTest,PageCreationAutoConfigurationTest test
+mvn -o -q -Dtest=PageCatalogLifecycleBridgeTest,PageCreationAutoConfigurationTest,PageCreationAdmissionCheckpointTest test
+mvn -o -q -Dpraxis.config.version=0.1.0-page-evidence-admission-SNAPSHOT -Dtest=QuickstartPageHostTest,QuickstartPageNeonDiagnosticsTest,EnterpriseRuntimeConfigurationTest test
+mvn -o -q -Dpraxis.config.version=0.1.0-page-evidence-admission-SNAPSHOT -Dtest=QuickstartPageNeonDiagnosticsTest test
+python3 -m unittest discover -s scripts/workspace -p test_corporate_page_focal.py
+```
+
+O rerun isolado de diagnostics corrigiu duas falhas de fixture (mock de record final e overload
+Mockito inferido num ternário); não houve ajuste de produção para fazer passar. Não se repetiram
+suites já válidas sem delta. Os relatórios XML e recibo final ficam em
+`/tmp/praxis-evidence-admission-final`; a evidência intermediária permanece em
+`/tmp/praxis-evidence-admission-stage3`. Skills runtime-persistence/security-config têm
+atualização canônica atribuída ao revisor de guidance no mesmo incremento; integração desse
+artefato e adoção operacional são gates separados da conclusão técnica local.
