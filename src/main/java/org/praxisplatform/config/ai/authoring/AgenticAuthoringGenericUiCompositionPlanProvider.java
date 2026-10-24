@@ -97,6 +97,23 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements
                 || hasVisualIntent(visualizationDecision, "accordion", "expansion", "expansivel", "paineis"));
         boolean masterDetailRequested = "page".equals(artifactKind)
                 && hasLayoutKind(visualizationDecision, "resource-master-detail");
+        if (masterDetailRequested) {
+            ResourceWorkspaceGrounding grounding = resourceWorkspaceGrounding(request, candidate);
+            if (workspaceDetailOperation(grounding, candidate) == null) {
+                ObjectNode rejected = objectMapper.createObjectNode();
+                addResourceWorkspaceGrounding(rejected, grounding);
+                ObjectNode diagnostics = (ObjectNode) rejected.at("/diagnostics/resourceWorkspaceGrounding");
+                diagnostics.put("status", "rejected");
+                diagnostics.put("failureCode",
+                        AgenticAuthoringSemanticMaterializationPolicy.RESOURCE_WORKSPACE_GROUNDING_REQUIRED_FAILURE);
+                return Optional.of(new AgenticAuthoringUiCompositionPlanResult(
+                        false,
+                        List.of(AgenticAuthoringSemanticMaterializationPolicy.RESOURCE_WORKSPACE_GROUNDING_REQUIRED_FAILURE),
+                        List.of("ui-composition-plan-provider:resource-workspace-detail-fail-closed"),
+                        rejected,
+                        emptyCompiledFormPatch()));
+            }
+        }
         boolean relatedResourceRequested = "page".equals(artifactKind)
                 && hasLayoutKind(visualizationDecision, "parent-child-related-resource")
                 && isPrimaryComponent(visualizationDecision, "praxis-related-resource-outlet");
@@ -752,7 +769,12 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements
             addWorkspaceFilter(widgets, candidate, filterKey);
         }
         addWorkspaceTable(widgets, candidate, masterKey, grounding);
-        addDetail(widgets, candidate, detailKey);
+        JsonNode detailOperation = workspaceDetailOperation(grounding, candidate);
+        if (detailOperation == null) {
+            addDetail(widgets, candidate, detailKey);
+        } else {
+            addWorkspaceDetail(widgets, candidate, detailKey, detailOperation);
+        }
         addMasterDetailStateAndBindings(plan, filterKey, masterKey, detailKey, grounding.filterOperationCount() > 0);
         addMasterDetailCanvas(plan, candidate, filterKey, masterKey, detailKey, grounding.filterOperationCount() > 0);
         addMasterDetailDeviceLayouts(plan, filterKey, masterKey, detailKey, grounding.filterOperationCount() > 0);
@@ -2870,6 +2892,44 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements
         inputs.put("enableCustomization", true);
         inputs.putObject("config")
                 .put("title", "Detalhes de " + resourceTitle(candidate));
+    }
+
+    private void addWorkspaceDetail(
+            ArrayNode widgets,
+            AgenticAuthoringCandidate candidate,
+            String key,
+            JsonNode operation) {
+        addDetail(widgets, candidate, key);
+        ObjectNode inputs = (ObjectNode) widgets.get(widgets.size() - 1).path("inputs");
+        // The item schema is backend-verified. A selected resource/catalog entry is not
+        // an operation binding and must not synthesize a collection GET for this form.
+        inputs.put("schemaUrl", operation.path("schemaUrl").asText());
+        inputs.remove(List.of("submitUrl", "submitMethod"));
+    }
+
+    private JsonNode workspaceDetailOperation(
+            ResourceWorkspaceGrounding grounding,
+            AgenticAuthoringCandidate candidate) {
+        if (!"verified".equals(grounding.status())) {
+            return null;
+        }
+        String resourcePath = businessResourcePath(candidate.resourcePath());
+        List<JsonNode> details = grounding.operations().stream()
+                .filter(operation -> "resource_operation".equals(safe(operation.path("kind").asText())))
+                .filter(operation -> "principal_capability".equals(safe(operation.path("verificationMode").asText())))
+                .filter(operation -> operation.path("availability").path("allowed").asBoolean(false)
+                        && "resource_capabilities".equals(safe(operation.path("availability").path("resolution").asText())))
+                .filter(operation -> grounding.resourceKey().equals(safe(operation.path("resourceKey").asText()))
+                        && resourcePath.equals(safe(operation.path("resourcePath").asText())))
+                .filter(operation -> "get".equalsIgnoreCase(safe(operation.path("apiMethod").asText()))
+                        && "response".equals(safe(operation.path("schemaType").asText())))
+                .filter(operation -> Set.of("byid", "view", "read", "get")
+                        .contains(safe(operation.path("operationId").asText()).toLowerCase(Locale.ROOT)))
+                .filter(operation -> safe(operation.path("apiPath").asText())
+                        .matches(Pattern.quote(resourcePath) + "/\\{[^/{}]+\\}"))
+                .toList();
+        // Multiple verified item projections still need semantic disambiguation.
+        return details.size() == 1 ? details.get(0) : null;
     }
 
     private ObjectNode emptyCompiledFormPatch() {
