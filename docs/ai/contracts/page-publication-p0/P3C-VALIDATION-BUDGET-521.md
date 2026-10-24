@@ -80,3 +80,35 @@ sem falhas, erros ou casos ignorados, em 2min41s, sem banco. A fonte de produç�
 `d948c4d3` permaneceu inalterada. A execução antecipa regressões das entradas
 lifecycle fora das 246 verificações focais; não substitui a prova HTTP/Neon
 nem o build e a assinatura oficiais de release.
+
+
+## Prova privada c3 aprovada
+
+O [ensaio remoto 40059431500](https://github.com/codexrodrigues/praxis-api-quickstart/actions/runs/40059431500)
+passou no mesmo Neon isolado, com Quickstart `7d729013` e Config `d948c4d3`.
+O GAV privado exclusivo foi `0.0.0-page-40059431500-1-d948c4d39509-SNAPSHOT`;
+seu JAR SHA256 é `d02bbbc052c25d4922b739e40a2d7f76c48c4da7783bdd50b3149212f7640ac6`.
+A árvore `src/main` é `2df3d15ceb0066ebec9061eb7b3dff55ff3d1ea1`, idêntica
+à correção revisada. A custódia confirmou o JAR efetivamente aninhado no host.
+
+Criação 201 em 29.813 ms; leitura do draft 200; publicação pelos seis comandos
+editoriais; documento publicado 200, condicional 304 e head confirmado por conexão
+ordinária independente. A sequência editorial totalizou 83.195 ms: são seis
+operações com orçamentos próprios de 40 segundos, não uma única janela de 40 segundos.
+
+A falha deliberada antes do commit retornou 503 em 23.957 ms, depois de observar
+catálogo, evidência de criação, draft e metadata preparados. Outra conexão ordinária
+confirmou a ausência de todos, da chave e do head antes da limpeza. A mesma chave
+criou novos IDs com 201 em 29.194 ms. Isolamento por tenant 404 e revogação atual 403
+passaram. JUnit: um teste aprovado, sem casos ignorados. Dois bancos e dois papéis
+foram removidos com seus OIDs confirmados, às 03:49:20 UTC. O secret temporário foi
+removido; a atribuição básica do Quickstart permaneceu intacta.
+
+Os seis recibos sanitizados estão no Quickstart em
+`internal-planning/page-runtime/evidence/p3c-budget-521-20261024/c3-remote-private/`.
+Root e `p3c_security_review` conferiram fonte, artefatos, fases e limpeza. Aceite
+restrito ao candidato privado na topologia testada: permite integrar esta correção
+e seguir o release compatível oficial. A negativa local c2 permanece válida; não
+há promessa de SLA local. A integração Quickstart 463 ainda exige Config público,
+POM sem override, nova prova pública e documentação/guidance finalizadas. Menu,
+cópia, browser e deploy não foram aceitos por este ensaio.
