@@ -61,8 +61,7 @@ final class UiLayoutNativeSnapshotReader {
   void admit(UiLayoutLifecycleInvocation invocation,
       UiLayoutFrozenWorkspaceResolver.Snapshot snapshot, UiLayoutValidationContext outer) {
     outer.attempt().requireActive();
-    try (var attempt = UiLayoutValidationAttempt.start(invocation, outer.attempt().operation(),
-        outer.attempt().remainingBudget())) {
+    try (var attempt = outer.attempt().correlate(invocation)) {
       var validation = new UiLayoutValidationContext(attempt, UiLayoutValidationPurpose.FROZEN_RELEASE);
       var state = snapshot.document().targets().getFirst();
       var assignment = state.selectedAssignment();

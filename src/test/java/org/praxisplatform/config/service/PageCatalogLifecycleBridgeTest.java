@@ -236,6 +236,24 @@ class PageCatalogLifecycleBridgeTest {
   private record Published(
       PageSourceReference.Published reference, PageCreationEvidence.SourceSnapshot snapshot) {}
 
+  /** Direct SPI tests model the lexical scope supplied by the initiating Config operation. */
+  private void withOwner(UiLayoutLifecycleInvocation invocation, Runnable callback) {
+    withOwner(invocation, UiLayoutLifecycleOperation.CREATE_DRAFT, callback);
+  }
+
+  private void withOwner(UiLayoutLifecycleInvocation invocation,
+      UiLayoutLifecycleOperation operation, Runnable callback) {
+    try (var owner = UiLayoutValidationAttempt.start(
+            invocation, operation, Duration.ofSeconds(30));
+        var scope = UiLayoutValidationScope.bind(owner)) {
+      callback.run();
+    }
+  }
+
+  private void verifyInOwner(PageCreationEvidence creation) {
+    withOwner(context.invocation(), () -> bridge.verify(context, creation));
+  }
+
   @Test
   void immutablePublishedBytesAreReusedButCurrentNativeAdmissionIsNot() throws Exception {
     var original = nativeCreation();
@@ -259,15 +277,15 @@ class PageCatalogLifecycleBridgeTest {
     org.springframework.transaction.support.TransactionSynchronizationManager
         .setActualTransactionActive(true);
     try {
-      bridge.verify(context, copy);
-      bridge.verify(context, copy);
+      verifyInOwner(copy);
+      verifyInOwner(copy);
       verify(frozen, times(1)).resolve(any(), eq(published.reference().releaseId()), any());
       doThrow(
               new UiLayoutLifecycleException(
                   UiLayoutLifecycleException.Code.DENIED, "Revoked native producer"))
           .when(host)
           .requireNative(any(), any(), any());
-      assertThatThrownBy(() -> bridge.verify(context, copy))
+      assertThatThrownBy(() -> verifyInOwner(copy))
           .isInstanceOfSatisfying(
               UiLayoutLifecycleException.class,
               failure ->
@@ -376,10 +394,12 @@ class PageCatalogLifecycleBridgeTest {
     raw.set(columns.toString());
     transactions.executeWithoutResult(status -> {
       assertThat(actualStore.prefetch(context, List.of(creation.pageId()))).isEqualTo(1);
-      assertThatThrownBy(() -> admission.require(UiLayoutLifecycleOperation.READ_HEAD, context.forTarget(creation.target())))
+      assertThatThrownBy(() -> withOwner(context.forTarget(creation.target()), UiLayoutLifecycleOperation.READ_HEAD,
+              () -> admission.require(UiLayoutLifecycleOperation.READ_HEAD, context.forTarget(creation.target()))))
           .extracting("code").isEqualTo(UiLayoutLifecycleException.Code.DENIED);
       allowed.set(true);
-      assertThatThrownBy(() -> admission.require(UiLayoutLifecycleOperation.READ_HEAD, context.forTarget(creation.target())))
+      assertThatThrownBy(() -> withOwner(context.forTarget(creation.target()), UiLayoutLifecycleOperation.READ_HEAD,
+              () -> admission.require(UiLayoutLifecycleOperation.READ_HEAD, context.forTarget(creation.target()))))
           .extracting("code").isEqualTo(UiLayoutLifecycleException.Code.INVALID_STATE);
     });
     verifyNoInteractions(metadata, nativeSource);
@@ -440,8 +460,8 @@ class PageCatalogLifecycleBridgeTest {
     try {
       assertThatThrownBy(
               () ->
-                  admission.require(
-                      UiLayoutLifecycleOperation.EDIT_DRAFT, context.forTarget(creation.target())))
+                  withOwner(context.forTarget(creation.target()), UiLayoutLifecycleOperation.EDIT_DRAFT, () -> admission.require(
+                      UiLayoutLifecycleOperation.EDIT_DRAFT, context.forTarget(creation.target()))))
           .isInstanceOfSatisfying(
               UiLayoutLifecycleException.class,
               failure ->
@@ -469,9 +489,9 @@ class PageCatalogLifecycleBridgeTest {
         .thenReturn(new PageCreationContext("app", "/pages", stale));
     assertThatThrownBy(
             () ->
-                bridge
+                withOwner(invocation, UiLayoutLifecycleOperation.READ_DRAFT, () -> bridge
                     .admission((op, inv) -> {})
-                    .require(UiLayoutLifecycleOperation.READ_DRAFT, invocation))
+                    .require(UiLayoutLifecycleOperation.READ_DRAFT, invocation)))
         .isInstanceOfSatisfying(
             UiLayoutLifecycleException.class,
             failure ->
@@ -487,7 +507,7 @@ class PageCatalogLifecycleBridgeTest {
     var seed = bridge.outputSeed(value);
     assertThatThrownBy(
             () ->
-                bridge
+                withOwner(context.forTarget(value.target()), () -> bridge
                     .metadataAdmission()
                     .require(
                         context.forTarget(value.target()),
@@ -495,7 +515,7 @@ class PageCatalogLifecycleBridgeTest {
                         seed.authoring(),
                         seed.sourceRef(),
                         seed.document(),
-                        seed.metadata()))
+                        seed.metadata())))
         .isInstanceOf(UiLayoutLifecycleException.class);
     assertThatThrownBy(
             () ->
@@ -563,7 +583,7 @@ class PageCatalogLifecycleBridgeTest {
                 valid.transformRef(),
                 List.of(),
                 valid.createdAt()))) {
-      assertThatThrownBy(() -> bridge.verify(context, corrupt))
+      assertThatThrownBy(() -> verifyInOwner(corrupt))
           .isInstanceOf(UiLayoutLifecycleException.class);
     }
     verify(host, never()).requireNative(any(), any(), any());
@@ -585,7 +605,7 @@ class PageCatalogLifecycleBridgeTest {
     var cyclicFirst =
         creation(publishedSecond.reference(), publishedSecond.snapshot(), first.pageId(), inverse);
     records.put(first.pageId(), cyclicFirst);
-    assertThatThrownBy(() -> bridge.verify(context, cyclicFirst))
+    assertThatThrownBy(() -> verifyInOwner(cyclicFirst))
         .isInstanceOf(UiLayoutLifecycleException.class);
     records.clear();
     snapshots.clear();
@@ -595,28 +615,93 @@ class PageCatalogLifecycleBridgeTest {
       var published = publish(current);
       current = creation(published.reference(), published.snapshot(), UUID.randomUUID(), null);
     }
-    bridge.verify(context, current); // Exact boundary succeeds without truncation.
+    verifyInOwner(current); // Exact boundary succeeds without truncation.
     var published = publish(current);
     var tooDeep = creation(published.reference(), published.snapshot(), UUID.randomUUID(), null);
-    assertThatThrownBy(() -> bridge.verify(context, tooDeep))
+    assertThatThrownBy(() -> verifyInOwner(tooDeep))
         .isInstanceOf(UiLayoutLifecycleException.class);
   }
 
   @Test
   void aggregateLedgerBytesAreBoundedAcrossOtherwiseValidSources() throws Exception {
     var current = nativeCreation(true);
-    bridge.verify(context, current);
+    verifyInOwner(current);
     for (int depth = 1; depth < 16; depth++) {
       var published = publish(current);
       current = creation(published.reference(), published.snapshot(), UUID.randomUUID(), null);
     }
     var oversized = current;
-    assertThatThrownBy(() -> bridge.verify(context, oversized))
+    assertThatThrownBy(() -> verifyInOwner(oversized))
         .isInstanceOfSatisfying(
             UiLayoutLifecycleException.class,
             failure ->
                 assertThat(failure.getCode())
                     .isEqualTo(UiLayoutLifecycleException.Code.VALIDATION_FAILED));
+  }
+
+  @Test
+  void verificationWithoutAnOwningScopeFailsBeforeProducerOrCatalogAccess() throws Exception {
+    var creation = nativeCreation();
+    assertThatThrownBy(() -> bridge.verify(context, creation))
+        .isInstanceOfSatisfying(UiLayoutLifecycleException.class,
+            failure -> assertThat(failure.getCode()).isEqualTo(UiLayoutLifecycleException.Code.SOURCE_UNAVAILABLE));
+    verifyNoInteractions(host, metadata, nativeSource, store);
+  }
+
+  @Test
+  void admissionAndGeneratedMetadataConsumeTheirOwnersClockWithoutReopeningIt() throws Exception {
+    var creation = nativeCreation();
+    records.put(creation.pageId(), creation);
+    var invocation = context.forTarget(creation.target());
+    var seed = bridge.outputSeed(creation);
+    var admission = bridge.admission((operation, current) -> {});
+    var generatedMetadata = bridge.metadataAdmission();
+    // Both SPI entry points must borrow their initiating operation, including across source roots.
+    for (boolean throughAdmission : List.of(true, false)) {
+      var clock = new AtomicLong();
+      var nativeCalls = new AtomicLong();
+      var metadataCalls = new AtomicLong();
+      var childCalls = new AtomicLong();
+      clearInvocations(host, metadata, nativeSource);
+      doAnswer(call -> { nativeCalls.incrementAndGet(); clock.addAndGet(Duration.ofSeconds(60).toNanos()); return null; })
+          .when(host).requireNative(any(), any(), any());
+      doAnswer(call -> { metadataCalls.incrementAndGet(); clock.addAndGet(Duration.ofSeconds(60).toNanos()); return null; })
+          .when(metadata).require(any(), any(), any(), any(), any(), any());
+      doAnswer(call -> { childCalls.incrementAndGet(); return null; })
+          .when(nativeSource).requirePageChild(any(), any(), any(), any());
+      Runnable callback = throughAdmission
+          ? () -> admission.require(UiLayoutLifecycleOperation.EDIT_DRAFT, invocation)
+          : () -> generatedMetadata.require(invocation, seed.target(), seed.authoring(),
+              seed.sourceRef(), seed.document(), seed.metadata());
+      org.springframework.transaction.support.TransactionSynchronizationManager.setActualTransactionActive(true);
+      try (var owner = new UiLayoutValidationAttempt(invocation, UiLayoutLifecycleOperation.EDIT_DRAFT,
+              Duration.ofSeconds(100), clock::get);
+          var scope = UiLayoutValidationScope.bind(owner)) {
+        assertThatThrownBy(callback::run)
+            .isInstanceOfSatisfying(UiLayoutLifecycleException.class,
+                failure -> assertThat(failure.getCode()).isEqualTo(UiLayoutLifecycleException.Code.SOURCE_UNAVAILABLE));
+        assertThat(owner.remainingBudget()).isZero();
+        long observedNativeCalls = nativeCalls.get();
+        long observedMetadataCalls = metadataCalls.get();
+        long observedChildCalls = childCalls.get();
+        assertThat(observedNativeCalls).isPositive();
+        assertThat(observedMetadataCalls).isPositive();
+        assertThat(observedChildCalls).as("Root metadata exhausts the owner before child admission").isZero();
+        // Native admission and root metadata consume 60 seconds each from the same 100.
+        // No child, repeated check or later SPI invocation may execute after that expiry.
+        for (int repeated = 0; repeated < 2; repeated++) {
+          assertThatThrownBy(callback::run)
+              .isInstanceOfSatisfying(UiLayoutLifecycleException.class,
+                  failure -> assertThat(failure.getCode()).isEqualTo(UiLayoutLifecycleException.Code.SOURCE_UNAVAILABLE));
+          assertThat(nativeCalls.get()).isEqualTo(observedNativeCalls);
+          assertThat(metadataCalls.get()).isEqualTo(observedMetadataCalls);
+          assertThat(childCalls.get()).isEqualTo(observedChildCalls);
+          assertThat(owner.remainingBudget()).isZero();
+        }
+      } finally {
+        org.springframework.transaction.support.TransactionSynchronizationManager.clear();
+      }
+    }
   }
 
   @Test

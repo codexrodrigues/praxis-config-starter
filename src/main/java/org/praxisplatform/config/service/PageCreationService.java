@@ -105,7 +105,7 @@ public final class PageCreationService {
         begin(currentContext, UiLayoutLifecycleOperation.CREATE_DRAFT);
     var attempt = validation.attempt();
     AtomicBoolean retainedUntilCompletion = new AtomicBoolean();
-    try {
+    try (var scope = UiLayoutValidationScope.bind(attempt)) {
       CreationOutcome outcome =
           transaction(
               currentContext,
@@ -179,7 +179,7 @@ public final class PageCreationService {
                                 contextVersion,
                                 creation.target(),
                                 command.creationKey().toString(),
-                                draftId));
+                                draftId, validation));
                 commitCheck(
                     principal, contextVersion, currentContext, command, creation, validation);
                 return new CreationOutcome(
@@ -202,7 +202,7 @@ public final class PageCreationService {
         begin(currentContext, UiLayoutLifecycleOperation.READ_DRAFT);
     var attempt = validation.attempt();
     AtomicBoolean retainedUntilCompletion = new AtomicBoolean();
-    try {
+    try (var scope = UiLayoutValidationScope.bind(attempt)) {
       PageCreationReceipt result =
           transaction(
               currentContext,
@@ -231,11 +231,11 @@ public final class PageCreationService {
                     receipt(principal, contextVersion, currentContext, creation, validation);
                 authorize.run();
                 beforeCommit(
-                    () -> {
+                    () -> validation.run(currentContext.invocation(), () -> {
                       authorize.run();
                       receipt(principal, contextVersion, currentContext, creation, validation);
                       authorize.run();
-                    });
+                    }));
                 return receipt;
               });
       validation.require(currentContext.invocation());
@@ -267,7 +267,7 @@ public final class PageCreationService {
                         principal,
                         version,
                         creation.target(),
-                        creation.command().creationKey().toString()));
+                        creation.command().creationKey().toString(), validation));
     if (!creation.draftId().toString().equals(currentDraft.draftRef())) {
       throw new UiLayoutLifecycleException(
           UiLayoutLifecycleException.Code.INVALID_STATE,
@@ -315,7 +315,7 @@ public final class PageCreationService {
           revalidate(principal, version, context, validation);
         };
     check.run();
-    beforeCommit(check);
+    beforeCommit(() -> validation.run(context.invocation(), check));
   }
 
   private void beforeCommit(Runnable check) {

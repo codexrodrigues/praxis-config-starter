@@ -131,20 +131,20 @@ public class UiLayoutLifecycleCommandService {
 
   public UiLayoutDraftWorkspaceReceipt createDraft(Principal principal, String contextVersion, UiLayoutTarget root,
       String idempotencyKey) {
-    return createDraft(principal, contextVersion, root, idempotencyKey, null);
+    return createDraft(principal, contextVersion, root, idempotencyKey, null, null);
   }
 
   UiLayoutDraftWorkspaceReceipt createReservedPageDraft(Principal principal, String contextVersion, UiLayoutTarget root,
-      String idempotencyKey, UUID reservedDraftId) {
+      String idempotencyKey, UUID reservedDraftId, UiLayoutValidationContext owner) {
     if (reservedDraftId == null || !UiLayoutPageRevisionReproduction.TYPE.equals(root.componentType())) throw invalid("Reserved page draft is invalid.");
-    return createDraft(principal, contextVersion, root, idempotencyKey, reservedDraftId);
+    return createDraft(principal, contextVersion, root, idempotencyKey, reservedDraftId, java.util.Objects.requireNonNull(owner));
   }
 
   private UiLayoutDraftWorkspaceReceipt createDraft(Principal principal, String contextVersion, UiLayoutTarget root,
-      String idempotencyKey, UUID assignedDraftId) {
+      String idempotencyKey, UUID assignedDraftId, UiLayoutValidationContext owner) {
     String key = bounded(idempotencyKey, "Idempotency-Key", 180);
-    UiLayoutLifecycleInvocation invocation = invoke(principal, contextVersion, root, UiLayoutLifecycleOperation.CREATE_DRAFT);
-    UiLayoutValidationContext validation = beginValidation(invocation, UiLayoutLifecycleOperation.CREATE_DRAFT, UiLayoutValidationPurpose.AUTHORING);
+    UiLayoutValidationContext validation = entry(principal, contextVersion, root, UiLayoutLifecycleOperation.CREATE_DRAFT, UiLayoutValidationPurpose.AUTHORING, owner);
+    UiLayoutLifecycleInvocation invocation = validation.attempt().invocation();
     return inAuthorizedConfigTransaction(principal, contextVersion, root, invocation,
         UiLayoutLifecycleOperation.CREATE_DRAFT, validation, status -> {
       if (metadataStore == null) throw unavailable("Metadata storage is unavailable.");
@@ -293,8 +293,8 @@ public class UiLayoutLifecycleCommandService {
 
   public RevisionResult createRevision(Principal principal, String contextVersion, UiLayoutTarget root, UUID draftId,
       String draftEtag, RevisionInput input) {
-    UiLayoutLifecycleInvocation invocation = invoke(principal, contextVersion, root, UiLayoutLifecycleOperation.EDIT_DRAFT);
-    UiLayoutValidationContext validation = beginValidation(invocation, UiLayoutLifecycleOperation.EDIT_DRAFT, UiLayoutValidationPurpose.AUTHORING);
+    UiLayoutValidationContext validation = entry(principal, contextVersion, root, UiLayoutLifecycleOperation.EDIT_DRAFT, UiLayoutValidationPurpose.AUTHORING, null);
+    UiLayoutLifecycleInvocation invocation = validation.attempt().invocation();
     return inAuthorizedConfigTransaction(principal, contextVersion, root, invocation,
         UiLayoutLifecycleOperation.EDIT_DRAFT, validation, status -> {
       requireCommandRef(input.commandRef());
@@ -347,8 +347,8 @@ public class UiLayoutLifecycleCommandService {
 
   public AssignmentResult createAssignment(Principal principal, String contextVersion, UiLayoutTarget root, UUID draftId,
       String draftEtag, AssignmentInput input) {
-    UiLayoutLifecycleInvocation invocation = invoke(principal, contextVersion, root, UiLayoutLifecycleOperation.EDIT_DRAFT);
-    UiLayoutValidationContext validation = beginValidation(invocation, UiLayoutLifecycleOperation.EDIT_DRAFT, UiLayoutValidationPurpose.AUTHORING);
+    UiLayoutValidationContext validation = entry(principal, contextVersion, root, UiLayoutLifecycleOperation.EDIT_DRAFT, UiLayoutValidationPurpose.AUTHORING, null);
+    UiLayoutLifecycleInvocation invocation = validation.attempt().invocation();
     return inAuthorizedConfigTransaction(principal, contextVersion, root, invocation,
         UiLayoutLifecycleOperation.EDIT_DRAFT, validation, status -> {
       requireCommandRef(input.commandRef());
@@ -380,8 +380,8 @@ public class UiLayoutLifecycleCommandService {
 
   public ReleaseResult freezeRelease(Principal principal, String contextVersion, UiLayoutTarget root, UUID draftId,
       String draftEtag, UUID commandRef) {
-    UiLayoutLifecycleInvocation invocation = invoke(principal, contextVersion, root, UiLayoutLifecycleOperation.SUBMIT_RELEASE);
-    UiLayoutValidationContext validation = beginValidation(invocation, UiLayoutLifecycleOperation.SUBMIT_RELEASE, UiLayoutValidationPurpose.AUTHORING);
+    UiLayoutValidationContext validation = entry(principal, contextVersion, root, UiLayoutLifecycleOperation.SUBMIT_RELEASE, UiLayoutValidationPurpose.AUTHORING, null);
+    UiLayoutLifecycleInvocation invocation = validation.attempt().invocation();
     return inAuthorizedConfigTransaction(principal, contextVersion, root, invocation,
         UiLayoutLifecycleOperation.SUBMIT_RELEASE, validation, status -> {
       requireCommandRef(commandRef);
@@ -418,39 +418,39 @@ public class UiLayoutLifecycleCommandService {
   }
 
   public UiLayoutReleaseReviewReceipt submit(Principal principal, String contextVersion, UiLayoutTarget root, UUID releaseId, String reviewEtag) {
-    UiLayoutLifecycleInvocation invocation = invoke(principal, contextVersion, root, UiLayoutLifecycleOperation.SUBMIT_RELEASE);
-    UiLayoutValidationContext validation = beginValidation(invocation, UiLayoutLifecycleOperation.SUBMIT_RELEASE, UiLayoutValidationPurpose.AUTHORING);
+    UiLayoutValidationContext validation = entry(principal, contextVersion, root, UiLayoutLifecycleOperation.SUBMIT_RELEASE, UiLayoutValidationPurpose.AUTHORING, null);
+    UiLayoutLifecycleInvocation invocation = validation.attempt().invocation();
     return inAuthorizedConfigTransaction(principal, contextVersion, root, invocation,
         UiLayoutLifecycleOperation.SUBMIT_RELEASE, validation, status -> { validation.run(invocation, () -> core.submit(scope(invocation), releaseId, uuid(reviewEtag, "If-Match"), invocation.actorRef())); return review(releaseId, root); });
   }
 
   public UiLayoutReleaseReviewReceipt approve(Principal principal, String contextVersion, UiLayoutTarget root, UUID releaseId, String reviewEtag, String reason) {
-    UiLayoutLifecycleInvocation invocation = invoke(principal, contextVersion, root, UiLayoutLifecycleOperation.APPROVE_RELEASE);
-    UiLayoutValidationContext validation = beginValidation(invocation, UiLayoutLifecycleOperation.APPROVE_RELEASE, UiLayoutValidationPurpose.AUTHORING);
+    UiLayoutValidationContext validation = entry(principal, contextVersion, root, UiLayoutLifecycleOperation.APPROVE_RELEASE, UiLayoutValidationPurpose.AUTHORING, null);
+    UiLayoutLifecycleInvocation invocation = validation.attempt().invocation();
     return inAuthorizedConfigTransaction(principal, contextVersion, root, invocation,
         UiLayoutLifecycleOperation.APPROVE_RELEASE, validation, status -> { validation.run(invocation, () -> core.approve(scope(invocation), releaseId, uuid(reviewEtag, "If-Match"), invocation.actorRef(), required(reason, "reason"))); return review(releaseId, root); });
   }
 
   public UiLayoutReleaseHeadReceipt publish(Principal principal, String contextVersion, UiLayoutTarget root, HeadWriteCondition condition,
       UUID releaseId, String reason) {
-    UiLayoutLifecycleInvocation invocation = invoke(principal, contextVersion, root, UiLayoutLifecycleOperation.PUBLISH_RELEASE);
-    UiLayoutValidationContext validation = beginValidation(invocation, UiLayoutLifecycleOperation.PUBLISH_RELEASE, UiLayoutValidationPurpose.FROZEN_RELEASE);
+    UiLayoutValidationContext validation = entry(principal, contextVersion, root, UiLayoutLifecycleOperation.PUBLISH_RELEASE, UiLayoutValidationPurpose.FROZEN_RELEASE, null);
+    UiLayoutLifecycleInvocation invocation = validation.attempt().invocation();
     return inAuthorizedConfigTransaction(principal, contextVersion, root, invocation,
         UiLayoutLifecycleOperation.PUBLISH_RELEASE, validation, status -> { structure.validateFrozenRelease(invocation, frozenRelease(invocation, root, releaseId, validation), validation);
       UiLayoutReleaseHead head = validation.call(invocation, () -> core.publish(invocation, releaseId, condition, required(reason, "reason"), validation)); return head(root, head); });
   }
 
   public UiLayoutReleaseHeadReceipt withdraw(Principal principal, String contextVersion, UiLayoutTarget root, HeadWriteCondition condition, String reason) {
-    UiLayoutLifecycleInvocation invocation = invoke(principal, contextVersion, root, UiLayoutLifecycleOperation.WITHDRAW_RELEASE);
-    UiLayoutValidationContext validation = beginValidation(invocation, UiLayoutLifecycleOperation.WITHDRAW_RELEASE, UiLayoutValidationPurpose.AUTHORING);
+    UiLayoutValidationContext validation = entry(principal, contextVersion, root, UiLayoutLifecycleOperation.WITHDRAW_RELEASE, UiLayoutValidationPurpose.AUTHORING, null);
+    UiLayoutLifecycleInvocation invocation = validation.attempt().invocation();
     return inAuthorizedConfigTransaction(principal, contextVersion, root, invocation,
         UiLayoutLifecycleOperation.WITHDRAW_RELEASE, validation, status -> { UiLayoutReleaseHead head = validation.call(invocation, () -> core.withdraw(invocation, condition, required(reason, "reason"), validation)); return head(root, head); });
   }
 
   public UiLayoutReleaseHeadReceipt rollback(Principal principal, String contextVersion, UiLayoutTarget root, HeadWriteCondition condition,
       UUID releaseId, String reason) {
-    UiLayoutLifecycleInvocation invocation = invoke(principal, contextVersion, root, UiLayoutLifecycleOperation.ROLLBACK_RELEASE);
-    UiLayoutValidationContext validation = beginValidation(invocation, UiLayoutLifecycleOperation.ROLLBACK_RELEASE, UiLayoutValidationPurpose.FROZEN_RELEASE);
+    UiLayoutValidationContext validation = entry(principal, contextVersion, root, UiLayoutLifecycleOperation.ROLLBACK_RELEASE, UiLayoutValidationPurpose.FROZEN_RELEASE, null);
+    UiLayoutLifecycleInvocation invocation = validation.attempt().invocation();
     return inAuthorizedConfigTransaction(principal, contextVersion, root, invocation,
         UiLayoutLifecycleOperation.ROLLBACK_RELEASE, validation, status -> { structure.validateFrozenRelease(invocation, frozenRelease(invocation, root, releaseId, validation), validation); UiLayoutReleaseHead head = validation.call(invocation, () -> core.rollback(invocation, releaseId, condition, required(reason, "reason"), validation)); return head(root, head); });
   }
@@ -461,7 +461,27 @@ public class UiLayoutLifecycleCommandService {
     return UiLayoutValidationContext.begin(budgetPolicy, invocation, operation, purpose);
   }
 
-  private UiLayoutLifecycleInvocation invoke(Principal principal, String contextVersion, UiLayoutTarget root, UiLayoutLifecycleOperation operation) {
+  private UiLayoutValidationContext entry(Principal principal, String version, UiLayoutTarget root,
+      UiLayoutLifecycleOperation operation, UiLayoutValidationPurpose purpose, UiLayoutValidationContext owner) {
+    UiLayoutLifecycleInvocation invocation = owner == null ? resolveInvocation(principal, version, root)
+        : owner.call(owner.attempt().invocation(), () -> resolveInvocation(principal, version, root));
+    var validation = owner == null ? beginValidation(invocation, operation, purpose) : owner.nested(invocation, purpose);
+    try {
+      validation.run(invocation, () -> requireAdmission(operation, invocation));
+      return validation;
+    } catch (RuntimeException | Error failure) {
+      validation.attempt().close();
+      throw failure;
+    }
+  }
+
+  private UiLayoutLifecycleInvocation invoke(Principal principal, String version, UiLayoutTarget root, UiLayoutLifecycleOperation operation) {
+    var invocation = resolveInvocation(principal, version, root);
+    requireAdmission(operation, invocation);
+    return invocation;
+  }
+
+  private UiLayoutLifecycleInvocation resolveInvocation(Principal principal, String contextVersion, UiLayoutTarget root) {
     if (principal == null) throw new UiLayoutLifecycleException(UiLayoutLifecycleException.Code.SESSION_REQUIRED, "Authenticated host principal is required.");
     if (contextVersion == null || contextVersion.isBlank()) throw new IllegalArgumentException("X-Praxis-Context-Version is required.");
     try {
@@ -469,12 +489,17 @@ public class UiLayoutLifecycleCommandService {
       if (invocation == null || !contextVersion.trim().equals(invocation.contextVersion()) || !root.equals(invocation.rootTarget())) {
         throw new UiLayoutLifecycleException(UiLayoutLifecycleException.Code.CONTEXT_STALE, "Lifecycle context changed before the operation.");
       }
-      admission.require(operation, invocation);
       return invocation;
     } catch (UiLayoutLifecycleException exception) {
       throw new UiLayoutLifecycleException(exception.getCode(), "Lifecycle context or admission is unavailable.");
-    }
-    catch (RuntimeException exception) { throw unavailable("Lifecycle context source is unavailable."); }
+    } catch (RuntimeException exception) { throw unavailable("Lifecycle context source is unavailable."); }
+  }
+
+  private void requireAdmission(UiLayoutLifecycleOperation operation, UiLayoutLifecycleInvocation invocation) {
+    try { admission.require(operation, invocation); }
+    catch (UiLayoutLifecycleException exception) {
+      throw new UiLayoutLifecycleException(exception.getCode(), "Lifecycle context or admission is unavailable.");
+    } catch (RuntimeException exception) { throw unavailable("Lifecycle context source is unavailable."); }
   }
 
   /** Rechecks the host-owned authority at transaction entry, after work and before actual commit. */
@@ -482,7 +507,7 @@ public class UiLayoutLifecycleCommandService {
       UiLayoutLifecycleInvocation expected, UiLayoutLifecycleOperation operation, UiLayoutValidationContext validation,
       Function<TransactionStatus, T> work) {
     var registered = new java.util.concurrent.atomic.AtomicBoolean();
-    try {
+    try (var scope = UiLayoutValidationScope.bind(validation.attempt())) {
       return inConfigTransactionWithStatus(status -> {
         validation.require(expected);
         if (!TransactionSynchronizationManager.isActualTransactionActive()
