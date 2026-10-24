@@ -107,11 +107,13 @@ public final class PageRuntimeReadService {
       var snapshot = current.visible(head, null);
       if (snapshot == null) throw notFound();
       JsonNode document = document(snapshot).deepCopy();
+      var copySource = new PageSourceReference.Published(pageId, snapshot.releaseId(),
+          snapshot.document().targets().getFirst().selectedRevision().revisionRef());
       String receipt = hashes.sha256Exact(Map.of("schema", PublishedPageResponse.SCHEMA_VERSION,
           "binding", current.binding("published", pageId.toString(), 1),
-          "head", head.stable(), "document", document));
+          "head", head.stable(), "document", document, "copySource", copySource));
       return new PublishedPageResponse(PublishedPageResponse.SCHEMA_VERSION, pageId, current.route(pageId),
-          document, current.context.invocation().contextVersion(), receipt, head.receipt(), Instant.now(clock));
+          document, current.context.invocation().contextVersion(), receipt, head.receipt(), copySource, Instant.now(clock));
     });
   }
 

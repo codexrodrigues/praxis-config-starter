@@ -1,0 +1,21 @@
+<testsuite xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="https://maven.apache.org/surefire/maven-surefire-plugin/xsd/surefire-test-report.xsd" version="3.0.2" name="org.praxisplatform.config.service.PageRuntimeReadServiceTest" time="2.584" tests="13" errors="0" skipped="0" failures="0" flakes="0">
+  <testcase name="malformedHostGroupsRootIsUnavailableRatherThanAnInvalidCallerCursor" classname="org.praxisplatform.config.service.PageRuntimeReadServiceTest" time="0.199" />
+  <testcase name="deniedAndSelectorIncompatibleMetadataRemainUnconsumedUntilAdmitted" classname="org.praxisplatform.config.service.PageRuntimeReadServiceTest" time="0.132" />
+  <testcase name="elapsedBudgetAfterSuccessfulStructureCallbackCannotReturnBodyOr304" classname="org.praxisplatform.config.service.PageRuntimeReadServiceTest" time="2.02">
+    <system-out>09:29:36.948 [main] INFO org.springframework.mock.web.MockServletContext -- Initializing Spring TestDispatcherServlet ''
+09:29:36.948 [main] INFO org.springframework.test.web.servlet.TestDispatcherServlet -- Initializing Servlet ''
+09:29:36.948 [main] INFO org.springframework.test.web.servlet.TestDispatcherServlet -- Completed initialization in 0 ms
+P3-B callback budget admittedRemainingNanos=1995101291 observedRemainingNanos=0 callbacks=1 HTTP=503 noStore=true IO=simulated
+</system-out>
+  </testcase>
+  <testcase name="lastMetadataAndLastMappingCallbacksCannotRevokeGrantsAndStillReturn" classname="org.praxisplatform.config.service.PageRuntimeReadServiceTest" time="0.028" />
+  <testcase name="publishedCopySourceUsesTheAdmittedRevisionAndInvalidatesThePreviousDigest" classname="org.praxisplatform.config.service.PageRuntimeReadServiceTest" time="0.013" />
+  <testcase name="requiredReadsDoNotFreezeTheHeadUntilOuterCommitButKeepAuthorityChecks" classname="org.praxisplatform.config.service.PageRuntimeReadServiceTest" time="0.013" />
+  <testcase name="vectorPhantomAndHeadABAInvalidateTheOperation" classname="org.praxisplatform.config.service.PageRuntimeReadServiceTest" time="0.007" />
+  <testcase name="permissiveReadGrantNeverBypassesNativeAdmissionAndFinalAudience" classname="org.praxisplatform.config.service.PageRuntimeReadServiceTest" time="0.011" />
+  <testcase name="missingAndOversizedPrivatePrefixStillAdvancesAcrossEveryCandidate" classname="org.praxisplatform.config.service.PageRuntimeReadServiceTest" time="0.013" />
+  <testcase name="directPageDoesNotRequireGroupGrantButMenuRequiresBoth" classname="org.praxisplatform.config.service.PageRuntimeReadServiceTest" time="0.013" />
+  <testcase name="unexpectedHostFailureIsUnavailableAndInvalidInputIsAClientError" classname="org.praxisplatform.config.service.PageRuntimeReadServiceTest" time="0.001" />
+  <testcase name="globalOrderingAndBindingIdentityAreIndependentOfCatalogOrder" classname="org.praxisplatform.config.service.PageRuntimeReadServiceTest" time="0.021" />
+  <testcase name="authorizedEmptyGroupsWitnessTheirHeadButDeniedGroupsRevealNoHead" classname="org.praxisplatform.config.service.PageRuntimeReadServiceTest" time="0.009" />
+</testsuite>

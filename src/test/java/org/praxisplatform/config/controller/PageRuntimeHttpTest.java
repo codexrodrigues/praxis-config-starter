@@ -55,6 +55,29 @@ class PageRuntimeHttpTest {
     verify(pages, times(3)).catalog(any(), eq("c1"), isNull(), eq(50));
   }
 
+  @Test void publishedCopySourceSerializesAsTheExistingExactCreationSelector() throws Exception {
+    UUID releaseId = UUID.randomUUID(), revisionId = UUID.randomUUID();
+    var source = new PageSourceReference.Published(pageId, releaseId, revisionId);
+    var head = new UiLayoutReleaseHeadReceipt(new UiLayoutTarget("praxis-dynamic-page", pageId.toString()),
+        releaseId.toString(), UUID.randomUUID().toString(), Instant.EPOCH);
+    when(pages.published(any(), eq("c1"), eq(pageId))).thenReturn(new PublishedPageResponse(
+        PublishedPageResponse.SCHEMA_VERSION, pageId, "/pages/" + pageId,
+        new ObjectMapper().createObjectNode(), "c1", etag, head, source, Instant.EPOCH));
+
+    var response = mvc.perform(get("/api/praxis/config/pages/" + pageId + "/published")
+        .principal(() -> "actor").header("X-Praxis-Context-Version", "c1").header("If-None-Match", "\"old-body\""))
+        .andExpect(status().isOk())
+        .andExpect(header().string("ETag", "W/\"" + etag + "\""))
+        .andExpect(jsonPath("$.copySource.kind").value("published-page"))
+        .andExpect(jsonPath("$.copySource.pageId").value(pageId.toString()))
+        .andExpect(jsonPath("$.copySource.releaseId").value(releaseId.toString()))
+        .andExpect(jsonPath("$.copySource.revisionId").value(revisionId.toString()))
+        .andReturn();
+    var mapper = new ObjectMapper();
+    var wireSource = mapper.readTree(response.getResponse().getContentAsString()).get("copySource");
+    assertThat(mapper.treeToValue(wireSource, PageSourceReference.class)).isEqualTo(source);
+  }
+
   @Test void conditionalReadsUseCanonicalWeakParsingAfterOwnerResolution() throws Exception {
     when(pages.catalog(any(), eq("c1"), isNull(), eq(50))).thenReturn(
         new PageCatalogResponse(PageCatalogResponse.SCHEMA_VERSION, List.of(), "c1", etag, null, Instant.EPOCH));

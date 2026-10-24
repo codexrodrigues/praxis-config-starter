@@ -26,7 +26,7 @@ import org.springframework.transaction.support.TransactionTemplate;
 @Tag("unit")
 class PageRuntimeReadServiceTest {
   final ObjectMapper json = new ObjectMapper();
-  final CanonicalJsonHashService hashes = new CanonicalJsonHashService(json);
+  final CanonicalJsonHashService hashes = spy(new CanonicalJsonHashService(json));
   final UUID groupId = UUID.fromString("11111111-1111-4111-8111-111111111111");
   final UiLayoutTarget root = new UiLayoutTarget("praxis-app-shell", "22222222-2222-4222-8222-222222222222");
   final UiLayoutLifecycleInvocation invocation = new UiLayoutLifecycleInvocation("actor", "tenant", "unit", "test", "c1",
@@ -274,6 +274,28 @@ class PageRuntimeReadServiceTest {
     assertThat(navigation(null, null, 50).receiptEtag()).isEqualTo(hidden.receiptEtag());
     assertThatThrownBy(() -> navigation(groupId.toString(), null, 50)).extracting("code")
         .isEqualTo(UiLayoutLifecycleException.Code.NOT_FOUND);
+  }
+
+  @Test void publishedCopySourceUsesTheAdmittedRevisionAndInvalidatesThePreviousDigest() {
+    var page = addPage("30000000-0000-4000-8000-000000000001", 1, "Copy this publication");
+    var pinned = memberRows.values().stream().filter(member -> page.release().equals(member.getReleaseId()))
+        .findFirst().orElseThrow();
+    var expected = new PageSourceReference.Published(page.pageId(), page.release(), pinned.getContentRevisionId());
+
+    var response = service.published(() -> "actor", "c1", page.pageId());
+
+    assertThat(response.copySource()).isEqualTo(expected);
+    assertThat(response.head().activeReleaseRef()).isEqualTo(response.copySource().releaseId().toString());
+    assertThat(vectorReads).hasValue(2);
+    var hashedInputs = org.mockito.ArgumentCaptor.forClass(Object.class);
+    verify(hashes, atLeastOnce()).sha256Exact(hashedInputs.capture());
+    var projections = hashedInputs.getAllValues().stream()
+        .filter(value -> value instanceof Map<?, ?> map && map.containsKey("copySource"))
+        .map(value -> (Map<?, ?>) value).toList();
+    assertThat(projections).hasSize(1);
+    var previousProjection = new LinkedHashMap<>(projections.getFirst());
+    assertThat(previousProjection.remove("copySource")).isEqualTo(expected);
+    assertThat(new CanonicalJsonHashService(json).sha256Exact(previousProjection)).isNotEqualTo(response.receiptEtag());
   }
 
   @Test void directPageDoesNotRequireGroupGrantButMenuRequiresBoth() {
