@@ -892,7 +892,9 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements
             String masterKey,
             String detailKey,
             boolean includeFilter) {
-        plan.putObject("state").putObject("values").putNull("selectedItem");
+        plan.putObject("state").putObject("values")
+                .putNull("selectedItem")
+                .putNull("selectedResourceId");
         ArrayNode bindings = plan.putArray("bindings");
 
         if (includeFilter) {
@@ -934,10 +936,12 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements
         selection.putObject("transform")
                 .put("kind", "pick-path")
                 .put("id", "pick-selected-row")
-                .put("path", "payload.row");
+                .put("path", "payload.selectedRows.0")
+                .put("inputSource", "event")
+                .putNull("fallbackValue");
         selection.putObject("policy")
                 .put("distinct", true)
-                .put("missingValuePolicy", "skip");
+                .put("missingValuePolicy", "propagate-undefined");
         selection.putObject("metadata")
                 .put("source", "ui-composition-plan")
                 .put("traceKey", "verified-component-port-composition")
@@ -945,30 +949,53 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements
                 .add("master-detail")
                 .add("selection-state");
 
+        ObjectNode identity = bindings.addObject();
+        identity.put("id", masterKey + ".selectionChange->state.selectedResourceId");
+        identity.put("intent", "state-write");
+        identity.putObject("from")
+                .put("kind", "component-port")
+                .put("widget", masterKey)
+                .put("port", "selectionChange")
+                .put("direction", "output");
+        identity.putObject("to")
+                .put("kind", "state")
+                .put("path", "selectedResourceId");
+        identity.putObject("transform")
+                .put("kind", "pick-path")
+                .put("id", "pick-selected-resource-id")
+                .put("path", "payload.resourceIdentity.key.value")
+                .put("inputSource", "event")
+                .putNull("fallbackValue");
+        identity.putObject("policy")
+                .put("distinct", true)
+                .put("missingValuePolicy", "propagate-undefined");
+        identity.putObject("metadata")
+                .put("source", "ui-composition-plan")
+                .put("traceKey", "verified-component-port-composition")
+                .putArray("tags")
+                .add("master-detail")
+                .add("selection-resource-id");
+
         ObjectNode detail = bindings.addObject();
-        detail.put("id", "state.selectedItem->" + detailKey + ".initialValue");
+        detail.put("id", "state.selectedResourceId->" + detailKey + ".resourceId");
         detail.put("intent", "state-read");
         detail.putObject("from")
                 .put("kind", "state")
-                .put("path", "selectedItem");
+                .put("path", "selectedResourceId");
         detail.putObject("to")
                 .put("kind", "component-port")
                 .put("widget", detailKey)
-                .put("port", "initialValue")
+                .put("port", "resourceId")
                 .put("direction", "input");
-        detail.putObject("condition")
-                .putArray("!!")
-                .addObject()
-                .put("var", "state.selectedItem");
         detail.putObject("policy")
                 .put("distinct", true)
-                .put("missingValuePolicy", "skip");
+                .put("missingValuePolicy", "propagate-undefined");
         detail.putObject("metadata")
                 .put("source", "ui-composition-plan")
                 .put("traceKey", "verified-component-port-composition")
                 .putArray("tags")
                 .add("master-detail")
-                .add("detail-initial-value");
+                .add("detail-resource-id");
     }
 
     private void addMasterDetailCanvas(

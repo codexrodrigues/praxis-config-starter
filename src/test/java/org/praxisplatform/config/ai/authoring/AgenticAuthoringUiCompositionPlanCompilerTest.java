@@ -12,6 +12,7 @@ import java.security.MessageDigest;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HexFormat;
+import java.util.List;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
@@ -21,6 +22,43 @@ class AgenticAuthoringUiCompositionPlanCompilerTest {
     private final ObjectMapper objectMapper = new ObjectMapper();
     private final AgenticAuthoringUiCompositionPlanCompiler compiler =
             new AgenticAuthoringUiCompositionPlanCompiler(objectMapper);
+
+    @Test
+    void preservesExplicitTypedFallbackIncludingNullWithoutInventingAnAbsentFallback() throws Exception {
+        ObjectNode plan = (ObjectNode) objectMapper.readTree("""
+                {
+                  "version": "1.0", "kind": "praxis.ui-composition-plan",
+                  "state": { "values": { "selectedResourceId": null } },
+                  "widgets": [{ "key": "master", "componentId": "praxis-table", "inputs": {},
+                                "outputs": { "selectionChange": "emit" } }],
+                  "bindings": [{
+                    "id": "master.selectionChange->state.selectedResourceId", "intent": "state-write",
+                    "from": { "kind": "component-port", "widget": "master", "port": "selectionChange", "direction": "output" },
+                    "to": { "kind": "state", "path": "selectedResourceId" },
+                    "transform": { "kind": "pick-path", "id": "identity", "inputSource": "event",
+                                   "path": "payload.resourceIdentity.key.value" },
+                    "policy": { "distinct": true, "missingValuePolicy": "propagate-undefined" }
+                  }]
+                }
+                """);
+        ObjectNode transform = (ObjectNode) plan.at("/bindings/0/transform");
+        for (JsonNode fallback : List.of(objectMapper.readTree("null"), objectMapper.readTree("193"),
+                objectMapper.readTree("{\"safe\":true}"))) {
+            transform.set("fallbackValue", fallback);
+            JsonNode before = plan.deepCopy();
+            var result = compiler.compile(plan, objectMapper.createObjectNode());
+            assertThat(result.valid()).withFailMessage("%s", result.failureCodes()).isTrue();
+            JsonNode compiledTransform = result.compiledFormPatch().at("/patch/page/composition/links/0/transform");
+            assertThat(compiledTransform.has("fallbackValue")).isTrue();
+            assertThat(compiledTransform.path("fallbackValue")).isEqualTo(fallback);
+            assertThat(plan).isEqualTo(before);
+        }
+        transform.remove("fallbackValue");
+        var withoutFallback = compiler.compile(plan, objectMapper.createObjectNode());
+        assertThat(withoutFallback.valid()).isTrue();
+        assertThat(withoutFallback.compiledFormPatch().at("/patch/page/composition/links/0/transform")
+                .has("fallbackValue")).isFalse();
+    }
 
     @Test
     void compilesCertifiedBusinessCommandRuntimeFixtureWithoutAiProvider() throws Exception {
