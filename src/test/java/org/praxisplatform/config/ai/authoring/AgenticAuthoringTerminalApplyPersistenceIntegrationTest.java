@@ -199,8 +199,11 @@ class AgenticAuthoringTerminalApplyPersistenceIntegrationTest {
                 .contains("praxis-table", "praxis-dynamic-form");
         assertThat(persistedPage.at("/composition/links/0/from/ref/port").asText())
                 .isEqualTo("selectionChange");
-        assertThat(persistedPage.at("/composition/links/1/to/ref/port").asText())
-                .isEqualTo("initialValue");
+        assertThat(persistedPage.path("composition").path("links")).hasSize(3);
+        assertThat(persistedPage.at("/composition/links/1/transform/steps/0/config/path").asText())
+                .isEqualTo("payload.resourceIdentity.key.value");
+        assertThat(persistedPage.at("/composition/links/2/to/ref/port").asText())
+                .isEqualTo("resourceId");
         assertThat(persistedPage.at("/widgets/0/definition/inputs/config/actions/row/discovery/enabled").asBoolean())
                 .isTrue();
         assertThat(persistedPage.at("/widgets/0/definition/inputs/config/actions/collection/discovery/enabled").asBoolean())
@@ -416,7 +419,7 @@ class AgenticAuthoringTerminalApplyPersistenceIntegrationTest {
                   "version": "1.0",
                   "kind": "praxis.ui-composition-plan",
                   "layoutPreset": "resource-master-detail",
-                  "state": { "values": { "selectedItem": null } },
+                  "state": { "values": { "selectedItem": null, "selectedResourceId": null } },
                   "canvas": {
                     "mode": "grid",
                     "columns": 12,
@@ -452,6 +455,7 @@ class AgenticAuthoringTerminalApplyPersistenceIntegrationTest {
                       "inputs": {
                         "resourcePath": "/api/operations/missoes",
                         "schemaSource": "resource",
+                        "schemaUrl": "/schemas/filtered?path=/api/operations/missoes/{id}&operation=get&schemaType=response",
                         "mode": "view",
                         "formId": "missions-detail"
                       }
@@ -478,15 +482,24 @@ class AgenticAuthoringTerminalApplyPersistenceIntegrationTest {
                       "intent": "state-write",
                       "from": { "kind": "component-port", "widget": "missions-master", "port": "selectionChange", "direction": "output" },
                       "to": { "kind": "state", "path": "selectedItem" },
-                      "transform": { "kind": "pick-path", "id": "pick-selected-row", "path": "payload.row" },
+                      "transform": { "kind": "pick-path", "id": "pick-selected-row", "path": "payload.selectedRows.0", "inputSource": "event", "fallbackValue": null },
+                      "policy": { "distinct": true, "missingValuePolicy": "propagate-undefined" },
                       "metadata": { "source": "ui-composition-plan", "tags": ["master-detail"] }
                     },
                     {
-                      "id": "state.selectedItem->missions-detail.initialValue",
+                      "id": "missions-master.selectionChange->state.selectedResourceId",
+                      "intent": "state-write",
+                      "from": { "kind": "component-port", "widget": "missions-master", "port": "selectionChange", "direction": "output" },
+                      "to": { "kind": "state", "path": "selectedResourceId" },
+                      "transform": { "kind": "pick-path", "id": "pick-selected-resource-id", "path": "payload.resourceIdentity.key.value", "inputSource": "event", "fallbackValue": null },
+                      "policy": { "distinct": true, "missingValuePolicy": "propagate-undefined" }
+                    },
+                    {
+                      "id": "state.selectedResourceId->missions-detail.resourceId",
                       "intent": "state-read",
-                      "from": { "kind": "state", "path": "selectedItem" },
-                      "to": { "kind": "component-port", "widget": "missions-detail", "port": "initialValue", "direction": "input" },
-                      "condition": { "!!": [{ "var": "state.selectedItem" }] },
+                      "from": { "kind": "state", "path": "selectedResourceId" },
+                      "to": { "kind": "component-port", "widget": "missions-detail", "port": "resourceId", "direction": "input" },
+                      "policy": { "distinct": true, "missingValuePolicy": "propagate-undefined" },
                       "metadata": { "source": "ui-composition-plan", "tags": ["master-detail"] }
                     }
                   ]

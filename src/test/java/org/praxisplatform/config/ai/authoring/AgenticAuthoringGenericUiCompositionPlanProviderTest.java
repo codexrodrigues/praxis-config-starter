@@ -820,7 +820,7 @@ class AgenticAuthoringGenericUiCompositionPlanProviderTest {
                 .containsExactly("praxis-table", "praxis-dynamic-form");
         assertThat(plan.path("widgets").findValuesAsText("componentId"))
                 .doesNotContain("praxis-crud");
-        assertThat(plan.path("bindings")).hasSize(2);
+        assertThat(plan.path("bindings")).hasSize(3);
         assertThat(plan.path("layoutPresetOptions").has("presetFamily")).isFalse();
     }
 
@@ -924,13 +924,16 @@ class AgenticAuthoringGenericUiCompositionPlanProviderTest {
         assertThat(plan.path("canvas").path("items").path("funcionarios-detail").path("rowSpan").asInt())
                 .isEqualTo(8);
         assertThat(plan.path("state").path("values").has("selectedItem")).isTrue();
-        assertThat(plan.path("bindings")).hasSize(2);
+        assertThat(plan.at("/state/values/selectedResourceId").isNull()).isTrue();
+        assertThat(plan.path("bindings")).hasSize(3);
         assertThat(plan.path("bindings").path(0).path("from").path("port").asText())
                 .isEqualTo("selectionChange");
         assertThat(plan.path("bindings").path(0).path("transform").path("path").asText())
-                .isEqualTo("payload.row");
-        assertThat(plan.path("bindings").path(1).path("to").path("port").asText())
-                .isEqualTo("initialValue");
+                .isEqualTo("payload.selectedRows.0");
+        assertThat(plan.path("bindings").path(1).path("transform").path("path").asText())
+                .isEqualTo("payload.resourceIdentity.key.value");
+        assertThat(plan.path("bindings").path(2).path("to").path("port").asText())
+                .isEqualTo("resourceId");
         assertThat(findWidget(plan, "praxis-table", "master").path("outputs")
                 .path("selectionChange").asText()).isEqualTo("emit");
         assertThat(findWidgetInputs(plan, "praxis-table", "master").path("config").has("toolbar"))
@@ -1001,13 +1004,15 @@ class AgenticAuthoringGenericUiCompositionPlanProviderTest {
                 new AgenticAuthoringUiCompositionPlanCompiler(objectMapper).compile(plan, basePatch);
         assertThat(compiled.valid()).withFailMessage("%s", compiled.failureCodes()).isTrue();
         JsonNode page = compiled.compiledFormPatch().path("patch").path("page");
-        assertThat(page.path("composition").path("links")).hasSize(3);
+        assertThat(page.path("composition").path("links")).hasSize(4);
         assertThat(page.path("composition").path("links").path(0)
                 .path("from").path("ref").path("port").asText()).isEqualTo("requestSearch");
         assertThat(page.path("composition").path("links").path(1)
                 .path("from").path("ref").path("port").asText()).isEqualTo("selectionChange");
-        assertThat(page.path("composition").path("links").path(2)
-                .path("to").path("ref").path("port").asText()).isEqualTo("initialValue");
+        assertThat(page.at("/composition/links/2/transform/steps/0/config/path").asText())
+                .isEqualTo("payload.resourceIdentity.key.value");
+        assertThat(page.path("composition").path("links").path(3)
+                .path("to").path("ref").path("port").asText()).isEqualTo("resourceId");
     }
 
     @Test
@@ -3092,9 +3097,9 @@ class AgenticAuthoringGenericUiCompositionPlanProviderTest {
         assertThat(detail.has("submitMethod")).isFalse();
         assertThat(findWidgetInputs(plan, "praxis-table", "master").path("resourcePath").asText())
                 .isEqualTo("/api/operations/missoes");
-        assertThat(plan.path("bindings")).hasSize(2);
-        assertThat(plan.at("/bindings/1/to/port").asText()).isEqualTo("initialValue");
-        assertThat(plan.at("/bindings/1/from/path").asText()).isEqualTo("selectedItem");
+        assertThat(plan.path("bindings")).hasSize(3);
+        assertThat(plan.at("/bindings/2/to/port").asText()).isEqualTo("resourceId");
+        assertThat(plan.at("/bindings/2/from/path").asText()).isEqualTo("selectedResourceId");
         assertThat(plan.path("sourceRefs")).extracting(JsonNode::asText).contains(verifiedSchema);
         assertThat(plan.at("/diagnostics/resourceWorkspaceGrounding/operations/1/sourceRelease").asText())
                 .isEqualTo("approved-binding-release-a");
@@ -3106,7 +3111,49 @@ class AgenticAuthoringGenericUiCompositionPlanProviderTest {
         JsonNode page = compiled.compiledFormPatch().at("/patch/page");
         assertThat(page.at("/widgets/1/definition/inputs/schemaUrl").asText()).isEqualTo(verifiedSchema);
         assertThat(page.at("/widgets/1/definition/inputs").has("submitUrl")).isFalse();
-        assertThat(page.at("/composition/links")).hasSize(2);
+        assertThat(page.at("/composition/links")).hasSize(3);
+    }
+
+    @Test
+    void masterDetailCompilesCanonicalIdentityAndSelectionClearWithoutASeedOrRowIdAssumption() {
+        var result = provider.plan(workspaceRequest(typedWorkspaceContext())).orElseThrow();
+        JsonNode plan = result.uiCompositionPlan();
+        assertThat(result.valid()).isTrue();
+        assertThat(plan.at("/state/values/selectedItem").isNull()).isTrue();
+        assertThat(plan.at("/state/values/selectedResourceId").isNull()).isTrue();
+        assertThat(plan.path("bindings")).extracting((JsonNode link) -> link.path("id").asText()).containsExactly(
+                "missoes-master.selectionChange->state.selectedItem",
+                "missoes-master.selectionChange->state.selectedResourceId",
+                "state.selectedResourceId->missoes-detail.resourceId");
+
+        var compiled = new AgenticAuthoringUiCompositionPlanCompiler(objectMapper)
+                .compile(plan, objectMapper.createObjectNode());
+        assertThat(compiled.valid()).withFailMessage("%s", compiled.failureCodes()).isTrue();
+        JsonNode links = compiled.compiledFormPatch().at("/patch/page/composition/links");
+        assertThat(links).hasSize(3);
+        assertThat(links).extracting((JsonNode link) -> link.path("id").asText()).containsExactly(
+                "missoes-master.selectionChange->state.selectedItem",
+                "missoes-master.selectionChange->state.selectedResourceId",
+                "state.selectedResourceId->missoes-detail.resourceId");
+        assertThat(links.at("/0/transform/steps/0/config/path").asText())
+                .isEqualTo("payload.selectedRows.0");
+        // ResourceIdentity.key.value is the canonical key even when its field is
+        // missionKey and row.id contains a different value. No row-field alias is compiled.
+        assertThat(links.at("/1/transform/steps/0/config/path").asText())
+                .isEqualTo("payload.resourceIdentity.key.value");
+        assertThat(links.at("/1/transform/steps/0/input/source").asText()).isEqualTo("event");
+        assertThat(links.at("/1/to/ref/path").asText()).isEqualTo("selectedResourceId");
+        for (int index : List.of(0, 1)) {
+            assertThat(links.path(index).path("transform").has("fallbackValue")).isTrue();
+            assertThat(links.path(index).path("transform").path("fallbackValue").isNull()).isTrue();
+            assertThat(links.path(index).at("/policy/missingValuePolicy").asText())
+                    .isEqualTo("propagate-undefined");
+        }
+        assertThat(links.at("/2/from/ref/path").asText()).isEqualTo("selectedResourceId");
+        assertThat(links.at("/2/to/ref/port").asText()).isEqualTo("resourceId");
+        assertThat(links.at("/2/policy/missingValuePolicy").asText()).isEqualTo("propagate-undefined");
+        assertThat(links.path(2).has("condition")).isFalse();
+        assertThat(links.toString()).doesNotContain("initialValue", "selectedItem.id", "payload.row.id");
     }
 
     @Test

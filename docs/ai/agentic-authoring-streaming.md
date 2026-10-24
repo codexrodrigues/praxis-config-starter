@@ -1172,12 +1172,21 @@ sem esse re-grounding bloqueia discovery de comandos e o gate semantico retorna
 `semantic-preview-resource-workspace-grounding-required`; um blueprint master-detail
 nao pode ser publicado como preview aplicavel com grounding `unavailable` ou `rejected`.
 
-O primeiro slice materializa Filter, Table master e Dynamic Form detail. Os links
-canonicos sao `requestSearch -> queryContext` e
-`selectionChange -> state.selectedItem -> initialValue`. Desktop usa composicao
-7/5 com filtro superior; tablet e mobile usam variantes empilhadas. O filtro
-continua responsavel por schema e option sources metadata-driven, e os widgets
-continuam responsaveis por loading, vazio e erro.
+O primeiro slice materializa Filter, Table master e Dynamic Form detail. O filtro
+usa `requestSearch -> queryContext`. A selecao preserva o registro em
+`state.selectedItem` a partir de `payload.selectedRows.0` e materializa
+`state.selectedResourceId` a partir de `payload.resourceIdentity.key.value`, a
+identidade canonica publicada pela Table a partir do contrato de metadata. O link
+`state.selectedResourceId -> detail.resourceId` aciona a leitura HTTP pareada do
+Form remoto; o registro selecionado nao vira um seed `initialValue` autoritativo.
+Nao se presume um campo `row.id`. Os dois picks preservam `fallbackValue: null`
+no plano e no pipeline compilado; a politica `propagate-undefined` e a ausencia de
+condicao de truthiness deixam a limpeza chegar ao Form. Uma identidade ausente
+nao dispara GET. O Form continua responsavel por cancelamento, respostas antigas,
+limpeza e revisao/ETag da entidade lida. Desktop usa composicao 7/5 com filtro
+superior; tablet e mobile usam variantes empilhadas. O filtro continua responsavel
+por schema e option sources metadata-driven, e os widgets continuam responsaveis
+por loading, vazio e erro.
 
 No blueprint semanticamente resolvido como `resource-master-detail`, o schema do
 Dynamic Form em `mode=view` vem da unica leitura de item `GET` / `response` admitida

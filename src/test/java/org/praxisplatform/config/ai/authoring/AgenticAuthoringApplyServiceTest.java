@@ -729,7 +729,7 @@ class AgenticAuthoringApplyServiceTest {
                   "version": "1.0",
                   "kind": "praxis.ui-composition-plan",
                   "layoutPreset": "master-detail-dashboard",
-                  "state": { "values": { "selectedItem": null } },
+                  "state": { "values": { "selectedItem": null, "selectedResourceId": null } },
                   "widgets": [
                     {
                       "key": "missions-master",
@@ -749,6 +749,7 @@ class AgenticAuthoringApplyServiceTest {
                       "inputs": {
                         "resourcePath": "/api/operations/missoes",
                         "schemaSource": "resource",
+                        "schemaUrl": "/schemas/filtered?path=/api/operations/missoes/{id}&operation=get&schemaType=response",
                         "mode": "view",
                         "formId": "missions-detail"
                       }
@@ -760,14 +761,23 @@ class AgenticAuthoringApplyServiceTest {
                       "intent": "state-write",
                       "from": { "kind": "component-port", "widget": "missions-master", "port": "selectionChange", "direction": "output" },
                       "to": { "kind": "state", "path": "selectedItem" },
-                      "transform": { "kind": "pick-path", "id": "pick-selected-row", "path": "payload.row" }
+                      "transform": { "kind": "pick-path", "id": "pick-selected-row", "path": "payload.selectedRows.0", "inputSource": "event", "fallbackValue": null },
+                      "policy": { "distinct": true, "missingValuePolicy": "propagate-undefined" }
                     },
                     {
-                      "id": "state.selectedItem->missions-detail.initialValue",
+                      "id": "missions-master.selectionChange->state.selectedResourceId",
+                      "intent": "state-write",
+                      "from": { "kind": "component-port", "widget": "missions-master", "port": "selectionChange", "direction": "output" },
+                      "to": { "kind": "state", "path": "selectedResourceId" },
+                      "transform": { "kind": "pick-path", "id": "pick-selected-resource-id", "path": "payload.resourceIdentity.key.value", "inputSource": "event", "fallbackValue": null },
+                      "policy": { "distinct": true, "missingValuePolicy": "propagate-undefined" }
+                    },
+                    {
+                      "id": "state.selectedResourceId->missions-detail.resourceId",
                       "intent": "state-read",
-                      "from": { "kind": "state", "path": "selectedItem" },
-                      "to": { "kind": "component-port", "widget": "missions-detail", "port": "initialValue", "direction": "input" },
-                      "condition": { "!!": [{ "var": "state.selectedItem" }] }
+                      "from": { "kind": "state", "path": "selectedResourceId" },
+                      "to": { "kind": "component-port", "widget": "missions-detail", "port": "resourceId", "direction": "input" },
+                      "policy": { "distinct": true, "missingValuePolicy": "propagate-undefined" }
                     }
                   ]
                 }

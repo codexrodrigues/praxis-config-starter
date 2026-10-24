@@ -1657,6 +1657,7 @@ final class AgenticAuthoringUiCompositionPlanCompiler {
         ObjectNode compiled = objectMapper.createObjectNode();
         compiled.put("version", "2.0");
         compiled.put("phase", "link-propagation");
+        copyIfDefined(transform, compiled, "fallbackValue");
         if ("query-context".equals(kind)) {
             compiled.put("mode", "object-fragment");
             ObjectNode step = baseTransformStep(compiled, transform, "object-template", true);
