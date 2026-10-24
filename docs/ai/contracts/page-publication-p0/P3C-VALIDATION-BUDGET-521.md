@@ -56,3 +56,27 @@ filha agora é cercada por entry/return, inclusive após deadline expirar; estru
 usa wrapper canônico. Lookup por chave preserva normalização anterior de erros.
 Candidato terá GAV novo0.0.0-p3c.521-SNAPSHOT em cache isolado, nunca bytes alterados
 sob168 pública. Host69 testes focais PASS; diff revisto estaticamente pelo peer.
+
+
+## Resultado negativo c2 e limite de aceite
+
+O ensaio privado c2 de 24/10/2026 usou Quickstart `78b473cd` e Config `d948c4d3`,
+GAV `0.0.0-p3c.521-SNAPSHOT`, com JAR SHA256
+`15b450bbb50717df052afb7a2ae7b0f04d27a77308a10f8ad981844e6f3763ed`.
+A criação retornou 503 `SOURCE_UNAVAILABLE` em 41.275 ms. A deadline dona não foi
+renovada, mas nenhuma criação 201, publicação ou observação independente de rollback
+foi alcançada. A limpeza confirmou dois bancos e dois papéis removidos às 03:18:55 UTC.
+O recibo negativo está preservado no Quickstart, em
+`internal-planning/page-runtime/evidence/p3c-budget-521-20261024/c2-negative.json`.
+
+A prova local não aceita a funcionalidade. O próximo passo é executar o gate focal
+em runner remoto com os mesmos 40 segundos e verificações de autorização, atribuição
+dedicada, SHA e JAR atestados e revisão independente antes do dispatch. O runner
+Ubuntu não comprova localização ou proximidade ao banco. Sucesso privado ainda
+exige adoção pública. A negativa não aprova release ou integração.
+
+O preflight adicional do perfil oficial `ci-smoke-unit` passou com 3.692 testes,
+sem falhas, erros ou casos ignorados, em 2min41s, sem banco. A fonte de produção
+`d948c4d3` permaneceu inalterada. A execução antecipa regressões das entradas
+lifecycle fora das 246 verificações focais; não substitui a prova HTTP/Neon
+nem o build e a assinatura oficiais de release.
