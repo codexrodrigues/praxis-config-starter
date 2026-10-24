@@ -31,7 +31,7 @@ class UiLayoutLifecycleControllerTest {
     assertThat(body.content()[0].mediaType()).isEqualTo("application/json");
     assertThat(body.content()[0].schema().implementation()).isEqualTo(org.praxisplatform.config.dto.UiLayoutRevisionCommandRequest.class);
     assertThat(java.util.Arrays.stream(org.praxisplatform.config.dto.UiLayoutRevisionCommandRequest.class.getRecordComponents())
-        .map(java.lang.reflect.RecordComponent::getName)).containsExactly("commandRef", "target", "authoringDocument", "reason");
+        .map(java.lang.reflect.RecordComponent::getName)).containsExactly("commandRef", "target", "authoringDocument", "reason", "childSources");
     assertThat(org.praxisplatform.config.dto.UiLayoutRevisionCommandRequest.class.getAnnotation(io.swagger.v3.oas.annotations.media.Schema.class).additionalProperties())
         .isEqualTo(io.swagger.v3.oas.annotations.media.Schema.AdditionalPropertiesValue.FALSE);
   }

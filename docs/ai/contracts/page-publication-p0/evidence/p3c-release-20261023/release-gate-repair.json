@@ -1,0 +1,36 @@
+{
+  "schemaVersion": 1,
+  "baseTag": "v0.1.0-rc.167",
+  "baseSource": "2513a3307738f1a2c6ee05ff8e28959cd45204b6",
+  "failedRelease": {
+    "prepareRun": 40050279145,
+    "publishRun": 40050323796,
+    "tests": 3674,
+    "failures": 5,
+    "errors": 5,
+    "skipped": 0,
+    "bundleConstruction": "SKIPPED",
+    "upload": "SKIPPED",
+    "published": false,
+    "tagRetained": true,
+    "logSha256": "3c09b808a7ab1fadbaa1acc7b4771ade7d9cbf3b161a776c3da44ae137e5d54f"
+  },
+  "change": "test fixtures/assertions only; no production, POM or workflow change",
+  "fileSha256": {
+    "src/test/java/org/praxisplatform/config/autoconfig/ConfigOpenApiAutoConfigurationTest.java": "795fd75b23132af46c3a1aad0cd6a116a450926094cd5e1ff0fcbdddea3aa334",
+    "src/test/java/org/praxisplatform/config/controller/UiLayoutLifecycleControllerTest.java": "de2bad38d4f86ae442ce0d201a832781cce06d74efc7275c0d4dcf06adac7919",
+    "src/test/java/org/praxisplatform/config/service/PagePublicationP0ContractTest.java": "e4dfca01f1157fa93d62abb63b8b0e648633abaf7c7db1579be374e15ae2eb58",
+    "src/test/java/org/praxisplatform/config/service/UiLayoutCompositionReadServiceTest.java": "0fb00256bdd5024317ced7eb506e2ec32cbaa50b98959df32ead449b70d84843"
+  },
+  "validation": {
+    "command": "mvn -B -Dmaven.repo.local=<isolated> -Dtest=ConfigOpenApiAutoConfigurationTest,UiLayoutLifecycleControllerTest,PagePublicationP0ContractTest,UiLayoutCompositionReadServiceTest,UiLayoutRevisionJsonInputTest test",
+    "tests": 125,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "databaseUsed": false,
+    "logSha256": "25a656d7a6bcfc926822dff7c724710e3de411a2d12478ffa36232565ba5573d"
+  },
+  "review": "p3c_security_review independently approved all four test corrections; root reviewed agent tests; source production unchanged, prior Neon proofs retained with original limits",
+  "next": "integrate correction; next free official RC168; no retag/reupload of167"
+}

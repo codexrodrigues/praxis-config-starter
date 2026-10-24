@@ -177,20 +177,44 @@ class PagePublicationP0ContractTest {
   }
 
   @Test
-  void pageProjectionIsImplementedWhileGroupsRemainUnavailable() throws Exception {
+  void pageAndGroupsProjectionsCompileReproducibleNativeRevisions() throws Exception {
     for (String contract : Set.of("pageDocument", "groupsDocument")) {
       JsonNode example = nodes(read("corpus.json").path("schemaCases"))
           .filter(c -> c.path("contract").asText().equals(contract) && c.path("valid").asBoolean())
           .findFirst().orElseThrow().get("input");
       var target = new UiLayoutTarget(contract.equals("pageDocument") ? "praxis-dynamic-page" : "praxis-app-shell", "11111111-1111-4111-8111-111111111111");
       var descriptor = new UiLayoutAuthoringDocumentDescriptor(example.path("kind").asText(), "fixture:proposed", "1");
+      ObjectNode candidate = example.deepCopy();
       if (contract.equals("pageDocument")) {
-        var projection = UiLayoutAuthoringProjection.project(target, descriptor, example, example, PATCH, () -> {});
-        UiLayoutPageRevisionReproduction.require(target, descriptor, example, example, PATCH, projection.compilePatch());
-      } else assertThrows(UiLayoutLifecycleException.class, () ->
-          UiLayoutAuthoringProjection.project(target, descriptor, example, example, PATCH, () -> {}));
+        ((ObjectNode) candidate.at("/config/presentation")).put("title", "Revised page title");
+      } else {
+        ((ObjectNode) candidate.at("/config/groups/0")).put("label", "Revised group label");
+      }
+      var projection = UiLayoutAuthoringProjection.project(target, descriptor, example, candidate, PATCH, () -> {});
+      assertEquals(example.get("config"), projection.baselineConfig());
+      assertEquals(candidate.get("config"), projection.candidateConfig());
+      assertNotEquals(projection.baselineConfig(), projection.candidateConfig());
+      UiLayoutRevisionRelation.requireReproduction(projection.baselineConfig(), projection.candidateConfig(), projection.compilePatch());
+      if (contract.equals("pageDocument")) {
+        UiLayoutPageRevisionReproduction.require(target, descriptor, example, candidate, PATCH, projection.compilePatch());
+      } else {
+        UiLayoutNavigationGroupsRevisionReproduction.require(target, descriptor, example, candidate, PATCH, projection.compilePatch());
+      }
+      assertThrows(UiLayoutLifecycleException.class, () ->
+          UiLayoutRevisionRelation.requireReproduction(projection.baselineConfig(), projection.candidateConfig(), JSON.createObjectNode()));
     }
+  }
 
+  @Test
+  void unknownNativeKindRemainsUnavailable() throws Exception {
+    JsonNode example = nodes(read("corpus.json").path("schemaCases"))
+        .filter(c -> c.path("contract").asText().equals("pageDocument") && c.path("valid").asBoolean())
+        .findFirst().orElseThrow().get("input");
+    var target = new UiLayoutTarget("praxis-dynamic-page", "11111111-1111-4111-8111-111111111111");
+    var descriptor = new UiLayoutAuthoringDocumentDescriptor("fixture.unsupported.editor", "fixture:unsupported", "1");
+    var failure = assertThrows(UiLayoutLifecycleException.class, () ->
+        UiLayoutAuthoringProjection.project(target, descriptor, example, example, PATCH, () -> {}));
+    assertEquals(UiLayoutLifecycleException.Code.SOURCE_UNAVAILABLE, failure.getCode());
   }
 
   @Test
