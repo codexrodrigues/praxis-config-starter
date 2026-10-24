@@ -373,8 +373,6 @@ public class AgenticAuthoringIntentResolverService {
                 && shouldResolveLlmIntent
                 && (llmIntent == null || (!llmIntent.resolved() && !primaryLlmIntentProviderFailure)));
         boolean semanticPolicyRefinedVisualProjection = false;
-        boolean apiCatalogAuthoringDriftNormalized = false;
-        boolean consultativeApiCatalogAuthoringDriftNormalized = false;
         boolean resourceDiscoveryAuthoringDriftNormalized = false;
         boolean resourceDiscoveryFocusSelectionApplied = false;
         boolean visualProjectionRefinement = isVisualProjectionRefinementPrompt(prompt, turn, currentPageSummary);
@@ -622,24 +620,6 @@ public class AgenticAuthoringIntentResolverService {
                 artifactKind = "dashboard";
             }
             changeKind = "create_artifact";
-        }
-        if (shouldNormalizeConsultativeApiCatalogAuthoringDrift(
-                llmIntent,
-                prompt,
-                consultativeDomainQuestion,
-                operationKind,
-                artifactKind,
-                changeKind)) {
-            operationKind = "explore";
-            artifactKind = "api_catalog";
-            changeKind = "answer_api_catalog_question";
-            consultativeApiCatalogAuthoringDriftNormalized = true;
-        }
-        if (shouldNormalizeApiCatalogAuthoringDrift(prompt, operationKind, artifactKind, changeKind, candidates)) {
-            operationKind = "create";
-            artifactKind = "page";
-            changeKind = "create_artifact";
-            apiCatalogAuthoringDriftNormalized = true;
         }
         candidates = filterConsultativeApiCatalogCandidates(prompt, artifactKind, candidates);
         if ("api_catalog".equals(artifactKind)) {
@@ -1327,12 +1307,6 @@ public class AgenticAuthoringIntentResolverService {
         }
         if (llmResourceSelectionOverriddenByGovernedRanking) {
             warnings = withWarning(warnings, "llm-resource-selection-overridden-by-governed-ranking");
-        }
-        if (apiCatalogAuthoringDriftNormalized) {
-            warnings = withWarning(warnings, "llm-api-catalog-authoring-drift-normalized");
-        }
-        if (consultativeApiCatalogAuthoringDriftNormalized) {
-            warnings = withWarning(warnings, "llm-consultative-api-catalog-authoring-drift-normalized");
         }
         if (resourceDiscoveryAuthoringDriftNormalized) {
             warnings = withWarning(warnings, "llm-resource-discovery-authoring-drift-normalized");
@@ -2405,33 +2379,6 @@ public class AgenticAuthoringIntentResolverService {
                 || hasOverviewDashboard
                 || (hasPageSurface && hasAuthoringIntent)
                 || (hasChart && hasFilter && hasDetails);
-    }
-
-    private boolean shouldNormalizeApiCatalogAuthoringDrift(
-            String prompt,
-            String operationKind,
-            String artifactKind,
-            String changeKind,
-            List<AgenticAuthoringCandidate> candidates) {
-        return isApiCatalogQuestion(operationKind, artifactKind, changeKind)
-                && candidates != null
-                && !candidates.isEmpty()
-                && isOpenBusinessSurfaceAuthoringPrompt(prompt)
-                && !isConsultativeDomainQuestion(prompt);
-    }
-
-    private boolean shouldNormalizeConsultativeApiCatalogAuthoringDrift(
-            AgenticAuthoringLlmIntentResolution llmIntent,
-            String prompt,
-            boolean consultativeDomainQuestion,
-            String operationKind,
-            String artifactKind,
-            String changeKind) {
-        return llmIntent != null
-                && llmIntent.resolved()
-                && consultativeDomainQuestion
-                && isMaterializableAuthoringIntent(operationKind, artifactKind, changeKind)
-                && !isConcreteDashboardMaterializationPrompt(prompt);
     }
 
     private boolean hasMaterializableResourceDiscoveryContext(AgenticAuthoringIntentResolutionRequest request) {

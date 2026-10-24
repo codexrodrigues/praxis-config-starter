@@ -28,6 +28,111 @@ class AgenticAuthoringIntentResolverServiceTest {
     private final AgenticAuthoringIntentResolverService service =
             new AgenticAuthoringIntentResolverService(objectMapper, quickstartCandidateCatalog());
 
+    private static final String PUBLIC_TABLE_INSTRUCTION =
+            "Na tabela de funcionários existente, mostre, nesta ordem, as colunas com os títulos literais "
+            + "Departamento, Estado civil, Cargo, Ativo e Nome. Preserve exatamente a grafia desses títulos, "
+            + "incluindo Estado civil com c minúsculo; use override do cabeçalho quando o label do schema "
+            + "for diferente. Nos filtros avançados, para Departamento use o filtro de texto pelo nome. "
+            + "Mantenha Estado civil conforme o schema. Deixe Departamento e Estado civil selecionados e sempre visíveis.";
+
+    @Test
+    void validatedComponentAuthoringIsNotReclassifiedByTextualCatalogCues() throws Exception {
+        var result = resolvePublicTableInstruction(new AgenticAuthoringLlmIntentResolution(
+                true, "modify", "table", "column.add", "/api/human-resources/funcionarios", null,
+                "new_instruction", "Vou atualizar a tabela selecionada.", List.of(), List.of(),
+                List.of("llm-compact-targeted-component-intent-used"), null, null, false, "component_authoring"));
+
+        assertThat(result.valid()).as("warnings=%s failures=%s", result.warnings(), result.failureCodes()).isTrue();
+        assertThat(result.operationKind()).isEqualTo("modify");
+        assertThat(result.artifactKind()).isEqualTo("table");
+        assertThat(result.changeKind()).isEqualTo("column.add");
+        assertThat(result.selectedCandidate()).isNotNull();
+        assertThat(result.selectedCandidate().resourcePath()).isEqualTo("/api/human-resources/funcionarios");
+        assertThat(result.effectivePrompt()).isEqualTo(PUBLIC_TABLE_INSTRUCTION);
+        assertThat(result.apiCatalogAnswer()).isNull();
+        assertThat(result.warnings()).doesNotContain("llm-consultative-api-catalog-authoring-drift-normalized");
+    }
+
+    @Test
+    void semanticApiCatalogConsultationRemainsAdvisoryForTheSameTableContext() throws Exception {
+        var result = resolvePublicTableInstruction(new AgenticAuthoringLlmIntentResolution(
+                true, "explore", "api_catalog", "answer_api_catalog_question", null, null,
+                "none", "Estas são as informações do catálogo.", List.of(), List.of(), List.of(),
+                null, null, false, "api_catalog_guidance"));
+
+        assertThat(result.operationKind()).isEqualTo("explore");
+        assertThat(result.artifactKind()).isEqualTo("api_catalog");
+        assertThat(result.changeKind()).isEqualTo("answer_api_catalog_question");
+        assertThat(result.apiCatalogAnswer()).isNotNull();
+        assertThat(result.warnings()).doesNotContain("llm-api-catalog-authoring-drift-normalized");
+    }
+
+    @Test
+    void unresolvedModelCannotAuthorizeTheTableInstructionFromItsWords() throws Exception {
+        var result = resolvePublicTableInstruction(new AgenticAuthoringLlmIntentResolution(
+                false, "unknown", "unknown", "unknown", null, null, "unknown", "Preciso de esclarecimento.",
+                List.of(), List.of("Confirme o objetivo desejado."), List.of(), null, null, false, "unknown"));
+        assertUnresolvedIntent(result);
+    }
+
+    @Test
+    void outOfScopeModelCannotAuthorizeTheSelectedTableFromItsWords() throws Exception {
+        var result = resolvePublicTableInstruction(new AgenticAuthoringLlmIntentResolution(
+                false, "unknown", "unknown", "unknown", null, null, "unknown", "O objetivo está fora do escopo.",
+                List.of(), List.of(), List.of(), null, null, false, "out_of_scope"));
+        assertUnresolvedIntent(result);
+    }
+
+    @Test
+    void resolvedAuthoringTupleWithUnknownClassIsNotRoutedFromCatalogWords() throws Exception {
+        var result = resolvePublicTableInstruction(new AgenticAuthoringLlmIntentResolution(
+                true, "modify", "table", "column.add", "/api/human-resources/funcionarios", null,
+                "new_instruction", "Vou atualizar a tabela selecionada.", List.of(), List.of(), List.of(),
+                null, null, false, "unknown"));
+        assertThat(result.valid()).isTrue();
+        assertThat(result.operationKind()).isEqualTo("modify");
+        assertThat(result.artifactKind()).isEqualTo("table");
+        assertThat(result.changeKind()).isEqualTo("column.add");
+        assertThat(result.apiCatalogAnswer()).isNull();
+        assertThat(result.warnings()).doesNotContain("llm-consultative-api-catalog-authoring-drift-normalized");
+    }
+
+    @Test
+    void resolvedCatalogTupleWithUnknownClassIsNotRoutedFromTableContext() throws Exception {
+        var result = resolvePublicTableInstruction(new AgenticAuthoringLlmIntentResolution(
+                true, "explore", "api_catalog", "answer_api_catalog_question", null, null,
+                "none", "Estas são as informações do catálogo.", List.of(), List.of(), List.of(),
+                null, null, false, "unknown"));
+        assertThat(result.operationKind()).isEqualTo("explore");
+        assertThat(result.artifactKind()).isEqualTo("api_catalog");
+        assertThat(result.changeKind()).isEqualTo("answer_api_catalog_question");
+        assertThat(result.apiCatalogAnswer()).isNotNull();
+        assertThat(result.warnings()).doesNotContain("llm-api-catalog-authoring-drift-normalized");
+    }
+
+    private AgenticAuthoringIntentResolutionResult resolvePublicTableInstruction(
+            AgenticAuthoringLlmIntentResolution modelResult) throws Exception {
+        var catalog = Mockito.mock(AgenticAuthoringApiMetadataCandidateCatalog.class);
+        var model = Mockito.mock(AgenticAuthoringLlmIntentResolverService.class);
+        Mockito.when(model.resolve(Mockito.any(), Mockito.anyString(), Mockito.any(), Mockito.any(),
+                Mockito.anyList(), Mockito.any(), Mockito.any(), Mockito.any(), Mockito.any()))
+                .thenReturn(Optional.of(modelResult));
+        var resolver = new AgenticAuthoringIntentResolverService(objectMapper, catalog, model,
+                new AgenticAuthoringComponentCapabilitiesService(),
+                AgenticAuthoringDomainCatalogHints.DEFAULT_SERVICE_KEY, null, false);
+        JsonNode page = objectMapper.readTree("""
+                {"version":"1.0.0","widgets":[{"key":"funcionarios-table","definition":{
+                "id":"praxis-table","inputs":{"resourcePath":"/api/human-resources/funcionarios",
+                "config":{"title":"Funcionários","columns":[]}}}}]}
+                """);
+        var result = resolver.resolve(new AgenticAuthoringIntentResolutionRequest(PUBLIC_TABLE_INSTRUCTION,
+                "praxis-ui-angular", "praxis-dynamic-page-builder", "/public-authoring-qualification",
+                page, "funcionarios-table", "model-fixture", null, null));
+        Mockito.verify(model).resolve(Mockito.any(), Mockito.eq(PUBLIC_TABLE_INSTRUCTION), Mockito.any(), Mockito.any(),
+                Mockito.anyList(), Mockito.any(), Mockito.any(), Mockito.any(), Mockito.any());
+        return result;
+    }
+
     private void assertUnresolvedIntent(AgenticAuthoringIntentResolutionResult result) {
         assertThat(result.valid()).isFalse();
         assertThat(result.operationKind()).isEqualTo("unknown");
@@ -5127,7 +5232,7 @@ class AgenticAuthoringIntentResolverServiceTest {
     }
 
     @Test
-    void consultativeDomainQuestionNormalizesLlmAuthoringDriftToCatalogAnswer() {
+    void semanticCatalogGuidanceAnswersConsultativeQuestionWithoutLexicalReroute() {
         ApiMetadataRepository repository = Mockito.mock(ApiMetadataRepository.class);
         AgenticAuthoringLlmIntentResolverService llmIntentResolver =
                 Mockito.mock(AgenticAuthoringLlmIntentResolverService.class);
@@ -5156,16 +5261,17 @@ class AgenticAuthoringIntentResolverServiceTest {
                         Mockito.any()))
                 .thenReturn(Optional.of(new AgenticAuthoringLlmIntentResolution(
                         true,
-                        "create",
-                        "form",
-                        "create_form",
+                        "explore",
+                        "api_catalog",
+                        "answer_api_catalog_question",
                         "/api/human-resources/folhas-pagamento",
                         null,
                         "none",
-                        "Vou criar um formulario.",
+                        "Vou explicar as fontes disponíveis.",
                         List.of(),
                         List.of(),
-                        List.of("llm-intent-resolution-used"))));
+                        List.of("llm-intent-resolution-used"),
+                        null, null, false, "api_catalog_guidance")));
         AgenticAuthoringIntentResolverService service = new AgenticAuthoringIntentResolverService(
                 objectMapper,
                 new AgenticAuthoringApiMetadataCandidateCatalog(repository),
@@ -5189,18 +5295,16 @@ class AgenticAuthoringIntentResolverServiceTest {
         assertThat(result.changeKind()).isEqualTo("answer_api_catalog_question");
         assertThat(result.apiCatalogAnswer()).isNotNull();
         assertThat(result.apiCatalogAnswer().path("candidateApis").size()).isGreaterThan(0);
-        assertThat(result.warnings())
-                .contains("llm-consultative-api-catalog-authoring-drift-normalized")
-                .doesNotContain("llm-api-catalog-authoring-drift-normalized");
-        assertThat(result.failureCodes())
-                .doesNotContain(
-                        "intent-resolution-selected-candidate-required",
-                        "intent-resolution-operation-must-be-create-modify-or-remove",
-                        "intent-resolution-artifact-must-be-form");
+        assertThat(result.warnings()).doesNotContain("llm-consultative-api-catalog-authoring-drift-normalized",
+                "llm-api-catalog-authoring-drift-normalized");
+        assertThat(result.failureCodes()).doesNotContain(
+                "intent-resolution-selected-candidate-required",
+                "intent-resolution-operation-must-be-create-modify-or-remove",
+                "intent-resolution-artifact-must-be-form");
     }
 
     @Test
-    void openSubjectQuestionDoesNotMaterializePageWhenLlmReturnsCreatePage() {
+    void openSubjectQuestionWithSemanticCatalogGuidanceDoesNotMaterializePage() {
         AgenticAuthoringApiMetadataCandidateCatalog candidateCatalog =
                 Mockito.mock(AgenticAuthoringApiMetadataCandidateCatalog.class);
         AgenticAuthoringLlmIntentResolverService llmIntentResolver =
@@ -5244,16 +5348,17 @@ class AgenticAuthoringIntentResolverServiceTest {
                         Mockito.any()))
                 .thenReturn(Optional.of(new AgenticAuthoringLlmIntentResolution(
                         true,
-                        "create",
-                        "page",
-                        "create_artifact",
-                        "/api/human-resources/departamentos",
+                        "explore",
+                        "api_catalog",
+                        "answer_api_catalog_question",
+                        null,
                         null,
                         "none",
-                        "Vou montar uma página com tabela e formulário.",
+                        "Vou explicar as fontes disponíveis.",
                         List.of(),
                         List.of(),
-                        List.of("llm-intent-resolution-used"))));
+                        List.of("llm-intent-resolution-used"),
+                        null, null, false, "api_catalog_guidance")));
         AgenticAuthoringIntentResolverService service = new AgenticAuthoringIntentResolverService(
                 objectMapper,
                 candidateCatalog,
@@ -5277,13 +5382,9 @@ class AgenticAuthoringIntentResolverServiceTest {
         assertThat(result.changeKind()).isEqualTo("answer_api_catalog_question");
         assertThat(result.selectedCandidate()).isNull();
         assertThat(result.apiCatalogAnswer()).isNotNull();
-        assertThat(result.warnings())
-                .contains(
-                        "llm-consultative-api-catalog-authoring-drift-normalized",
-                        "api-catalog-weak-lexical-selection-deferred")
-                .doesNotContain(
-                        "llm-api-catalog-authoring-drift-normalized",
-                        "resource-selection-lexical-fallback-selected");
+        assertThat(result.warnings()).contains("api-catalog-weak-lexical-selection-deferred")
+                .doesNotContain("llm-consultative-api-catalog-authoring-drift-normalized",
+                        "llm-api-catalog-authoring-drift-normalized", "resource-selection-lexical-fallback-selected");
     }
 
     @Test
@@ -11081,7 +11182,28 @@ class AgenticAuthoringIntentResolverServiceTest {
     }
 
     @Test
-    void apiCatalogLlmDriftForOpenPageAuthoringIsNormalizedToPageAuthoring() {
+    void semanticCatalogClassCannotBecomePageFromOpenAuthoringWords() {
+        var result = resolveOpenAuthoringPromptWithCatalogTuple("api_catalog_guidance");
+        assertThat(result.operationKind()).isEqualTo("explore");
+        assertThat(result.artifactKind()).isEqualTo("api_catalog");
+        assertThat(result.changeKind()).isEqualTo("answer_api_catalog_question");
+        assertThat(result.apiCatalogAnswer()).isNotNull();
+        assertThat(result.selectedCandidate()).isNotNull();
+        assertThat(result.selectedCandidate().resourcePath()).isEqualTo("/api/human-resources/funcionarios");
+        assertThat(result.warnings()).doesNotContain("llm-api-catalog-authoring-drift-normalized");
+    }
+
+    @Test
+    void resolvedCatalogTupleWithUnknownClassCannotBecomePageFromPrompt() {
+        var result = resolveOpenAuthoringPromptWithCatalogTuple("unknown");
+        assertThat(result.operationKind()).isEqualTo("explore");
+        assertThat(result.artifactKind()).isEqualTo("api_catalog");
+        assertThat(result.changeKind()).isEqualTo("answer_api_catalog_question");
+        assertThat(result.apiCatalogAnswer()).isNotNull();
+        assertThat(result.warnings()).doesNotContain("llm-api-catalog-authoring-drift-normalized");
+    }
+
+    private AgenticAuthoringIntentResolutionResult resolveOpenAuthoringPromptWithCatalogTuple(String semanticClass) {
         AgenticAuthoringApiMetadataCandidateCatalog candidateCatalog =
                 Mockito.mock(AgenticAuthoringApiMetadataCandidateCatalog.class);
         AgenticAuthoringLlmIntentResolverService llmIntentResolver =
@@ -11121,23 +11243,17 @@ class AgenticAuthoringIntentResolverServiceTest {
                         "Encontrei fontes candidatas para escolher.",
                         List.of(),
                         List.of(),
-                        List.of("llm-intent-resolution-used"))));
+                        List.of("llm-intent-resolution-used"), null, null, false, semanticClass)));
         AgenticAuthoringIntentResolverService llmFirstService = new AgenticAuthoringIntentResolverService(
                 objectMapper,
                 candidateCatalog,
                 llmIntentResolver,
                 null);
 
-        AgenticAuthoringIntentResolutionResult result = llmFirstService.resolve(requestWithContextHints(
+        return llmFirstService.resolve(requestWithContextHints(
                 "queria uma tela para acompanhar o time da empresa",
                 "deterministic-smoke-disabled",
                 objectMapper.createObjectNode()));
-
-        assertThat(result.artifactKind()).isEqualTo("page");
-        assertThat(result.changeKind()).isEqualTo("create_artifact");
-        assertThat(result.selectedCandidate()).isNotNull();
-        assertThat(result.selectedCandidate().resourcePath()).isEqualTo("/api/human-resources/funcionarios");
-        assertThat(result.warnings()).contains("llm-api-catalog-authoring-drift-normalized");
     }
 
     @Test

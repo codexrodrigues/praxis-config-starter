@@ -672,13 +672,19 @@ public class AgenticAuthoringTurnStreamService {
             return new StreamAppendResult(latestEvent(streamId, false), false);
         }
         long appendStartedAtNanos = System.nanoTime();
-        AiTurnEventEnvelope event = turnEventService.appendEvent(
-                principalContext,
-                streamId,
-                threadId,
-                turnId,
-                type,
-                payload);
+        AiTurnEventEnvelope event;
+        try {
+            event = turnEventService.appendEvent(
+                    principalContext,
+                    streamId,
+                    threadId,
+                    turnId,
+                    type,
+                    payload);
+        } catch (RuntimeException failure) {
+            if (turnEventService.isTerminalType(type)) terminal.set(false);
+            throw failure;
+        }
         long appendElapsedNanos = System.nanoTime() - appendStartedAtNanos;
         String appendPhase = objectMapper.valueToTree(payload).path("phase").asText("unspecified");
         Metrics.timer(
@@ -1170,7 +1176,8 @@ public class AgenticAuthoringTurnStreamService {
                 && type.equalsIgnoreCase(result.event().getType());
     }
 
-    private boolean terminalReached(UUID streamId) {
+    // Share the append monitor: reservation is not persisted and delivered terminal state.
+    private synchronized boolean terminalReached(UUID streamId) {
         AtomicBoolean terminal = terminalByStream.computeIfAbsent(streamId, ignored -> new AtomicBoolean(false));
         if (terminal.get()) {
             return true;
