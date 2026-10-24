@@ -41,7 +41,9 @@ class PageCreationAdmissionCheckpointTest {
         "admit3", "admit4", "receipt", "admit5", "admit6", "commit");
     assertThat(fixture.tx.durable).isTrue();
     verify(fixture.bridge, never()).require(any(), any(), any());
-    verify(fixture.bridge, times(6)).requireCreation(CONTEXT, COMMAND.source());
+    verify(fixture.bridge, times(6)).requireCreation(any(), eq("c1"), eq(CONTEXT), eq(COMMAND.source()));
+    // Bootstrap plus the independent post-receipt I/O re-attestation remain.
+    verify(fixture.bridge, times(2)).resolve(any(), eq("c1"));
   }
 
   @Test void denialAtEveryCheckpointPreventsCommitAndSuccessfulOutcome() throws Exception {
@@ -66,14 +68,14 @@ class PageCreationAdmissionCheckpointTest {
     try (var attempt = new UiLayoutValidationAttempt(INVOCATION, UiLayoutLifecycleOperation.CREATE_DRAFT,
         Duration.ofNanos(100), clock::get)) {
       var validation = new UiLayoutValidationContext(attempt, UiLayoutValidationPurpose.AUTHORING);
-      doAnswer(call -> { clock.set(101); return null; }).when(fixture.bridge).requireCreation(any(), any());
-      assertThatThrownBy(() -> ReflectionTestUtils.invokeMethod(fixture.pages, "authorizeCreate", CONTEXT, COMMAND, validation))
+      doAnswer(call -> { clock.set(101); return null; }).when(fixture.bridge).requireCreation(any(), any(), any(), any());
+      assertThatThrownBy(() -> ReflectionTestUtils.invokeMethod(fixture.pages, "authorizeCreate", (java.security.Principal) () -> "alice", "c1", CONTEXT, COMMAND, validation))
           .isInstanceOfSatisfying(UiLayoutLifecycleException.class,
               failure -> assertThat(failure.getCode()).isEqualTo(UiLayoutLifecycleException.Code.SOURCE_UNAVAILABLE));
-      verify(fixture.bridge, times(1)).requireCreation(CONTEXT, COMMAND.source());
-      assertThatThrownBy(() -> ReflectionTestUtils.invokeMethod(fixture.pages, "authorizeCreate", CONTEXT, COMMAND, validation))
+      verify(fixture.bridge, times(1)).requireCreation(any(), eq("c1"), eq(CONTEXT), eq(COMMAND.source()));
+      assertThatThrownBy(() -> ReflectionTestUtils.invokeMethod(fixture.pages, "authorizeCreate", (java.security.Principal) () -> "alice", "c1", CONTEXT, COMMAND, validation))
           .isInstanceOf(UiLayoutLifecycleException.class);
-      verify(fixture.bridge, times(1)).requireCreation(CONTEXT, COMMAND.source());
+      verify(fixture.bridge, times(1)).requireCreation(any(), eq("c1"), eq(CONTEXT), eq(COMMAND.source()));
     }
   }
 
@@ -104,7 +106,7 @@ class PageCreationAdmissionCheckpointTest {
         events.add("admit" + ++admissions);
         if (admissions == denyAt) throw new UiLayoutLifecycleException(UiLayoutLifecycleException.Code.DENIED, "revoked");
         return null;
-      }).when(bridge).requireCreation(CONTEXT, COMMAND.source());
+      }).when(bridge).requireCreation(any(), eq("c1"), eq(CONTEXT), eq(COMMAND.source()));
       doAnswer(call -> { events.add("lock"); return null; }).when(store).lock(any(), any());
       when(store.byKey(any(), any())).thenReturn(Optional.empty());
       var document = UiLayoutPageRevisionReproductionTest.page();

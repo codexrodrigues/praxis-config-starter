@@ -67,7 +67,7 @@ class PageCatalogLifecycleBridgeTest {
       UiLayoutDraftWorkspaceSeed.TargetSeed captured = call.getArgument(2);
       PageNativeProvenanceTestPolicies.require(current, captured,
           () -> host.requireNative(current, origin, captured), nativeSource, metadata);
-      return null;
+      return host.resolveLifecycle(((PageCreationContext) call.getArgument(0)).invocation());
     }).when(host).requireNativeProvenance(any(), any(), any());
     when(host.resolveLifecycle(any()))
         .thenAnswer(call -> new PageCreationContext("app", "/pages", call.getArgument(0)));
@@ -400,10 +400,111 @@ class PageCatalogLifecycleBridgeTest {
   }
 
   @Test
+  void creationJointPreservesExplicitCredentialsAndRejectsEveryReturnedContextDifference() {
+    java.security.Principal principal = () -> "explicit-principal";
+    var source = new PageSourceReference.Native("fixture:page", "r1");
+    for (var returned : java.util.Arrays.asList(null,
+        new PageCreationContext("foreign", "/pages", context.invocation()),
+        new PageCreationContext("app", "/foreign", context.invocation()),
+        new PageCreationContext("app", "/pages", context.forTarget(new UiLayoutTarget("praxis-dynamic-page", UUID.randomUUID().toString()))))) {
+      when(host.requireCreation(principal, "c1", context, source)).thenReturn(returned);
+      assertThatThrownBy(() -> bridge.requireCreation(principal, "c1", context, source))
+          .extracting("code").isEqualTo(UiLayoutLifecycleException.Code.CONTEXT_STALE);
+    }
+    when(host.requireCreation(principal, "c1", context, source)).thenReturn(context);
+    bridge.requireCreation(principal, "c1", context, source);
+    verify(host, times(5)).requireCreation(same(principal), eq("c1"), eq(context), eq(source));
+    verify(host, never()).resolve(any(), any());
+  }
+
+  @Test
+  void postCatalogJointRegistrationDenialBlocksEveryExtensionAndFurtherIo() throws Exception {
+    var creation = nativeCreation();
+    records.put(creation.pageId(), creation);
+    var invocation = context.forTarget(creation.target());
+    var events = new ArrayList<String>();
+    var registrationRevoked = new java.util.concurrent.atomic.AtomicBoolean();
+    when(host.resolveLifecycle(invocation)).thenAnswer(call -> {
+      events.add("registration");
+      if (registrationRevoked.get()) throw new UiLayoutLifecycleException(UiLayoutLifecycleException.Code.DENIED, "registration revoked");
+      return new PageCreationContext("app", "/pages", invocation);
+    });
+    when(store.byPage(any(), eq(creation.pageId()))).thenAnswer(call -> {
+      events.add("catalog"); registrationRevoked.set(true); return Optional.of(creation);
+    });
+    // Provenance bytes remain acceptable. The joint callback must also run the full registration
+    // policy, which now denies; a permissive provenance-only policy could not satisfy this SPI.
+    doAnswer(call -> {
+      events.add("joint"); return host.resolveLifecycle(((PageCreationContext) call.getArgument(0)).invocation());
+    }).when(host).requireNativeProvenance(any(), any(), any());
+    assertThatThrownBy(() -> captureRegistered(invocation)).extracting("code")
+        .isEqualTo(UiLayoutLifecycleException.Code.DENIED);
+    assertThat(events).containsExactly("registration", "catalog", "joint", "registration");
+    verify(store, times(1)).byPage(any(), any());
+    verifyNoMoreInteractions(store);
+    verifyNoInteractions(structure, nativeSource, metadata, captures, frozen);
+  }
+
+  @Test
+  void postCatalogJointRejectsNullAndEveryRegistrationIdentityDifferenceBeforeExtensions() throws Exception {
+    var creation = nativeCreation();
+    records.put(creation.pageId(), creation);
+    var invocation = context.forTarget(creation.target());
+    var foreignComposition = new UiLayoutLifecycleInvocation(invocation.actorRef(), invocation.tenantId(),
+        invocation.administrativeUnit(), invocation.environment(), invocation.contextVersion(),
+        new UiLayoutCompositionRegistration(UiLayoutPageRevisionReproductionTest.PAGE, List.of(UiLayoutPageRevisionReproductionTest.PAGE)));
+    var foreignVersion = new UiLayoutLifecycleInvocation(invocation.actorRef(), invocation.tenantId(),
+        invocation.administrativeUnit(), invocation.environment(), "changed", invocation.composition());
+    for (var returned : java.util.Arrays.asList(null,
+        new PageCreationContext("foreign", "/pages", invocation),
+        new PageCreationContext("app", "/foreign", invocation),
+        new PageCreationContext("app", "/pages", foreignComposition),
+        new PageCreationContext("app", "/pages", foreignVersion))) {
+      clearInvocations(structure, nativeSource, metadata, captures, frozen);
+      doReturn(returned).when(host).requireNativeProvenance(any(), any(), any());
+      assertThatThrownBy(() -> captureRegistered(invocation)).extracting("code")
+          .isEqualTo(UiLayoutLifecycleException.Code.CONTEXT_STALE);
+      verifyNoInteractions(structure, nativeSource, metadata, captures, frozen);
+    }
+  }
+
+  @Test
+  void finalProvenanceContextDriftIsRejectedAfterStructuralExtensions() throws Exception {
+    var creation = nativeCreation();
+    var calls = new java.util.concurrent.atomic.AtomicInteger();
+    doAnswer(call -> calls.incrementAndGet() == 1 ? call.getArgument(0)
+        : new PageCreationContext("app", "/changed", ((PageCreationContext) call.getArgument(0)).invocation()))
+        .when(host).requireNativeProvenance(any(), any(), any());
+    assertThatThrownBy(() -> verifyInOwner(creation)).extracting("code")
+        .isEqualTo(UiLayoutLifecycleException.Code.CONTEXT_STALE);
+    assertThat(calls.get()).isEqualTo(2);
+    verify(structure).validateAuthoringRevision(any(), any(), any(), any(), any(), any(), any(), any(), any());
+  }
+
+  @Test
+  void registrationPolicyDenialBeforeCatalogStillPreventsAllContentReads() throws Exception {
+    var creation = nativeCreation();
+    var invocation = context.forTarget(creation.target());
+    when(host.resolveLifecycle(invocation)).thenThrow(new UiLayoutLifecycleException(UiLayoutLifecycleException.Code.DENIED, "registration denied"));
+    assertThatThrownBy(() -> captureRegistered(invocation)).extracting("code")
+        .isEqualTo(UiLayoutLifecycleException.Code.DENIED);
+    verifyNoInteractions(store, structure, nativeSource, metadata);
+    verify(host, never()).requireNativeProvenance(any(), any(), any());
+  }
+
+  private void captureRegistered(UiLayoutLifecycleInvocation invocation) {
+    var validation = UiLayoutValidationContext.begin((op, inv) -> Duration.ofSeconds(30), invocation,
+        UiLayoutLifecycleOperation.CREATE_DRAFT, UiLayoutValidationPurpose.AUTHORING);
+    try (var attempt = validation.attempt(); var scope = UiLayoutValidationScope.bind(attempt)) {
+      bridge.workspaceSource().capture(invocation, validation);
+    }
+  }
+
+  @Test
   void pureNativeJointProvenanceBracketsEveryStructuralExtension() throws Exception {
     var creation = nativeCreation();
     var order = new ArrayList<String>();
-    doAnswer(call -> { order.add("provenance"); return null; }).when(host).requireNativeProvenance(any(), any(), any());
+    doAnswer(call -> { order.add("provenance"); return host.resolveLifecycle(((PageCreationContext) call.getArgument(0)).invocation()); }).when(host).requireNativeProvenance(any(), any(), any());
     doAnswer(call -> { order.add("target"); return null; }).when(structure).validateTarget(any(), any(), any());
     doAnswer(call -> { order.add("baseline"); return null; }).when(structure).validateAuthoringBaseline(any(), any(), any(), any(), any());
     doAnswer(call -> { order.add("revision"); return null; }).when(structure).validateAuthoringRevision(any(), any(), any(), any(), any(), any(), any(), any(), any());
@@ -422,7 +523,7 @@ class PageCatalogLifecycleBridgeTest {
       var revoked = new java.util.concurrent.atomic.AtomicBoolean();
       doAnswer(call -> {
         if (revoked.get()) throw new UiLayoutLifecycleException(UiLayoutLifecycleException.Code.DENIED, "revoked by extension");
-        return null;
+        return host.resolveLifecycle(((PageCreationContext) call.getArgument(0)).invocation());
       }).when(host).requireNativeProvenance(any(), any(), any());
       org.mockito.stubbing.Answer<Void> revoke = call -> { revoked.set(true); return null; };
       if (boundary == 0) doAnswer(revoke).when(structure).validateTarget(any(), any(), any());
@@ -443,7 +544,7 @@ class PageCatalogLifecycleBridgeTest {
       var calls = new java.util.concurrent.atomic.AtomicInteger();
       doAnswer(call -> {
         if (calls.incrementAndGet() == expireAt) clock.set(Duration.ofSeconds(2).toNanos());
-        return null;
+        return host.resolveLifecycle(((PageCreationContext) call.getArgument(0)).invocation());
       }).when(host).requireNativeProvenance(any(), any(), any());
       try (var attempt = new UiLayoutValidationAttempt(context.invocation(),
           UiLayoutLifecycleOperation.CREATE_DRAFT, Duration.ofSeconds(1), clock::get);

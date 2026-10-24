@@ -584,10 +584,13 @@ class PageCreationPostgresIT {
                   UiLayoutLifecycleException.Code.DENIED, "Grant denied");
           }
 
-          public void requireCreation(PageCreationContext context, PageSourceReference source) {
+          public PageCreationContext requireCreation(java.security.Principal principal, String version, PageCreationContext context, PageSourceReference source) {
+        var observed = resolve(principal, version);
+        if (!context.equals(observed)) throw new UiLayoutLifecycleException(UiLayoutLifecycleException.Code.CONTEXT_STALE, "Context changed");
             require(PageCreationOperation.CREATE_PAGE, context, null);
             require(PageCreationOperation.READ_SOURCE, context, source);
             require(PageCreationOperation.COPY_SOURCE, context, source);
+        return observed;
           }
           public UiLayoutDraftWorkspaceSeed.TargetSeed captureNative(
               PageCreationContext c, PageSourceReference.Native selected) {
@@ -657,10 +660,13 @@ class PageCreationPostgresIT {
                 children);
           }
 
-          public void requireNativeProvenance(PageCreationContext context, PageSourceReference.Native origin,
+          public PageCreationContext requireNativeProvenance(PageCreationContext context, PageSourceReference.Native origin,
               UiLayoutDraftWorkspaceSeed.TargetSeed captured) {
-            PageNativeProvenanceTestPolicies.require(context, captured,
+            var observed = resolveLifecycle(context.invocation());
+        if (!context.equals(observed)) throw new UiLayoutLifecycleException(UiLayoutLifecycleException.Code.CONTEXT_STALE, "Context changed");
+        PageNativeProvenanceTestPolicies.require(context, captured,
                 () -> requireNative(context, origin, captured), source, metadata);
+        return observed;
           }
           public void requireNative(
               PageCreationContext c,

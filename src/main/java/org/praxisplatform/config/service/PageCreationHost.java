@@ -39,9 +39,16 @@ public interface PageCreationHost {
    * the same locked authority snapshot, with fresh observation/expiry checks before and after
    * that policy. Revocation racing the joint decision serializes at this window's completion.
    * Never retain the decision across calls, execute Config work in this callback, or omit a policy.
+   * Include the FULL policy of resolve(principal, contextVersion), using the supplied Principal
+   * as the credential input rather than substituting the expected actor or thread identity.
+   * Return the freshly observed context only after all policies and final observation succeed.
+   * Expected is correlation only: Config rejects null or any difference from it, without changing
+   * scope. Resolution and creation now linearize together; do not implement as two transactions.
    * Config calls again at every creation checkpoint, including before actual commit.
    */
-  void requireCreation(PageCreationContext context, PageSourceReference source);
+  PageCreationContext requireCreation(
+      Principal principal, String contextVersion, PageCreationContext expected,
+      PageSourceReference source);
 
   UiLayoutDraftWorkspaceSeed.TargetSeed captureNative(
       PageCreationContext context, PageSourceReference.Native source);
@@ -54,10 +61,15 @@ public interface PageCreationHost {
    * The host evaluates all policies in one current-authority window, with fresh observation and
    * expiry/coherence checks around them. No grant is retained between calls. Config invokes this
    * before and after structural extensions and still checks exact reproduction and child identity.
+   * Include the FULL resolveLifecycle(context.invocation()) policy, including custom registration
+   * restrictions, in this same window and return its freshly attested context after final checks.
+   * The supplied context may contain ledger-derived application/namespace comparison values;
+   * it is never authority. Config rejects null or any identity/registration difference. Resolution
+   * and provenance linearize together, and no Config I/O or extension executes in this callback.
    * This does not grant access to published or Config-generated origins. Mixed captures retain
    * requireNative plus the independent metadata/child admissions and Config provenance checks.
    */
-  void requireNativeProvenance(
+  PageCreationContext requireNativeProvenance(
       PageCreationContext context,
       PageSourceReference.Native source,
       UiLayoutDraftWorkspaceSeed.TargetSeed captured);

@@ -121,20 +121,26 @@ final class UiLayoutPageGroupHostFixture implements AutoCloseable {
         current(context.invocation());
         pageGrant.require(operation, context, reference);
       }
-      public void requireCreation(PageCreationContext context, PageSourceReference source) {
+      public PageCreationContext requireCreation(java.security.Principal principal, String version, PageCreationContext context, PageSourceReference source) {
+        var observed = resolve(principal, version);
+        if (!context.equals(observed)) throw new UiLayoutLifecycleException(UiLayoutLifecycleException.Code.CONTEXT_STALE, "Context changed");
         require(PageCreationOperation.CREATE_PAGE, context, null);
         require(PageCreationOperation.READ_SOURCE, context, source);
         require(PageCreationOperation.COPY_SOURCE, context, source);
+        return observed;
       }
       public UiLayoutDraftWorkspaceSeed.TargetSeed captureNative(PageCreationContext context, PageSourceReference.Native reference) {
         assertThat(reference).isEqualTo(new PageSourceReference.Native("fixture:page", "r1"));
         nativeCaptures.incrementAndGet();
         return nativePageSeed(context.invocation());
       }
-      public void requireNativeProvenance(PageCreationContext context, PageSourceReference.Native origin,
+      public PageCreationContext requireNativeProvenance(PageCreationContext context, PageSourceReference.Native origin,
           UiLayoutDraftWorkspaceSeed.TargetSeed captured) {
+        var observed = resolveLifecycle(context.invocation());
+        if (!context.equals(observed)) throw new UiLayoutLifecycleException(UiLayoutLifecycleException.Code.CONTEXT_STALE, "Context changed");
         PageNativeProvenanceTestPolicies.require(context, captured,
             () -> requireNative(context, origin, captured), source, metadataAdmission);
+        return observed;
       }
       public void requireNative(PageCreationContext context, PageSourceReference.Native reference,
           UiLayoutDraftWorkspaceSeed.TargetSeed captured) {

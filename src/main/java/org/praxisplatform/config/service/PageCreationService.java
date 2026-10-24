@@ -113,13 +113,11 @@ public final class PageCreationService {
               validation,
               retainedUntilCompletion,
               () -> {
-                revalidate(principal, contextVersion, currentContext, validation);
-                authorizeCreate(currentContext, command, validation);
+                authorizeCreate(principal, contextVersion, currentContext, command, validation);
                 validation.run(
                     currentContext.invocation(),
                     () -> store.lock(currentContext, command.creationKey()));
-                revalidate(principal, contextVersion, currentContext, validation);
-                authorizeCreate(currentContext, command, validation);
+                authorizeCreate(principal, contextVersion, currentContext, command, validation);
                 var replay =
                     validation.call(
                         currentContext.invocation(),
@@ -286,11 +284,12 @@ public final class PageCreationService {
   }
 
   private void authorizeCreate(
+      Principal principal, String version,
       PageCreationContext context,
       PageCreationCommand command,
       UiLayoutValidationContext validation) {
     validation.run(
-        context.invocation(), () -> bridge.requireCreation(context, command.source()));
+        context.invocation(), () -> bridge.requireCreation(principal, version, context, command.source()));
   }
 
   private void commitCheck(
@@ -302,11 +301,9 @@ public final class PageCreationService {
       UiLayoutValidationContext validation) {
     Runnable check =
         () -> {
-          revalidate(principal, version, context, validation);
-          authorizeCreate(context, command, validation);
+          authorizeCreate(principal, version, context, command, validation);
           bridge.verify(context, creation, validation.attempt());
-          authorizeCreate(context, command, validation);
-          revalidate(principal, version, context, validation);
+          authorizeCreate(principal, version, context, command, validation);
         };
     check.run();
     beforeCommit(() -> validation.run(context.invocation(), check));

@@ -413,3 +413,93 @@ suites já válidas sem delta. Os relatórios XML e recibo final ficam em
 `/tmp/praxis-evidence-admission-stage3`. Skills runtime-persistence/security-config têm
 atualização canônica atribuída ao revisor de guidance no mesmo incremento; integração desse
 artefato e adoção operacional são gates separados da conclusão técnica local.
+
+### Incremento após rc173: resolução e decisão na mesma janela (plano)
+
+Baseline Config `769a461e48fb5d76eb81759c5ced1d172730acc3`; a prova real Hero rc173
+retornou503 em41,0317s. A fixture completa atual conta139 unidades,119 no corpo e20 no
+beforeCommit; não mede latência operacional. Nenhum novo ensaio de banco/POST está autorizado
+neste incremento e o limite40s permanece.
+
+Classificação: contrato-publico/transversal. Inventário: as policies de registro/contexto,
+criação e proveniência já existem, mas sua composição ainda exige admissões consecutivas
+sem I/O entre elas (`suportado-parcialmente`). A lacuna real do SPI é não devolver a atestação
+de contexto da decisão conjunta nem exigir a policy de resolução completa nessa janela.
+A fonte canônica é PageCreationHost; evoluem-se seus métodos existentes, sem aliases ou grants.
+
+Plano antes de editar produção:
+
+- `requireCreation(Principal, version, expectedContext, source)` retorna contexto observado,
+  incluindo toda policy de `resolve(principal, version)` e CREATE/READ/COPY. Config compara
+  `expected.equals(returned)` e rejeita null/drift; a identidade explícita não é substituída por
+  actor histórico ou thread. Seis pares adjacentes são compostos; bootstrap e resolução após
+  receipt I/O permanecem.
+- `requireNativeProvenance` retorna contexto e inclui toda policy de `resolveLifecycle` para a
+  invocation exata, além das policies de producer/root metadata/children. Os23 contextos
+  pós-byPage do caminho inteiramente Native são incorporados à primeira decisão; os15
+  contextos pré-byPage e a segunda decisão após extensões permanecem. Ledger fornece somente
+  valores de comparação. Mixed/generated/published e recursões mantêm suas fronteiras.
+- As duas observações frescas e locks operacionais abrangem somente policies puras; terminam
+  antes de Config I/O. Revogação serializa contra a decisão conjunta, não contra as antigas
+  duas admissões separadas. Não há equivalência de todos os interleavings antigos.
+
+Impacto: PageCreationHost, PageCreationService, PageCatalogLifecycleBridge, implementadores e
+fixtures Config; QuickstartPageHost e diagnóstico/testes do consumidor. Breaking SPI beta
+intencional. Docs P2/P3C e skills runtime-persistence/security-config precisam refletir o
+contrato final. Endpoints, JSON HTTP, headers, corpus e Angular não mudam.
+
+Validação mínima sem banco: seis checkpoints e rollback beforeCommit; Principal explícito
+incorreto, policy custom de registro negada, contexto/null/app/namespace/composição divergentes,
+expiry/coerência posterior, revogação em extensões e caminhos mixed/published; fixture completa
+com corpo/commit separados e build/teste focal Quickstart via GAV privado exclusivo. Expectativa
+139→110 unidades é hipótese até a fixture executar; nenhuma previsão de SLA. Revisão por agente
+diferente obrigatória. Lifecycle invocation+admission permanece em desenho separado antes de
+qualquer decisão de release; publicação/deploy não estão autorizados nesta etapa.
+
+A fixture executada na árvore stage5 confirmou110 unidades:95 BODY +15 BEFORE_COMMIT.
+Permanecem54 NativeProvenance,6 creation,19 lifecycle operation,13 resolve,15 resolveLifecycle,
+1 READ_SOURCE,1 COPY_SOURCE e1 captureNative. As29 unidades removidas são23 contextos pós-I/O
+incorporados à primeira proveniência e6 resoluções incorporadas aos checkpoints de criação.
+O SQL sintético de armazenamento e os validadores estruturais permanecem.220 observações é
+somente2×110 modelado;27,5s a250ms/unidade é sensibilidade arbitrária, nunca latência medida.
+
+Inspeção do host existente: cada `authorizeCurrent` executa duas observações de SESSION+
+membership, cada uma já com uma consulta SQL agregada, e conclui a transação operacional.
+Os guards de datasource conferem `getAutoCommit`, que no driver PostgreSQL é estado local;
+nenhum SELECT adicional por guard foi demonstrado. O custo da conclusão transacional não está
+incluído na contagem de snapshots C5. Não se afirma medição de RTT/COMMIT da execução rc173.
+Mesmo com110 unidades, a margem real depende de latência operacional e demais I/O: com overhead
+H segundos fora das admissões, o custo médio máximo seria(40-H)/110 segundos por unidade.
+Não existe medição atual suficiente para certificar essa margem.
+
+A alternativa de combinar invocation+operation do lifecycle exigiria ownership explícito das
+policies de PageCreationHost e do admission bean configurado, além da entrada sem budget ainda
+resolvido. Ela não foi implementada por inferência de identidade, alias ou bypass do provider.
+A decisão de publicação permanece separada, após revisão do incremento e avaliação dessa margem.
+
+Validação final stage5 sem banco:58 testes Config PASS (bridge28, full path3, checkpoints3,
+composição5, runtime13, groups6) e58 Quickstart PASS (host31, diagnostics12, wiring15).
+As duas negativas finais também provam drift do retorno da segunda proveniência e drift na
+criação beforeCommit, com rollback sintético após escritas provisórias. Principal inválido,
+Authentication válida distinta com mesmo subject e ambient trocado não passam a decisão
+conjunta Quickstart; nenhuma leitura operacional ocorre nesses casos. A fixture de composição
+foi corrigida após tentar construir um record que o próprio construtor já rejeita; não houve
+relaxamento de produção. A prova de banco não foi repetida nem substituída por estas fixtures.
+
+Comandos focais finais (JDK21.0.10+7), sem suites remotas:
+
+```sh
+mvn -o -q -Dtest=PageCatalogLifecycleBridgeTest,PageCreationAdmissionCheckpointTest,PageCreationFullPathCostTest,PageRuntimeReadServiceTest,UiLayoutPageGroupSnapshotContractTest,PageCreationAutoConfigurationTest test
+mvn -o -q -f .page-provenance-build-pom.xml -Dtest=PageCatalogLifecycleBridgeTest install
+mvn -o -q -Dtest=PageCatalogLifecycleBridgeTest,PageCreationFullPathCostTest test
+mvn -o -q -Dpraxis.config.version=0.1.0-page-provenance-boundaries-SNAPSHOT -Dtest=QuickstartPageHostTest,QuickstartPageNeonDiagnosticsTest,EnterpriseRuntimeConfigurationTest test
+```
+
+O POM temporário só muda a versão para o GAV privado exclusivo acima e foi arquivado no recibo;
+nenhuma coordenada pública foi sobrescrita. JAR privado SHA256:
+`933edc0f31fc882ac889c8df75e984d632147a15e34e90cf9f3bbcc555cbc79d`.
+Recibo, diffs, XML e logs: `/tmp/praxis-provenance-boundaries-final`.
+O reviewer independente revisou produção, negativos, docs e XML sem achado de produção;
+a referência final da árvore revisada fica no recibo. Skills classificadas `atualizar-existente`
+(runtime-persistence e security-config), com autor canônico separado neste mesmo incremento.
+Integração das skills, release, adoção e prova real Hero continuam gates separados.
