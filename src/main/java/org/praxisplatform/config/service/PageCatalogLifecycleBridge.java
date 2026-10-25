@@ -2,10 +2,13 @@ package org.praxisplatform.config.service;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import java.nio.charset.StandardCharsets;
 import java.security.Principal;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import org.praxisplatform.config.dto.PageSourceReference;
@@ -81,13 +84,17 @@ final class PageCatalogLifecycleBridge {
     }
   }
 
-  void requireCreation(Principal principal, String version,
-      PageCreationContext expected, PageSourceReference source) {
+  void requireCreation(
+      Principal principal,
+      String version,
+      PageCreationContext expected,
+      PageSourceReference source) {
     try {
       var current = host.requireCreation(principal, version, expected, source);
       if (!expected.equals(current)) throw failure(UiLayoutLifecycleException.Code.CONTEXT_STALE);
     } catch (RuntimeException e) {
-      throw UiLayoutMetadataAdmissionFailure.sanitized(e, "Page creation authority is unavailable.");
+      throw UiLayoutMetadataAdmissionFailure.sanitized(
+          e, "Page creation authority is unavailable.");
     }
   }
 
@@ -117,13 +124,15 @@ final class PageCatalogLifecycleBridge {
 
   UiLayoutLifecycleAdmission admission(UiLayoutLifecycleAdmission delegate) {
     if (!(delegate instanceof PageLifecycleAdmission pages))
-      throw new IllegalArgumentException("Page composition requires the configured PageLifecycleAdmission bean.");
+      throw new IllegalArgumentException(
+          "Page composition requires the configured PageLifecycleAdmission bean.");
     return (operation, invocation) -> {
       if (!isPage(invocation.rootTarget())) {
         delegate.require(operation, invocation);
         return;
       }
-      var record = registered(invocation, admittedPageContext(pages, operation, invocation));
+      var admitted = admittedPageContext(pages, operation, invocation);
+      var record = registered(invocation, admitted);
       if (org.springframework.transaction.support.TransactionSynchronizationManager
               .isActualTransactionActive()
           && record.isPresent()
@@ -133,8 +142,9 @@ final class PageCatalogLifecycleBridge {
             default -> true;
           }) {
         var creation = record.orElseThrow();
-        verify(verificationContext(invocation, creation), creation);
-        sameNamespace(admittedPageContext(pages, operation, invocation), creation);
+        if (verifyWithOutcome(verificationContext(invocation, creation, admitted), creation)) {
+          sameNamespace(admittedPageContext(pages, operation, invocation), creation);
+        }
       }
     };
   }
@@ -143,10 +153,12 @@ final class PageCatalogLifecycleBridge {
     return new UiLayoutDraftWorkspaceSource() {
       public UiLayoutDraftWorkspaceSeed capture(
           UiLayoutLifecycleInvocation invocation, UiLayoutValidationContext validation) {
-        var record = registered(invocation);
+        if (!isPage(invocation.rootTarget())) return nativeSource.capture(invocation, validation);
+        var current = currentOrVerifiedContext(invocation, validation.attempt());
+        var record = registered(invocation, current);
         if (record.isEmpty()) return nativeSource.capture(invocation, validation);
         var value = record.orElseThrow();
-        verify(verificationContext(invocation, value), value, validation.attempt());
+        verify(verificationContext(invocation, value, current), value, validation.attempt());
         return new UiLayoutDraftWorkspaceSeed(List.of(outputSeed(value, invocation)));
       }
 
@@ -164,11 +176,19 @@ final class PageCatalogLifecycleBridge {
           UiLayoutTarget page,
           UiLayoutPageChildSeed seed,
           UiLayoutValidationContext validation) {
-        var record = registered(invocation);
+        var current =
+            isPage(invocation.rootTarget())
+                ? currentOrVerifiedContext(invocation, validation.attempt())
+                : null;
+        var record =
+            current == null
+                ? Optional.<PageCreationEvidence>empty()
+                : registered(invocation, current);
         if (isGenerated(seed.metadata())) {
           var value =
               record.orElseThrow(() -> failure(UiLayoutLifecycleException.Code.INVALID_STATE));
-          if (!page.equals(value.target())) throw failure(UiLayoutLifecycleException.Code.VALIDATION_FAILED);
+          if (!page.equals(value.target()))
+            throw failure(UiLayoutLifecycleException.Code.VALIDATION_FAILED);
           var expected =
               outputSeed(value).pageChildren().stream()
                   .filter(child -> child.request().equals(seed.request()))
@@ -176,7 +196,7 @@ final class PageCatalogLifecycleBridge {
                   .orElseThrow(() -> failure(UiLayoutLifecycleException.Code.VALIDATION_FAILED));
           if (!sameSeedOrigin(expected, seed))
             throw failure(UiLayoutLifecycleException.Code.VALIDATION_FAILED);
-          verify(verificationContext(invocation, value), value, validation.attempt());
+          verify(verificationContext(invocation, value, current), value, validation.attempt());
         } else nativeSource.requirePageChildEvidence(invocation, page, seed, validation);
       }
     };
@@ -184,7 +204,12 @@ final class PageCatalogLifecycleBridge {
 
   UiLayoutBaselineMetadataAdmission metadataAdmission() {
     return (invocation, target, descriptor, sourceRef, baseline, seed) -> {
-      var record = registered(invocation);
+      var current =
+          isPage(invocation.rootTarget()) ? currentOrScopedVerifiedContext(invocation) : null;
+      var record =
+          current == null
+              ? Optional.<PageCreationEvidence>empty()
+              : registered(invocation, current);
       if (isGenerated(seed)) {
         var value =
             record.orElseThrow(() -> failure(UiLayoutLifecycleException.Code.INVALID_STATE));
@@ -213,14 +238,17 @@ final class PageCatalogLifecycleBridge {
             }
           }
         if (!match) throw failure(UiLayoutLifecycleException.Code.VALIDATION_FAILED);
-        verify(verificationContext(invocation, value), value);
+        verify(verificationContext(invocation, value, current), value);
       } else metadata.require(invocation, target, descriptor, sourceRef, baseline, seed);
     };
   }
 
   PageCreationEvidence.SourceSnapshot capture(
-      Principal principal, String version, PageCreationContext context,
-      PageSourceReference source, UiLayoutValidationAttempt outer) {
+      Principal principal,
+      String version,
+      PageCreationContext context,
+      PageSourceReference source,
+      UiLayoutValidationAttempt outer) {
     var chain = new Chain(outer);
     chain.check();
     // Fresh joint authority after creation-key lookup, before any source I/O or extension.
@@ -237,11 +265,15 @@ final class PageCatalogLifecycleBridge {
       }
       if (seed == null) throw failure(UiLayoutLifecycleException.Code.SOURCE_UNAVAILABLE);
       snapshot = new PageCreationEvidence.SourceSnapshot(seed, seed.document(), null);
-    } else if (source instanceof PageSourceReference.Published published)
+      verifySource(context, source, snapshot, chain, false);
+    } else if (source instanceof PageSourceReference.Published published) {
       snapshot = published(context, published, chain);
-    else throw failure(UiLayoutLifecycleException.Code.INVALID_REQUEST);
-    verifySource(context, source, snapshot, chain);
+      verifySource(context, source, snapshot, chain, true);
+    } else throw failure(UiLayoutLifecycleException.Code.INVALID_REQUEST);
     chain.check();
+    outer.markVerified(
+        sourceKey(context, source, snapshot, outer.inBeforeCommit()),
+        new VerifiedLineage(chain.maxDepth, chain.bytes, Set.copyOf(chain.verified), context));
     return snapshot;
   }
 
@@ -253,6 +285,90 @@ final class PageCatalogLifecycleBridge {
       UUID page,
       UUID release,
       UUID revision) {}
+
+  private record ContextCorrelationKey(
+      String applicationId,
+      String routeNamespace,
+      String actorRef,
+      String tenantId,
+      String administrativeUnit,
+      String environment,
+      String contextVersion) {
+    static ContextCorrelationKey of(PageCreationContext context) {
+      var inv = context.invocation();
+      return new ContextCorrelationKey(
+          context.applicationId(),
+          context.routeNamespace(),
+          inv.actorRef(),
+          inv.tenantId(),
+          inv.administrativeUnit(),
+          inv.environment(),
+          inv.contextVersion());
+    }
+  }
+
+  private record VerifiedSourceKey(
+      ContextCorrelationKey context,
+      PageSourceReference source,
+      String baselineHash,
+      String documentHash,
+      UUID sourceDraftId,
+      boolean beforeCommit) {}
+
+  private record VerifiedEvidenceKey(
+      ContextCorrelationKey context,
+      UUID pageId,
+      String sourceHash,
+      String outputHash,
+      boolean beforeCommit) {}
+
+  private record VerifiedPageContextKey(
+      UUID pageId,
+      String actorRef,
+      String tenantId,
+      String administrativeUnit,
+      String environment,
+      String contextVersion,
+      boolean beforeCommit) {
+    static VerifiedPageContextKey of(
+        UUID pageId, UiLayoutLifecycleInvocation invocation, boolean beforeCommit) {
+      return new VerifiedPageContextKey(
+          pageId,
+          invocation.actorRef(),
+          invocation.tenantId(),
+          invocation.administrativeUnit(),
+          invocation.environment(),
+          invocation.contextVersion(),
+          beforeCommit);
+    }
+  }
+
+  private record VerifiedLineage(
+      int depth, long bytes, Set<UUID> lineageIds, PageCreationContext context) {}
+
+  private VerifiedSourceKey sourceKey(
+      PageCreationContext context,
+      PageSourceReference source,
+      PageCreationEvidence.SourceSnapshot snapshot,
+      boolean beforeCommit) {
+    return new VerifiedSourceKey(
+        ContextCorrelationKey.of(context),
+        source,
+        hashes.sha256Exact(codec.tree(snapshot.baseline())),
+        hashes.sha256Exact(snapshot.document()),
+        snapshot.sourceDraftId(),
+        beforeCommit);
+  }
+
+  private VerifiedEvidenceKey evidenceKey(
+      PageCreationContext context, PageCreationEvidence value, boolean beforeCommit) {
+    return new VerifiedEvidenceKey(
+        ContextCorrelationKey.of(context),
+        value.pageId(),
+        value.sourceHash(),
+        value.outputHash(),
+        beforeCommit);
+  }
 
   private PageCreationEvidence.SourceSnapshot published(
       PageCreationContext context, PageSourceReference.Published source, Chain chain) {
@@ -271,7 +387,7 @@ final class PageCatalogLifecycleBridge {
             store
                 .immutableRead(
                     key,
-                    () -> java.util.Optional.of(codec.write(loadPublished(context, source, chain))))
+                    () -> Optional.of(codec.write(loadPublished(context, source, chain))))
                 .orElseThrow(() -> failure(UiLayoutLifecycleException.Code.INVALID_STATE)));
     // This callback is current policy, so it executes even when immutable bytes were reused.
     var sourceInvocation = context.forTarget(snapshot.baseline().target());
@@ -361,27 +477,55 @@ final class PageCatalogLifecycleBridge {
   }
 
   void verify(PageCreationContext context, PageCreationEvidence value) {
+    verifyWithOutcome(context, value);
+  }
+
+  private boolean verifyWithOutcome(PageCreationContext context, PageCreationEvidence value) {
     try (var attempt = UiLayoutValidationScope.borrow(context.invocation())) {
-      verify(context, value, attempt);
+      return verifyWithOutcome(context, value, attempt);
     }
   }
 
   void verify(
       PageCreationContext context, PageCreationEvidence value, UiLayoutValidationAttempt outer) {
-    var chain = new Chain(outer);
-    verify(context, value, chain);
-    chain.check();
+    verifyWithOutcome(context, value, outer);
   }
 
-  private void verify(PageCreationContext context, PageCreationEvidence value, Chain chain) {
+  private boolean verifyWithOutcome(
+      PageCreationContext context, PageCreationEvidence value, UiLayoutValidationAttempt outer) {
+    var chain = new Chain(outer);
+    boolean executed = verify(context, value, chain);
+    chain.check();
+    return executed;
+  }
+
+  private boolean verify(PageCreationContext context, PageCreationEvidence value, Chain chain) {
     chain.check();
     sameNamespace(context, value);
-    if (chain.verified.contains(value.pageId())) return;
+    if (chain.verified.contains(value.pageId())) return false;
+    var evKey = evidenceKey(context, value, chain.outer.inBeforeCommit());
+    VerifiedLineage cached = chain.outer.verified(evKey);
+    if (cached != null) {
+      if (!Collections.disjoint(chain.path, cached.lineageIds())
+          || chain.path.size() + cached.depth() > MAX_CHAIN
+          || chain.bytes + cached.bytes() > MAX_CHAIN_BYTES) {
+        throw failure(UiLayoutLifecycleException.Code.VALIDATION_FAILED);
+      }
+      chain.maxDepth = Math.max(chain.maxDepth, chain.path.size() + cached.depth());
+      chain.bytes += cached.bytes();
+      chain.verified.addAll(cached.lineageIds());
+      return false;
+    }
     if (chain.path.size() >= MAX_CHAIN || !chain.path.add(value.pageId()))
       throw failure(UiLayoutLifecycleException.Code.VALIDATION_FAILED);
-    chain.bytes += codec.write(value).getBytes(java.nio.charset.StandardCharsets.UTF_8).length;
+    chain.maxDepth = Math.max(chain.maxDepth, chain.path.size());
+    long bytesBefore = chain.bytes;
+    int depthBefore = chain.path.size() - 1;
+    Set<UUID> verifiedBefore = new HashSet<>(chain.verified);
+    chain.bytes += codec.write(value).getBytes(StandardCharsets.UTF_8).length;
     if (chain.bytes > MAX_CHAIN_BYTES)
       throw failure(UiLayoutLifecycleException.Code.VALIDATION_FAILED);
+    boolean executedExtensions = true;
     try {
       if (!PageCopyTransformation.TRANSFORM.equals(value.transformRef()))
         throw failure(UiLayoutLifecycleException.Code.INVALID_STATE);
@@ -389,8 +533,40 @@ final class PageCatalogLifecycleBridge {
       if (!result.sourceHash().equals(value.sourceHash())
           || !result.outputHash().equals(value.outputHash()))
         throw failure(UiLayoutLifecycleException.Code.INVALID_STATE);
-      verifySource(context, value.command().source(), value.original(), chain);
+      var srcKey =
+          sourceKey(
+              context, value.command().source(), value.original(), chain.outer.inBeforeCommit());
+      VerifiedLineage cachedSource = chain.outer.verified(srcKey);
+      if (cachedSource != null) {
+        if (!Collections.disjoint(chain.path, cachedSource.lineageIds())
+            || chain.path.size() + cachedSource.depth() > MAX_CHAIN
+            || chain.bytes + cachedSource.bytes() > MAX_CHAIN_BYTES) {
+          throw failure(UiLayoutLifecycleException.Code.VALIDATION_FAILED);
+        }
+        chain.maxDepth = Math.max(chain.maxDepth, chain.path.size() + cachedSource.depth());
+        chain.bytes += cachedSource.bytes();
+        chain.verified.addAll(cachedSource.lineageIds());
+        executedExtensions = false;
+      } else {
+        verifySource(context, value.command().source(), value.original(), chain, false);
+      }
       chain.verified.add(value.pageId());
+      int subtreeDepth = Math.max(1, chain.maxDepth - depthBefore);
+      long subtreeBytes = chain.bytes - bytesBefore;
+      Set<UUID> subtreeIds = new HashSet<>(chain.verified);
+      subtreeIds.removeAll(verifiedBefore);
+      subtreeIds.add(value.pageId());
+      var pageContext =
+          new PageCreationContext(
+              context.applicationId(), context.routeNamespace(), context.forTarget(value.target()));
+      var lineage =
+          new VerifiedLineage(subtreeDepth, subtreeBytes, Set.copyOf(subtreeIds), pageContext);
+      chain.outer.markVerified(evKey, lineage);
+      chain.outer.markVerified(
+          VerifiedPageContextKey.of(
+              value.pageId(), pageContext.invocation(), chain.outer.inBeforeCommit()),
+          lineage);
+      return executedExtensions;
     } finally {
       chain.path.remove(value.pageId());
       chain.check();
@@ -401,7 +577,8 @@ final class PageCatalogLifecycleBridge {
       PageCreationContext context,
       PageSourceReference source,
       PageCreationEvidence.SourceSnapshot snapshot,
-      Chain chain) {
+      Chain chain,
+      boolean publishedSnapshotAlreadyLoaded) {
     chain.check();
 
     var seed = snapshot.baseline();
@@ -421,8 +598,10 @@ final class PageCatalogLifecycleBridge {
             e, "Native page source admission is unavailable.");
       }
     } else if (source instanceof PageSourceReference.Published origin) {
-      var actual = published(context, origin, chain);
-      if (!exact(actual, snapshot)) throw failure(UiLayoutLifecycleException.Code.INVALID_STATE);
+      if (!publishedSnapshotAlreadyLoaded) {
+        var actual = published(context, origin, chain);
+        if (!exact(actual, snapshot)) throw failure(UiLayoutLifecycleException.Code.INVALID_STATE);
+      }
       var sourceCreation =
           store
               .byPage(context, origin.pageId())
@@ -455,15 +634,19 @@ final class PageCatalogLifecycleBridge {
           seed.patch(),
           projection.compilePatch(),
           validation);
-      if (!jointNative) validation.run(invocation, () -> requireOriginalMetadata(
-          context,
-          invocation,
-          seed.target(),
-          seed.authoring(),
-          seed.sourceRef(),
-          seed.document(),
-          seed.metadata(),
-          chain));
+      if (!jointNative)
+        validation.run(
+            invocation,
+            () ->
+                requireOriginalMetadata(
+                    context,
+                    invocation,
+                    seed.target(),
+                    seed.authoring(),
+                    seed.sourceRef(),
+                    seed.document(),
+                    seed.metadata(),
+                    chain));
       var children = UiLayoutPageRevisionReproduction.children(snapshot.document());
       var keys = new HashSet<String>();
       for (var child : seed.pageChildren()) {
@@ -487,15 +670,20 @@ final class PageCatalogLifecycleBridge {
           // The source page creation was already traversed above for a published source.
           if (!(source instanceof PageSourceReference.Published)) verify(context, record, chain);
         } else if (!jointNative) {
-          validation.run(invocation, () -> nativeSource.requirePageChildEvidence(invocation, seed.target(), child, validation));
+          validation.run(
+              invocation,
+              () ->
+                  nativeSource.requirePageChildEvidence(
+                      invocation, seed.target(), child, validation));
         }
       }
       if (!keys.equals(children.keySet()))
         throw failure(UiLayoutLifecycleException.Code.INVALID_STATE);
       if (jointNative) {
         try {
-          validation.run(invocation, () -> requireNativeProvenance(
-              context, (PageSourceReference.Native) source, seed));
+          validation.run(
+              invocation,
+              () -> requireNativeProvenance(context, (PageSourceReference.Native) source, seed));
         } catch (RuntimeException e) {
           throw UiLayoutMetadataAdmissionFailure.sanitized(
               e, "Native page provenance admission is unavailable.");
@@ -504,15 +692,18 @@ final class PageCatalogLifecycleBridge {
     }
   }
 
-  private static boolean whollyNative(PageSourceReference source,
-      PageCreationEvidence.SourceSnapshot snapshot) {
+  private static boolean whollyNative(
+      PageSourceReference source, PageCreationEvidence.SourceSnapshot snapshot) {
     return source instanceof PageSourceReference.Native
         && !isGenerated(snapshot.baseline().metadata())
-        && snapshot.baseline().pageChildren().stream().noneMatch(child -> isGenerated(child.metadata()));
+        && snapshot.baseline().pageChildren().stream()
+            .noneMatch(child -> isGenerated(child.metadata()));
   }
 
-  private void requireNativeProvenance(PageCreationContext expected,
-      PageSourceReference.Native source, UiLayoutDraftWorkspaceSeed.TargetSeed seed) {
+  private void requireNativeProvenance(
+      PageCreationContext expected,
+      PageSourceReference.Native source,
+      UiLayoutDraftWorkspaceSeed.TargetSeed seed) {
     var current = host.requireNativeProvenance(expected, source, seed);
     if (!expected.equals(current)) throw failure(UiLayoutLifecycleException.Code.CONTEXT_STALE);
   }
@@ -618,13 +809,7 @@ final class PageCatalogLifecycleBridge {
         UiLayoutRevisionJsonInput.writeDocument(document, () -> {}));
   }
 
-  private java.util.Optional<PageCreationEvidence> registered(
-      UiLayoutLifecycleInvocation invocation) {
-    if (!isPage(invocation.rootTarget())) return java.util.Optional.empty();
-    return registered(invocation, currentContext(invocation));
-  }
-
-  private java.util.Optional<PageCreationEvidence> registered(
+  private Optional<PageCreationEvidence> registered(
       UiLayoutLifecycleInvocation invocation, PageCreationContext current) {
     var result = store.byPage(current, UUID.fromString(invocation.rootTarget().componentId()));
     if (result.isEmpty() && store.knownPage(UUID.fromString(invocation.rootTarget().componentId())))
@@ -634,27 +819,51 @@ final class PageCatalogLifecycleBridge {
   }
 
   private PageCreationContext verificationContext(
-      UiLayoutLifecycleInvocation invocation, PageCreationEvidence value) {
+      UiLayoutLifecycleInvocation invocation,
+      PageCreationEvidence value,
+      PageCreationContext current) {
     if (whollyNative(value.command().source(), value.original())) {
       // Comparison values only. verifySource must freshly attest FULL lifecycle registration
       // together with provenance before any extension or I/O, and again after extensions.
-      return new PageCreationContext(value.observation().applicationId(),
-          value.observation().routeNamespace(), invocation);
+      return new PageCreationContext(
+          value.observation().applicationId(), value.observation().routeNamespace(), invocation);
     }
-    var current = currentContext(invocation);
     sameNamespace(current, value);
     return current;
   }
 
-  private PageCreationContext admittedPageContext(PageLifecycleAdmission admission,
-      UiLayoutLifecycleOperation operation, UiLayoutLifecycleInvocation invocation) {
+  private PageCreationContext admittedPageContext(
+      PageLifecycleAdmission admission,
+      UiLayoutLifecycleOperation operation,
+      UiLayoutLifecycleInvocation invocation) {
     try {
       var current = admission.requirePage(operation, invocation);
       if (current == null || !invocation.equals(current.invocation()))
         throw failure(UiLayoutLifecycleException.Code.CONTEXT_STALE);
       return current;
     } catch (RuntimeException error) {
-      throw UiLayoutMetadataAdmissionFailure.sanitized(error, "Page lifecycle authority is unavailable.");
+      throw UiLayoutMetadataAdmissionFailure.sanitized(
+          error, "Page lifecycle authority is unavailable.");
+    }
+  }
+
+  private PageCreationContext currentOrVerifiedContext(
+      UiLayoutLifecycleInvocation invocation, UiLayoutValidationAttempt attempt) {
+    UUID pageId = UUID.fromString(invocation.rootTarget().componentId());
+    VerifiedLineage cached =
+        attempt.verified(VerifiedPageContextKey.of(pageId, invocation, attempt.inBeforeCommit()));
+    if (cached != null && invocation.equals(cached.context().invocation())) {
+      return cached.context();
+    }
+    return currentContext(invocation);
+  }
+
+  private PageCreationContext currentOrScopedVerifiedContext(
+      UiLayoutLifecycleInvocation invocation) {
+    try (var attempt = UiLayoutValidationScope.borrow(invocation)) {
+      return currentOrVerifiedContext(invocation, attempt);
+    } catch (UiLayoutLifecycleException ignored) {
+      return currentContext(invocation);
     }
   }
 
@@ -724,6 +933,7 @@ final class PageCatalogLifecycleBridge {
   private static final class Chain {
     final Set<UUID> path = new HashSet<>();
     final Set<UUID> verified = new HashSet<>();
+    int maxDepth;
     long bytes;
     private final UiLayoutValidationAttempt outer;
     private int checkpoints;
@@ -741,8 +951,7 @@ final class PageCatalogLifecycleBridge {
         UiLayoutLifecycleInvocation invocation, UiLayoutLifecycleOperation operation) {
       check();
       return new UiLayoutValidationContext(
-          outer.correlate(invocation),
-          UiLayoutValidationPurpose.AUTHORING);
+          outer.correlate(invocation), UiLayoutValidationPurpose.AUTHORING);
     }
   }
 }

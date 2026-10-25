@@ -4,19 +4,15 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.security.Principal;
 import java.util.ArrayList;
-import java.util.HashSet;
 import java.util.List;
-import java.util.Set;
 import java.util.UUID;
 import java.util.function.Function;
 import org.springframework.transaction.TransactionStatus;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.praxisplatform.config.domain.UiLayoutAssignmentRevision;
-import org.praxisplatform.config.domain.UiLayoutDefinition;
 import org.praxisplatform.config.domain.UiLayoutDraft;
 import org.praxisplatform.config.domain.UiLayoutRelease;
 import org.praxisplatform.config.domain.UiLayoutReleaseHead;
-import org.praxisplatform.config.domain.UiLayoutReleaseMember;
 import org.praxisplatform.config.domain.UiLayoutReleaseReview;
 import org.praxisplatform.config.domain.UiLayoutRevision;
 import org.praxisplatform.config.dto.UiLayoutAssignmentRevisionReceipt;
@@ -162,7 +158,6 @@ public class UiLayoutLifecycleCommandService {
         revalidate(principal, contextVersion, root, invocation, UiLayoutLifecycleOperation.READ_DRAFT, validation);
         return receipt;
       }
-      revalidate(principal, contextVersion, root, invocation, UiLayoutLifecycleOperation.CREATE_DRAFT, validation);
       UiLayoutDraftWorkspaceSeed seed;
       try { seed = workspaceSource == null ? null : validation.call(invocation, () -> workspaceSource.capture(invocation, validation)); }
       catch (UiLayoutLifecycleException exception) {
@@ -198,7 +193,6 @@ public class UiLayoutLifecycleCommandService {
         }
         requireMetadata(invocation, target.target(), target.authoring(), target.sourceRef(), target.document(), target.metadata(), validation);
       }
-      revalidate(principal, contextVersion, root, invocation, UiLayoutLifecycleOperation.CREATE_DRAFT, validation);
       UiLayoutDraft draft = validation.call(invocation, () -> core.createDraft(reservedDraftId, scope(invocation), workspaceCodec.encode(document), invocation.actorRef(), key));
       // The Config JDBC store must see the new JPA draft inside this same transaction.
       validation.run(invocation, () -> drafts.flush());
@@ -211,18 +205,17 @@ public class UiLayoutLifecycleCommandService {
       }
       validation.run(invocation, () -> metadataStore.append(status, invocation, draft.getId(), captured, (current, capture) -> requireMetadataAccess(current, capture, validation)));
       var receipt = workspaceProjector.project(invocation, draft, validation.forPurpose(UiLayoutValidationPurpose.CURRENT_WORKSPACE_READ));
-      revalidate(principal, contextVersion, root, invocation, UiLayoutLifecycleOperation.CREATE_DRAFT, validation);
       requireMetadataEvidence(invocation, draft, captured, validation);
       if (UiLayoutNavigationGroupsRevisionReproduction.TYPE.equals(root.componentType())) {
         TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
           @Override public void beforeCommit(boolean readOnly) {
+            validation.attempt().enterBeforeCommit();
             requireMetadataEvidence(invocation, draft, captured, validation);
             revalidate(principal, contextVersion, root, invocation, UiLayoutLifecycleOperation.CREATE_DRAFT, validation);
           }
         });
       }
-      for (var state : document.targets()) recheckPageChildren(invocation, draft.getId(), state, validation);
-      revalidate(principal, contextVersion, root, invocation, UiLayoutLifecycleOperation.CREATE_DRAFT, validation);
+      for (var state : document.targets()) recheckPageChildrenBeforeCommit(invocation, draft.getId(), state, validation);
       return receipt;
     });
   }
@@ -333,12 +326,13 @@ public class UiLayoutLifecycleCommandService {
         requireMetadataEvidence(invocation, updated, null, validation);
         TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
           @Override public void beforeCommit(boolean readOnly) {
+            validation.attempt().enterBeforeCommit();
             requireMetadataEvidence(invocation, updated, null, validation);
             revalidate(principal, contextVersion, root, invocation, UiLayoutLifecycleOperation.EDIT_DRAFT, validation);
           }
         });
       }
-      recheckPageChildren(invocation, draftId, nextTarget, validation);
+      recheckPageChildrenBeforeCommit(invocation, draftId, nextTarget, validation);
       return new RevisionResult(new UiLayoutRevisionReceipt(revision.getId().toString(), input.target(), revision.getContentHash(),
           revision.getSchemaVersion(), revision.getRevisionNumber()), workspaceProjector.project(invocation, updated, validation.forPurpose(UiLayoutValidationPurpose.CURRENT_WORKSPACE_READ)));
     });
@@ -399,11 +393,12 @@ public class UiLayoutLifecycleCommandService {
       requireMetadataEvidence(invocation, current, null, validation);
       TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
         @Override public void beforeCommit(boolean readOnly) {
+          validation.attempt().enterBeforeCommit();
           requireMetadataEvidence(invocation, currentDraft(invocation, root, draftId), null, validation);
           revalidate(principal, contextVersion, root, invocation, UiLayoutLifecycleOperation.SUBMIT_RELEASE, validation);
         }
       });
-      for (var state : workspace.targets()) recheckPageChildren(invocation, draftId, state, validation);
+      for (var state : workspace.targets()) recheckPageChildrenBeforeCommit(invocation, draftId, state, validation);
       structure.validateReleaseTargets(invocation, workspace.targets().stream().map(UiLayoutDraftWorkspaceDocument.TargetState::target).toList(), validation);
       UiLayoutDraftWorkspaceDocument frozenWorkspace = new UiLayoutDraftWorkspaceDocument(
           workspace.schemaVersion(), workspace.targets(), commandRef);
@@ -517,6 +512,7 @@ public class UiLayoutLifecycleCommandService {
         validation.run(expected, () -> revalidate(principal, contextVersion, root, expected, operation, validation));
         TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
           @Override public void beforeCommit(boolean readOnly) {
+            validation.attempt().enterBeforeCommit();
             validation.run(expected, () -> revalidate(principal, contextVersion, root, expected, operation, validation));
           }
           @Override public void afterCompletion(int completionStatus) { validation.attempt().close(); }
@@ -581,8 +577,18 @@ public class UiLayoutLifecycleCommandService {
     Runnable check = () -> pageChildren.verify(invocation, draftId, state.target(), state.baseline().document(),
         state.working().document(), state.pageChildren(), workspaceSource, validation);
     check.run();
+    recheckPageChildrenBeforeCommit(invocation, draftId, state, validation);
+  }
+
+  private void recheckPageChildrenBeforeCommit(UiLayoutLifecycleInvocation invocation, UUID draftId,
+      UiLayoutDraftWorkspaceDocument.TargetState state, UiLayoutValidationContext validation) {
+    if (!UiLayoutPageRevisionReproduction.TYPE.equals(state.target().componentType())) return;
     TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
-      @Override public void beforeCommit(boolean readOnly) { check.run(); }
+      @Override public void beforeCommit(boolean readOnly) {
+        validation.attempt().enterBeforeCommit();
+        pageChildren.verify(invocation, draftId, state.target(), state.baseline().document(),
+            state.working().document(), state.pageChildren(), workspaceSource, validation);
+      }
     });
   }
 

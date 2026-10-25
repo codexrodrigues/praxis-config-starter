@@ -144,7 +144,9 @@ public final class PageCreationService {
                           principal, contextVersion, currentContext, originalCreation, validation),
                       false);
                 }
-                var originalSource = bridge.capture(principal, contextVersion, currentContext, command.source(), attempt);
+                var originalSource =
+                    bridge.capture(
+                        principal, contextVersion, currentContext, command.source(), attempt);
                 UUID pageId = UUID.randomUUID();
                 UUID draftId = UUID.randomUUID();
                 var transformed =
@@ -178,7 +180,8 @@ public final class PageCreationService {
                                 contextVersion,
                                 creation.target(),
                                 command.creationKey().toString(),
-                                draftId, validation));
+                                draftId,
+                                validation));
                 commitCheck(
                     principal, contextVersion, currentContext, command, creation, validation);
                 return new CreationOutcome(
@@ -230,11 +233,16 @@ public final class PageCreationService {
                     receipt(principal, contextVersion, currentContext, creation, validation);
                 authorize.run();
                 beforeCommit(
-                    () -> validation.run(currentContext.invocation(), () -> {
-                      authorize.run();
-                      receipt(principal, contextVersion, currentContext, creation, validation);
-                      authorize.run();
-                    }));
+                    validation,
+                    () ->
+                        validation.run(
+                            currentContext.invocation(),
+                            () -> {
+                              authorize.run();
+                              receipt(
+                                  principal, contextVersion, currentContext, creation, validation);
+                              authorize.run();
+                            }));
                 return receipt;
               });
       validation.require(currentContext.invocation());
@@ -266,7 +274,8 @@ public final class PageCreationService {
                         principal,
                         version,
                         creation.target(),
-                        creation.command().creationKey().toString(), validation));
+                        creation.command().creationKey().toString(),
+                        validation));
     if (!creation.draftId().toString().equals(currentDraft.draftRef())) {
       throw new UiLayoutLifecycleException(
           UiLayoutLifecycleException.Code.INVALID_STATE,
@@ -284,12 +293,14 @@ public final class PageCreationService {
   }
 
   private void authorizeCreate(
-      Principal principal, String version,
+      Principal principal,
+      String version,
       PageCreationContext context,
       PageCreationCommand command,
       UiLayoutValidationContext validation) {
     validation.run(
-        context.invocation(), () -> bridge.requireCreation(principal, version, context, command.source()));
+        context.invocation(),
+        () -> bridge.requireCreation(principal, version, context, command.source()));
   }
 
   private void commitCheck(
@@ -306,14 +317,15 @@ public final class PageCreationService {
           authorizeCreate(principal, version, context, command, validation);
         };
     check.run();
-    beforeCommit(() -> validation.run(context.invocation(), check));
+    beforeCommit(validation, () -> validation.run(context.invocation(), check));
   }
 
-  private void beforeCommit(Runnable check) {
+  private void beforeCommit(UiLayoutValidationContext validation, Runnable check) {
     TransactionSynchronizationManager.registerSynchronization(
         new TransactionSynchronization() {
           @Override
           public void beforeCommit(boolean readOnly) {
+            validation.attempt().enterBeforeCommit();
             store.requireTransaction();
             check.run();
             store.requireTransaction();
