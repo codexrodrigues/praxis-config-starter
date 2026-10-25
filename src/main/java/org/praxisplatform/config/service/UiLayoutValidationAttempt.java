@@ -1,8 +1,11 @@
 package org.praxisplatform.config.service;
 
 import java.time.Duration;
+import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.LongSupplier;
 
@@ -17,7 +20,7 @@ public final class UiLayoutValidationAttempt implements AutoCloseable {
   private final UiLayoutLifecycleInvocation invocation;
   private final Budget budget;
   private final boolean owner;
-  private final java.util.concurrent.atomic.AtomicBoolean closed = new java.util.concurrent.atomic.AtomicBoolean();
+  private final AtomicBoolean closed = new AtomicBoolean();
 
   /** One monotonic clock and lifetime. Correlated views never allocate another allowance. */
   private static final class Budget {
@@ -26,6 +29,8 @@ public final class UiLayoutValidationAttempt implements AutoCloseable {
     final LongSupplier ticker;
     final long startedAt, budgetNanos;
     final AtomicLong remaining;
+    final AtomicBoolean beforeCommit = new AtomicBoolean();
+    final Map<Object, Object> verified = new ConcurrentHashMap<>();
     Budget(UiLayoutLifecycleOperation operation, long nanos, LongSupplier ticker) {
       this.operation = operation; this.ticker = ticker; this.startedAt = ticker.getAsLong();
       this.budgetNanos = nanos; this.remaining = new AtomicLong(nanos);
@@ -71,6 +76,25 @@ public final class UiLayoutValidationAttempt implements AutoCloseable {
   }
 
   boolean sharesBudget(UiLayoutValidationAttempt other) { return other != null && budget == other.budget; }
+
+  void enterBeforeCommit() {
+    budget.beforeCommit.set(true);
+  }
+
+  boolean inBeforeCommit() {
+    return budget.beforeCommit.get();
+  }
+
+  @SuppressWarnings("unchecked")
+  <T> T verified(Object key) {
+    requireActive();
+    return (T) budget.verified.get(key);
+  }
+
+  void markVerified(Object key, Object summary) {
+    requireActive();
+    budget.verified.put(key, summary);
+  }
 
   public UiLayoutLifecycleInvocation invocation() { return invocation; }
   /** Initiating operation, retained even if diagnosis requires a nested historical visibility check. */

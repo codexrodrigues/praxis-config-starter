@@ -503,3 +503,46 @@ O reviewer independente revisou produção, negativos, docs e XML sem achado de 
 a referência final da árvore revisada fica no recibo. Skills classificadas `atualizar-existente`
 (runtime-persistence e security-config), com autor canônico separado neste mesmo incremento.
 Integração das skills, release, adoção e prova real Hero continuam gates separados.
+
+
+## Published copy: measured orchestration and capture admission
+
+A focal synthetic fixture now runs a published-page copy through the real
+`PageCreationService`, frozen workspace resolver, provenance bridge, JDBC store
+implementations and Spring beforeCommit/physical commit callbacks. JDBC/repository
+transport is mocked; the source release is a pinned synthetic released snapshot
+of a previously created native page, not an executed publication or database proof.
+On rc174, the existing native case has110 authority units; published has132:
+38 lifecycle context resolutions versus15, and no native capture callback.
+These are structural counts, not measurements of remote latency, statements issued
+by SESSION readers or the cause of the observed HTTP503 at40973ms.
+
+The capture checkpoint now reuses the existing mandatory `requireCreation` seam
+with the original Principal/version and exact expected context/source. Instead of
+adjacent independent READ_SOURCE/COPY_SOURCE calls, it performs FULL context
+resolution plus CREATE_PAGE/READ_SOURCE/COPY_SOURCE in the established joint
+before/after authority window. This adds current CREATE_PAGE and context policy
+at this point; no grant or authority result is cached. The original six creation
+checkpoints, source reads/extensions, provenance traversal and commit checks stay
+in place; capture is the seventh fresh joint call. Deadline checks still surround
+that call and the host's original Principal/ambient identity coherence applies.
+No public SPI, permission, transaction budget, SQL grant or host implementation changes.
+
+The same fixture after this patch measures native109 and published131 units
+(2 fewer modeled authority observations per operation). The published delta remains
+22 units; this small reduction does not establish that a real copy fits40 seconds.
+Reports are `target/page-creation-native-full-path-cost.json` and
+`target/page-creation-published-full-path-cost.json`. Baseline reports were preserved
+before applying the production patch. Focal negative coverage includes revocation
+and complete context drift after creation-key lookup for both source kinds, original
+Principal identity, deadline closure on both sides of the joint window, and physical
+rollback without commit. No HTTP write or Neon rehearsal was repeated.
+
+Validation:37 focal unit tests passed (FullPath5, Checkpoint3, Bridge29); the Bridge
+suite was rerun only after adding the before/after attempt-closure test. Skill
+impact: `existente-adequada`, checked against canonical skills main9298573:
+`praxis-config-runtime-persistence/references/governed-layout-integrity.md` and
+`praxis-api-quickstart-security-config/SKILL.md` already require the exact joint
+creation unit at each checkpoint, original credential/coherence, full policies,
+no source I/O inside the unit and no SLA claim from callback counts. This patch
+reuses that contract rather than introducing a new seam or changing host adoption.

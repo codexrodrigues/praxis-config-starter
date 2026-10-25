@@ -113,7 +113,7 @@ class PageCreationAdmissionCheckpointTest {
       var seed = new UiLayoutDraftWorkspaceSeed.TargetSeed(UiLayoutPageRevisionReproductionTest.PAGE,
           UiLayoutPageRevisionReproductionTest.DESCRIPTOR, UiLayoutPageRevisionReproductionTest.PATCH,
           "fixture:page", document, UiLayoutMetadataTestFixtures.nativeMetadata(document, "alice", "unit", "c1"));
-      when(bridge.capture(any(), any(), any())).thenReturn(new PageCreationEvidence.SourceSnapshot(seed, document, null));
+      when(bridge.capture(any(), any(), any(), any(), any())).thenReturn(new PageCreationEvidence.SourceSnapshot(seed, document, null));
       doAnswer(call -> { inserted = call.getArgument(0); events.add("insert"); tx.provisional = true; return null; })
           .when(store).insert(any());
       when(commands.createReservedPageDraft(any(), any(), any(), any(), any(), any())).thenAnswer(call -> {
