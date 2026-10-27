@@ -931,7 +931,7 @@ class DomainRuleServiceTest {
                             "schemaVersion": "praxis.domain-rule-fact-catalog.v1",
                             "facts": [{
                               "path": "request.requestedAmount",
-                              "valueType": "number",
+                              "valueType": "array<number>",
                               "nullable": false,
                               "labels": {"pt-BR": "Valor solicitado", "en-US": "Requested amount"},
                               "descriptions": {"pt-BR": "Valor monetário solicitado.", "en-US": "Requested monetary amount."},
@@ -953,7 +953,7 @@ class DomainRuleServiceTest {
         assertThat(catalog.schemaVersion()).isEqualTo("praxis.domain-rule-fact-catalog.v1");
         assertThat(catalog.facts()).singleElement().satisfies(fact -> {
             assertThat(fact.path()).isEqualTo("request.requestedAmount");
-            assertThat(fact.valueType()).isEqualTo("number");
+            assertThat(fact.valueType()).isEqualTo("array<number>");
             assertThat(fact.labels()).containsEntry("pt-BR", "Valor solicitado");
             assertThat(fact.sensitivity()).isEqualTo("SENSITIVE");
             assertThat(fact.redaction()).isEqualTo("MASK");

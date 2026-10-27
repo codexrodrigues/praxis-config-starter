@@ -125,6 +125,40 @@ class ResourceCapabilitiesRetrievalServiceTest {
                 .isEqualTo(ResourceCapabilitiesFetchResult.Status.INVALID_RESOURCE);
     }
 
+    @Test
+    void cachesSuccessfulCapabilitiesLookupPerScopeAndReturnsDefensiveCopies() throws Exception {
+        List<String> requests = new ArrayList<>();
+        server = HttpServer.create(new InetSocketAddress(0), 0);
+        server.createContext("/api/human-resources/funcionarios/capabilities", exchange -> {
+            requests.add(exchange.getRequestHeaders().getFirst("X-Tenant-ID"));
+            writeJson(exchange, 200, """
+                    {
+                      "resourcePath": "/api/human-resources/funcionarios",
+                      "stats": { "fields": [{ "field": "departamento", "groupByEligible": true }] }
+                    }
+                    """);
+        });
+        server.start();
+
+        ResourceCapabilitiesRetrievalService service = new ResourceCapabilitiesRetrievalService(
+                new ObjectMapper(),
+                "http://localhost:" + server.getAddress().getPort(),
+                5_000L);
+
+        ResourceCapabilitiesFetchResult first = service.fetchCapabilitiesResult(
+                "/api/human-resources/funcionarios", null, "tenant-a", "user-a", "local");
+        ((com.fasterxml.jackson.databind.node.ObjectNode) first.getCapabilities()).put("mutated", true);
+        ResourceCapabilitiesFetchResult second = service.fetchCapabilitiesResult(
+                "/api/human-resources/funcionarios", null, "tenant-a", "user-a", "local");
+        ResourceCapabilitiesFetchResult otherTenant = service.fetchCapabilitiesResult(
+                "/api/human-resources/funcionarios", null, "tenant-b", "user-a", "local");
+
+        assertThat(second.isSuccess()).isTrue();
+        assertThat(second.getCapabilities().has("mutated")).isFalse();
+        assertThat(otherTenant.isSuccess()).isTrue();
+        assertThat(requests).containsExactly("tenant-a", "tenant-b");
+    }
+
     private static void writeJson(HttpExchange exchange, int status, String body) throws IOException {
         byte[] bytes = body.getBytes(StandardCharsets.UTF_8);
         exchange.getResponseHeaders().add("Content-Type", "application/json");

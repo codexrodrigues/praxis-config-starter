@@ -488,12 +488,32 @@ public class AgenticAuthoringApiMetadataCandidateCatalog {
                         .toList();
             }
         }
-        Comparator<AgenticAuthoringCandidate> ranking = "api_catalog".equals(artifactKind)
+        boolean llmResourceFocus = hasLlmAuthoredResourceFocus(normalize(valueOrEmpty(normalizedPrompt)));
+        Comparator<AgenticAuthoringCandidate> baseRanking = "api_catalog".equals(artifactKind)
                 ? Comparator.comparingDouble(AgenticAuthoringCandidate::score).reversed()
                 : resourceNeed == SemanticResourceNeed.ANALYTICS
                 && !hasLlmAuthoredResourceFocus(normalize(valueOrEmpty(normalizedPrompt)))
                 ? CandidateRankingPolicy.byEvidenceStrengthScoreThenRoleFit(resourceNeed)
                 : CandidateRankingPolicy.byEvidenceStrengthRoleFitThenScore(resourceNeed);
+        Comparator<AgenticAuthoringCandidate> ranking = !"api_catalog".equals(artifactKind)
+                && llmResourceFocus
+                && resourceNeed == SemanticResourceNeed.GENERIC_OPERATIONAL
+                ? Comparator.comparingInt(this::evidenceStrength).reversed()
+                        .thenComparing(Comparator.comparingInt(
+                                (AgenticAuthoringCandidate candidate) -> hasStaticEvidence(
+                                        candidate,
+                                        "tool-search-api-resources") ? 1 : 0)
+                                .reversed())
+                        .thenComparing(Comparator.comparingDouble(
+                                (AgenticAuthoringCandidate candidate) -> semanticRoleFit(candidate, resourceNeed))
+                                .reversed())
+                        .thenComparing(Comparator.comparingInt(
+                                (AgenticAuthoringCandidate candidate) -> primaryBusinessEntityAlignmentScore(
+                                        normalizedPrompt,
+                                        candidate))
+                                .reversed())
+                        .thenComparing(Comparator.comparingDouble(AgenticAuthoringCandidate::score).reversed())
+                : baseRanking;
         return subjectScopedCandidates.stream()
                 .sorted(ranking)
                 .limit(CANDIDATE_LIMIT)
@@ -522,8 +542,9 @@ public class AgenticAuthoringApiMetadataCandidateCatalog {
         if (candidate == null) {
             return 0;
         }
+        String normalizedFullPrompt = normalize(valueOrEmpty(normalizedPrompt));
         String primaryBusinessEntity = semanticQuerySection(
-                normalize(valueOrEmpty(normalizedPrompt)),
+                normalizedFullPrompt,
                 "primary business entity:",
                 "supporting concepts:");
         List<String> subjectTokens = meaningfulTokens(primaryBusinessEntity);
@@ -555,8 +576,24 @@ public class AgenticAuthoringApiMetadataCandidateCatalog {
             }
         }
         String normalizedSubject = normalize(String.join(" ", subjectTokens)).trim();
-        if (!normalizedSubject.isBlank() && normalizedSubject.equals(normalizedTerminal)) {
+        if (!normalizedSubject.isBlank() && matchesExactOrPluralToken(normalizedTerminal, normalizedSubject)) {
             score += 6;
+        }
+        if (!isDerivedProjectionCandidate(candidate)) {
+            String supportingConcepts = semanticQuerySection(
+                    normalizedFullPrompt,
+                    "supporting concepts:",
+                    "desired surface:");
+            List<String> supportingTokens = meaningfulTokens(supportingConcepts);
+            List<String> terminalTokens = meaningfulTokens(normalizedTerminal);
+            if (terminalTokens.size() >= 2 && !supportingTokens.isEmpty()) {
+                boolean allTerminalTokensMatchedInSupporting = terminalTokens.stream()
+                        .allMatch(terminalToken -> supportingTokens.stream()
+                                .anyMatch(supportingToken -> matchesToken(terminalToken, supportingToken)));
+                if (allTerminalTokensMatchedInSupporting) {
+                    score += terminalTokens.size() * 3 + 6;
+                }
+            }
         }
         return score;
     }
@@ -658,7 +695,7 @@ public class AgenticAuthoringApiMetadataCandidateCatalog {
                             normalizedPrompt,
                             method,
                             null,
-                            CANDIDATE_LIMIT,
+                            CANDIDATE_LIMIT * 3,
                             null,
                             tenantId,
                             environment,
@@ -859,7 +896,7 @@ public class AgenticAuthoringApiMetadataCandidateCatalog {
             String environment,
             String releaseId) {
         String operation = result.getMethod().toLowerCase(Locale.ROOT);
-        String submitUrl = canonicalSubmitUrl(result.getPath(), operation, artifactKind);
+        String submitUrl = canonicalSubmitUrl(result.getPath(), operation, artifactKind, normalizedPrompt);
         String submitMethod = canonicalSubmitMethod(submitUrl, operation);
         String resourcePath = baseResourcePath(result.getPath());
         double score = Math.max(0.45d, Math.min(0.98d, result.getSimilarityScore()));
@@ -945,7 +982,7 @@ public class AgenticAuthoringApiMetadataCandidateCatalog {
         }
         score = Math.max(0d, Math.min(0.99d, score));
         String operation = metadata.getMethod().toLowerCase(Locale.ROOT);
-        String submitUrl = canonicalSubmitUrl(metadata.getPath(), operation, artifactKind);
+        String submitUrl = canonicalSubmitUrl(metadata.getPath(), operation, artifactKind, normalizedPrompt);
         String submitMethod = canonicalSubmitMethod(submitUrl, operation);
         String resourcePath = baseResourcePath(metadata.getPath());
         ResourceSemanticRole semanticRole = semanticRole(
@@ -1013,7 +1050,7 @@ public class AgenticAuthoringApiMetadataCandidateCatalog {
         }
         score = Math.max(0d, Math.min(0.90d, score));
         String operation = metadata.getMethod().toLowerCase(Locale.ROOT);
-        String submitUrl = canonicalSubmitUrl(metadata.getPath(), operation, artifactKind);
+        String submitUrl = canonicalSubmitUrl(metadata.getPath(), operation, artifactKind, normalizedPrompt);
         String submitMethod = canonicalSubmitMethod(submitUrl, operation);
         String resourcePath = baseResourcePath(metadata.getPath());
         ResourceSemanticRole semanticRole = semanticRole(
@@ -1055,7 +1092,11 @@ public class AgenticAuthoringApiMetadataCandidateCatalog {
             String resourceFocus) {
         String endpointText = searchableText(metadata);
         String operation = metadata.getMethod().toLowerCase(Locale.ROOT);
-        String submitUrl = canonicalSubmitUrl(metadata.getPath(), operation, context.artifactKind());
+        String submitUrl = canonicalSubmitUrl(
+                metadata.getPath(),
+                operation,
+                context.artifactKind(),
+                context.normalizedPrompt());
         String submitMethod = canonicalSubmitMethod(submitUrl, operation);
         String resourcePath = baseResourcePath(metadata.getPath());
         ResourceSemanticRole semanticRole = semanticRole(
@@ -1254,6 +1295,9 @@ public class AgenticAuthoringApiMetadataCandidateCatalog {
         if (path.endsWith("/stats/distribution") && !hasDistributionToken(tokens)) {
             return -0.05d;
         }
+        if (path.endsWith("/stats/comparison") && !hasComparisonToken(tokens)) {
+            return -0.08d;
+        }
         return 0d;
     }
 
@@ -1271,6 +1315,11 @@ public class AgenticAuthoringApiMetadataCandidateCatalog {
     private boolean hasDistributionToken(List<String> tokens) {
         return tokens != null && tokens.stream().anyMatch(token -> containsAny(token,
                 "distribuicao", "faixa", "faixas", "histograma", "dispersao"));
+    }
+
+    private boolean hasComparisonToken(List<String> tokens) {
+        return tokens != null && tokens.stream().anyMatch(token -> containsAny(token,
+                "comparar", "comparacao", "comparativo", "versus", "vs"));
     }
 
     private String searchableText(ApiMetadataCandidateEvidence metadata) {
@@ -1404,8 +1453,8 @@ public class AgenticAuthoringApiMetadataCandidateCatalog {
         String value = valueOrEmpty(focusedIntent);
         return containsAny(value,
                 "analitico", "analitica", "analytics", "metricas agregadas", "agregado", "agregada",
-                "distribuicao", "serie temporal", "tendencia", "histograma", "folha", "pagamento",
-                "remuneracao", "salario", "payroll", "financeira");
+                "distribuicao", "serie temporal", "tendencia", "histograma",
+                "evolucao", "progressao", "trajetoria", "ao longo do tempo", "kpi", "indicadores");
     }
 
     private boolean hasProfileIntentSignal(String intentBearingText, String fullText) {
@@ -1463,11 +1512,37 @@ public class AgenticAuthoringApiMetadataCandidateCatalog {
             String submitUrl,
             String normalizedPrompt,
             String artifactKind) {
-        if (!isDerivedProjectionPath(resourcePath) && !isDerivedProjectionPath(submitUrl)) {
+        String normalizedFullPrompt = normalize(valueOrEmpty(normalizedPrompt));
+        boolean derivedProjection = isDerivedProjectionPath(resourcePath) || isDerivedProjectionPath(submitUrl);
+        if (!derivedProjection) {
+            if (hasMultiTokenSupportingTerminalMatch(resourcePath, normalizedFullPrompt)) {
+                return 0.12d;
+            }
             return 0d;
         }
         SemanticResourceNeed need = semanticResourceNeed(normalizedPrompt, artifactKind);
         return need == SemanticResourceNeed.GENERIC_OPERATIONAL ? -0.08d : 0d;
+    }
+
+    private boolean hasMultiTokenSupportingTerminalMatch(String resourcePath, String normalizedFullPrompt) {
+        String terminalSegment = normalizePath(valueOrEmpty(resourcePath))
+                .replaceAll("/+$", "")
+                .replaceAll("^.*/", "");
+        String normalizedTerminal = normalize(terminalSegment.replaceAll("[^a-z0-9]+", " ")).trim();
+        List<String> terminalTokens = meaningfulTokens(normalizedTerminal);
+        if (terminalTokens.size() < 2) {
+            return false;
+        }
+        String supportingConcepts = hasLlmAuthoredResourceFocus(normalizedFullPrompt)
+                ? semanticQuerySection(normalizedFullPrompt, "supporting concepts:", "desired surface:")
+                : normalizedFullPrompt;
+        List<String> supportingTokens = meaningfulTokens(supportingConcepts);
+        if (supportingTokens.isEmpty()) {
+            return false;
+        }
+        return terminalTokens.stream()
+                .allMatch(terminalToken -> supportingTokens.stream()
+                        .anyMatch(supportingToken -> matchesToken(terminalToken, supportingToken)));
     }
 
     private static boolean isDerivedProjectionPath(String value) {
@@ -1529,6 +1604,31 @@ public class AgenticAuthoringApiMetadataCandidateCatalog {
         return adjustment;
     }
 
+    private boolean matchesExactOrPluralToken(String terminal, String subject) {
+        if (terminal == null || subject == null || terminal.isBlank() || subject.isBlank()) {
+            return false;
+        }
+        if (terminal.equals(subject)
+                || terminal.equals(subject + "s")
+                || (subject.endsWith("s") && subject.equals(terminal + "s"))) {
+            return true;
+        }
+        if (subject.endsWith("al") && subject.length() >= 4
+                && terminal.equals(subject.substring(0, subject.length() - 2) + "ais")) {
+            return true;
+        }
+        if (subject.endsWith("ais") && subject.length() >= 5
+                && terminal.equals(subject.substring(0, subject.length() - 3) + "al")) {
+            return true;
+        }
+        if (subject.endsWith("ao") && subject.length() >= 4
+                && terminal.equals(subject.substring(0, subject.length() - 2) + "oes")) {
+            return true;
+        }
+        return subject.endsWith("oes") && subject.length() >= 5
+                && terminal.equals(subject.substring(0, subject.length() - 3) + "ao");
+    }
+
     private boolean matchesToken(String text, String token) {
         return matchesRawToken(text, token);
     }
@@ -1537,8 +1637,24 @@ public class AgenticAuthoringApiMetadataCandidateCatalog {
         if (text.contains(token)) {
             return true;
         }
+        if (token.endsWith("ais") && token.length() > 4
+                && text.contains(token.substring(0, token.length() - 3) + "al")) {
+            return true;
+        }
+        if (token.endsWith("al") && token.length() > 3
+                && text.contains(token.substring(0, token.length() - 2) + "ais")) {
+            return true;
+        }
         if (token.endsWith("s") && token.length() > 4) {
             return text.contains(token.substring(0, token.length() - 1));
+        }
+        if (token.endsWith("oes") && token.length() > 5
+                && text.contains(token.substring(0, token.length() - 3) + "ao")) {
+            return true;
+        }
+        if (token.endsWith("ao") && token.length() > 4
+                && text.contains(token.substring(0, token.length() - 2) + "oes")) {
+            return true;
         }
         return text.contains(token + "s");
     }
@@ -1667,7 +1783,7 @@ public class AgenticAuthoringApiMetadataCandidateCatalog {
         return "/schemas/filtered?path=" + resourcePath + "&operation=" + operation + "&schemaType=" + schemaType;
     }
 
-    private String canonicalSubmitUrl(String path, String operation, String artifactKind) {
+    private String canonicalSubmitUrl(String path, String operation, String artifactKind, String normalizedPrompt) {
         if (path == null || path.isBlank()) {
             return "";
         }
@@ -1675,6 +1791,11 @@ public class AgenticAuthoringApiMetadataCandidateCatalog {
         if (("table".equals(artifactKind) || "page".equals(artifactKind) || "unknown".equals(artifactKind))
                 && normalized.endsWith("/filter")) {
             return normalized + "/cursor";
+        }
+        if ("dashboard".equals(artifactKind)
+                && normalized.endsWith("/stats/comparison")
+                && !containsAny(normalize(valueOrEmpty(normalizedPrompt)), "comparar", "comparacao", "comparativo", "compare", "comparison", "versus")) {
+            return baseResourcePath(normalized) + "/stats/group-by";
         }
         if ("dashboard".equals(artifactKind) && !isKnownCollectionOperation(normalized) && !normalized.contains("/{")) {
             return normalized + "/stats/group-by";

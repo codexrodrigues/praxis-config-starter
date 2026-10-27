@@ -46,6 +46,9 @@ public class AgenticAuthoringComponentCapabilitiesService {
     private static final AtomicInteger REGISTRY_REFRESH_SEQUENCE = new AtomicInteger();
 
     private static final String SNAPSHOT_RESOURCE = "ai-registry/registry-snapshot.json";
+    private static volatile SnapshotCapabilitySource cachedSnapshotSource;
+    private static volatile List<AgenticAuthoringComponentCapabilitiesResult.ComponentCapabilityCatalog>
+            cachedSnapshotCatalogs;
     private final AiRegistryRepository aiRegistryRepository;
     private final ObjectMapper objectMapper;
     private final long cacheTtlMs;
@@ -328,15 +331,24 @@ public class AgenticAuthoringComponentCapabilitiesService {
 
     private AgenticAuthoringComponentCapabilitiesResult snapshotCapabilities(
             AgenticAuthoringComponentCapabilitiesResult.ComponentCapabilityDiagnostics diagnostics) {
-        SnapshotCapabilitySource snapshot = loadSnapshotCapabilitySource();
-        Map<String, AgenticAuthoringComponentCapabilitiesResult.ComponentCapabilityCatalog> catalogs = new LinkedHashMap<>();
-        snapshot.projections().stream()
-                .map(this::toRegistryCatalog)
-                .filter(Objects::nonNull)
-                .forEach(catalog -> putCatalog(catalogs, catalog));
+        List<AgenticAuthoringComponentCapabilitiesResult.ComponentCapabilityCatalog> catalogs =
+                cachedSnapshotCatalogs;
+        if (catalogs == null) {
+            SnapshotCapabilitySource snapshot = loadSnapshotCapabilitySource();
+            Map<String, AgenticAuthoringComponentCapabilitiesResult.ComponentCapabilityCatalog> built =
+                    new LinkedHashMap<>();
+            snapshot.projections().stream()
+                    .map(this::toRegistryCatalog)
+                    .filter(Objects::nonNull)
+                    .forEach(catalog -> putCatalog(built, catalog));
+            catalogs = List.copyOf(built.values());
+            if (snapshot.unavailableReason() == null) {
+                cachedSnapshotCatalogs = catalogs;
+            }
+        }
         return new AgenticAuthoringComponentCapabilitiesResult(
                 RESULT_VERSION,
-                List.copyOf(catalogs.values()),
+                catalogs,
                 diagnostics);
     }
 
@@ -623,6 +635,10 @@ public class AgenticAuthoringComponentCapabilitiesService {
     }
 
     private SnapshotCapabilitySource loadSnapshotCapabilitySource() {
+        SnapshotCapabilitySource existing = cachedSnapshotSource;
+        if (existing != null) {
+            return existing;
+        }
         try (InputStream input = getClass().getClassLoader().getResourceAsStream(SNAPSHOT_RESOURCE)) {
             if (input == null) {
                 return SnapshotCapabilitySource.unavailable("snapshot-missing");
@@ -647,13 +663,16 @@ public class AgenticAuthoringComponentCapabilitiesService {
                         component.path("tags").toString(),
                         manifest.toString()));
             });
-            return projections.isEmpty()
-                    ? SnapshotCapabilitySource.unavailable("snapshot-authoring-manifests-missing")
-                    : new SnapshotCapabilitySource(
-                            List.copyOf(projections),
-                            firstText(snapshot, "version", "unknown"),
-                            text(snapshot, "generatedAt"),
-                            null);
+            if (projections.isEmpty()) {
+                return SnapshotCapabilitySource.unavailable("snapshot-authoring-manifests-missing");
+            }
+            SnapshotCapabilitySource loaded = new SnapshotCapabilitySource(
+                    List.copyOf(projections),
+                    firstText(snapshot, "version", "unknown"),
+                    text(snapshot, "generatedAt"),
+                    null);
+            cachedSnapshotSource = loaded;
+            return loaded;
         } catch (Exception ex) {
             log.warn("Unable to load the derived AI registry snapshot capability fallback.", ex);
             return SnapshotCapabilitySource.unavailable("snapshot-unreadable");

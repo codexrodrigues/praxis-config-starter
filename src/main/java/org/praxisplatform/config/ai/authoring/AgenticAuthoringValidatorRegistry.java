@@ -3465,7 +3465,8 @@ public final class AgenticAuthoringValidatorRegistry {
         }
 
         JsonNode handlerContract = delegatedEffect.path("handlerContract");
-        boolean delegatedToCanonicalRuntime = "praxis-page-builder".equals(componentId)
+        boolean delegatedToCanonicalRuntime = ("praxis-page-builder".equals(componentId)
+                || "praxis-dynamic-page-builder".equals(componentId))
                 && "page.preview.apply".equals(operationId)
                 && arrayContainsText(handlerContract.path("reads"), requiredRead)
                 && requiredFailureModes.stream()

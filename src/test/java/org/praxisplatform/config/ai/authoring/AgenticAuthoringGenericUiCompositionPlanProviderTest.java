@@ -1798,7 +1798,7 @@ class AgenticAuthoringGenericUiCompositionPlanProviderTest {
 
         String widgets = result.uiCompositionPlan().path("widgets").toString();
         assertThat(widgets)
-                .contains("\"metrics\":[{\"field\":\"salarioLiquido\",\"label\":\"Salario liquido\",\"aggregation\":\"sum\"}]")
+                .contains("\"metrics\":[{\"field\":\"salarioLiquido\",\"label\":\"Salario liquido\",\"aggregation\":\"sum\",\"format\":\"BRL|symbol|2\"}]")
                 .contains("\"source\":{\"kind\":\"praxis.stats\",\"resource\":\"/api/human-resources/vw-analytics-folha-pagamento\",\"operation\":\"group-by\"")
                 .doesNotContain("\"statsRequest\"");
     }
@@ -1834,7 +1834,7 @@ class AgenticAuthoringGenericUiCompositionPlanProviderTest {
                         "praxis-table");
         assertThat(widgets)
                 .contains("\"field\":\"departamento\"")
-                .contains("\"metrics\":[{\"field\":\"salarioLiquido\",\"label\":\"Soma do salario liquido\",\"aggregation\":\"sum\"}]")
+                .contains("\"metrics\":[{\"field\":\"salarioLiquido\",\"label\":\"Soma do salario liquido\",\"aggregation\":\"sum\",\"format\":\"BRL|symbol|2\"}]")
                 .contains("\"orientation\":\"horizontal\"")
                 .doesNotContain("\"statsRequest\"");
     }
@@ -3391,6 +3391,322 @@ class AgenticAuthoringGenericUiCompositionPlanProviderTest {
         assertThat(result.uiCompositionPlan().at("/widgets/1/inputs/surfaceId").asText()).isEmpty();
         assertThat(result.uiCompositionPlan().at("/diagnostics/relatedResourceGrounding/status").asText())
                 .isEqualTo("surface-id-selected-runtime-verification-required");
+    }
+
+    @Test
+    void wiresVerifiedWorkflowActionDiscoveryIntoParentTableOfRelatedResourcePagePlan() {
+        AgenticAuthoringVisualizationDecision visualization =
+                new AgenticAuthoringVisualizationDecision(
+                        "praxis-agentic-authoring-visualization-decision.v1",
+                        "mission-team-workspace",
+                        "parent-child-related-resource",
+                        "praxis-related-resource-outlet",
+                        List.of(),
+                        false,
+                        false,
+                        List.of(),
+                        false,
+                        false,
+                        "llm-authored-semantic-decision",
+                        "team");
+        ObjectNode contextHints = objectMapper.createObjectNode();
+        ObjectNode verifiedEnvelope = contextHints.putObject("verifiedDomainOperations");
+        verifiedEnvelope.put("schemaVersion", "praxis-agentic-authoring-verified-domain-operations.v2");
+        verifiedEnvelope.put("source", "schemas.filtered+resource.capabilities+schemas.actions");
+        verifiedEnvelope.put("operationCount", 3);
+        ArrayNode entries = verifiedEnvelope.putArray("entries");
+        addVerifiedOperation(
+                entries,
+                "/api/operations/missoes",
+                "operations.missoes",
+                "/api/operations/missoes/filter/cursor",
+                "post",
+                "cursor");
+        addVerifiedOperation(
+                entries,
+                "/api/operations/missoes",
+                "operations.missoes",
+                "/api/operations/missoes/{id}/actions/start",
+                "post",
+                "startMission");
+        addVerifiedOperation(
+                entries,
+                "/api/operations/missoes",
+                "operations.missoes",
+                "/api/operations/missoes/actions/export-roster",
+                "post",
+                "exportMissionRoster");
+
+        AgenticAuthoringUiCompositionPlanResult result = provider.plan(
+                new AgenticAuthoringPlanRequest(
+                        "Crie uma página de missões com a equipe relacionada e ações operacionais.",
+                        "openai",
+                        "gpt-5.6-terra",
+                        "test-key",
+                        null,
+                        intent("create", "page", "create_artifact", "/api/operations/missoes", visualization),
+                        "session-1",
+                        "turn-1",
+                        List.of(),
+                        null,
+                        List.of(),
+                        contextHints))
+                .orElseThrow();
+
+        assertThat(result.valid()).isTrue();
+        JsonNode plan = result.uiCompositionPlan();
+        assertThat(plan.at("/widgets/0/inputs/config/actions/collection/discovery/enabled").asBoolean()).isTrue();
+        assertThat(plan.at("/widgets/0/inputs/config/actions/row/enabled").asBoolean()).isTrue();
+        assertThat(plan.at("/widgets/0/inputs/config/actions/row/discovery/enabled").asBoolean()).isTrue();
+        assertThat(plan.at("/diagnostics/resourceWorkspaceGrounding/commandDiscovery/status").asText())
+                .isEqualTo("enabled");
+        assertThat(plan.at("/diagnostics/resourceWorkspaceGrounding/commandDiscovery/item").asBoolean()).isTrue();
+        assertThat(plan.at("/diagnostics/resourceWorkspaceGrounding/commandDiscovery/collection").asBoolean()).isTrue();
+    }
+
+    @Test
+    void materializesApprovalActionWorkbenchPlanBoundToVerifiedWorkflowActionSchema() {
+        AgenticAuthoringVisualizationDecision visualization =
+                new AgenticAuthoringVisualizationDecision(
+                        "praxis-agentic-authoring-visualization-decision.v1",
+                        "approval-workbench",
+                        "resource-action-workbench",
+                        "praxis-table",
+                        List.of(),
+                        false,
+                        false,
+                        List.of(),
+                        false,
+                        false,
+                        "llm-authored-semantic-decision",
+                        "startMission");
+        ObjectNode contextHints = verifiedDomainOperations(
+                "schemas.filtered+resource.capabilities+schemas.actions",
+                "/api/operations/missoes",
+                "operations.missoes",
+                true);
+
+        AgenticAuthoringUiCompositionPlanResult result = provider.plan(
+                new AgenticAuthoringPlanRequest(
+                        "Crie uma mesa de aprovação e execução de início de missão.",
+                        "openai",
+                        "gpt-5.6-terra",
+                        "test-key",
+                        null,
+                        intent("create", "page", "create_artifact", "/api/operations/missoes", visualization),
+                        "session-1",
+                        "turn-1",
+                        List.of(),
+                        null,
+                        List.of(),
+                        contextHints))
+                .orElseThrow();
+
+        assertThat(result.valid()).isTrue();
+        JsonNode plan = result.uiCompositionPlan();
+        assertThat(plan.path("widgets")).hasSize(3);
+        assertThat(plan.at("/widgets/0/componentId").asText()).isEqualTo("praxis-filter");
+        assertThat(plan.at("/widgets/1/componentId").asText()).isEqualTo("praxis-table");
+        assertThat(plan.at("/widgets/1/inputs/config/actions/row/discovery/enabled").asBoolean()).isTrue();
+        assertThat(plan.at("/widgets/2/componentId").asText()).isEqualTo("praxis-dynamic-form");
+        assertThat(plan.at("/widgets/2/inputs/schemaSource").asText()).isEqualTo("action");
+        assertThat(plan.at("/widgets/2/inputs/actionId").asText()).isEqualTo("start");
+        assertThat(plan.at("/widgets/2/inputs/submitUrl").asText())
+                .isEqualTo("/api/operations/missoes/{id}/actions/start");
+        assertThat(plan.at("/widgets/2/inputs/submitMethod").asText()).isEqualTo("post");
+        assertThat(plan.at("/widgets/2/inputs/schemaUrl").asText())
+                .isEqualTo("/schemas/filtered?path=/api/operations/missoes/{id}/actions/start&operation=post&schemaType=request");
+        assertThat(plan.path("bindings").toString())
+                .contains("state.selectedResourceId->missoes-detail.resourceId")
+                .contains("payload.resourceIdentity.key.value");
+        assertThat(plan.at("/diagnostics/actionWorkbenchGrounding/status").asText()).isEqualTo("verified");
+        assertThat(plan.at("/diagnostics/actionWorkbenchGrounding/actionId").asText()).isEqualTo("start");
+    }
+
+    @Test
+    void degradesApprovalWorkbenchToSafeMasterDetailWhenNoVerifiedWorkflowActionExists() {
+        AgenticAuthoringVisualizationDecision visualization =
+                new AgenticAuthoringVisualizationDecision(
+                        "praxis-agentic-authoring-visualization-decision.v1",
+                        "approval-workbench",
+                        "approval-workbench",
+                        "praxis-table",
+                        List.of(),
+                        false,
+                        false,
+                        List.of(),
+                        false,
+                        false,
+                        "llm-authored-semantic-decision",
+                        "approveMission");
+
+        AgenticAuthoringUiCompositionPlanResult result = provider.plan(
+                new AgenticAuthoringPlanRequest(
+                        "Crie uma mesa de aprovação de missões.",
+                        "openai",
+                        "gpt-5.6-terra",
+                        "test-key",
+                        null,
+                        intent("create", "page", "create_artifact", "/api/operations/missoes", visualization)))
+                .orElseThrow();
+
+        assertThat(result.valid()).isTrue();
+        JsonNode plan = result.uiCompositionPlan();
+        assertThat(plan.at("/diagnostics/actionWorkbenchGrounding/status").asText())
+                .isEqualTo("degraded-to-master-detail");
+        assertThat(plan.at("/diagnostics/actionWorkbenchGrounding/verificationGap").asText())
+                .isEqualTo("missing-verified-workflow-action");
+    }
+
+    @Test
+    void materializesSalaryEvolutionDashboardWithTimeseriesAreaChartAndEmployeeScopeFilter() {
+        ObjectNode contextHints = objectMapper.createObjectNode();
+        ArrayNode analyticsFields = contextHints.putArray("analyticsFields");
+        analyticsFields.addObject()
+                .put("field", "dataInicio")
+                .put("label", "Início de Vigência")
+                .put("timeSeriesEligible", true)
+                .put("groupByEligible", true);
+        analyticsFields.addObject()
+                .put("field", "motivo")
+                .put("label", "Motivo")
+                .put("groupByEligible", true);
+        ObjectNode salarioMetric = analyticsFields.addObject()
+                .put("field", "salario")
+                .put("label", "Salário")
+                .put("metricFieldEligible", true);
+        salarioMetric.putArray("allowedAggregations").add("avg").add("sum");
+
+        ArrayNode filterSchemaFields = contextHints.putArray("filterSchemaFields");
+        filterSchemaFields.addObject()
+                .put("fieldName", "funcionarioId")
+                .put("label", "Funcionário")
+                .put("optionSourceType", "RESOURCE_ENTITY")
+                .put("endpoint", "/api/human-resources/funcionarios/options/filter");
+        filterSchemaFields.addObject()
+                .put("fieldName", "dataInicioBetween")
+                .put("label", "Início de Vigência");
+        filterSchemaFields.addObject()
+                .put("fieldName", "motivo")
+                .put("label", "Motivo")
+                .put("semanticKind", "categorical");
+
+        AgenticAuthoringUiCompositionPlanResult result = provider.plan(
+                new AgenticAuthoringPlanRequest(
+                        "Quero verificar a evolução do salário de um determinado funcionário.",
+                        "openai",
+                        "gpt-5.4-mini",
+                        "test-key",
+                        null,
+                        dashboardIntent("/api/human-resources/historicos-salariais", List.of()),
+                        "session-salary",
+                        "turn-salary",
+                        List.of(),
+                        null,
+                        List.of(),
+                        contextHints))
+                .orElseThrow();
+
+        assertThat(result.valid()).isTrue();
+        JsonNode plan = result.uiCompositionPlan();
+        JsonNode filterInputs = findWidgetInputs(plan, "praxis-filter");
+        assertThat(stringArray(filterInputs.path("selectedFieldIds")))
+                .containsExactly("funcionarioId", "dataInicioBetween", "motivo");
+
+        JsonNode primaryChart = plan.path("widgets").findParents("key").stream()
+                .filter(widget -> "historicos-salariais-chart-dataInicio".equals(widget.path("key").asText()))
+                .findFirst()
+                .orElseThrow();
+        JsonNode primaryChartDoc = primaryChart.path("inputs").path("chartDocument");
+        assertThat(primaryChartDoc.path("kind").asText()).isEqualTo("area");
+        assertThat(primaryChartDoc.path("labels").asBoolean()).isFalse();
+        assertThat(primaryChartDoc.path("source").path("operation").asText()).isEqualTo("timeseries");
+        assertThat(primaryChartDoc.path("source").path("options").path("granularity").asText()).isEqualTo("month");
+        assertThat(primaryChartDoc.path("dimensions").path(0).path("field").asText()).isEqualTo("dataInicio");
+        assertThat(primaryChartDoc.path("dimensions").path(0).path("role").asText()).isEqualTo("time");
+        assertThat(primaryChartDoc.path("metrics").path(0).path("field").asText()).isEqualTo("salario");
+        assertThat(primaryChartDoc.path("metrics").path(0).path("aggregation").asText()).isEqualTo("avg");
+        assertThat(primaryChartDoc.path("metrics").path(0).path("format").asText()).isEqualTo("BRL|symbol|2");
+
+        JsonNode secondaryChart = plan.path("widgets").findParents("key").stream()
+                .filter(widget -> "historicos-salariais-chart-motivo".equals(widget.path("key").asText()))
+                .findFirst()
+                .orElseThrow();
+        JsonNode secondaryChartDoc = secondaryChart.path("inputs").path("chartDocument");
+        assertThat(secondaryChartDoc.path("kind").asText()).isEqualTo("bar");
+        assertThat(secondaryChartDoc.path("labels").asBoolean()).isTrue();
+        assertThat(secondaryChartDoc.path("source").path("operation").asText()).isEqualTo("group-by");
+        assertThat(secondaryChartDoc.path("dimensions").path(0).path("field").asText()).isEqualTo("motivo");
+        assertThat(secondaryChartDoc.path("metrics").path(0).path("field").asText()).isEqualTo("salario");
+        assertThat(secondaryChartDoc.path("metrics").path(0).path("aggregation").asText()).isEqualTo("avg");
+        assertThat(secondaryChartDoc.path("metrics").path(0).path("format").asText()).isEqualTo("BRL|symbol|2");
+    }
+
+    @Test
+    void materializesDomainAgnosticTemporalMetricEvolutionFromGovernedCapabilities() {
+        ObjectNode contextHints = objectMapper.createObjectNode();
+        ArrayNode analyticsFields = contextHints.putArray("analyticsFields");
+        analyticsFields.addObject()
+                .put("field", "dataFaturamento")
+                .put("label", "Data de Faturamento")
+                .put("timeSeriesEligible", true)
+                .put("groupByEligible", true);
+        analyticsFields.addObject()
+                .put("field", "segmentoComercial")
+                .put("label", "Segmento Comercial")
+                .put("groupByEligible", true);
+        ObjectNode receitaMetric = analyticsFields.addObject()
+                .put("field", "receitaLiquida")
+                .put("label", "Receita Líquida")
+                .put("metricFieldEligible", true);
+        receitaMetric.putArray("allowedAggregations").add("avg").add("sum");
+
+        ArrayNode filterSchemaFields = contextHints.putArray("filterSchemaFields");
+        filterSchemaFields.addObject()
+                .put("fieldName", "clienteId")
+                .put("label", "Cliente")
+                .put("optionSourceType", "RESOURCE_ENTITY")
+                .put("endpoint", "/api/finance/clientes/options/filter");
+        filterSchemaFields.addObject()
+                .put("fieldName", "dataFaturamentoBetween")
+                .put("label", "Data de Faturamento");
+        filterSchemaFields.addObject()
+                .put("fieldName", "segmentoComercial")
+                .put("label", "Segmento Comercial")
+                .put("semanticKind", "categorical");
+
+        AgenticAuthoringUiCompositionPlanResult result = provider.plan(
+                new AgenticAuthoringPlanRequest(
+                        "Quero acompanhar a evolução da receita líquida de um cliente ao longo do tempo.",
+                        "openai",
+                        "gpt-5.4-mini",
+                        "test-key",
+                        null,
+                        dashboardIntent("/api/finance/faturamentos-clientes", List.of()),
+                        "session-finance",
+                        "turn-finance",
+                        List.of(),
+                        null,
+                        List.of(),
+                        contextHints))
+                .orElseThrow();
+
+        assertThat(result.valid()).isTrue();
+        JsonNode plan = result.uiCompositionPlan();
+        JsonNode filterInputs = findWidgetInputs(plan, "praxis-filter");
+        assertThat(stringArray(filterInputs.path("selectedFieldIds")))
+                .containsExactly("clienteId", "dataFaturamentoBetween", "segmentoComercial");
+
+        JsonNode primaryChart = plan.path("widgets").findParents("key").stream()
+                .filter(widget -> "faturamentos-clientes-chart-dataFaturamento".equals(widget.path("key").asText()))
+                .findFirst()
+                .orElseThrow();
+        JsonNode primaryChartDoc = primaryChart.path("inputs").path("chartDocument");
+        assertThat(primaryChartDoc.path("kind").asText()).isEqualTo("area");
+        assertThat(primaryChartDoc.path("source").path("operation").asText()).isEqualTo("timeseries");
+        assertThat(primaryChartDoc.path("dimensions").path(0).path("field").asText()).isEqualTo("dataFaturamento");
+        assertThat(primaryChartDoc.path("metrics").path(0).path("field").asText()).isEqualTo("receitaLiquida");
+        assertThat(primaryChartDoc.path("metrics").path(0).path("aggregation").asText()).isEqualTo("avg");
     }
 
     private void addVerifiedOperation(

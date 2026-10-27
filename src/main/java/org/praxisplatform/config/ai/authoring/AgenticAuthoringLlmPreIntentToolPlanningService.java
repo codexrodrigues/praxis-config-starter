@@ -30,7 +30,7 @@ import org.springframework.util.StringUtils;
 public class AgenticAuthoringLlmPreIntentToolPlanningService implements AgenticAuthoringPreIntentToolPlanningService {
 
     private static final Logger log = LoggerFactory.getLogger(AgenticAuthoringLlmPreIntentToolPlanningService.class);
-    private static final int MAX_PLANNING_TOKENS = 640;
+    private static final int MAX_PLANNING_TOKENS = 1536;
     private static final int MAX_PLANNER_CONTEXT_ARRAY_ITEMS = 8;
     private static final int MAX_PLANNER_PAGE_WIDGETS = 12;
     private static final int MAX_PLANNER_TEXT_LENGTH = 700;
@@ -54,6 +54,7 @@ public class AgenticAuthoringLlmPreIntentToolPlanningService implements AgenticA
     private static final List<String> COMPACT_RESOURCE_COMPOSITION_LAYOUTS = List.of(
             "single-table",
             "resource-master-detail",
+            "approval-workbench",
             "parent-child-related-resource",
             "resource-crud",
             "tabs_layout");
@@ -64,7 +65,7 @@ public class AgenticAuthoringLlmPreIntentToolPlanningService implements AgenticA
     private final int planningBudgetSeconds;
     private final int providerAttempts;
     private final long providerRetryDelayMs;
-    private final String openAiPlanningModel;
+    private final Map<String, String> planningModelOverrides;
 
     public AgenticAuthoringLlmPreIntentToolPlanningService(
             AiProviderManagementService providerManagementService,
@@ -99,6 +100,21 @@ public class AgenticAuthoringLlmPreIntentToolPlanningService implements AgenticA
                 DEFAULT_PROVIDER_ATTEMPTS,
                 DEFAULT_PROVIDER_RETRY_DELAY_MS,
                 openAiPlanningModel);
+    }
+
+    public AgenticAuthoringLlmPreIntentToolPlanningService(
+            AiProviderManagementService providerManagementService,
+            ObjectMapper objectMapper,
+            DomainCatalogPromptContextService domainCatalogPromptContextService,
+            Map<String, String> planningModelOverrides) {
+        this(
+                providerManagementService,
+                objectMapper,
+                domainCatalogPromptContextService,
+                DEFAULT_PLANNING_BUDGET_SECONDS,
+                DEFAULT_PROVIDER_ATTEMPTS,
+                DEFAULT_PROVIDER_RETRY_DELAY_MS,
+                planningModelOverrides);
     }
 
     AgenticAuthoringLlmPreIntentToolPlanningService(
@@ -156,6 +172,26 @@ public class AgenticAuthoringLlmPreIntentToolPlanningService implements AgenticA
             int providerAttempts,
             long providerRetryDelayMs,
             String openAiPlanningModel) {
+        this(
+                providerManagementService,
+                objectMapper,
+                domainCatalogPromptContextService,
+                planningBudgetSeconds,
+                providerAttempts,
+                providerRetryDelayMs,
+                StringUtils.hasText(openAiPlanningModel)
+                        ? Map.of("openai", normalizeModel(openAiPlanningModel))
+                        : Map.of());
+    }
+
+    AgenticAuthoringLlmPreIntentToolPlanningService(
+            AiProviderManagementService providerManagementService,
+            ObjectMapper objectMapper,
+            DomainCatalogPromptContextService domainCatalogPromptContextService,
+            int planningBudgetSeconds,
+            int providerAttempts,
+            long providerRetryDelayMs,
+            Map<String, String> planningModelOverrides) {
         this.providerManagementService = Objects.requireNonNull(
                 providerManagementService,
                 "providerManagementService must not be null");
@@ -166,7 +202,20 @@ public class AgenticAuthoringLlmPreIntentToolPlanningService implements AgenticA
                 : DEFAULT_PLANNING_BUDGET_SECONDS;
         this.providerAttempts = Math.max(1, providerAttempts);
         this.providerRetryDelayMs = Math.max(0L, providerRetryDelayMs);
-        this.openAiPlanningModel = normalizeModel(openAiPlanningModel);
+        this.planningModelOverrides = normalizeProviderModelOverrides(planningModelOverrides);
+    }
+
+    private static Map<String, String> normalizeProviderModelOverrides(Map<String, String> rawOverrides) {
+        if (rawOverrides == null || rawOverrides.isEmpty()) {
+            return Map.of();
+        }
+        java.util.LinkedHashMap<String, String> normalized = new java.util.LinkedHashMap<>();
+        rawOverrides.forEach((provider, model) -> {
+            if (StringUtils.hasText(provider) && StringUtils.hasText(model)) {
+                normalized.put(provider.trim().toLowerCase(Locale.ROOT), normalizeModel(model));
+            }
+        });
+        return Map.copyOf(normalized);
     }
 
     @Override
@@ -312,6 +361,16 @@ public class AgenticAuthoringLlmPreIntentToolPlanningService implements AgenticA
                 && !"praxis-table".equals(primaryComponent)) {
             return false;
         }
+        if ("approval-workbench".equals(layoutKind)
+                && (!("page".equals(text(result, "artifactKind")))
+                        || !Set.of("praxis-table", "praxis-dynamic-form").contains(primaryComponent))) {
+            return false;
+        }
+        if ("parent-child-related-resource".equals(layoutKind)
+                && (!("page".equals(text(result, "artifactKind")))
+                        || !Set.of("praxis-related-resource-outlet", "praxis-table").contains(primaryComponent))) {
+            return false;
+        }
         if ("resource-crud".equals(layoutKind)
                 && !"praxis-crud".equals(primaryComponent)) {
             return false;
@@ -352,8 +411,7 @@ public class AgenticAuthoringLlmPreIntentToolPlanningService implements AgenticA
         return AiCallConfig.agenticAuthoringBuilder()
                 .provider(request.provider())
                 .model(request.model())
-                .providerModelOverrides(StringUtils.hasText(openAiPlanningModel)
-                        ? java.util.Map.of("openai", openAiPlanningModel) : java.util.Map.of())
+                .providerModelOverrides(planningModelOverrides)
                 .apiKey(request.apiKey())
                 .temperature(0.0d)
                 .maxTokens(MAX_PLANNING_TOKENS)
@@ -437,7 +495,11 @@ public class AgenticAuthoringLlmPreIntentToolPlanningService implements AgenticA
                     false,
                     result.path("queryConstraints").deepCopy(),
                     text(result, "artifactKind"),
-                    primaryComponent(result),
+                    "parent-child-related-resource".equals(layoutKind(result))
+                            ? "praxis-related-resource-outlet"
+                            : "approval-workbench".equals(layoutKind(result))
+                                    ? "praxis-table"
+                                    : primaryComponent(result),
                     layoutKind(result)));
         }
         if (!result.path("shouldRetrieveGovernedResources").asBoolean(false)) {
@@ -450,7 +512,11 @@ public class AgenticAuthoringLlmPreIntentToolPlanningService implements AgenticA
                     result.path("requiresFullIntentResolution").asBoolean(false),
                     result.path("queryConstraints").deepCopy(),
                     text(result, "artifactKind"),
-                    primaryComponent(result),
+                    "parent-child-related-resource".equals(layoutKind(result))
+                            ? "praxis-related-resource-outlet"
+                            : "approval-workbench".equals(layoutKind(result))
+                                    ? "praxis-table"
+                                    : primaryComponent(result),
                     layoutKind(result)));
         }
         String groundingProfile = text(result, "groundingProfile");
@@ -491,7 +557,7 @@ public class AgenticAuthoringLlmPreIntentToolPlanningService implements AgenticA
         // remains responsible for declaring full resolution when the user actually requests a
         // predicate, grouping, aggregation, ordering or layout constraint.
         boolean requiresFullIntentResolution =
-                result.path("requiresFullIntentResolution").asBoolean(false);
+                result.path("requiresFullIntentResolution").asBoolean(false) || "parent-child-related-resource".equals(layoutKind(result));
         if (!"domain_decision".equals(groundingProfile)) {
             retrievalQuery = focusedRetrievalQuery(retrievalQuery, resourceSearchFocus);
         }
@@ -511,7 +577,11 @@ public class AgenticAuthoringLlmPreIntentToolPlanningService implements AgenticA
                 requiresFullIntentResolution,
                 result.path("queryConstraints").deepCopy(),
                 artifactKind,
-                primaryComponent(result),
+                "parent-child-related-resource".equals(layoutKind(result))
+                        ? "praxis-related-resource-outlet"
+                        : "approval-workbench".equals(layoutKind(result))
+                                ? "praxis-table"
+                                : primaryComponent(result),
                 layoutKind(result)));
     }
 
@@ -667,9 +737,9 @@ public class AgenticAuthoringLlmPreIntentToolPlanningService implements AgenticA
                 including when the user mentions a future form, table, dashboard or page only as the reason for asking.
                 This class always sets shouldRetrieveGovernedResources=true, assistantMessage empty and starts with
                 groundingProfile=domain_context. It is governed domain enumeration, not generic platform guidance and
-                not yet concrete artifact authoring. Semantically equivalent examples include asking which administrative
-                themes are available for an interactive dashboard, what business areas the host knows, or which governed
-                domains can be used before choosing what to build. A question such as "sobre quais assuntos posso criar
+                not yet concrete artifact authoring. A question such as "sobre quais assuntos posso criar
+                tabelas ou dashboards para obter informações visuais?" is domain discovery: the user is asking for the
+                available business subjects, not yet commanding creation of either artifact. The same remains true with
                 tabelas ou dashboards para obter informações visuais?" is domain discovery: the user is asking for the
                 available business subjects, not yet commanding creation of either artifact. The same remains true with
                 grammar errors, omitted words, or without the literal word "available". This discovery must happen before capability, concept,
@@ -690,11 +760,11 @@ public class AgenticAuthoringLlmPreIntentToolPlanningService implements AgenticA
                 fully represented by layoutKind needs no second pass. Resource discovery and defaults are not constraints.
                 Use groundingProfile=domain_decision for LLM semantic discovery; searchDomainRules returns identities,
                 never conditions or authority.
-                Select other groundingProfile values progressively: domain_context for macro business orientation,
-                domain_capability when a governed context is known but the business capability is not, domain_concept
-                for concepts inside an already scoped context/resource, domain_binding after a canonical resourceKey
-                has been resolved but its operational binding is not yet grounded, operation_verification after a binding
-                exists but its exact schema and current capability have not been checked, and api_resource only when an operational
+                Select groundingProfile progressively.
+                Use domain_capability, domain_concept, domain_binding or operation_verification when needed.
+                Use api_resource when an operational
+                resource is needed.
+                Use API resource retrieval when
                 resource, field, dataset, binding or endpoint is actually needed. Use API resource retrieval when
                 governed resources, fields, datasets or
                 API-backed sources are needed for a page, view, table, dashboard, form, overview, analysis,
@@ -713,7 +783,7 @@ public class AgenticAuthoringLlmPreIntentToolPlanningService implements AgenticA
                 or department stays on employees. For KPI/chart dashboards, prefer the governed analytical projection
                 of the measured subject over contributing operational/history records. After confirmation, select the
                 canonical payroll analytical resource. A related category constraining displayed records belongs in
-                supportingConcepts/queryConstraints, never as primaryBusinessEntity because it ranks higher.
+                supportingConcepts/queryConstraints, never as primaryBusinessEntity because it ranks higher. For parent-child-related-resource, resource-master-detail or tabs_layout where the user selects a parent record to view/manage related child records, primaryBusinessEntity is that parent entity and child records go in supportingConcepts.
                 When domainDiscovery contains the semantically matching business subject, use its canonical resourceKey
                 exactly as primaryBusinessEntity. Titles, aliases and fields explain that resource; they do not replace
                 the canonical key or authorize a different related projection.
@@ -727,8 +797,8 @@ public class AgenticAuthoringLlmPreIntentToolPlanningService implements AgenticA
                 regions such as filters, KPIs, multiple charts and a detail/list/table surface. Use artifactKind page
                 for general layout or content composition where analytics are not the dominant requested outcome.
                 Choose layoutKind: single-table + table + praxis-table; resource-master-detail + praxis-table;
-                parent-child-related-resource + praxis-related-resource-outlet; resource-crud + praxis-crud;
-                tabs_layout + page + praxis-tabs covers Table -> state -> Form; no full pass.
+                approval-workbench + page + praxis-table; parent-child-related-resource + praxis-related-resource-outlet;
+                resource-crud + praxis-crud; tabs_layout + page + praxis-tabs covers Table -> state -> Form; no full pass.
                 Never keyword-route or substitute primaryComponent for layoutKind.
                 Canonical response locale: %s
                 Context JSON: %s
@@ -1206,14 +1276,14 @@ public class AgenticAuthoringLlmPreIntentToolPlanningService implements AgenticA
         layoutKindEnum.addNull();
         layoutKind.put(
                 "description",
-                "AI-authored semantic composition archetype: single-table, resource-master-detail, parent-child-related-resource, resource-crud, or tabs_layout. tabs_layout requires artifactKind=page and primaryComponent=praxis-tabs; it completely represents a governed collection Table and Dynamic Form detail synchronized through persisted state and nestedPath links, so those materialization details do not require another intent pass.");
+                "AI-authored semantic composition archetype: single-table, resource-master-detail, approval-workbench, parent-child-related-resource, resource-crud, or tabs_layout. approval-workbench requires artifactKind=page and primaryComponent=praxis-table for approval or workflow-action workbenches pairing a collection Table with a workflow action Form. tabs_layout requires artifactKind=page and primaryComponent=praxis-tabs; it completely represents a governed collection Table and Dynamic Form detail synchronized through persisted state and nestedPath links, so those materialization details do not require another intent pass.");
         nullableString(properties, "retrievalQuery");
         nullableString(properties, "reason");
         ObjectNode focus = properties.putObject("resourceSearchFocus");
         focus.put("type", "object");
         ObjectNode focusProperties = focus.putObject("properties");
         nullableString(focusProperties, "primaryBusinessEntity")
-                .put("description", "Canonical business subject explicitly requested by the user. When domainDiscovery provides the matching subject, return its resourceKey exactly. Use the entity being governed, filtered, listed, or analyzed; never substitute a UI surface, profile/view name, or related analytical projection.");
+                .put("description", "Canonical business subject explicitly requested by the user. When domainDiscovery provides the matching subject, return its resourceKey exactly. Use the entity being governed, filtered, listed, or analyzed; never substitute a UI surface, profile/view name, or related analytical projection. For parent-child-related-resource, resource-master-detail, or tabs_layout where the user selects a parent record to inspect related child records, use the selected parent entity as primaryBusinessEntity and put child records in supportingConcepts.");
         ObjectNode supportingConcepts = focusProperties.putObject("supportingConcepts");
         supportingConcepts.put("type", "array");
         supportingConcepts.putObject("items").put("type", "string");

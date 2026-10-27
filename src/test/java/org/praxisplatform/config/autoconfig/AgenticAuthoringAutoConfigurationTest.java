@@ -360,6 +360,245 @@ class AgenticAuthoringAutoConfigurationTest {
     }
 
     @Test
+    void shouldRegisterInMemoryRateLimitAndStreamCapacityStoresByDefault() {
+        contextRunner.run(context -> {
+            assertThat(context).hasSingleBean(org.praxisplatform.config.service.AiProviderRateLimitStore.class);
+            assertThat(context.getBean(org.praxisplatform.config.service.AiProviderRateLimitStore.class))
+                    .isInstanceOf(org.praxisplatform.config.service.InMemoryAiProviderRateLimitStore.class);
+            assertThat(context).hasSingleBean(
+                    org.praxisplatform.config.ai.authoring.AgenticAuthoringStreamCapacityStore.class);
+            assertThat(context.getBean(
+                    org.praxisplatform.config.ai.authoring.AgenticAuthoringStreamCapacityStore.class))
+                    .isInstanceOf(
+                            org.praxisplatform.config.ai.authoring.InMemoryAgenticAuthoringStreamCapacityStore.class);
+        });
+    }
+
+    @Test
+    void shouldRegisterJdbcRateLimitAndStreamCapacityStoresWhenConfigured() {
+        org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate jdbc =
+                org.mockito.Mockito.mock(
+                        org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate.class);
+        contextRunner
+                .withBean(
+                        org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate.class,
+                        () -> jdbc)
+                .withPropertyValues(
+                        "praxis.ai.rate-limit.store=jdbc",
+                        "praxis.ai.authoring.stream-capacity.store=jdbc",
+                        "praxis.ai.authoring.stream-capacity.lease-ttl-seconds=180")
+                .run(context -> {
+                    assertThat(context).hasSingleBean(
+                            org.praxisplatform.config.service.AiProviderRateLimitStore.class);
+                    assertThat(context.getBean(
+                            org.praxisplatform.config.service.AiProviderRateLimitStore.class))
+                            .isInstanceOf(org.praxisplatform.config.service.JdbcAiProviderRateLimitStore.class);
+                    assertThat(context).hasSingleBean(
+                            org.praxisplatform.config.ai.authoring.AgenticAuthoringStreamCapacityStore.class);
+                    org.praxisplatform.config.ai.authoring.AgenticAuthoringStreamCapacityStore capacityStore =
+                            context.getBean(
+                                    org.praxisplatform.config.ai.authoring.AgenticAuthoringStreamCapacityStore.class);
+                    assertThat(capacityStore)
+                            .isInstanceOf(
+                                    org.praxisplatform.config.ai.authoring.JdbcAgenticAuthoringStreamCapacityStore.class);
+                    assertThat(ReflectionTestUtils.getField(capacityStore, "leaseTtl"))
+                            .isEqualTo(java.time.Duration.ofSeconds(180));
+                });
+    }
+
+    @Test
+    void shouldRespectCustomRateLimitAndStreamCapacityStoresAndWireIntoTurnStreamService() {
+        org.praxisplatform.config.service.AiProviderRateLimitStore customRateLimitStore =
+                org.mockito.Mockito.mock(org.praxisplatform.config.service.AiProviderRateLimitStore.class);
+        org.praxisplatform.config.ai.authoring.AgenticAuthoringStreamCapacityStore customCapacityStore =
+                org.mockito.Mockito.mock(
+                        org.praxisplatform.config.ai.authoring.AgenticAuthoringStreamCapacityStore.class);
+        AiProviderManagementService providerManagementService =
+                org.mockito.Mockito.mock(AiProviderManagementService.class);
+        org.praxisplatform.config.service.AiThreadService threadService =
+                org.mockito.Mockito.mock(org.praxisplatform.config.service.AiThreadService.class);
+        org.praxisplatform.config.service.AiTurnService turnService =
+                org.mockito.Mockito.mock(org.praxisplatform.config.service.AiTurnService.class);
+        AiTurnEventService turnEventService = org.mockito.Mockito.mock(AiTurnEventService.class);
+        org.praxisplatform.config.service.AiStreamAccessTokenService streamAccessTokenService =
+                org.mockito.Mockito.mock(org.praxisplatform.config.service.AiStreamAccessTokenService.class);
+        io.micrometer.core.instrument.simple.SimpleMeterRegistry meterRegistry =
+                new io.micrometer.core.instrument.simple.SimpleMeterRegistry();
+
+        contextRunner
+                .withBean(
+                        org.praxisplatform.config.service.AiProviderRateLimitStore.class,
+                        () -> customRateLimitStore)
+                .withBean(
+                        org.praxisplatform.config.ai.authoring.AgenticAuthoringStreamCapacityStore.class,
+                        () -> customCapacityStore)
+                .withBean(AiProviderManagementService.class, () -> providerManagementService)
+                .withBean(org.praxisplatform.config.service.AiThreadService.class, () -> threadService)
+                .withBean(org.praxisplatform.config.service.AiTurnService.class, () -> turnService)
+                .withBean(AiTurnEventService.class, () -> turnEventService)
+                .withBean(
+                        org.praxisplatform.config.service.AiStreamAccessTokenService.class,
+                        () -> streamAccessTokenService)
+                .withBean(io.micrometer.core.instrument.MeterRegistry.class, () -> meterRegistry)
+                .run(context -> {
+                    assertThat(context.getBean(
+                            org.praxisplatform.config.service.AiProviderRateLimitStore.class))
+                            .isSameAs(customRateLimitStore);
+                    assertThat(context.getBean(
+                            org.praxisplatform.config.ai.authoring.AgenticAuthoringStreamCapacityStore.class))
+                            .isSameAs(customCapacityStore);
+                    org.praxisplatform.config.ai.authoring.AgenticAuthoringTurnStreamService streamService =
+                            context.getBean(
+                                    org.praxisplatform.config.ai.authoring.AgenticAuthoringTurnStreamService.class);
+                    assertThat(ReflectionTestUtils.getField(streamService, "capacityStore"))
+                            .isSameAs(customCapacityStore);
+                    assertThat(ReflectionTestUtils.getField(streamService, "meterRegistry"))
+                            .isSameAs(meterRegistry);
+                });
+    }
+
+    @Test
+    void shouldPreferConfigNamedParameterJdbcTemplateWhenMultipleJdbcTemplatesExist() {
+        org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate businessJdbc =
+                org.mockito.Mockito.mock(org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate.class);
+        org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate configJdbc =
+                org.mockito.Mockito.mock(org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate.class);
+        contextRunner
+                .withPropertyValues(
+                        "praxis.ai.rate-limit.store=jdbc",
+                        "praxis.ai.authoring.stream-capacity.store=jdbc")
+                .withBean(
+                        "businessNamedParameterJdbcTemplate",
+                        org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate.class,
+                        () -> businessJdbc)
+                .withBean(
+                        "configNamedParameterJdbcTemplate",
+                        org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate.class,
+                        () -> configJdbc)
+                .run(context -> {
+                    org.praxisplatform.config.service.AiProviderRateLimitStore rateLimitStore =
+                            context.getBean(org.praxisplatform.config.service.AiProviderRateLimitStore.class);
+                    org.praxisplatform.config.ai.authoring.AgenticAuthoringStreamCapacityStore capacityStore =
+                            context.getBean(
+                                    org.praxisplatform.config.ai.authoring.AgenticAuthoringStreamCapacityStore.class);
+                    assertThat(ReflectionTestUtils.getField(rateLimitStore, "jdbc"))
+                            .isSameAs(configJdbc);
+                    assertThat(ReflectionTestUtils.getField(capacityStore, "jdbc"))
+                            .isSameAs(configJdbc);
+                });
+    }
+
+    @Test
+    void shouldExecuteV71ClusterCoordinationDdlOnConfigDataSourceAndCoordinateWhenBusinessDataSourceIsSeparate()
+            throws Exception {
+        org.springframework.jdbc.datasource.DriverManagerDataSource businessDataSource =
+                new org.springframework.jdbc.datasource.DriverManagerDataSource(
+                        "jdbc:h2:mem:business_ds_" + java.util.UUID.randomUUID() + ";MODE=PostgreSQL;DB_CLOSE_DELAY=-1",
+                        "sa",
+                        "");
+        org.springframework.jdbc.datasource.DriverManagerDataSource configDataSource =
+                new org.springframework.jdbc.datasource.DriverManagerDataSource(
+                        "jdbc:h2:mem:config_ds_" + java.util.UUID.randomUUID() + ";MODE=PostgreSQL;DB_CLOSE_DELAY=-1",
+                        "sa",
+                        "");
+        org.springframework.jdbc.datasource.init.ResourceDatabasePopulator populator =
+                new org.springframework.jdbc.datasource.init.ResourceDatabasePopulator(
+                        new org.springframework.core.io.ClassPathResource(
+                                "db/migration/V71__create_ai_cluster_coordination_tables.sql"));
+        populator.execute(configDataSource);
+
+        org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate businessJdbc =
+                new org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate(businessDataSource);
+        org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate configJdbc =
+                new org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate(configDataSource);
+
+        contextRunner
+                .withPropertyValues(
+                        "praxis.ai.rate-limit.store=jdbc",
+                        "praxis.ai.authoring.stream-capacity.store=jdbc")
+                .withBean(
+                        "businessNamedParameterJdbcTemplate",
+                        org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate.class,
+                        () -> businessJdbc)
+                .withBean(
+                        "configNamedParameterJdbcTemplate",
+                        org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate.class,
+                        () -> configJdbc)
+                .run(context -> {
+                    org.praxisplatform.config.service.AiProviderRateLimitStore rateLimitStore =
+                            context.getBean(org.praxisplatform.config.service.AiProviderRateLimitStore.class);
+                    org.praxisplatform.config.ai.authoring.AgenticAuthoringStreamCapacityStore capacityStore =
+                            context.getBean(
+                                    org.praxisplatform.config.ai.authoring.AgenticAuthoringStreamCapacityStore.class);
+
+                    java.time.Instant now = java.time.Instant.now();
+                    rateLimitStore.recordCooldown(
+                            "openai",
+                            "gpt-5.4-nano",
+                            now.plusSeconds(30),
+                            "HTTP 429 Too Many Requests");
+                    assertThat(rateLimitStore.findActiveCooldown("openai", "gpt-5.4-nano", now.plusSeconds(5)))
+                            .isPresent();
+
+                    var reservation1 = capacityStore.tryReserve(
+                            java.util.UUID.randomUUID(),
+                            "tenant-a",
+                            "tenant-a:user-1",
+                            2,
+                            2,
+                            1,
+                            () -> true);
+                    var reservation2 = capacityStore.tryReserve(
+                            java.util.UUID.randomUUID(),
+                            "tenant-a",
+                            "tenant-a:user-1",
+                            2,
+                            2,
+                            1,
+                            () -> true);
+                    assertThat(reservation1).isEqualTo(
+                            org.praxisplatform.config.ai.authoring.AgenticAuthoringStreamCapacityStore.ReservationStatus
+                                    .RESERVED);
+                    assertThat(reservation2).isEqualTo(
+                            org.praxisplatform.config.ai.authoring.AgenticAuthoringStreamCapacityStore.ReservationStatus
+                                    .USER_LIMIT_EXCEEDED);
+                    assertThat(capacityStore.activeGlobalCount()).isEqualTo(1);
+                });
+    }
+
+    @Test
+    void shouldBindMultiProviderFastTierModelOverridesForPreviewMessageAndPreIntentPlanning() {
+        AiProviderManagementService providerManagementService =
+                org.mockito.Mockito.mock(AiProviderManagementService.class);
+        contextRunner
+                .withBean(AiProviderManagementService.class, () -> providerManagementService)
+                .withPropertyValues(
+                        "praxis.ai.authoring.preview-message.openai-model=gpt-5.6-luna",
+                        "praxis.ai.authoring.preview-message.gemini-model=gemini-2.5-flash",
+                        "praxis.ai.authoring.preview-message.anthropic-model=claude-3-5-haiku-latest",
+                        "praxis.ai.authoring.pre-intent.openai-model=gpt-5.6-luna",
+                        "praxis.ai.authoring.pre-intent.gemini-model=gemini-2.5-flash",
+                        "praxis.ai.authoring.pre-intent.anthropic-model=claude-3-5-haiku-latest")
+                .run(context -> {
+                    org.praxisplatform.config.ai.authoring.AgenticAuthoringPreviewMessageSynthesizerService previewMessageService =
+                            context.getBean(org.praxisplatform.config.ai.authoring.AgenticAuthoringPreviewMessageSynthesizerService.class);
+                    org.praxisplatform.config.ai.authoring.AgenticAuthoringPreIntentToolPlanningService preIntentService =
+                            context.getBean(org.praxisplatform.config.ai.authoring.AgenticAuthoringPreIntentToolPlanningService.class);
+
+                    assertThat(ReflectionTestUtils.getField(previewMessageService, "previewMessageModelOverrides"))
+                            .isEqualTo(java.util.Map.of(
+                                    "openai", "gpt-5.6-luna",
+                                    "gemini", "gemini-2.5-flash",
+                                    "anthropic", "claude-3-5-haiku-latest"));
+                    assertThat(ReflectionTestUtils.getField(preIntentService, "planningModelOverrides"))
+                            .isEqualTo(java.util.Map.of(
+                                    "openai", "gpt-5.6-luna",
+                                    "gemini", "gemini-2.5-flash",
+                                    "anthropic", "claude-3-5-haiku-latest"));
+                });
+    }
+
+    @Test
     void shouldRegisterApplyServiceWhenPersistenceAndTurnEventServicesExist() {
         UserConfigService userConfigService = org.mockito.Mockito.mock(UserConfigService.class);
         AiApiKeyProtectionService apiKeyProtectionService = org.mockito.Mockito.mock(AiApiKeyProtectionService.class);

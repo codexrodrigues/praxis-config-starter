@@ -65,12 +65,17 @@ public class AgenticAuthoringOperationalBindingVerificationService {
         }
         List<AgenticAuthoringDomainBindingService.BindingProjection> bindings = bindingService.resolve(
                 principalContext.tenantId(), principalContext.environment(), resourceKey, 12);
+        Map<String, ResourceCapabilitiesFetchResult> capabilitiesByResource = new LinkedHashMap<>();
+        if (bindings.isEmpty()) {
+            bindings = resolveCanonicalCapabilityBindings(
+                    resourceKey, requestBaseUrl, principalContext, capabilitiesByResource);
+        }
         if (bindings.isEmpty()) {
             return VerificationResult.blocked(resourceKey, "operational-grounding-binding-required");
         }
         List<OperationProjection> verified = new ArrayList<>();
         List<String> failures = new ArrayList<>();
-        Map<String, ResourceCapabilitiesFetchResult> capabilitiesByResource = new LinkedHashMap<>();
+
         String capabilitiesResourcePath = bindings.stream()
                 .filter(binding -> "api_resource".equals(binding.bindingType()))
                 .map(AgenticAuthoringDomainBindingService.BindingProjection::apiPath)
@@ -148,6 +153,14 @@ public class AgenticAuthoringOperationalBindingVerificationService {
                     binding.sourceRelease(),
                     binding.evidence()));
         }
+        supplementCanonicalCapabilityOperations(
+                resourceKey,
+                capabilitiesResourcePath,
+                requestBaseUrl,
+                principalContext,
+                bindings,
+                capabilitiesByResource,
+                verified);
         int failuresBeforeActionCatalog = failures.size();
         verifyPublishedActions(
                 resourceKey,
@@ -173,12 +186,15 @@ public class AgenticAuthoringOperationalBindingVerificationService {
                         List.copyOf(failures));
     }
 
-    private List<RelatedResourceSurfaceProjection> verifyRelatedResourceSurfaces(
+    List<RelatedResourceSurfaceProjection> verifyRelatedResourceSurfaces(
             String resourceKey,
             String resourcePath,
             String requestBaseUrl,
             AiPrincipalContext principalContext) {
-        if (surfaceCatalogRetrievalService == null || !StringUtils.hasText(resourcePath)) {
+        if (surfaceCatalogRetrievalService == null
+                || principalContext == null
+                || !StringUtils.hasText(resourceKey)
+                || !StringUtils.hasText(resourcePath)) {
             return List.of();
         }
         ResourceSurfaceCatalogFetchResult result = surfaceCatalogRetrievalService.fetchCatalogResult(
@@ -463,6 +479,226 @@ public class AgenticAuthoringOperationalBindingVerificationService {
             case "delete" -> List.of("delete");
             default -> List.of();
         };
+    }
+
+    private void supplementCanonicalCapabilityOperations(
+            String resourceKey,
+            String capabilitiesResourcePath,
+            String requestBaseUrl,
+            AiPrincipalContext principalContext,
+            List<AgenticAuthoringDomainBindingService.BindingProjection> bindings,
+            Map<String, ResourceCapabilitiesFetchResult> capabilitiesByResource,
+            List<OperationProjection> verified) {
+        if (schemaRetrievalService == null
+                || principalContext == null
+                || capabilitiesByResource.isEmpty()
+                || !StringUtils.hasText(capabilitiesResourcePath)
+                || bindings.stream().anyMatch(binding ->
+                        "api_resource".equals(binding.bindingType())
+                                || "api_operation".equals(binding.bindingType()))
+                || verified.stream().anyMatch(operation ->
+                        operation.apiPath().endsWith("/filter")
+                                || operation.apiPath().endsWith("/filter/cursor"))) {
+            return;
+        }
+        ResourceCapabilitiesFetchResult capabilities =
+                capabilitiesByResource.get(canonicalPath(capabilitiesResourcePath));
+        if (capabilities == null || !capabilities.isSuccess()) {
+            return;
+        }
+        List<AgenticAuthoringDomainBindingService.BindingProjection> canonicalBindings =
+                synthesizeCanonicalCapabilityBindings(resourceKey, capabilitiesResourcePath, capabilities);
+        for (AgenticAuthoringDomainBindingService.BindingProjection binding : canonicalBindings) {
+            String method = binding.apiMethod().trim().toLowerCase(Locale.ROOT);
+            String canonicalBindingPath = canonicalPath(binding.apiPath());
+            boolean alreadyVerified = verified.stream().anyMatch(existing ->
+                    canonicalBindingPath.equals(canonicalPath(existing.apiPath()))
+                            && method.equalsIgnoreCase(existing.apiMethod()));
+            if (alreadyVerified) {
+                continue;
+            }
+            CapabilityDecision capabilityDecision =
+                    operationAvailable(capabilities.getCapabilities(), binding, method);
+            if (!capabilityDecision.verified()) {
+                continue;
+            }
+            SchemaFetchResult schema = schemaRetrievalService.fetchSchemaResult(
+                    AiSchemaContext.builder()
+                            .path(binding.apiPath())
+                            .operation(method)
+                            .schemaType(schemaType(binding, method))
+                            .build(),
+                    requestBaseUrl,
+                    principalContext.tenantId(),
+                    principalContext.userId(),
+                    principalContext.environment());
+            if (schema == null || !schema.isSuccess()) {
+                continue;
+            }
+            verified.add(new OperationProjection(
+                    binding.conceptKey(),
+                    binding.bindingKey(),
+                    "resource_operation",
+                    binding.resourceKey(),
+                    capabilitiesResourcePath,
+                    binding.apiPath(),
+                    method,
+                    schemaType(binding, method),
+                    schema.getEndpointUrl(),
+                    capabilities.getEndpointUrl(),
+                    capabilityDecision.operationId(),
+                    "",
+                    "",
+                    "principal_capability",
+                    new AvailabilityProjection(true, "", "resource_capabilities"),
+                    binding.sourceRelease(),
+                    withStatsCapabilitiesEvidence(binding.evidence(), capabilities.getCapabilities())));
+        }
+    }
+
+    private List<AgenticAuthoringDomainBindingService.BindingProjection> resolveCanonicalCapabilityBindings(
+            String resourceKey,
+            String requestBaseUrl,
+            AiPrincipalContext principalContext,
+            Map<String, ResourceCapabilitiesFetchResult> capabilitiesByResource) {
+        String resourcePath = canonicalResourcePath(resourceKey);
+        if (capabilitiesRetrievalService == null || !StringUtils.hasText(resourcePath)) {
+            return List.of();
+        }
+        ResourceCapabilitiesFetchResult capabilities = capabilitiesRetrievalService.fetchCapabilitiesResult(
+                resourcePath,
+                requestBaseUrl,
+                principalContext.tenantId(),
+                principalContext.userId(),
+                principalContext.environment());
+        if (capabilities == null || !capabilities.isSuccess()) {
+            return List.of();
+        }
+        capabilitiesByResource.put(canonicalPath(resourcePath), capabilities);
+        return synthesizeCanonicalCapabilityBindings(resourceKey, resourcePath, capabilities);
+    }
+
+    private List<AgenticAuthoringDomainBindingService.BindingProjection> synthesizeCanonicalCapabilityBindings(
+            String resourceKey,
+            String resourcePath,
+            ResourceCapabilitiesFetchResult capabilities) {
+        JsonNode root = capabilities.getCapabilities() != null
+                        && capabilities.getCapabilities().path("data").isObject()
+                ? capabilities.getCapabilities().path("data")
+                : capabilities.getCapabilities();
+        JsonNode operations = root == null ? null : root.path("operations");
+        if (operations == null || !operations.isObject()) {
+            return List.of();
+        }
+        List<AgenticAuthoringDomainBindingService.BindingProjection> synthesized = new ArrayList<>();
+        List<String> evidence = withStatsCapabilitiesEvidence(
+                List.of(
+                        "domain-knowledge:evidence-status:active",
+                        "metadata-capabilities-grounding:" + resourceKey),
+                capabilities.getCapabilities());
+        if (isSupportedAndAllowed(operations.path("all"))) {
+            synthesized.add(new AgenticAuthoringDomainBindingService.BindingProjection(
+                    resourceKey + ".workspace",
+                    "api_operation",
+                    "all",
+                    resourceKey,
+                    resourcePath + "/all",
+                    "GET",
+                    "/schemas/filtered?path=" + resourcePath + "/all&operation=get&schemaType=response",
+                    1.0,
+                    "canonical-metadata-capabilities",
+                    evidence));
+        }
+        if (isSupportedAndAllowed(operations.path("list"))
+                || isSupportedAndAllowed(operations.path("read"))
+                || isSupportedAndAllowed(operations.path("get"))) {
+            synthesized.add(new AgenticAuthoringDomainBindingService.BindingProjection(
+                    resourceKey + ".workspace",
+                    "api_resource",
+                    "resource:" + resourceKey,
+                    resourceKey,
+                    resourcePath,
+                    "GET",
+                    "/schemas/filtered?path=" + resourcePath + "&operation=get&schemaType=response",
+                    1.0,
+                    "canonical-metadata-capabilities",
+                    evidence));
+        }
+        if (isSupportedAndAllowed(operations.path("byId"))) {
+            synthesized.add(new AgenticAuthoringDomainBindingService.BindingProjection(
+                    resourceKey + ".workspace",
+                    "api_operation",
+                    "byId",
+                    resourceKey,
+                    resourcePath + "/{id}",
+                    "GET",
+                    "/schemas/filtered?path=" + resourcePath + "/{id}&operation=get&schemaType=response",
+                    1.0,
+                    "canonical-metadata-capabilities",
+                    evidence));
+        }
+        if (isSupportedAndAllowed(operations.path("cursor"))) {
+            synthesized.add(new AgenticAuthoringDomainBindingService.BindingProjection(
+                    resourceKey + ".workspace",
+                    "api_operation",
+                    "cursor",
+                    resourceKey,
+                    resourcePath + "/filter/cursor",
+                    "POST",
+                    "/schemas/filtered?path=" + resourcePath + "/filter/cursor&operation=post&schemaType=response",
+                    1.0,
+                    "canonical-metadata-capabilities",
+                    evidence));
+        }
+        if (isSupportedAndAllowed(operations.path("filter"))) {
+            synthesized.add(new AgenticAuthoringDomainBindingService.BindingProjection(
+                    resourceKey + ".workspace",
+                    "api_operation",
+                    "filter",
+                    resourceKey,
+                    resourcePath + "/filter",
+                    "POST",
+                    "/schemas/filtered?path=" + resourcePath + "/filter&operation=post&schemaType=response",
+                    1.0,
+                    "canonical-metadata-capabilities",
+                    evidence));
+        }
+        return List.copyOf(synthesized);
+    }
+
+    private boolean isSupportedAndAllowed(JsonNode operation) {
+        return operation != null
+                && operation.isObject()
+                && operation.path("supported").asBoolean(false)
+                && operation.path("availability").path("allowed").isBoolean()
+                && operation.path("availability").path("allowed").asBoolean(false);
+    }
+
+    private List<String> withStatsCapabilitiesEvidence(List<String> baseEvidence, JsonNode capabilities) {
+        List<String> base = baseEvidence == null ? List.of() : baseEvidence;
+        if (!statsSupported(capabilities) || base.contains("stats-capabilities-verified")) {
+            return List.copyOf(base);
+        }
+        List<String> merged = new ArrayList<>(base);
+        merged.add("stats-capabilities-verified");
+        return List.copyOf(merged);
+    }
+
+    private boolean statsSupported(JsonNode capabilities) {
+        JsonNode root = capabilities != null && capabilities.path("data").isObject()
+                ? capabilities.path("data")
+                : capabilities;
+        if (root == null || !root.isObject()) {
+            return false;
+        }
+        if (root.path("stats").path("supported").asBoolean(false)) {
+            return true;
+        }
+        JsonNode operations = root.path("operations");
+        return operations.isObject()
+                && (isSupportedAndAllowed(operations.path("statsGroupBy"))
+                        || isSupportedAndAllowed(operations.path("statsTimeSeries"))
+                        || isSupportedAndAllowed(operations.path("statsDistribution")));
     }
 
     private String canonicalResourcePath(String resourceKey) {

@@ -151,6 +151,9 @@ final class AgenticAuthoringSemanticMaterializationPolicy {
                 : safe(semanticDecision.visualizationDecision().layoutKind());
         return "resource-master-detail".equals(semanticLayout)
                 || "parent-child-related-resource".equals(semanticLayout)
+                || "approval-workbench".equals(semanticLayout)
+                || "resource-action-workbench".equals(semanticLayout)
+                || "workflow-action-workbench".equals(semanticLayout)
                 || "single-table".equals(semanticLayout)
                 || materialization != null
                         && List.of("master-detail-dashboard", "single-table-page").contains(
@@ -221,6 +224,7 @@ final class AgenticAuthoringSemanticMaterializationPolicy {
             case "single-table" -> "single-table-page";
             case "resource-master-detail" -> "master-detail-dashboard";
             case "parent-child-related-resource" -> "master-detail-dashboard";
+            case "approval-workbench", "resource-action-workbench", "workflow-action-workbench" -> "master-detail-dashboard";
             case "resource-crud" -> "resource-crud";
             default -> "";
         };

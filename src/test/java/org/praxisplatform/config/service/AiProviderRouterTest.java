@@ -1,21 +1,24 @@
 package org.praxisplatform.config.service;
 
-import org.junit.jupiter.api.Tag;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
+import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
-import org.mockito.ArgumentCaptor;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.praxisplatform.config.dto.AiProviderModel;
@@ -132,6 +135,36 @@ class AiProviderRouterTest {
     }
 
     @Test
+    void rateLimitStoreRecordsCooldownAndPrioritizesHealthyFallbackCandidateOnSubsequentCalls() {
+        when(openaiProvider.getIfAvailable(any())).thenReturn(openai);
+        when(geminiProvider.getIfAvailable(any())).thenReturn(gemini);
+        InMemoryAiProviderRateLimitStore rateLimitStore = new InMemoryAiProviderRateLimitStore();
+        AiProviderRouter router = new AiProviderRouter(
+                geminiProvider,
+                openaiProvider,
+                xaiProvider,
+                mockProvider,
+                rateLimitStore);
+        ReflectionTestUtils.setField(router, "provider", "openai");
+        ReflectionTestUtils.setField(router, "providerFallbackEnabled", true);
+        ReflectionTestUtils.setField(router, "providerFallbackCandidates", "gemini:gemini-2.5-flash");
+
+        Instant retryAfter = Instant.now().plusSeconds(30);
+        when(openai.generateText(eq("first"), any()))
+                .thenThrow(AiProviderCallException.fromHttpStatus("openai", 429, "rate_limit_exceeded", retryAfter, null));
+        when(gemini.generateText(any(), any())).thenReturn("fallback-answer");
+
+        assertEquals("fallback-answer", router.generateText("first"));
+        assertTrue(rateLimitStore.isInCooldown("openai", null, Instant.now()));
+        assertFalse(rateLimitStore.isInCooldown("gemini", "gemini-2.5-flash", Instant.now()));
+
+        // Second call within cooldown window skips openai and routes directly to healthy fallback gemini
+        assertEquals("fallback-answer", router.generateText("second"));
+        verify(openai, times(1)).generateText(any(), any());
+        verify(gemini, times(2)).generateText(any(), any());
+    }
+
+    @Test
     void generateTextDoesNotRenewTheOperationTimeoutForFallbackProvider() throws Exception {
         when(openaiProvider.getIfAvailable(any())).thenReturn(openai);
         AiProviderRouter router = new AiProviderRouter(geminiProvider, openaiProvider, xaiProvider, mockProvider);
@@ -227,5 +260,98 @@ class AiProviderRouterTest {
         router.cancelTurn(threadId, turnId);
 
         verify(gemini).cancelTurn(threadId, turnId);
+    }
+
+    @Test
+    void customCallerApiKeyRateLimitDoesNotPoisonSharedProviderCooldownStore() {
+        when(openaiProvider.getIfAvailable(any())).thenReturn(openai);
+        when(geminiProvider.getIfAvailable(any())).thenReturn(gemini);
+        InMemoryAiProviderRateLimitStore rateLimitStore = new InMemoryAiProviderRateLimitStore();
+        AiProviderRouter router = new AiProviderRouter(
+                geminiProvider,
+                openaiProvider,
+                xaiProvider,
+                mockProvider,
+                rateLimitStore);
+        ReflectionTestUtils.setField(router, "provider", "openai");
+        ReflectionTestUtils.setField(router, "providerFallbackEnabled", true);
+        ReflectionTestUtils.setField(router, "providerFallbackCandidates", "openai,gemini:gemini-2.0-flash");
+
+        AiProviderCallException rateLimit = AiProviderCallException.fromHttpStatus(
+                "openai",
+                429,
+                "rate_limit_exceeded",
+                Instant.now().plusSeconds(60),
+                null);
+        when(openai.generateText(eq("byok-prompt"), any())).thenThrow(rateLimit);
+        when(gemini.generateText(eq("byok-prompt"), any())).thenReturn("gemini-fallback");
+
+        AiCallConfig byokConfig = AiCallConfig.builder()
+                .provider("openai")
+                .apiKey("sk-custom-caller-key")
+                .build();
+        String result = router.generateText("byok-prompt", byokConfig);
+
+        assertEquals("gemini-fallback", result);
+        assertTrue(
+                !rateLimitStore.isInCooldown("openai", null, Instant.now()),
+                "Shared rateLimitStore must not enter cooldown when a caller-supplied apiKey hits 429");
+    }
+
+    @Test
+    void clearingModelSpecificCooldownAlsoClearsProviderWildcardCooldown() {
+        InMemoryAiProviderRateLimitStore store = new InMemoryAiProviderRateLimitStore();
+        Instant now = Instant.now();
+        store.recordCooldown("openai", null, now.plusSeconds(30), "rate_limit");
+        assertTrue(store.isInCooldown("openai", "gpt-4o-mini", now));
+
+        store.clearCooldown("openai", "gpt-4o-mini");
+
+        assertTrue(!store.isInCooldown("openai", "gpt-4o-mini", now));
+        assertTrue(!store.isInCooldown("openai", null, now));
+    }
+
+    @Test
+    void recordsMicrometerCountersWhenProviderEntersCooldownAndFallsBack() {
+        when(openaiProvider.getIfAvailable(any())).thenReturn(openai);
+        when(geminiProvider.getIfAvailable(any())).thenReturn(gemini);
+        InMemoryAiProviderRateLimitStore rateLimitStore = new InMemoryAiProviderRateLimitStore();
+        io.micrometer.core.instrument.simple.SimpleMeterRegistry meterRegistry =
+                new io.micrometer.core.instrument.simple.SimpleMeterRegistry();
+        AiProviderRouter router = new AiProviderRouter(
+                geminiProvider,
+                openaiProvider,
+                xaiProvider,
+                mockProvider,
+                rateLimitStore);
+        router.setMeterRegistry(meterRegistry);
+        ReflectionTestUtils.setField(router, "provider", "openai");
+        ReflectionTestUtils.setField(router, "providerFallbackEnabled", true);
+        ReflectionTestUtils.setField(router, "providerFallbackCandidates", "gemini:gemini-2.5-flash");
+
+        when(openai.generateText(eq("metric-prompt"), any()))
+                .thenThrow(AiProviderCallException.fromHttpStatus("openai", 429, "rate_limit_exceeded"));
+        when(gemini.generateText(eq("metric-prompt"), any())).thenReturn("ok-from-gemini");
+
+        assertEquals("ok-from-gemini", router.generateText("metric-prompt"));
+
+        assertEquals(
+                1.0,
+                meterRegistry.get("praxis_ai_provider_cooldown_recorded_total")
+                        .tag("provider", "openai")
+                        .tag("reason", "rate_limit")
+                        .counter()
+                        .count(),
+                0.0001);
+        assertEquals(
+                1.0,
+                meterRegistry.get("praxis_ai_provider_fallback_total")
+                        .tag("operation", "generateText")
+                        .tag("from_provider", "openai")
+                        .tag("to_provider", "gemini")
+                        .tag("reason", "rate_limit")
+                        .counter()
+                        .count(),
+                0.0001);
     }
 }

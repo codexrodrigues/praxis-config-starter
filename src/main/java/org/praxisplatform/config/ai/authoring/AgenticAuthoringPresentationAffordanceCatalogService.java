@@ -78,6 +78,18 @@ public class AgenticAuthoringPresentationAffordanceCatalogService {
         if (aiRegistryRepository == null || componentId == null || componentId.isBlank()) {
             return Optional.empty();
         }
+        String normalizedComponentId = componentId.trim();
+        Optional<AgenticAuthoringPresentationAffordanceCatalog> direct = findRegistryCatalog(normalizedComponentId);
+        if (direct.isPresent()) {
+            return direct;
+        }
+        if ("praxis-dynamic-page-builder".equals(normalizedComponentId)) {
+            return findRegistryCatalog("praxis-page-builder");
+        }
+        return Optional.empty();
+    }
+
+    private Optional<AgenticAuthoringPresentationAffordanceCatalog> findRegistryCatalog(String componentId) {
         Optional<AiRegistry> registry;
         try {
             registry = aiRegistryRepository.findByRegistryTypeAndRegistryKeyAndComponentTypeAndScopeAndScopeKey(

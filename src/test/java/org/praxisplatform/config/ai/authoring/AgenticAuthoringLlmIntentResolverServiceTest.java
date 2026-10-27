@@ -4103,6 +4103,189 @@ class AgenticAuthoringLlmIntentResolverServiceTest {
                                         List.of())))));
     }
 
+    @Test
+    void skipsDeclaredClientActionIntentCallWhenNoActionIsAvailableAndPreIntentGroundingIsPresent() throws Exception {
+        ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
+        when(providerManagementService.generateJson(
+                promptCaptor.capture(),
+                any(AiJsonSchema.class),
+                any(AiCallConfig.class),
+                eq("tenant"),
+                eq("user"),
+                eq("local"))).thenReturn(objectMapper.readTree("""
+                {
+                  "resolved": true,
+                  "operationKind": "create",
+                  "artifactKind": "table",
+                  "semanticIntentClass": "component_authoring",
+                  "changeKind": "create_artifact",
+                  "selectedResourcePath": "/api/human-resources/funcionarios",
+                  "resourceSearchQuery": null,
+                  "followUpKind": "none",
+                  "assistantMessage": "Preparei a tabela de funcionários.",
+                  "requiresGovernedAuthoring": false,
+                  "visualizationDecision": {
+                    "schemaVersion": "praxis-agentic-authoring-visualization-decision.v1",
+                    "intent": "table",
+                    "layoutKind": "single-table",
+                    "primaryComponent": "praxis-table",
+                    "primaryComponentId": null,
+                    "axes": [],
+                    "includeSummary": false,
+                    "includeDetailTable": true,
+                    "excludedComponentIds": [],
+                    "includeFilters": false,
+                    "includeKpis": false,
+                    "provenance": "llm",
+                    "targetSurfaceId": null
+                  },
+                  "consultativeRetrievalPlan": null,
+                  "queryConstraints": {
+                    "appliesToDataSelection": false,
+                    "filters": []
+                  },
+                  "quickReplies": [],
+                  "clarificationQuestions": [],
+                  "warnings": []
+                }
+                """));
+        ObjectNode contextHints = objectMapper.createObjectNode();
+        ObjectNode action = contextHints.putArray("clientActions").addObject();
+        action.put("schemaVersion", "praxis-agentic-authoring-client-action.v1");
+        action.put("id", "page-builder.local-preview.undo");
+        action.put("kind", "local-undo");
+        action.put("capabilityRef", "page-builder.local-preview-history");
+        action.put("available", false);
+        action.put("targetComponentId", "praxis-dynamic-page-builder");
+        contextHints.putObject("preIntentSemanticOrientation")
+                .put("semanticIntentClass", "authoring_or_other")
+                .put("artifactKind", "table");
+        AgenticAuthoringIntentResolutionRequest request = new AgenticAuthoringIntentResolutionRequest(
+                "crie uma tabela de funcionários",
+                "page-builder",
+                "praxis-dynamic-page-builder",
+                "/page-builder-ia",
+                objectMapper.createObjectNode(),
+                null,
+                "openai",
+                "gpt-5.4-mini",
+                "test-key",
+                "session-1",
+                "turn-1",
+                List.of(),
+                null,
+                List.of(),
+                contextHints,
+                null);
+
+        AgenticAuthoringLlmIntentResolution resolution = new AgenticAuthoringLlmIntentResolverService(
+                        providerManagementService,
+                        objectMapper)
+                .resolve(
+                        request,
+                        request.userPrompt(),
+                        objectMapper.createObjectNode(),
+                        null,
+                        List.of(weakCandidate("/api/human-resources/funcionarios")),
+                        componentCapabilitiesWithExpansion(),
+                        "tenant",
+                        "user",
+                        "local")
+                .orElseThrow();
+
+        assertThat(resolution.resolved()).isTrue();
+        assertThat(resolution.providerInvocations())
+                .extracting(org.praxisplatform.config.service.AiProviderInvocationTelemetry::phase)
+                .containsExactly("intent_fast");
+    }
+
+    @Test
+    void shortCircuitsIntentResolutionWhenPreIntentRecordedTerminalProviderFailure() {
+        ObjectNode contextHints = objectMapper.createObjectNode();
+        contextHints.putObject("preIntentProviderFailure")
+                .put("phase", "pre_intent_tool_plan")
+                .put("failureKind", "quota-exhausted");
+        AgenticAuthoringIntentResolutionRequest request = new AgenticAuthoringIntentResolutionRequest(
+                "crie um dashboard",
+                "page-builder",
+                "praxis-dynamic-page-builder",
+                "/page-builder-ia",
+                objectMapper.createObjectNode(),
+                null,
+                "openai",
+                "gpt-5.4-mini",
+                "test-key",
+                "session-1",
+                "turn-1",
+                List.of(),
+                null,
+                List.of(),
+                contextHints,
+                null);
+
+        AgenticAuthoringLlmIntentResolution resolution = new AgenticAuthoringLlmIntentResolverService(
+                        providerManagementService,
+                        objectMapper)
+                .resolve(
+                        request,
+                        request.userPrompt(),
+                        objectMapper.createObjectNode(),
+                        null,
+                        List.of(),
+                        componentCapabilities(),
+                        "tenant",
+                        "user",
+                        "local")
+                .orElseThrow();
+
+        assertThat(resolution.resolved()).isFalse();
+        assertThat(resolution.followUpKind()).isEqualTo("provider_error");
+        assertThat(resolution.warnings())
+                .contains(
+                        "llm-intent-resolution-failed",
+                        "llm-provider-error",
+                        "llm-provider-quota-exhausted",
+                        "llm-pre-intent-terminal-provider-circuit-breaker");
+        assertThat(resolution.providerInvocations()).isEmpty();
+        Mockito.verifyNoInteractions(providerManagementService);
+    }
+
+    @Test
+    void declaredClientActionIntentTerminalQuotaFailureDoesNotCascadeIntoFastOrFullIntent() {
+        when(providerManagementService.generateJson(
+                any(),
+                any(AiJsonSchema.class),
+                any(AiCallConfig.class),
+                eq("tenant"),
+                eq("user"),
+                eq("local"))).thenThrow(new RuntimeException("provider quota exhausted"));
+
+        AgenticAuthoringLlmIntentResolution resolution = new AgenticAuthoringLlmIntentResolverService(
+                        providerManagementService,
+                        objectMapper)
+                .resolve(
+                        targetedTableUndoRequest(true),
+                        "Desfaz só a última mudança e mantém todas as anteriores.",
+                        objectMapper.createObjectNode(),
+                        targetedTableTarget(),
+                        List.of(),
+                        componentCapabilities(),
+                        "tenant",
+                        "user",
+                        "local")
+                .orElseThrow();
+
+        assertThat(resolution.resolved()).isFalse();
+        assertThat(resolution.followUpKind()).isEqualTo("provider_error");
+        assertThat(resolution.providerInvocations())
+                .extracting(
+                        org.praxisplatform.config.service.AiProviderInvocationTelemetry::phase,
+                        org.praxisplatform.config.service.AiProviderInvocationTelemetry::status,
+                        org.praxisplatform.config.service.AiProviderInvocationTelemetry::failureKind)
+                .containsExactly(
+                        org.assertj.core.groups.Tuple.tuple("declared_client_action_intent", "failure", "quota-exhausted"));
+    }
+
     private AgenticAuthoringCandidate weakCandidate(String resourcePath) {
         return new AgenticAuthoringCandidate(
                 resourcePath,

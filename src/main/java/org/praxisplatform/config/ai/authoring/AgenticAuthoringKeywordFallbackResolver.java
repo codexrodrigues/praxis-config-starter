@@ -57,7 +57,8 @@ final class AgenticAuthoringKeywordFallbackResolver {
                 "dividir", "divida", "renomear", "renomeie", "formatar", "formate", "formatacao")) {
             return "modify";
         }
-        if (isExplicitCreateConfirmation(prompt)) {
+        if (isExplicitCreateConfirmation(prompt)
+                || (isTemporalEvolutionAuthoringPrompt(prompt) && !isRecommendationQuestion(prompt))) {
             return "create";
         }
         if (containsAny(prompt, "criar", "crie", "gerar", "gere", "montar", "monte",
@@ -104,7 +105,8 @@ final class AgenticAuthoringKeywordFallbackResolver {
         if (isReadDetailPagePrompt(prompt)) {
             return "page";
         }
-        if (isOperationalMonitoringDashboardPrompt(prompt)) {
+        if (isOperationalMonitoringDashboardPrompt(prompt)
+                || isTemporalEvolutionDashboardPrompt(prompt)) {
             return "dashboard";
         }
         if (isAnalyticalVisualizationIntent(prompt)) {
@@ -382,6 +384,25 @@ final class AgenticAuthoringKeywordFallbackResolver {
                 "acesso", "acessos", "local", "locais", "usado", "usados", "uso", "usos",
                 "estrutura", "contrato", "contratos", "caso",
                 "casos", "andamento", "recurso", "recursos");
+    }
+
+    private boolean isTemporalEvolutionAuthoringPrompt(String prompt) {
+        return isTemporalEvolutionDashboardPrompt(prompt)
+                && containsAny(prompt,
+                "quero", "preciso", "gostaria", "necessito",
+                "verificar", "verifique", "acompanhar", "acompanhe",
+                "avaliar", "avalie", "conferir", "confira");
+    }
+
+    private boolean isTemporalEvolutionDashboardPrompt(String prompt) {
+        if (isTablePrompt(prompt)
+                || containsAny(prompt, "cadastro", "cadastrar", "salvar", "gravar", "preencher", "formulario")) {
+            return false;
+        }
+        return containsAny(prompt,
+                "evolucao", "evolução", "progressao", "progressão",
+                "trajetoria", "trajetória", "serie temporal", "série temporal",
+                "ao longo do tempo");
     }
 
     private boolean isOperationalMonitoringDashboardPrompt(String prompt) {

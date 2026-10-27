@@ -45,6 +45,55 @@ public class AgenticAuthoringPersistedUiCompositionSourceResolver {
                 "apiKeyProtectionService must not be null");
     }
 
+    /**
+     * Reconciles a {@code create} apply target to {@code update} only when the persisted record
+     * for the resolved principal identity is a soft-deleted tombstone ({@code tags.deleted=true})
+     * or an empty canvas ({@code payload.widgets} empty). Active populated corporate pages are
+     * never silently promoted from {@code create} to {@code update}, preserving optimistic
+     * concurrency protection ({@code If-None-Match: *}).
+     */
+    AgenticAuthoringApplyTarget.Resolution reconcileApplyTarget(
+            AiPrincipalContext principalContext,
+            AgenticAuthoringApplyTarget.Resolution applyTargetResolution) {
+        if (applyTargetResolution == null
+                || !applyTargetResolution.valid()
+                || !"create".equals(applyTargetResolution.target().mode())
+                || principalContext == null
+                || principalContext.tenantId() == null) {
+            return applyTargetResolution;
+        }
+        AgenticAuthoringApplyTarget target = applyTargetResolution.target();
+        UserConfigService.Scope scope = "user".equals(target.scope())
+                ? UserConfigService.Scope.USER
+                : UserConfigService.Scope.TENANT;
+        try {
+            UserConfigService.ResolvedConfig persisted = userConfigService.getByScope(
+                            scope,
+                            principalContext.tenantId(),
+                            principalContext.userId(),
+                            target.componentType(),
+                            target.componentId(),
+                            target.environment())
+                    .orElse(null);
+            if (persisted != null
+                    && persisted.config() != null
+                    && persisted.config().getEtag() != null
+                    && isInactiveOrBlankPersistedConfig(persisted.config())) {
+                return AgenticAuthoringApplyTarget.Resolution.resolved(new AgenticAuthoringApplyTarget(
+                        target.schemaVersion(),
+                        target.componentType(),
+                        target.componentId(),
+                        target.scope(),
+                        target.environment(),
+                        "update",
+                        persisted.config().getEtag().toString()));
+            }
+        } catch (RuntimeException ignored) {
+            // Keep caller target resolution; downstream persistence or source resolution will govern.
+        }
+        return applyTargetResolution;
+    }
+
     Resolution resolve(
             AgenticAuthoringTurnStreamRequest request,
             AiPrincipalContext principalContext,
@@ -123,6 +172,10 @@ public class AgenticAuthoringPersistedUiCompositionSourceResolver {
             return Resolution.blocked("persisted-ui-composition-etag-mismatch");
         }
 
+        if (isBlankCanvas(currentPage)) {
+            return Resolution.notRequired();
+        }
+
         String rawAuthoringSource = config.getAuthoringSource();
         if (rawAuthoringSource == null || rawAuthoringSource.isBlank()) {
             return Resolution.notRequired();
@@ -173,6 +226,25 @@ public class AgenticAuthoringPersistedUiCompositionSourceResolver {
         } catch (RuntimeException exception) {
             return Resolution.blocked("persisted-ui-composition-validation-failed");
         }
+    }
+
+    private boolean isInactiveOrBlankPersistedConfig(UiUserConfig config) {
+        if (config == null) {
+            return true;
+        }
+        JsonNode tags = readJson(config.getTags());
+        if (tags != null && tags.isObject() && tags.path("deleted").asBoolean(false)) {
+            return true;
+        }
+        JsonNode payload = readJson(config.getPayload());
+        return payload == null || !payload.isObject() || isBlankCanvas(payload);
+    }
+
+    private boolean isBlankCanvas(JsonNode currentPage) {
+        return currentPage != null
+                && currentPage.isObject()
+                && currentPage.path("widgets").isArray()
+                && currentPage.path("widgets").isEmpty();
     }
 
     private JsonNode readJson(String value) {

@@ -131,6 +131,13 @@ public class DomainCatalogPromptContextService {
             if (context == null || context.items() == null || context.items().isEmpty()) {
                 return "";
             }
+            if (context.items().size() >= effectiveLimit && effectiveLimit == MAX_LIMIT) {
+                DomainCatalogContextResponse expanded = domainCatalogIngestionService.contextLatest(defaultServiceKey, tenantId, environment, "node", null, "concept", null, 120);
+                if (expanded != null && expanded.items() != null && !expanded.items().isEmpty()) {
+                    context = expanded;
+                }
+            }
+            java.util.LinkedHashSet<String> seenResourceKeys = new java.util.LinkedHashSet<>();
             StringBuilder builder = new StringBuilder("DOMAIN_RESOURCE_IDENTITY_CATALOG\nitems:\n");
             for (DomainCatalogItemResponse item : context.items()) {
                 JsonNode payload = item.payload();
@@ -138,7 +145,7 @@ public class DomainCatalogPromptContextService {
                         text(payload == null ? null : payload.path("metadata"), "resourceKey"),
                         text(payload, "resourceKey"),
                         item.itemKey());
-                if (!StringUtils.hasText(resourceKey)) {
+                if (!StringUtils.hasText(resourceKey) || !seenResourceKeys.add(resourceKey)) {
                     continue;
                 }
                 builder.append("- resourceKey=")

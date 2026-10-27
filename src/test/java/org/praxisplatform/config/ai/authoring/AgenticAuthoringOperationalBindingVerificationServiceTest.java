@@ -536,6 +536,133 @@ class AgenticAuthoringOperationalBindingVerificationServiceTest {
         assertThat(result.failureCodes()).contains("operational-binding-action-catalog-invalid_response");
     }
 
+    @Test
+    void verifiesCanonicalResourceCapabilitiesWhenDomainKnowledgeBindingsAreEmpty() throws Exception {
+        when(bindingService.resolve("tenant", "dev", "operations.missoes", 12))
+                .thenReturn(List.of());
+        when(schemaService.fetchSchemaResult(any(), any(), any(), any(), any()))
+                .thenReturn(SchemaFetchResult.success(
+                        objectMapper.readTree("{\"type\":\"array\"}"), "schema-url"));
+        when(capabilitiesService.fetchCapabilitiesResult(
+                "/api/operations/missoes", "http://localhost", "tenant", "user", "dev"))
+                .thenReturn(ResourceCapabilitiesFetchResult.success(
+                        objectMapper.readTree("""
+                                {
+                                  "operations": {
+                                    "all": {"supported":true,"availability":{"allowed":true}},
+                                    "byId": {"supported":true,"availability":{"allowed":true}},
+                                    "cursor": {"supported":true,"availability":{"allowed":true}}
+                                  }
+                                }
+                                """),
+                        "http://localhost/api/operations/missoes/capabilities"));
+
+        AgenticAuthoringOperationalBindingVerificationService.VerificationResult result = service.verify(
+                "operations.missoes",
+                "http://localhost",
+                new AiPrincipalContext("tenant", "user", "dev", true));
+
+        assertThat(result.verified()).isTrue();
+        assertThat(result.operations()).extracting(
+                        AgenticAuthoringOperationalBindingVerificationService.OperationProjection::operationId)
+                .containsExactly("all", "byId", "cursor");
+        assertThat(result.operations()).extracting(
+                        AgenticAuthoringOperationalBindingVerificationService.OperationProjection::apiPath)
+                .containsExactly(
+                        "/api/operations/missoes/all",
+                        "/api/operations/missoes/{id}",
+                        "/api/operations/missoes/filter/cursor");
+    }
+
+    @Test
+    void supplementsCanonicalResourceCapabilitiesWhenBindingsOnlyContainUiSurfaceAndWorkflowActions()
+            throws Exception {
+        AgenticAuthoringDomainBindingService.BindingProjection createSurface =
+                new AgenticAuthoringDomainBindingService.BindingProjection(
+                        "operations.missoes.surface.create",
+                        "ui_surface",
+                        "binding:operations.missoes.surface.create:ui-surface",
+                        "create",
+                        "operations.missoes",
+                        "/api/operations/missoes",
+                        "POST",
+                        null,
+                        1.0,
+                        "operations-v1",
+                        List.of("domain-knowledge:evidence-status:active"));
+        AgenticAuthoringDomainBindingService.BindingProjection approveAction =
+                new AgenticAuthoringDomainBindingService.BindingProjection(
+                        "operations.missoes.action.approve",
+                        "workflow_action",
+                        "binding:operations.missoes.action.approve:workflow-action",
+                        "approve",
+                        "operations.missoes",
+                        "/api/operations/missoes/{id}/actions/approve",
+                        "POST",
+                        null,
+                        1.0,
+                        "operations-v1",
+                        List.of("domain-knowledge:evidence-status:active"));
+        when(bindingService.resolve("tenant", "dev", "operations.missoes", 12))
+                .thenReturn(List.of(createSurface, approveAction));
+        when(schemaService.fetchSchemaResult(any(), any(), any(), any(), any()))
+                .thenReturn(SchemaFetchResult.success(
+                        objectMapper.readTree("{\"type\":\"object\"}"), "schema-url"));
+        when(capabilitiesService.fetchCapabilitiesResult(
+                "/api/operations/missoes", "http://localhost", "tenant", "user", "dev"))
+                .thenReturn(ResourceCapabilitiesFetchResult.success(
+                        objectMapper.readTree("""
+                                {
+                                  "operations": {
+                                    "create": {"supported":true,"availability":{"allowed":true}},
+                                    "all": {"supported":true,"availability":{"allowed":true}},
+                                    "byId": {"supported":true,"availability":{"allowed":true}},
+                                    "cursor": {"supported":true,"availability":{"allowed":true}},
+                                    "filter": {"supported":true,"availability":{"allowed":true}}
+                                  }
+                                }
+                                """),
+                        "http://localhost/api/operations/missoes/capabilities"));
+        when(actionCatalogService.fetchCatalogResult(
+                "operations.missoes", "http://localhost", "tenant", "user", "dev"))
+                .thenReturn(ResourceActionCatalogFetchResult.success(
+                        objectMapper.readTree("""
+                                {
+                                  "resourceKey": "operations.missoes",
+                                  "resourcePath": "/api/operations/missoes",
+                                  "actions": [{
+                                    "id": "approve",
+                                    "resourceKey": "operations.missoes",
+                                    "scope": "ITEM",
+                                    "operationId": "approveMission",
+                                    "path": "/api/operations/missoes/{id}/actions/approve",
+                                    "method": "POST",
+                                    "availability": {
+                                      "allowed": false,
+                                      "reason": "resource-context-required"
+                                    }
+                                  }]
+                                }
+                                """),
+                        "http://localhost/schemas/actions?resource=operations.missoes"));
+
+        AgenticAuthoringOperationalBindingVerificationService.VerificationResult result = service.verify(
+                "operations.missoes",
+                "http://localhost",
+                new AiPrincipalContext("tenant", "user", "dev", true));
+
+        assertThat(result.verified()).isTrue();
+        assertThat(result.operations()).extracting(
+                        AgenticAuthoringOperationalBindingVerificationService.OperationProjection::apiPath)
+                .containsExactly(
+                        "/api/operations/missoes",
+                        "/api/operations/missoes/all",
+                        "/api/operations/missoes/{id}",
+                        "/api/operations/missoes/filter/cursor",
+                        "/api/operations/missoes/filter",
+                        "/api/operations/missoes/{id}/actions/approve");
+    }
+
     private void stubValidResourceOperation() throws Exception {
         AgenticAuthoringDomainBindingService.BindingProjection binding =
                 new AgenticAuthoringDomainBindingService.BindingProjection(

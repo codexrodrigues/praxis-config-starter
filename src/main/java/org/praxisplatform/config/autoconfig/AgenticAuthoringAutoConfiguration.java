@@ -43,14 +43,20 @@ import org.praxisplatform.config.ai.authoring.AgenticAuthoringDefaultToolLoopPla
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringOrchestrator;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringToolLoopExecutor;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringToolLoopPlanner;
+import org.praxisplatform.config.ai.authoring.AgenticAuthoringStreamCapacityStore;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringTurnStreamService;
+import org.praxisplatform.config.ai.authoring.InMemoryAgenticAuthoringStreamCapacityStore;
+import org.praxisplatform.config.ai.authoring.JdbcAgenticAuthoringStreamCapacityStore;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringUiCompositionPlanProvider;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringUiCompositionTemplateResolver;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringValidatorRegistry;
 import org.praxisplatform.config.controller.AgenticAuthoringManifestController;
 import org.praxisplatform.config.service.AiApiKeyProtectionService;
 import org.praxisplatform.config.service.AiProviderManagementService;
+import org.praxisplatform.config.service.AiProviderRateLimitStore;
 import org.praxisplatform.config.service.AiRegistryTemplateService;
+import org.praxisplatform.config.service.InMemoryAiProviderRateLimitStore;
+import org.praxisplatform.config.service.JdbcAiProviderRateLimitStore;
 import org.praxisplatform.config.service.AiStreamAccessTokenService;
 import org.praxisplatform.config.service.AiThreadService;
 import org.praxisplatform.config.service.AiTurnEventService;
@@ -80,11 +86,14 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
+import java.time.Clock;
+import java.time.Duration;
 import org.springframework.context.annotation.Bean;
 import org.springframework.core.annotation.Order;
+import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 
 @AutoConfiguration
-@AutoConfigureAfter(DomainRuleExplanationAutoConfiguration.class)
+@AutoConfigureAfter({DomainRuleExplanationAutoConfiguration.class, ConfigJdbcTemplateAutoConfiguration.class})
 @ConditionalOnClass(AgenticAuthoringDryRunService.class)
 @EnableConfigurationProperties({
         AgenticAuthoringArtifactProperties.class,
@@ -125,14 +134,21 @@ public class AgenticAuthoringAutoConfiguration {
             @Value("${praxis.ai.authoring.intent-resolution.fast-timeout-seconds:12}") int fastIntentTimeoutSeconds,
             @Value("${praxis.ai.authoring.intent-resolution.full-timeout-seconds:30}") int fullIntentTimeoutSeconds,
             @Value("${praxis.ai.authoring.intent-resolution.live-option.openai-model:gpt-5.6-luna}")
-                    String liveOptionRefinementOpenAiModel) {
+                    String liveOptionRefinementOpenAiModel,
+            @Value("${praxis.ai.authoring.intent-resolution.live-option.gemini-model:}")
+                    String liveOptionRefinementGeminiModel,
+            @Value("${praxis.ai.authoring.intent-resolution.live-option.anthropic-model:}")
+                    String liveOptionRefinementAnthropicModel) {
         return new AgenticAuthoringLlmIntentResolverService(
                 providerManagementService,
                 objectMapper,
                 domainCatalogPromptContextService.getIfAvailable(),
                 fastIntentTimeoutSeconds,
                 fullIntentTimeoutSeconds,
-                liveOptionRefinementOpenAiModel);
+                providerModelOverrides(
+                        liveOptionRefinementOpenAiModel,
+                        liveOptionRefinementGeminiModel,
+                        liveOptionRefinementAnthropicModel));
     }
 
     @Bean
@@ -463,8 +479,20 @@ public class AgenticAuthoringAutoConfiguration {
     @ConditionalOnBean(AiProviderManagementService.class)
     public AgenticAuthoringPreviewMessageSynthesizerService agenticAuthoringPreviewMessageSynthesizerService(
             AiProviderManagementService providerManagementService,
-            ObjectMapper objectMapper) {
-        return new AgenticAuthoringPreviewMessageSynthesizerService(providerManagementService, objectMapper);
+            ObjectMapper objectMapper,
+            @Value("${praxis.ai.authoring.preview-message.openai-model:gpt-5.6-luna}")
+            String openAiPreviewMessageModel,
+            @Value("${praxis.ai.authoring.preview-message.gemini-model:}")
+            String geminiPreviewMessageModel,
+            @Value("${praxis.ai.authoring.preview-message.anthropic-model:}")
+            String anthropicPreviewMessageModel) {
+        return new AgenticAuthoringPreviewMessageSynthesizerService(
+                providerManagementService,
+                objectMapper,
+                providerModelOverrides(
+                        openAiPreviewMessageModel,
+                        geminiPreviewMessageModel,
+                        anthropicPreviewMessageModel));
     }
 
     @Bean
@@ -475,12 +503,36 @@ public class AgenticAuthoringAutoConfiguration {
             ObjectMapper objectMapper,
             ObjectProvider<DomainCatalogPromptContextService> domainCatalogPromptContextService,
             @Value("${praxis.ai.authoring.pre-intent.openai-model:gpt-5.6-luna}")
-            String openAiPlanningModel) {
+            String openAiPlanningModel,
+            @Value("${praxis.ai.authoring.pre-intent.gemini-model:}")
+            String geminiPlanningModel,
+            @Value("${praxis.ai.authoring.pre-intent.anthropic-model:}")
+            String anthropicPlanningModel) {
         return new AgenticAuthoringLlmPreIntentToolPlanningService(
                 providerManagementService,
                 objectMapper,
                 domainCatalogPromptContextService.getIfAvailable(),
-                openAiPlanningModel);
+                providerModelOverrides(
+                        openAiPlanningModel,
+                        geminiPlanningModel,
+                        anthropicPlanningModel));
+    }
+
+    private static java.util.Map<String, String> providerModelOverrides(
+            String openAiModel,
+            String geminiModel,
+            String anthropicModel) {
+        java.util.LinkedHashMap<String, String> overrides = new java.util.LinkedHashMap<>();
+        if (org.springframework.util.StringUtils.hasText(openAiModel)) {
+            overrides.put("openai", openAiModel.trim());
+        }
+        if (org.springframework.util.StringUtils.hasText(geminiModel)) {
+            overrides.put("gemini", geminiModel.trim());
+        }
+        if (org.springframework.util.StringUtils.hasText(anthropicModel)) {
+            overrides.put("anthropic", anthropicModel.trim());
+        }
+        return java.util.Map.copyOf(overrides);
     }
 
     @Bean
@@ -672,6 +724,56 @@ public class AgenticAuthoringAutoConfiguration {
     }
 
     @Bean
+    @ConditionalOnMissingBean(AiProviderRateLimitStore.class)
+    @ConditionalOnBean(NamedParameterJdbcTemplate.class)
+    @ConditionalOnProperty(
+            prefix = "praxis.ai.rate-limit",
+            name = "store",
+            havingValue = "jdbc"
+    )
+    public AiProviderRateLimitStore jdbcAiProviderRateLimitStore(
+            org.springframework.context.ApplicationContext applicationContext) {
+        return new JdbcAiProviderRateLimitStore(resolveConfigNamedParameterJdbcTemplate(applicationContext));
+    }
+
+    @Bean
+    @ConditionalOnMissingBean(AiProviderRateLimitStore.class)
+    public AiProviderRateLimitStore aiProviderRateLimitStore() {
+        return new InMemoryAiProviderRateLimitStore();
+    }
+
+    @Bean
+    @ConditionalOnMissingBean(AgenticAuthoringStreamCapacityStore.class)
+    @ConditionalOnBean(NamedParameterJdbcTemplate.class)
+    @ConditionalOnProperty(
+            prefix = "praxis.ai.authoring.stream-capacity",
+            name = "store",
+            havingValue = "jdbc"
+    )
+    public AgenticAuthoringStreamCapacityStore jdbcAgenticAuthoringStreamCapacityStore(
+            org.springframework.context.ApplicationContext applicationContext,
+            @Value("${praxis.ai.authoring.stream-capacity.lease-ttl-seconds:300}") long leaseTtlSeconds) {
+        return new JdbcAgenticAuthoringStreamCapacityStore(
+                resolveConfigNamedParameterJdbcTemplate(applicationContext),
+                Duration.ofSeconds(Math.max(10L, leaseTtlSeconds)),
+                Clock.systemUTC());
+    }
+
+    private NamedParameterJdbcTemplate resolveConfigNamedParameterJdbcTemplate(
+            org.springframework.context.ApplicationContext context) {
+        if (context.containsBean("configNamedParameterJdbcTemplate")) {
+            return context.getBean("configNamedParameterJdbcTemplate", NamedParameterJdbcTemplate.class);
+        }
+        return context.getBean(NamedParameterJdbcTemplate.class);
+    }
+
+    @Bean
+    @ConditionalOnMissingBean(AgenticAuthoringStreamCapacityStore.class)
+    public AgenticAuthoringStreamCapacityStore agenticAuthoringStreamCapacityStore() {
+        return new InMemoryAgenticAuthoringStreamCapacityStore();
+    }
+
+    @Bean
     @ConditionalOnMissingBean
     @ConditionalOnBean({
             AgenticAuthoringTurnEngine.class,
@@ -685,13 +787,19 @@ public class AgenticAuthoringAutoConfiguration {
             AiThreadService threadService,
             AiTurnService turnService,
             AiTurnEventService turnEventService,
-            AiStreamAccessTokenService streamAccessTokenService) {
-        return new AgenticAuthoringTurnStreamService(
+            AiStreamAccessTokenService streamAccessTokenService,
+            ObjectProvider<AgenticAuthoringStreamCapacityStore> capacityStoreProvider,
+            ObjectProvider<io.micrometer.core.instrument.MeterRegistry> meterRegistryProvider) {
+        AgenticAuthoringTurnStreamService service = new AgenticAuthoringTurnStreamService(
                 turnEngine,
                 threadService,
                 turnService,
                 turnEventService,
                 streamAccessTokenService);
+        service.setCapacityStore(
+                capacityStoreProvider.getIfAvailable(InMemoryAgenticAuthoringStreamCapacityStore::new));
+        meterRegistryProvider.ifAvailable(service::setMeterRegistry);
+        return service;
     }
 
     @Bean

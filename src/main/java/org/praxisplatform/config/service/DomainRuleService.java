@@ -88,7 +88,7 @@ public class DomainRuleService {
             Pattern.compile("^[A-Za-z][A-Za-z0-9_.:-]{0,254}$");
     private static final String FACT_CATALOG_SCHEMA_VERSION = "praxis.domain-rule-fact-catalog.v1";
     private static final Set<String> FACT_VALUE_TYPES = Set.of(
-            "boolean", "string", "number", "date", "string-array", "date-array");
+            "boolean", "string", "number", "date", "string-array", "date-array", "number-array", "array<number>");
     private static final Set<String> FACT_SENSITIVITIES = Set.of(
             "NON_SENSITIVE", "PERSONAL", "SENSITIVE", "SECRET");
     private static final Set<String> FACT_REDACTION_POLICIES = Set.of(

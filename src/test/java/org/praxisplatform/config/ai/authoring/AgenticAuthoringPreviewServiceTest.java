@@ -68,6 +68,132 @@ class AgenticAuthoringPreviewServiceTest {
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     @Test
+    void previewPropagatesPrincipalScopeWhenEnrichingTemporalMetricEvolutionFilterSchema() throws Exception {
+        AgenticAuthoringCandidate candidate = new AgenticAuthoringCandidate(
+                "/api/human-resources/historico-salarial",
+                "post",
+                "/schemas/filtered?path=/api/human-resources/historico-salarial/filter/cursor&operation=post&schemaType=response",
+                "/api/human-resources/historico-salarial/filter/cursor",
+                "post",
+                0.95,
+                "matched historico salarial",
+                List.of("explicit-resource-path"));
+        AgenticAuthoringIntentResolutionResult intent = new AgenticAuthoringIntentResolutionResult(
+                true,
+                "create",
+                "dashboard",
+                "create_artifact",
+                "ui-composition-plan@0.1.0",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                null,
+                candidate,
+                List.of(candidate),
+                new AgenticAuthoringGateResult("candidate-eligibility@0.1.0", "eligible", List.of()),
+                "Crie um painel de evolucao salarial com filtro por motivo",
+                "Vou criar o painel de evolucao salarial.",
+                null,
+                List.of(),
+                null,
+                List.of(),
+                List.of(),
+                List.of(),
+                objectMapper.createObjectNode(),
+                objectMapper.createObjectNode(),
+                null);
+        AgenticAuthoringPlanRequest request = new AgenticAuthoringPlanRequest(
+                "Crie um painel de evolucao salarial com filtro por motivo",
+                "openai",
+                "gpt-5.4-mini",
+                "test-key",
+                null,
+                intent);
+        ObjectNode capabilities = objectMapper.createObjectNode();
+        ArrayNode statsFields = capabilities.putObject("stats").putArray("fields");
+        statsFields.addObject()
+                .put("field", "dataInicio")
+                .put("label", "Data de inicio")
+                .put("timeSeriesEligible", true)
+                .putArray("modes").add("TIME_SERIES");
+        statsFields.addObject()
+                .put("field", "salario")
+                .put("label", "Salario")
+                .put("metricFieldEligible", true)
+                .putArray("metrics").add("AVG").add("SUM");
+        ObjectNode filterSchema = objectMapper.createObjectNode();
+        filterSchema.putObject("properties")
+                .putObject("motivo")
+                .put("type", "string")
+                .put("description", "Motivo da alteracao salarial")
+                .putObject("x-ui")
+                .put("label", "Motivo")
+                .put("controlType", "input");
+        when(resourceCapabilitiesRetrievalService.fetchCapabilitiesResult(
+                eq("/api/human-resources/historico-salarial"),
+                eq("http://localhost"),
+                eq("tenant-corp"),
+                eq("user-corp"),
+                eq("prod")))
+                .thenReturn(ResourceCapabilitiesFetchResult.success(
+                        capabilities,
+                        "http://localhost/api/human-resources/historico-salarial/capabilities"));
+        ObjectNode responseSchema = objectMapper.createObjectNode();
+        responseSchema.putObject("properties")
+                .putObject("salario")
+                .put("type", "number");
+        when(schemaRetrievalService.fetchSchemaResult(
+                any(AiSchemaContext.class),
+                eq("http://localhost")))
+                .thenReturn(SchemaFetchResult.success(responseSchema, "http://localhost/schemas/filtered"));
+        when(schemaRetrievalService.fetchSchemaResult(
+                any(AiSchemaContext.class),
+                eq("http://localhost"),
+                eq("tenant-corp"),
+                eq("user-corp"),
+                eq("prod")))
+                .thenReturn(SchemaFetchResult.success(filterSchema, "http://localhost/schemas/filtered"));
+        AtomicReference<JsonNode> capturedHints = new AtomicReference<>();
+        AgenticAuthoringUiCompositionPlanProvider provider = enrichedRequest -> {
+            capturedHints.set(enrichedRequest.contextHints());
+            ObjectNode plan = objectMapper.createObjectNode();
+            plan.put("version", "1.0");
+            plan.put("kind", "praxis.ui-composition-plan");
+            plan.putArray("widgets").addObject()
+                    .put("key", "salary-table")
+                    .put("componentId", "praxis-table");
+            ObjectNode compiled = objectMapper.createObjectNode();
+            compiled.putObject("patch").putObject("page").putArray("widgets");
+            return Optional.of(new AgenticAuthoringUiCompositionPlanResult(
+                    true,
+                    List.of(),
+                    List.of("ui-composition-plan-provider:test-enriched-hints"),
+                    plan,
+                    compiled));
+        };
+
+        AgenticAuthoringPreviewResult result = new AgenticAuthoringPreviewService(
+                planService,
+                patchCompilerService,
+                objectMapper,
+                List.of(provider),
+                null,
+                schemaRetrievalService,
+                resourceCapabilitiesRetrievalService)
+                .preview(request, "tenant-corp", "user-corp", "prod", "http://localhost");
+
+        assertThat(result.valid()).isTrue();
+        assertThat(capturedHints.get()).isNotNull();
+        assertThat(capturedHints.get().path("analyticsFields")).hasSize(2);
+        assertThat(capturedHints.get().at("/filterSchemaFields/0/fieldName").asText()).isEqualTo("motivo");
+        verify(schemaRetrievalService).fetchSchemaResult(
+                any(AiSchemaContext.class),
+                eq("http://localhost"),
+                eq("tenant-corp"),
+                eq("user-corp"),
+                eq("prod"));
+    }
+
+    @Test
     void invalidFormSelectionPublishesTheCanonicalClarificationWithoutCompiling() throws Exception {
         var intent = createEmployeeFormIntent();
         var plan = objectMapper.createObjectNode();

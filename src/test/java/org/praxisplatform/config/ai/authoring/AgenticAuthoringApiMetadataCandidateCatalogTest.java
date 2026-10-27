@@ -936,6 +936,54 @@ class AgenticAuthoringApiMetadataCandidateCatalogTest {
                 .contains("semantic-retrieval", "semantic-role:operational-resource");
     }
 
+    @Test
+    void retainsAndRanksSalaryHistoryAheadOfPayrollViewWhenSupportingConceptsNameHistoricoSalarial() {
+        ApiMetadataRepository repository = Mockito.mock(ApiMetadataRepository.class);
+        Mockito.when(repository.findAllCandidateProjections()).thenReturn(List.of());
+        ContextRetrievalService retrievalService = Mockito.mock(ContextRetrievalService.class);
+        Mockito.when(retrievalService.searchApiMetadata(
+                        Mockito.anyString(),
+                        Mockito.nullable(String.class),
+                        Mockito.isNull(),
+                        Mockito.anyInt(),
+                        Mockito.isNull(),
+                        Mockito.isNull(),
+                        Mockito.isNull(),
+                        Mockito.isNull()))
+                .thenReturn(List.of(
+                        searchResult(
+                                "/api/human-resources/vw-analytics-folha-pagamento/stats/group-by",
+                                "POST",
+                                "Visao analitica de folha de pagamento e remuneracao com metricas agregadas.",
+                                0.89d),
+                        searchResult(
+                                "/api/human-resources/folhas-pagamento/filter/cursor",
+                                "POST",
+                                "Folhas de pagamento e remuneracao por competencia.",
+                                0.88d),
+                        searchResult(
+                                "/api/human-resources/historicos-salariais/stats/timeseries",
+                                "POST",
+                                "Trilha salarial e evolucao de remuneracao por colaborador e vigencia.",
+                                0.85d)));
+        AgenticAuthoringApiMetadataCandidateCatalog catalog =
+                new AgenticAuthoringApiMetadataCandidateCatalog(repository, retrievalService);
+
+        List<AgenticAuthoringCandidate> candidates = catalog.discover(
+                "primary business entity: folha de pagamento ou remuneracao. "
+                        + "supporting concepts: funcionario especifico, evolucao salarial ao longo do tempo, "
+                        + "historico salarial, indicadores de remuneracao, serie temporal, historico detalhado. "
+                        + "desired surface: Dashboard analitico com grafico didatico, indicadores e historico detalhado "
+                        + "filtrado para um funcionario. "
+                        + "semantic query: Localizar o recurso analitico governado de folha de pagamento, remuneracao "
+                        + "ou historico salarial que permita acompanhar a evolucao temporal do salario de um funcionario especifico.",
+                "dashboard");
+
+        assertThat(candidates).isNotEmpty();
+        assertThat(candidates.get(0).resourcePath())
+                .isEqualTo("/api/human-resources/historicos-salariais");
+    }
+
     private ApiMetadata apiMetadata(
             String path,
             String method,

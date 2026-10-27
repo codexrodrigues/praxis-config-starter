@@ -447,6 +447,18 @@ public class AgenticAuthoringManifestService {
         if (componentId == null || componentId.isBlank()) {
             return Optional.empty();
         }
+        String normalizedComponentId = componentId.trim();
+        Optional<JsonNode> direct = findRepositoryManifest(normalizedComponentId);
+        if (direct.isPresent()) {
+            return direct;
+        }
+        if ("praxis-dynamic-page-builder".equals(normalizedComponentId)) {
+            return findRepositoryManifest("praxis-page-builder");
+        }
+        return Optional.empty();
+    }
+
+    private Optional<JsonNode> findRepositoryManifest(String componentId) {
         return repository.findAuthoringManifestPayload(
                         REGISTRY_TYPE_COMPONENT_DEF,
                         componentId,

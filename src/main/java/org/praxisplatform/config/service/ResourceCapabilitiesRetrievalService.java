@@ -8,6 +8,9 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
+import java.util.Iterator;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import lombok.extern.slf4j.Slf4j;
 
 /**
@@ -17,7 +20,12 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 public class ResourceCapabilitiesRetrievalService {
 
+    private static final long SUCCESS_CACHE_TTL_MS = 60_000L;
+    private static final int SUCCESS_CACHE_MAX_ENTRIES = 256;
+
     private final ObjectMapper objectMapper;
+    private final Map<CapabilitiesCacheKey, CapabilitiesCacheEntry> successCache = new ConcurrentHashMap<>();
+    private volatile HttpClient httpClient;
     private final String configuredBaseUrl;
     private final long timeoutMs;
     private final GovernedPlatformRequestAuthorizationProvider authorizationProvider;
@@ -68,6 +76,17 @@ public class ResourceCapabilitiesRetrievalService {
         }
 
         String url = baseUrl + safeResourcePath + "/capabilities";
+        CapabilitiesCacheKey cacheKey = new CapabilitiesCacheKey(
+                url,
+                normalizeScope(tenantId),
+                normalizeScope(userId),
+                normalizeScope(environment));
+        ResourceCapabilitiesFetchResult cached = cached(cacheKey);
+        if (cached != null) {
+            Metrics.counter("ai_resource_capabilities_fetch_cache_total", "status", "hit").increment();
+            return cached;
+        }
+        Metrics.counter("ai_resource_capabilities_fetch_cache_total", "status", "miss").increment();
         try {
             HttpClient client = HttpClient.newBuilder()
                     .connectTimeout(Duration.ofMillis(Math.max(1000, timeoutMs)))
@@ -90,7 +109,7 @@ public class ResourceCapabilitiesRetrievalService {
                             tenantId,
                             userId,
                             environment));
-            HttpResponse<String> response = client.send(request.build(), HttpResponse.BodyHandlers.ofString());
+            HttpResponse<String> response = httpClient().send(request.build(), HttpResponse.BodyHandlers.ofString());
             if (response.statusCode() >= 400) {
                 return failure(
                         classifyStatus(response.statusCode()),
@@ -119,7 +138,9 @@ public class ResourceCapabilitiesRetrievalService {
                         "Resolved payload was null or missing.");
             }
             Metrics.counter("ai_resource_capabilities_fetch_total", "status", "success").increment();
-            return ResourceCapabilitiesFetchResult.success(capabilities, url);
+            ResourceCapabilitiesFetchResult result = ResourceCapabilitiesFetchResult.success(capabilities, url);
+            cache(cacheKey, result);
+            return result;
         } catch (java.io.IOException e) {
             return failure(
                     ResourceCapabilitiesFetchResult.Status.TRANSPORT_ERROR,
@@ -237,5 +258,73 @@ public class ResourceCapabilitiesRetrievalService {
         }
         String normalized = detail.replaceAll("\\s+", " ").trim();
         return normalized.length() <= 240 ? normalized : normalized.substring(0, 240) + "...";
+    }
+
+    private HttpClient httpClient() {
+        HttpClient resolved = httpClient;
+        if (resolved != null) {
+            return resolved;
+        }
+        synchronized (this) {
+            if (httpClient == null) {
+                httpClient = HttpClient.newBuilder()
+                        .connectTimeout(Duration.ofMillis(Math.max(1000, timeoutMs)))
+                        .build();
+            }
+            return httpClient;
+        }
+    }
+
+    private ResourceCapabilitiesFetchResult cached(CapabilitiesCacheKey key) {
+        CapabilitiesCacheEntry entry = successCache.get(key);
+        if (entry == null) {
+            return null;
+        }
+        if (entry.isExpired(System.currentTimeMillis())) {
+            successCache.remove(key, entry);
+            return null;
+        }
+        return defensiveCopy(entry.result());
+    }
+
+    private void cache(CapabilitiesCacheKey key, ResourceCapabilitiesFetchResult result) {
+        if (key == null || result == null || !result.isSuccess()) {
+            return;
+        }
+        evictExpiredOrOldestIfRequired();
+        successCache.put(
+                key,
+                new CapabilitiesCacheEntry(
+                        defensiveCopy(result),
+                        System.currentTimeMillis() + SUCCESS_CACHE_TTL_MS));
+    }
+
+    private void evictExpiredOrOldestIfRequired() {
+        long now = System.currentTimeMillis();
+        successCache.entrySet().removeIf(entry -> entry.getValue().isExpired(now));
+        if (successCache.size() < SUCCESS_CACHE_MAX_ENTRIES) {
+            return;
+        }
+        Iterator<Map.Entry<CapabilitiesCacheKey, CapabilitiesCacheEntry>> iterator = successCache.entrySet().iterator();
+        if (iterator.hasNext()) {
+            successCache.remove(iterator.next().getKey());
+        }
+    }
+
+    private ResourceCapabilitiesFetchResult defensiveCopy(ResourceCapabilitiesFetchResult result) {
+        if (result == null || !result.isSuccess()) {
+            return result;
+        }
+        return ResourceCapabilitiesFetchResult.success(result.getCapabilities().deepCopy(), result.getEndpointUrl());
+    }
+
+    private String normalizeScope(String value) {
+        return value == null ? "" : value.trim();
+    }
+
+    private record CapabilitiesCacheKey(String url, String tenantId, String userId, String environment) {}
+
+    private record CapabilitiesCacheEntry(ResourceCapabilitiesFetchResult result, long expiresAtEpochMs) {
+        private boolean isExpired(long nowEpochMs) { return expiresAtEpochMs <= nowEpochMs; }
     }
 }

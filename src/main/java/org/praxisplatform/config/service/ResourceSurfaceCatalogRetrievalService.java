@@ -10,6 +10,9 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.Iterator;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.Locale;
 import java.util.regex.Pattern;
 import lombok.extern.slf4j.Slf4j;
@@ -24,7 +27,12 @@ public class ResourceSurfaceCatalogRetrievalService {
     private static final Pattern RESOURCE_KEY_PATTERN =
             Pattern.compile("[A-Za-z0-9][A-Za-z0-9._-]{0,199}");
 
+    private static final long SUCCESS_CACHE_TTL_MS = 60_000L;
+    private static final int SUCCESS_CACHE_MAX_ENTRIES = 256;
+
     private final ObjectMapper objectMapper;
+    private final Map<SurfaceCatalogCacheKey, SurfaceCatalogCacheEntry> successCache = new ConcurrentHashMap<>();
+    private volatile HttpClient httpClient;
     private final String configuredBaseUrl;
     private final long timeoutMs;
     private final GovernedPlatformRequestAuthorizationProvider authorizationProvider;
@@ -76,6 +84,17 @@ public class ResourceSurfaceCatalogRetrievalService {
 
         String url = baseUrl + "/schemas/surfaces?resource="
                 + URLEncoder.encode(safeResourceKey, StandardCharsets.UTF_8);
+        SurfaceCatalogCacheKey cacheKey = new SurfaceCatalogCacheKey(
+                url,
+                normalizeScope(tenantId),
+                normalizeScope(userId),
+                normalizeScope(environment));
+        ResourceSurfaceCatalogFetchResult cached = cached(cacheKey);
+        if (cached != null) {
+            Metrics.counter("ai_resource_surface_catalog_fetch_cache_total", "status", "hit").increment();
+            return cached;
+        }
+        Metrics.counter("ai_resource_surface_catalog_fetch_cache_total", "status", "miss").increment();
         try {
             HttpClient client = HttpClient.newBuilder()
                     .connectTimeout(Duration.ofMillis(Math.max(1000, timeoutMs)))
@@ -98,7 +117,7 @@ public class ResourceSurfaceCatalogRetrievalService {
                             tenantId,
                             userId,
                             environment));
-            HttpResponse<String> response = client.send(request.build(), HttpResponse.BodyHandlers.ofString());
+            HttpResponse<String> response = httpClient().send(request.build(), HttpResponse.BodyHandlers.ofString());
             if (response.statusCode() >= 400) {
                 return failure(
                         classifyStatus(response.statusCode()),
@@ -131,7 +150,9 @@ public class ResourceSurfaceCatalogRetrievalService {
                         "Catalog must contain the requested resourceKey, resourcePath and surfaces array.");
             }
             Metrics.counter("ai_resource_surface_catalog_fetch_total", "status", "success").increment();
-            return ResourceSurfaceCatalogFetchResult.success(catalog, url);
+            ResourceSurfaceCatalogFetchResult result = ResourceSurfaceCatalogFetchResult.success(catalog, url);
+            cache(cacheKey, result);
+            return result;
         } catch (java.io.IOException e) {
             return failure(
                     ResourceSurfaceCatalogFetchResult.Status.TRANSPORT_ERROR,
@@ -255,5 +276,73 @@ public class ResourceSurfaceCatalogRetrievalService {
         }
         String normalized = detail.replaceAll("\\s+", " ").trim();
         return normalized.length() <= 240 ? normalized : normalized.substring(0, 240) + "...";
+    }
+
+    private HttpClient httpClient() {
+        HttpClient resolved = httpClient;
+        if (resolved != null) {
+            return resolved;
+        }
+        synchronized (this) {
+            if (httpClient == null) {
+                httpClient = HttpClient.newBuilder()
+                        .connectTimeout(Duration.ofMillis(Math.max(1000, timeoutMs)))
+                        .build();
+            }
+            return httpClient;
+        }
+    }
+
+    private ResourceSurfaceCatalogFetchResult cached(SurfaceCatalogCacheKey key) {
+        SurfaceCatalogCacheEntry entry = successCache.get(key);
+        if (entry == null) {
+            return null;
+        }
+        if (entry.isExpired(System.currentTimeMillis())) {
+            successCache.remove(key, entry);
+            return null;
+        }
+        return defensiveCopy(entry.result());
+    }
+
+    private void cache(SurfaceCatalogCacheKey key, ResourceSurfaceCatalogFetchResult result) {
+        if (key == null || result == null || !result.isSuccess()) {
+            return;
+        }
+        evictExpiredOrOldestIfRequired();
+        successCache.put(
+                key,
+                new SurfaceCatalogCacheEntry(
+                        defensiveCopy(result),
+                        System.currentTimeMillis() + SUCCESS_CACHE_TTL_MS));
+    }
+
+    private void evictExpiredOrOldestIfRequired() {
+        long now = System.currentTimeMillis();
+        successCache.entrySet().removeIf(entry -> entry.getValue().isExpired(now));
+        if (successCache.size() < SUCCESS_CACHE_MAX_ENTRIES) {
+            return;
+        }
+        Iterator<Map.Entry<SurfaceCatalogCacheKey, SurfaceCatalogCacheEntry>> iterator = successCache.entrySet().iterator();
+        if (iterator.hasNext()) {
+            successCache.remove(iterator.next().getKey());
+        }
+    }
+
+    private ResourceSurfaceCatalogFetchResult defensiveCopy(ResourceSurfaceCatalogFetchResult result) {
+        if (result == null || !result.isSuccess()) {
+            return result;
+        }
+        return ResourceSurfaceCatalogFetchResult.success(result.getCatalog().deepCopy(), result.getEndpointUrl());
+    }
+
+    private String normalizeScope(String value) {
+        return value == null ? "" : value.trim();
+    }
+
+    private record SurfaceCatalogCacheKey(String url, String tenantId, String userId, String environment) {}
+
+    private record SurfaceCatalogCacheEntry(ResourceSurfaceCatalogFetchResult result, long expiresAtEpochMs) {
+        private boolean isExpired(long nowEpochMs) { return expiresAtEpochMs <= nowEpochMs; }
     }
 }

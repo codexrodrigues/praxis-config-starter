@@ -8869,6 +8869,63 @@ class AgenticAuthoringIntentResolverServiceTest {
     }
 
     @Test
+    void metadataBackedHelpdeskNotebookTicketPromptSelectsHelpdeskCreateEndpoint() {
+        ApiMetadataRepository repository = Mockito.mock(ApiMetadataRepository.class);
+        Mockito.when(repository.findAllCandidateProjections()).thenReturn(projections(
+                new ApiMetadata(
+                        "/api/helpdesk/chamados/filter/cursor",
+                        "POST",
+                        "helpdesk,chamados,chamado,tickets,notebooks,suporte,consulta,tabela",
+                        "Filtrar chamados de suporte com paginacao por cursor",
+                        "Consulta chamados de helpdesk e suporte tecnico para equipamentos e notebooks.",
+                        "filterChamadosCursor",
+                        null,
+                        "{\"type\":\"object\"}",
+                        "[]",
+                        "{}",
+                        null),
+                new ApiMetadata(
+                        "/api/helpdesk/chamados",
+                        "POST",
+                        "helpdesk,chamados,chamado,tickets,notebooks,suporte,cadastro,formulario",
+                        "Abrir chamado de helpdesk",
+                        "Abre um novo chamado de suporte tecnico para notebooks, equipamentos e incidentes de TI.",
+                        "createChamado",
+                        null,
+                        "{\"type\":\"object\"}",
+                        "[]",
+                        "{}",
+                        null)));
+        AgenticAuthoringIntentResolverService metadataBackedService =
+                new AgenticAuthoringIntentResolverService(
+                        objectMapper,
+                        new AgenticAuthoringApiMetadataCandidateCatalog(repository));
+
+        AgenticAuthoringIntentResolutionResult result = metadataBackedService.resolve(new AgenticAuthoringIntentResolutionRequest(
+                "Crie um formulario didatico so com os campos realmente necessarios para abrir chamados para notebooks com a tela quebrada.",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                "/page-builder-ia",
+                objectMapper.createObjectNode(),
+                null,
+                null,
+                null,
+                null));
+
+        assertThat(result.valid()).isTrue();
+        assertThat(result.operationKind()).isEqualTo("create");
+        assertThat(result.artifactKind()).isEqualTo("form");
+        assertThat(result.changeKind()).isEqualTo("create_artifact");
+        assertThat(result.selectedCandidate()).isNotNull();
+        assertThat(result.selectedCandidate().resourcePath()).isEqualTo("/api/helpdesk/chamados");
+        assertThat(result.selectedCandidate().submitUrl()).isEqualTo("/api/helpdesk/chamados");
+        assertThat(result.selectedCandidate().schemaUrl())
+                .isEqualTo("/schemas/filtered?path=/api/helpdesk/chamados&operation=post&schemaType=request");
+        assertThat(result.gate().status()).isEqualTo("eligible");
+        assertThat(result.failureCodes()).isEmpty();
+    }
+
+    @Test
     void metadataBackedPromptFallsBackToBroadArtifactDiscoveryBeforeAskingForManualResource() {
         ApiMetadataRepository repository = Mockito.mock(ApiMetadataRepository.class);
         Mockito.when(repository.findAllCandidateProjections()).thenReturn(projections(

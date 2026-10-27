@@ -119,6 +119,87 @@ class AgenticAuthoringPreviewMessageSynthesizerServiceTest {
     }
 
     @Test
+    void synthesizePassesConfiguredOpenAiPreviewMessageModelOverrideWhenLlmIsInvoked() {
+        when(providerManagementService.generateText(
+                any(String.class),
+                any(AiCallConfig.class),
+                eq("tenant"),
+                eq("user"),
+                eq("local")))
+                .thenReturn("Criei uma pre-visualizacao usando Resumo missoes como fonte de dados.");
+        ArgumentCaptor<AiCallConfig> configCaptor = ArgumentCaptor.forClass(AiCallConfig.class);
+        AgenticAuthoringPreviewMessageSynthesizerService configuredService =
+                new AgenticAuthoringPreviewMessageSynthesizerService(
+                        providerManagementService,
+                        objectMapper,
+                        "gpt-5.6-luna");
+
+        configuredService.synthesize(
+                request(),
+                intent(),
+                uiCompositionPlan(),
+                true,
+                List.of(),
+                List.of(),
+                "fallback seguro",
+                "tenant",
+                "user",
+                "local");
+
+        org.mockito.Mockito.verify(providerManagementService).generateText(
+                any(String.class),
+                configCaptor.capture(),
+                eq("tenant"),
+                eq("user"),
+                eq("local"));
+        assertThat(configCaptor.getValue().getProviderModelOverrides())
+                .containsEntry("openai", "gpt-5.6-luna");
+    }
+
+    @Test
+    void synthesizePassesMultiProviderFastTierModelOverridesWhenConfigured() {
+        when(providerManagementService.generateText(
+                any(String.class),
+                any(AiCallConfig.class),
+                eq("tenant"),
+                eq("user"),
+                eq("local")))
+                .thenReturn("Criei uma pre-visualizacao usando Resumo missoes como fonte de dados.");
+        ArgumentCaptor<AiCallConfig> configCaptor = ArgumentCaptor.forClass(AiCallConfig.class);
+        AgenticAuthoringPreviewMessageSynthesizerService configuredService =
+                new AgenticAuthoringPreviewMessageSynthesizerService(
+                        providerManagementService,
+                        objectMapper,
+                        java.util.Map.of(
+                                "OpenAI", " gpt-5.6-luna ",
+                                "Gemini", " gemini-2.5-flash ",
+                                "Anthropic", " claude-3-5-haiku-latest "));
+
+        configuredService.synthesize(
+                request(),
+                intent(),
+                uiCompositionPlan(),
+                true,
+                List.of(),
+                List.of(),
+                "fallback seguro",
+                "tenant",
+                "user",
+                "local");
+
+        org.mockito.Mockito.verify(providerManagementService).generateText(
+                any(String.class),
+                configCaptor.capture(),
+                eq("tenant"),
+                eq("user"),
+                eq("local"));
+        assertThat(configCaptor.getValue().getProviderModelOverrides())
+                .containsEntry("openai", "gpt-5.6-luna")
+                .containsEntry("gemini", "gemini-2.5-flash")
+                .containsEntry("anthropic", "claude-3-5-haiku-latest");
+    }
+
+    @Test
     void synthesizeWithTelemetryReturnsSanitizedProviderInvocation() {
         when(providerManagementService.generateText(
                 any(String.class),
@@ -355,6 +436,150 @@ class AgenticAuthoringPreviewMessageSynthesizerServiceTest {
                 .contains("Materialização: tabela")
                 .doesNotContain("/api/")
                 .doesNotContain("/schemas/");
+        org.mockito.Mockito.verify(providerManagementService, org.mockito.Mockito.never()).generateText(
+                any(String.class),
+                any(AiCallConfig.class),
+                any(String.class),
+                any(String.class),
+                any(String.class));
+    }
+
+    @Test
+    void synthesizeReusesGovernedDashboardWithVerifiedStatsWithoutExtraProviderCall() {
+        ObjectNode plan = objectMapper.createObjectNode();
+        plan.put("kind", "dashboard");
+        plan.put("layoutPreset", "analytical-dashboard");
+        plan.putArray("widgets")
+                .addObject().put("componentId", "praxis-filter").put("title", "Filtros");
+        plan.withArray("widgets")
+                .addObject().put("componentId", "praxis-chart").put("title", "Receita Média ao longo de Data de Faturamento");
+        plan.withArray("widgets")
+                .addObject().put("componentId", "praxis-table").put("title", "Faturamentos de Clientes");
+        ObjectNode diagnostics = plan.putObject("diagnostics");
+        ObjectNode axis1 = diagnostics.putArray("semanticAxes").addObject();
+        axis1.put("concept", "evolucao temporal");
+        axis1.put("field", "dataFaturamento");
+        axis1.put("label", "Data de Faturamento");
+        axis1.put("schemaLabel", "Data de Faturamento");
+        axis1.put("schemaVerified", true);
+        axis1.put("schemaProbeStatus", "verified");
+        ObjectNode axis2 = diagnostics.withArray("semanticAxes").addObject();
+        axis2.put("concept", "composicao");
+        axis2.put("field", "segmentoComercial");
+        axis2.put("label", "Segmento Comercial");
+        axis2.put("schemaLabel", "Segmento Comercial");
+        axis2.put("schemaVerified", true);
+        axis2.put("schemaProbeStatus", "verified");
+
+        AgenticAuthoringIntentResolutionResult intent = new AgenticAuthoringIntentResolutionResult(
+                true,
+                "create",
+                "dashboard",
+                "create_artifact",
+                "generic-page-change",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                null,
+                new AgenticAuthoringCandidate(
+                        "/api/finance/faturamentos-clientes",
+                        "post",
+                        "/schemas/filtered?path=/api/finance/faturamentos-clientes/filter&operation=post&schemaType=response",
+                        "/api/finance/faturamentos-clientes/filter",
+                        "POST",
+                        0.96d,
+                        "Faturamentos de clientes",
+                        List.of("domain-catalog-grounding", "stats-capabilities-verified")),
+                List.of(),
+                new AgenticAuthoringGateResult("candidate-eligibility@0.1.0", "eligible", List.of()),
+                "evolucao da receita liquida por cliente ao longo do tempo",
+                "Vou montar um dashboard governado.",
+                null,
+                List.of(),
+                null,
+                List.of(),
+                List.of("llm-intent-resolution-used", "llm-fast-intent-resolution-used"),
+                List.of(),
+                objectMapper.createObjectNode(),
+                objectMapper.createObjectNode(),
+                null);
+
+        String result = service().synthesize(
+                governedFastIntentRequest(),
+                intent,
+                plan,
+                true,
+                List.of(),
+                List.of("ui-composition-plan-provider:generic-resource-dashboard", "stats-capabilities-verified"),
+                "fallback seguro",
+                "tenant",
+                "user",
+                "local");
+
+        assertThat(result)
+                .contains("pré-visualização governada")
+                .contains("Materialização: filtro, gráfico e tabela")
+                .contains("Recortes confirmados: Data de Faturamento e Segmento Comercial")
+                .doesNotContain("/api/");
+        org.mockito.Mockito.verify(providerManagementService, org.mockito.Mockito.never()).generateText(
+                any(String.class),
+                any(AiCallConfig.class),
+                any(String.class),
+                any(String.class),
+                any(String.class));
+    }
+
+    @Test
+    void synthesizeReusesDomainCatalogGroundedRelatedResourcePageWithoutExtraProviderCall() {
+        ObjectNode plan = uiCompositionPlan();
+        plan.withArray("widgets").addObject().put("componentId", "praxis-related-resource-outlet");
+        AgenticAuthoringIntentResolutionResult intent = new AgenticAuthoringIntentResolutionResult(
+                true,
+                "create",
+                "page",
+                "create_artifact",
+                "generic-page-change",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                null,
+                new AgenticAuthoringCandidate(
+                        "/api/operations/missoes",
+                        "post",
+                        "/schemas/filtered?path=/api/operations/missoes/filter&operation=post&schemaType=response",
+                        "/api/operations/missoes/filter",
+                        "POST",
+                        0.96d,
+                        "Domain catalog grounded parent resource",
+                        List.of("domain-catalog-grounding", "api-metadata")),
+                List.of(),
+                new AgenticAuthoringGateResult("candidate-eligibility@0.1.0", "eligible", List.of()),
+                "escolher uma missao e ver os funcionarios que participam dela",
+                "Vou montar uma prévia governada.",
+                null,
+                List.of(),
+                null,
+                List.of(),
+                List.of("llm-intent-resolution-used", "llm-fast-intent-resolution-used"),
+                List.of(),
+                objectMapper.createObjectNode(),
+                objectMapper.createObjectNode(),
+                null);
+
+        String result = service().synthesize(
+                governedFastIntentRequest(),
+                intent,
+                plan,
+                true,
+                List.of(),
+                List.of("ui-composition-plan-provider:generic-resource-related-resource-page"),
+                "fallback seguro",
+                "tenant",
+                "user",
+                "local");
+
+        assertThat(result)
+                .contains("pré-visualização governada")
+                .contains("Materialização: tabela e recursos relacionados")
+                .doesNotContain("/api/");
         org.mockito.Mockito.verify(providerManagementService, org.mockito.Mockito.never()).generateText(
                 any(String.class),
                 any(AiCallConfig.class),
@@ -759,6 +984,56 @@ class AgenticAuthoringPreviewMessageSynthesizerServiceTest {
                 eq("local"));
         assertThat(promptCaptor.getValue()).contains("\"localEditorialComposition\" : true");
         assertThat(promptCaptor.getValue()).contains("Do not mention selected resource");
+    }
+
+    @Test
+    void synthesizeFallsBackWhenProviderReturnsMidSentenceTruncatedMessage() {
+        when(providerManagementService.generateText(
+                any(String.class),
+                any(AiCallConfig.class),
+                eq("tenant"),
+                eq("user"),
+                eq("local")))
+                .thenReturn("Criei um painel de funcionários com");
+
+        String result = service().synthesize(
+                request(),
+                intent(),
+                uiCompositionPlan(),
+                true,
+                List.of(),
+                List.of(),
+                "Pré-visualização pronta para revisão.",
+                "tenant",
+                "user",
+                "local");
+
+        assertThat(result).isEqualTo("Pré-visualização pronta para revisão.");
+    }
+
+    @Test
+    void synthesizeFallsBackWhenTechnicalSanitizationLeavesTruncatedMessage() {
+        when(providerManagementService.generateText(
+                any(String.class),
+                any(AiCallConfig.class),
+                eq("tenant"),
+                eq("user"),
+                eq("local")))
+                .thenReturn("Seu painel foi ajustado e está (human-resources-funcionarios-widget)");
+
+        String result = service().synthesize(
+                request(),
+                intent(),
+                uiCompositionPlan(),
+                true,
+                List.of(),
+                List.of(),
+                "Pré-visualização pronta para revisão.",
+                "tenant",
+                "user",
+                "local");
+
+        assertThat(result).isEqualTo("Pré-visualização pronta para revisão.");
     }
 
     private AgenticAuthoringPreviewMessageSynthesizerService service() {

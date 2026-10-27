@@ -1,6 +1,7 @@
 package org.praxisplatform.config.service;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -9,13 +10,13 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.praxisplatform.config.dto.AiProviderModel;
 import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Primary;
 import org.springframework.stereotype.Service;
-import org.praxisplatform.config.dto.AiProviderModel;
 
 /**
  * Roteador primário de provedores AI.
@@ -28,7 +29,6 @@ import org.praxisplatform.config.dto.AiProviderModel;
  */
 @Service
 @Primary
-@RequiredArgsConstructor
 @Slf4j
 public class AiProviderRouter implements AiProvider {
 
@@ -36,6 +36,14 @@ public class AiProviderRouter implements AiProvider {
     private final ObjectProvider<SpringAiOpenAiService> openaiProvider;
     private final ObjectProvider<SpringAiXaiService> xaiProvider;
     private final ObjectProvider<MockAiService> mockProvider;
+    private final AiProviderRateLimitStore rateLimitStore;
+
+    private io.micrometer.core.instrument.MeterRegistry meterRegistry;
+
+    @Autowired(required = false)
+    public void setMeterRegistry(io.micrometer.core.instrument.MeterRegistry meterRegistry) {
+        this.meterRegistry = meterRegistry;
+    }
 
     @Value("${praxis.ai.provider:gemini}")
     private String provider;
@@ -45,6 +53,47 @@ public class AiProviderRouter implements AiProvider {
 
     @Value("${praxis.ai.provider-fallback.candidates:gemini,openai}")
     private String providerFallbackCandidates;
+
+    @Value("${praxis.ai.provider-fallback.default-rate-limit-cooldown-seconds:5}")
+    private long defaultRateLimitCooldownSeconds = 5L;
+
+    public AiProviderRouter(
+            ObjectProvider<SpringAiGeminiService> geminiProvider,
+            ObjectProvider<SpringAiOpenAiService> openaiProvider,
+            ObjectProvider<SpringAiXaiService> xaiProvider,
+            ObjectProvider<MockAiService> mockProvider) {
+        this(geminiProvider, openaiProvider, xaiProvider, mockProvider, new InMemoryAiProviderRateLimitStore());
+    }
+
+    @Autowired
+    public AiProviderRouter(
+            ObjectProvider<SpringAiGeminiService> geminiProvider,
+            ObjectProvider<SpringAiOpenAiService> openaiProvider,
+            ObjectProvider<SpringAiXaiService> xaiProvider,
+            ObjectProvider<MockAiService> mockProvider,
+            ObjectProvider<AiProviderRateLimitStore> rateLimitStoreProvider) {
+        this(
+                geminiProvider,
+                openaiProvider,
+                xaiProvider,
+                mockProvider,
+                rateLimitStoreProvider != null
+                        ? rateLimitStoreProvider.getIfAvailable(InMemoryAiProviderRateLimitStore::new)
+                        : new InMemoryAiProviderRateLimitStore());
+    }
+
+    public AiProviderRouter(
+            ObjectProvider<SpringAiGeminiService> geminiProvider,
+            ObjectProvider<SpringAiOpenAiService> openaiProvider,
+            ObjectProvider<SpringAiXaiService> xaiProvider,
+            ObjectProvider<MockAiService> mockProvider,
+            AiProviderRateLimitStore rateLimitStore) {
+        this.geminiProvider = geminiProvider;
+        this.openaiProvider = openaiProvider;
+        this.xaiProvider = xaiProvider;
+        this.mockProvider = mockProvider;
+        this.rateLimitStore = rateLimitStore != null ? rateLimitStore : new InMemoryAiProviderRateLimitStore();
+    }
 
     @Override
     public JsonNode generateJson(String prompt) {
@@ -181,13 +230,15 @@ public class AiProviderRouter implements AiProvider {
             String operationName,
             Supplier<Boolean> fallbackAllowed,
             ProviderOperation<T> operation) {
+        ProviderCandidate primary = primaryCandidate(config);
         List<ProviderCandidate> candidates = resolveProviderCandidates(config);
         long deadlineNanos = operationDeadlineNanos(config);
         RuntimeException firstRecoverableFailure = null;
         RuntimeException lastRecoverableFailure = null;
         for (int i = 0; i < candidates.size(); i++) {
             ProviderCandidate candidate = candidates.get(i);
-            AiProvider selectedProvider = resolveProvider(candidate.provider(), i == 0);
+            boolean isPrimaryCandidate = candidate.equals(primary);
+            AiProvider selectedProvider = resolveProvider(candidate.provider(), isPrimaryCandidate);
             if (selectedProvider == null) {
                 continue;
             }
@@ -203,11 +254,18 @@ public class AiProviderRouter implements AiProvider {
             AiCallConfig selectedConfig = configForCandidate(
                     config,
                     candidate,
-                    i == 0,
+                    isPrimaryCandidate,
                     remainingTimeoutSeconds);
             try {
-                return operation.execute(selectedProvider, selectedConfig);
+                T result = operation.execute(selectedProvider, selectedConfig);
+                if (!hasCustomApiKey(selectedConfig)) {
+                    rateLimitStore.clearCooldown(candidate.provider(), candidate.model());
+                }
+                return result;
             } catch (RuntimeException ex) {
+                if (!hasCustomApiKey(selectedConfig)) {
+                    recordRateLimitCooldownIfApplicable(candidate, ex);
+                }
                 boolean canTryFallback = providerFallbackEnabled
                         && i + 1 < candidates.size()
                         && Boolean.TRUE.equals(fallbackAllowed.get())
@@ -230,6 +288,13 @@ public class AiProviderRouter implements AiProvider {
                 }
                 lastRecoverableFailure = ex;
                 ProviderCandidate next = candidates.get(i + 1);
+                String reason = normalizedFailureReason(ex);
+                counter(
+                        "praxis_ai_provider_fallback_total",
+                        "operation", safeMetricTag(operationName),
+                        "from_provider", safeMetricTag(candidate.provider()),
+                        "to_provider", safeMetricTag(next.provider()),
+                        "reason", safeMetricTag(reason)).increment();
                 log.warn(
                         "[AiProviderRouter] Provider fallback; operation={} provider={} model={} nextProvider={} nextModel={} candidate={}/{} reason={}",
                         operationName,
@@ -239,7 +304,7 @@ public class AiProviderRouter implements AiProvider {
                         next.model(),
                         i + 1,
                         candidates.size(),
-                        normalizedFailureReason(ex));
+                        reason);
             }
         }
         if (firstRecoverableFailure != null) {
@@ -285,7 +350,80 @@ public class AiProviderRouter implements AiProvider {
                 addCandidate(candidates, seen, parseCandidate(token));
             }
         }
-        return candidates;
+        if (!providerFallbackEnabled || candidates.size() <= 1 || rateLimitStore == null) {
+            return candidates;
+        }
+        Instant now = Instant.now();
+        boolean primaryUsesCustomKey = hasCustomApiKey(config);
+        List<ProviderCandidate> healthy = new ArrayList<>(candidates.size());
+        List<ProviderCandidate> cooledDown = new ArrayList<>();
+        for (ProviderCandidate candidate : candidates) {
+            boolean skipSharedCooldownForPrimary = primaryUsesCustomKey && candidate.equals(primary);
+            if (!skipSharedCooldownForPrimary
+                    && rateLimitStore.isInCooldown(candidate.provider(), candidate.model(), now)) {
+                cooledDown.add(candidate);
+            } else {
+                healthy.add(candidate);
+            }
+        }
+        if (healthy.isEmpty() || cooledDown.isEmpty()) {
+            return candidates;
+        }
+        List<ProviderCandidate> prioritized = new ArrayList<>(candidates.size());
+        prioritized.addAll(healthy);
+        prioritized.addAll(cooledDown);
+        return prioritized;
+    }
+
+    private void recordRateLimitCooldownIfApplicable(ProviderCandidate candidate, RuntimeException ex) {
+        if (candidate == null || rateLimitStore == null || ex == null) {
+            return;
+        }
+        Instant retryAfter = null;
+        boolean shouldRecord = false;
+        if (ex instanceof AiProviderCallException callException) {
+            retryAfter = callException.getRetryAfter();
+            shouldRecord = retryAfter != null
+                    || callException.getKind() == AiProviderCallException.Kind.RATE_LIMIT
+                    || callException.getKind() == AiProviderCallException.Kind.CAPACITY;
+        } else if (ex instanceof AiProviderStreamException streamException) {
+            shouldRecord = streamException.getKind() == AiProviderStreamException.Kind.RATE_LIMIT
+                    || streamException.getKind() == AiProviderStreamException.Kind.CAPACITY;
+        }
+        if (!shouldRecord) {
+            return;
+        }
+        Instant now = Instant.now();
+        if (retryAfter == null || !retryAfter.isAfter(now)) {
+            if (defaultRateLimitCooldownSeconds <= 0) {
+                return;
+            }
+            retryAfter = now.plusSeconds(defaultRateLimitCooldownSeconds);
+        }
+        String reason = normalizedFailureReason(ex);
+        rateLimitStore.recordCooldown(
+                candidate.provider(),
+                candidate.model(),
+                retryAfter,
+                reason);
+        counter(
+                "praxis_ai_provider_cooldown_recorded_total",
+                "provider", safeMetricTag(candidate.provider()),
+                "reason", safeMetricTag(reason)).increment();
+    }
+
+    private io.micrometer.core.instrument.Counter counter(String name, String... tags) {
+        return meterRegistry != null
+                ? meterRegistry.counter(name, tags)
+                : io.micrometer.core.instrument.Metrics.counter(name, tags);
+    }
+
+    private String safeMetricTag(String value) {
+        if (value == null || value.isBlank()) {
+            return "unknown";
+        }
+        String sanitized = value.replaceAll("[^A-Za-z0-9_.:-]", "_");
+        return sanitized.isBlank() ? "unknown" : sanitized;
     }
 
     private ProviderCandidate primaryCandidate(AiCallConfig config) {
@@ -353,6 +491,10 @@ public class AiProviderRouter implements AiProvider {
             builder.apiKey(null);
         }
         return builder.build();
+    }
+
+    private boolean hasCustomApiKey(AiCallConfig config) {
+        return config != null && config.getApiKey() != null && !config.getApiKey().isBlank();
     }
 
     private boolean isRecoverableForFallback(RuntimeException ex) {

@@ -399,6 +399,137 @@ class AgenticAuthoringPersistedUiCompositionSourceResolverTest {
                 .hasMessage("apply-target-missing");
     }
 
+    @Test
+    void reconcilesCreateApplyTargetToUpdateWhenPersistedConfigAlreadyExists() throws Exception {
+        UUID etag = UUID.randomUUID();
+        ObjectNode blankPage = objectMapper.createObjectNode();
+        blankPage.putArray("widgets");
+        UiUserConfig config = persistedConfig(etag, blankPage, null);
+        when(userConfigService.getByScope(
+                UserConfigService.Scope.USER,
+                TENANT,
+                USER,
+                COMPONENT_TYPE,
+                COMPONENT_ID,
+                ENVIRONMENT))
+                .thenReturn(Optional.of(new UserConfigService.ResolvedConfig(config, UserConfigService.Scope.USER)));
+
+        ObjectNode contextHints = objectMapper.createObjectNode();
+        ObjectNode target = contextHints.putObject("agenticApplyTarget");
+        target.put("schemaVersion", AgenticAuthoringApplyTarget.SCHEMA_VERSION);
+        target.put("componentType", COMPONENT_TYPE);
+        target.put("componentId", COMPONENT_ID);
+        target.put("scope", "user");
+        target.put("mode", "create");
+        AgenticAuthoringTurnStreamRequest request = new AgenticAuthoringTurnStreamRequest(
+                "Crie um dashboard",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                "/page-builder-ia",
+                blankPage,
+                null,
+                "openai",
+                "gpt-5.4-mini",
+                null,
+                "session",
+                UUID.randomUUID().toString(),
+                null,
+                null,
+                null,
+                contextHints,
+                null,
+                null);
+
+        AgenticAuthoringApplyTarget.Resolution reconciled = resolver.reconcileApplyTarget(
+                principal,
+                AgenticAuthoringApplyTarget.resolve(request, principal));
+        AgenticAuthoringPersistedUiCompositionSourceResolver.Resolution sourceResolution = resolver.resolve(
+                request,
+                principal,
+                reconciled);
+
+        assertThat(reconciled.valid()).isTrue();
+        assertThat(reconciled.target().mode()).isEqualTo("update");
+        assertThat(reconciled.target().baseEtag()).isEqualTo(etag.toString());
+        assertThat(sourceResolution.valid()).isTrue();
+        assertThat(sourceResolution.required()).isFalse();
+    }
+
+    @Test
+    void doesNotPromoteCreateToUpdateWhenActivePopulatedCorporatePageExists() throws Exception {
+        UUID etag = UUID.randomUUID();
+        ObjectNode activePage = materializedPage("bar");
+        UiUserConfig config = persistedConfig(etag, activePage, authoringSource(compositionPlan("bar"), activePage));
+        when(userConfigService.getByScope(
+                UserConfigService.Scope.USER,
+                TENANT,
+                USER,
+                COMPONENT_TYPE,
+                COMPONENT_ID,
+                ENVIRONMENT))
+                .thenReturn(Optional.of(new UserConfigService.ResolvedConfig(config, UserConfigService.Scope.USER)));
+
+        ObjectNode blankPage = objectMapper.createObjectNode();
+        blankPage.putArray("widgets");
+        ObjectNode contextHints = objectMapper.createObjectNode();
+        ObjectNode target = contextHints.putObject("agenticApplyTarget");
+        target.put("schemaVersion", AgenticAuthoringApplyTarget.SCHEMA_VERSION);
+        target.put("componentType", COMPONENT_TYPE);
+        target.put("componentId", COMPONENT_ID);
+        target.put("scope", "user");
+        target.put("mode", "create");
+        AgenticAuthoringTurnStreamRequest request = new AgenticAuthoringTurnStreamRequest(
+                "Crie um dashboard",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                "/page-builder-ia",
+                blankPage,
+                null,
+                "openai",
+                "gpt-5.4-mini",
+                null,
+                "session",
+                UUID.randomUUID().toString(),
+                null,
+                null,
+                null,
+                contextHints,
+                null,
+                null);
+
+        AgenticAuthoringApplyTarget.Resolution reconciled = resolver.reconcileApplyTarget(
+                principal,
+                AgenticAuthoringApplyTarget.resolve(request, principal));
+
+        assertThat(reconciled.valid()).isTrue();
+        assertThat(reconciled.target().mode()).isEqualTo("create");
+        assertThat(reconciled.target().baseEtag()).isNull();
+    }
+
+    @Test
+    void returnsNotRequiredWhenCurrentPageWasResetToBlankCanvasAndEtagMatchesPersistedConfig() throws Exception {
+        UUID etag = UUID.randomUUID();
+        ObjectNode plan = compositionPlan("bar");
+        ObjectNode persistedPage = materializedPage("bar");
+        ObjectNode authoringSource = authoringSource(plan, persistedPage);
+        ObjectNode blankCanvas = objectMapper.createObjectNode();
+        blankCanvas.putArray("widgets");
+        when(userConfigService.getByScope(
+                UserConfigService.Scope.USER, TENANT, USER, COMPONENT_TYPE, COMPONENT_ID, ENVIRONMENT))
+                .thenReturn(Optional.of(new UserConfigService.ResolvedConfig(
+                        persistedConfig(etag, persistedPage, authoringSource), UserConfigService.Scope.USER)));
+
+        AgenticAuthoringTurnStreamRequest request = updateRequest(blankCanvas, etag, authoringSource);
+        AgenticAuthoringPersistedUiCompositionSourceResolver.Resolution resolution = resolver.resolve(
+                request,
+                principal,
+                AgenticAuthoringApplyTarget.resolve(request, principal));
+
+        assertThat(resolution.valid()).isTrue();
+        assertThat(resolution.required()).isFalse();
+        assertThat(resolution.plan()).isNull();
+    }
+
     private AgenticAuthoringTurnStreamRequest updateRequest(
             JsonNode currentPage,
             UUID etag,

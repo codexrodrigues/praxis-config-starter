@@ -50,7 +50,7 @@ public class AgenticAuthoringLlmIntentResolverService {
     private final DomainCatalogPromptContextService domainCatalogPromptContextService;
     private final int fastIntentTimeoutSeconds;
     private final int fullIntentTimeoutSeconds;
-    private final String liveOptionRefinementOpenAiModel;
+    private final java.util.Map<String, String> liveOptionRefinementModelOverrides;
 
     public AgenticAuthoringLlmIntentResolverService(
             AiProviderManagementService providerManagementService,
@@ -93,6 +93,26 @@ public class AgenticAuthoringLlmIntentResolverService {
             int fastIntentTimeoutSeconds,
             int fullIntentTimeoutSeconds,
             String liveOptionRefinementOpenAiModel) {
+        this(
+                providerManagementService,
+                objectMapper,
+                domainCatalogPromptContextService,
+                fastIntentTimeoutSeconds,
+                fullIntentTimeoutSeconds,
+                java.util.Map.of(
+                        "openai",
+                        StringUtils.hasText(liveOptionRefinementOpenAiModel)
+                                ? liveOptionRefinementOpenAiModel.trim()
+                                : DEFAULT_LIVE_OPTION_REFINEMENT_OPENAI_MODEL));
+    }
+
+    public AgenticAuthoringLlmIntentResolverService(
+            AiProviderManagementService providerManagementService,
+            ObjectMapper objectMapper,
+            DomainCatalogPromptContextService domainCatalogPromptContextService,
+            int fastIntentTimeoutSeconds,
+            int fullIntentTimeoutSeconds,
+            java.util.Map<String, String> liveOptionRefinementModelOverrides) {
         this.providerManagementService = Objects.requireNonNull(providerManagementService, "providerManagementService must not be null");
         this.objectMapper = Objects.requireNonNull(objectMapper, "objectMapper must not be null");
         this.domainCatalogPromptContextService = domainCatalogPromptContextService;
@@ -102,9 +122,21 @@ public class AgenticAuthoringLlmIntentResolverService {
         this.fullIntentTimeoutSeconds = positiveOrDefault(
                 fullIntentTimeoutSeconds,
                 DEFAULT_FULL_INTENT_TIMEOUT_SECONDS);
-        this.liveOptionRefinementOpenAiModel = StringUtils.hasText(liveOptionRefinementOpenAiModel)
-                ? liveOptionRefinementOpenAiModel.trim()
-                : DEFAULT_LIVE_OPTION_REFINEMENT_OPENAI_MODEL;
+        this.liveOptionRefinementModelOverrides = normalizeProviderModelOverrides(liveOptionRefinementModelOverrides);
+    }
+
+    private static java.util.Map<String, String> normalizeProviderModelOverrides(
+            java.util.Map<String, String> rawOverrides) {
+        java.util.LinkedHashMap<String, String> normalized = new java.util.LinkedHashMap<>();
+        normalized.put("openai", DEFAULT_LIVE_OPTION_REFINEMENT_OPENAI_MODEL);
+        if (rawOverrides != null) {
+            rawOverrides.forEach((provider, model) -> {
+                if (StringUtils.hasText(provider) && StringUtils.hasText(model)) {
+                    normalized.put(provider.trim().toLowerCase(Locale.ROOT), model.trim());
+                }
+            });
+        }
+        return java.util.Map.copyOf(normalized);
     }
 
     public Optional<AgenticAuthoringLlmIntentResolution> resolve(
@@ -123,6 +155,10 @@ public class AgenticAuthoringLlmIntentResolverService {
         List<AgenticAuthoringCandidate> usableCandidates =
                 candidateOptions == null ? List.of() : candidateOptions;
         List<AiProviderInvocationTelemetry> providerInvocations = new ArrayList<>();
+        String preIntentTerminalFailureKind = preIntentTerminalProviderFailureKind(request);
+        if (StringUtils.hasText(preIntentTerminalFailureKind)) {
+            return Optional.of(failedResolutionForFailureKind(preIntentTerminalFailureKind, request));
+        }
         boolean liveOptionRefinement = hasLiveOptionRefinementContext(request);
         // Resource, field and current candidates are already governed before this terminal
         // classifier runs. Rebuilding the broader domain/RAG prompt here is both redundant and
@@ -429,6 +465,90 @@ public class AgenticAuthoringLlmIntentResolverService {
         warnings.add("llm-intent-resolution-failed");
         warnings.add("llm-provider-error");
         warnings.add("llm-provider-" + providerFailureKind(error));
+
+        return List.copyOf(warnings);
+    }
+
+    private String preIntentTerminalProviderFailureKind(AgenticAuthoringIntentResolutionRequest request) {
+        if (request == null || request.contextHints() == null) {
+            return "";
+        }
+        String failureKind = nullableText(request.contextHints().path("preIntentProviderFailure"), "failureKind");
+        return isTerminalProviderFailureKind(failureKind) ? failureKind : "";
+    }
+
+    private boolean isTerminalProviderFailureKind(String failureKind) {
+        return switch (failureKind == null ? "" : failureKind) {
+            case "quota-exhausted", "auth-error", "provider-not-configured" -> true;
+            default -> false;
+        };
+    }
+
+    private AgenticAuthoringLlmIntentResolution failedResolutionForFailureKind(
+            String failureKind,
+            AgenticAuthoringIntentResolutionRequest request) {
+        LinkedHashSet<String> warnings = new LinkedHashSet<>();
+        warnings.add("llm-intent-resolution-failed");
+        warnings.add("llm-provider-error");
+        warnings.add("llm-provider-" + failureKind);
+        warnings.add("llm-pre-intent-terminal-provider-circuit-breaker");
+        if (hasPriorPlatformGuidanceSemanticScope(request)) {
+            warnings.add("platform-guidance-prior-semantic-scope-recovery-used");
+            return new AgenticAuthoringLlmIntentResolution(
+                    true,
+                    "explain",
+                    "component",
+                    "answer_component_catalog_question",
+                    null,
+                    null,
+                    "none",
+                    "Aqui você pode descrever em linguagem natural a tela que deseja criar ou melhorar. Posso ajudar com formulários, tabelas, gráficos, filtros e composição de páginas, sempre usando os componentes e dados governados disponíveis e apresentando qualquer alteração para revisão antes de aplicá-la.",
+                    List.of(),
+                    List.of(),
+                    List.copyOf(warnings),
+                    null,
+                    null,
+                    false,
+                    "platform_guidance");
+        }
+        return new AgenticAuthoringLlmIntentResolution(
+                false,
+                "unknown",
+                "unknown",
+                "unknown",
+                null,
+                null,
+                "provider_error",
+                "Não consegui confirmar a sua intenção com segurança agora. Confirme se você quer consultar dados disponíveis, criar uma tabela, montar um formulário ou gerar uma visualização.",
+                List.of(),
+                List.of("Você quer consultar dados disponíveis ou já quer criar uma tabela, formulário, gráfico ou painel?"),
+                List.copyOf(warnings),
+                null,
+                null);
+    }
+
+    private boolean hasAvailableDeclaredClientAction(ArrayNode declaredActions) {
+        if (declaredActions == null) {
+            return false;
+        }
+        for (JsonNode action : declaredActions) {
+            if (action != null && action.path("available").asBoolean(false)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private boolean hasPreIntentResourceOrOrientationGrounding(AgenticAuthoringIntentResolutionRequest request) {
+        if (request == null || request.contextHints() == null) {
+            return false;
+        }
+        JsonNode hints = request.contextHints();
+        return hints.path("resourceDiscovery").isObject()
+                || hints.path("preIntentSemanticOrientation").isObject();
+    }
+
+    private List<String> unusedProviderFailureWarningsTail(Throwable error) { List<String> warnings = List.of();
         return List.copyOf(warnings);
     }
 
@@ -477,7 +597,7 @@ public class AgenticAuthoringLlmIntentResolverService {
                             .provider(request.provider())
                             .model(request.model())
                             .providerModelOverrides(liveOptionRefinement
-                                    ? java.util.Map.of("openai", liveOptionRefinementOpenAiModel)
+                                    ? liveOptionRefinementModelOverrides
                                     : java.util.Map.of())
                             .apiKey(request.apiKey())
                             .temperature(0.0d)
@@ -976,10 +1096,11 @@ public class AgenticAuthoringLlmIntentResolverService {
             String userId,
             String environment,
             List<AiProviderInvocationTelemetry> providerInvocations) {
+        // keep clientActions in targeted prompt context
         JsonNode clientActions = request.contextHints() == null
                 ? null
                 : request.contextHints().path("clientActions");
-        if (clientActions == null || !clientActions.isArray() || clientActions.isEmpty()) {
+        if (hasLiveOptionRefinementContext(request) || clientActions == null || !clientActions.isArray() || clientActions.isEmpty()) {
             return Optional.empty();
         }
         ArrayNode declaredActions = objectMapper.createArrayNode();
@@ -994,7 +1115,10 @@ public class AgenticAuthoringLlmIntentResolverService {
                         nullableText(action, "targetComponentId"), ""));
             }
         });
-        if (declaredActions.isEmpty()) {
+        if (declaredActions.isEmpty()
+                || (!hasAvailableDeclaredClientAction(declaredActions)
+                        && request.activeSemanticDecision() == null
+                        && hasPreIntentResourceOrOrientationGrounding(request))) {
             return Optional.empty();
         }
         ObjectNode context = objectMapper.createObjectNode();
@@ -1062,6 +1186,12 @@ public class AgenticAuthoringLlmIntentResolverService {
                     false,
                     "component_authoring"));
         } catch (RuntimeException ex) {
+            log.debug(
+                    "[AgenticAuthoringLlmIntentResolver] Declared client action intent failure kind={}",
+                    providerFailureKind(providerFailureCause(ex)));
+            if (isTerminalProviderFailureKind(providerFailureKind(providerFailureCause(ex)))) {
+                throw ex;
+            }
             log.debug(
                     "[AgenticAuthoringLlmIntentResolver] Declared client action intent failed open to the general semantic resolver; kind={} cause={}",
                     providerFailureKind(providerFailureCause(ex)),
@@ -1295,6 +1425,7 @@ public class AgenticAuthoringLlmIntentResolverService {
                 item.put("text", boundedText(message.text(), 500));
             }
         }
+        // keep clientActions in targeted prompt context
         JsonNode clientActions = request.contextHints() == null
                 ? null
                 : request.contextHints().path("clientActions");
@@ -2036,8 +2167,9 @@ public class AgenticAuthoringLlmIntentResolverService {
                 layoutKind, preserve both independent prior AI-authored decisions unless later governed component or
                 resource evidence proves either incompatible. primaryComponent does not override layoutKind: a
                 single-table composition is one governed collection table, a resource-master-detail composition may use
-                praxis-table as its master and a dynamic form as its detail, while resource-crud means one CRUD host is
-                itself the requested composition.
+                praxis-table as its master and a dynamic form as its detail, an approval-workbench composition uses
+                praxis-table as its master and a workflow-action dynamic form for the selected row, while resource-crud
+                means one CRUD host is itself the requested composition.
                 Treat activeSemanticDecision and recentConversation as prior governed lineage for the current refinement, not as permission to ignore the new user request.
                 When the user's primary meaning is to reverse only the most recently materialized local change,
                 select semanticIntentClass "component_authoring", operationKind "undo", keep artifactKind aligned
@@ -2075,7 +2207,7 @@ public class AgenticAuthoringLlmIntentResolverService {
                 from governed metadata/capabilities; their presence does not downgrade the composition to resource-crud.
                 For a requested parent-child page that coordinates a parent collection and one item-level related-resource
                 surface, use artifactKind "page", operationKind "create", layoutKind
-                "parent-child-related-resource", primaryComponent "praxis-related-resource-outlet", and copy the exact
+                "parent-child-related-resource", primaryComponent "praxis-related-resource-outlet", selectedResourcePath from the parent resource that owns the parent collection and publishes the surface, and copy the exact
                 governed runtime surface id from verifiedRelatedResourceSurfaces.entries[].surfaceId,
                 metadata.surfaceId, or the ui_surface binding target.id into
                 targetSurfaceId; never copy the surface nodeKey/canonicalKey into this runtime field. Leave
@@ -2085,6 +2217,7 @@ public class AgenticAuthoringLlmIntentResolverService {
                 deactivating, reactivating, paying, scheduling or editing a concrete record, use component_authoring,
                 operationKind "create", artifactKind "page", changeKind "create_artifact" and primaryComponent
                 "praxis-crud" with layoutKind "resource-crud" when one CRUD host is the requested composition. When
+                the user explicitly requests an approval workbench or workflow-action workbench (approval-workbench / mesa de aprovação / bancada de ação) pairing a collection table with a workflow action form on the selected record, use artifactKind "page", primaryComponent "praxis-table" and layoutKind "approval-workbench". When
                 the user explicitly requests a coordinated collection, selection and detail/editor workspace, preserve
                 primaryComponent "praxis-table" with layoutKind "resource-master-detail"; the table runtime discovers
                 governed item actions. Do not reinterpret an existing operation as shared-rule authoring or a bare
@@ -2560,11 +2693,33 @@ public class AgenticAuthoringLlmIntentResolverService {
             String operationKind,
             String artifactKind,
             AgenticAuthoringVisualizationDecision decision) {
+        if (resolved && "create".equals(operationKind) && "page".equals(artifactKind) && decision != null && "parent-child-related-resource".equals(valueOrDefault(decision.layoutKind(), "")) && "praxis-table".equals(valueOrDefault(decision.primaryComponent(), ""))) {
+            return new AgenticAuthoringVisualizationDecision(decision.schemaVersion(), decision.intent(), decision.layoutKind(), "praxis-related-resource-outlet", decision.axes(), decision.includeSummary(), decision.includeDetailTable(), decision.excludedComponentIds(), decision.includeFilters(), decision.includeKpis(), valueOrDefault(decision.provenance(), "llm-authored-semantic-decision") + " + canonical-component-alignment", decision.targetSurfaceId());
+        }
+        if (resolved && "create".equals(operationKind) && "page".equals(artifactKind) && decision != null && "approval-workbench".equals(valueOrDefault(decision.layoutKind(), "")) && "praxis-dynamic-form".equals(valueOrDefault(decision.primaryComponent(), ""))) {
+            return new AgenticAuthoringVisualizationDecision(decision.schemaVersion(), decision.intent(), decision.layoutKind(), "praxis-table", decision.axes(), decision.includeSummary(), decision.includeDetailTable(), decision.excludedComponentIds(), decision.includeFilters(), decision.includeKpis(), valueOrDefault(decision.provenance(), "llm-authored-semantic-decision") + " + canonical-component-alignment", decision.targetSurfaceId());
+        }
         if (!resolved
                 || !"create".equals(operationKind)
-                || !"dashboard".equals(artifactKind)
-                || decision == null
-                || !"praxis-crud".equals(valueOrDefault(decision.primaryComponent(), ""))) {
+                || (!"dashboard".equals(artifactKind) && !"chart".equals(artifactKind))
+                || decision == null) {
+            return decision;
+        }
+        String currentPrimary = valueOrDefault(decision.primaryComponent(), "");
+        boolean nonCanonicalDashboardPrimary = "praxis-crud".equals(currentPrimary)
+                || (!currentPrimary.isBlank()
+                        && !Set.of(
+                                "praxis-chart",
+                                "praxis-dynamic-page-builder",
+                                "praxis-page-builder",
+                                "praxis-table",
+                                "praxis-list",
+                                "praxis-dynamic-form",
+                                "praxis-tabs",
+                                "praxis-expansion",
+                                "praxis-related-resource-outlet")
+                                .contains(currentPrimary));
+        if (!nonCanonicalDashboardPrimary) {
             return decision;
         }
         boolean hasAnalyticalAxes = decision.axes() != null && !decision.axes().isEmpty();
@@ -2573,10 +2728,16 @@ public class AgenticAuthoringLlmIntentResolverService {
         String primaryComponent = hasAnalyticalAxes && !chartExcluded
                 ? "praxis-chart"
                 : "praxis-dynamic-page-builder";
+        String layoutKind = valueOrDefault(decision.layoutKind(), "");
+        if ("coordinated_dashboard".equalsIgnoreCase(layoutKind)
+                || "analytics_dashboard".equalsIgnoreCase(layoutKind)
+                || "executive_dashboard".equalsIgnoreCase(layoutKind)) {
+            layoutKind = "resource-dashboard";
+        }
         return new AgenticAuthoringVisualizationDecision(
                 decision.schemaVersion(),
                 decision.intent(),
-                decision.layoutKind(),
+                layoutKind,
                 primaryComponent,
                 decision.axes(),
                 decision.includeSummary(),

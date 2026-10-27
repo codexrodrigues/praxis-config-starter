@@ -581,7 +581,11 @@ public class AgenticAuthoringToolRegistry {
                             Map.of(
                                     "resourceKey", safeText(result.resourceKey()),
                                     "operationCount", result.operations().size(),
-                                    "verification", "schemas_filtered+capabilities+actions"))
+                                    "verification", "schemas_filtered+capabilities+actions",
+                                    AgenticAuthoringResourceCandidatesResult.VERIFIED_RELATED_RESOURCE_SURFACES_CONTEXT_KEY,
+                                    result.relatedResourceSurfaces() == null
+                                            ? List.of()
+                                            : List.copyOf(result.relatedResourceSurfaces())))
                     : AgenticAuthoringToolResult.failure(
                             call.name(),
                             result.failureCodes().isEmpty()
@@ -1005,7 +1009,7 @@ public class AgenticAuthoringToolRegistry {
             }
             AgenticAuthoringResourceCandidatesResult result =
                     resourceDiscoveryService.search(request, principalContext, requestBaseUrl);
-            String discoveredResourceKey = uniqueDomainCatalogGroundedResourceKey(result);
+            String discoveredResourceKey = uniqueDomainCatalogGroundedResourceKey(request, result);
             if (!discoveredResourceKey.isBlank() && operationalVerificationService != null) {
                 // The LLM has already authored the business subject and semantic retrieval has
                 // resolved it to one governed Domain Catalog resource. This is post-intent target
@@ -1027,12 +1031,75 @@ public class AgenticAuthoringToolRegistry {
                         principalContext,
                         verification,
                         false,
-                        "unique-domain-catalog-resource");
+                        "unique-domain-catalog-resource",
+                        result);
                 if (verifiedResult != null) {
                     return success(call, verifiedResult);
                 }
             }
-            return success(call, result);
+            return success(call, enrichWithCandidateRelatedResourceSurfaces(request, result, requestBaseUrl, principalContext));
+        }
+
+        private AgenticAuthoringResourceCandidatesResult enrichWithCandidateRelatedResourceSurfaces(
+                AgenticAuthoringResourceCandidatesRequest request,
+                AgenticAuthoringResourceCandidatesResult result,
+                String requestBaseUrl,
+                AiPrincipalContext principalContext) {
+            if (result == null
+                    || !result.valid()
+                    || result.candidates() == null
+                    || result.candidates().isEmpty()
+                    || operationalVerificationService == null
+                    || !result.verifiedRelatedResourceSurfaces().isEmpty()
+                    || !shouldEnrichCandidateRelatedResourceSurfaces(request)) {
+                return result;
+            }
+            Map<String, String> distinctResourcePathsByKey = new LinkedHashMap<>();
+            for (AgenticAuthoringCandidate candidate : result.candidates()) {
+                if (candidate == null || candidate.resourcePath() == null || candidate.resourcePath().isBlank()) {
+                    continue;
+                }
+                String resourceKey = canonicalResourceKey(candidate.resourcePath());
+                if (!resourceKey.isBlank()) {
+                    distinctResourcePathsByKey.putIfAbsent(resourceKey, candidate.resourcePath());
+                }
+                if (distinctResourcePathsByKey.size() >= 3) {
+                    break;
+                }
+            }
+            if (distinctResourcePathsByKey.isEmpty()) {
+                return result;
+            }
+            List<AgenticAuthoringOperationalBindingVerificationService.RelatedResourceSurfaceProjection> surfaces =
+                    new ArrayList<>();
+            for (Map.Entry<String, String> entry : distinctResourcePathsByKey.entrySet()) {
+                surfaces.addAll(operationalVerificationService.verifyRelatedResourceSurfaces(
+                        entry.getKey(),
+                        entry.getValue(),
+                        requestBaseUrl,
+                        principalContext));
+            }
+            if (surfaces.isEmpty()) {
+                return result;
+            }
+            Map<String, Object> diagnostics = new LinkedHashMap<>(
+                    result.diagnostics() == null ? Map.of() : result.diagnostics());
+            diagnostics.put(
+                    AgenticAuthoringResourceCandidatesResult.VERIFIED_RELATED_RESOURCE_SURFACES_CONTEXT_KEY,
+                    List.copyOf(surfaces));
+            return new AgenticAuthoringResourceCandidatesResult(
+                    result.valid(),
+                    result.tool(),
+                    result.retrievalQuery(),
+                    result.artifactKind(),
+                    result.assistantMessage(),
+                    result.assistantContent(),
+                    result.candidates(),
+                    result.quickReplies(),
+                    result.warnings(),
+                    result.resourceSearchFocus(),
+                    result.consultativeProjection(),
+                    Map.copyOf(diagnostics));
         }
 
         private AgenticAuthoringResourceCandidatesRequest withOperationallyVerifiedResourceFocus(
@@ -1056,7 +1123,32 @@ public class AgenticAuthoringToolRegistry {
                     reconciled);
         }
 
+        private boolean hasDomainCatalogGrounding(AgenticAuthoringResourceCandidatesResult result) {
+            return result != null
+                    && result.candidates() != null
+                    && result.candidates().stream()
+                            .filter(Objects::nonNull)
+                            .anyMatch(candidate -> candidate.evidence() != null
+                                    && candidate.evidence().contains(
+                                            AgenticAuthoringDomainCatalogCandidateEnhancer.DOMAIN_CATALOG_GROUNDING));
+        }
+
+        private boolean shouldEnrichCandidateRelatedResourceSurfaces(
+                AgenticAuthoringResourceCandidatesRequest request) {
+            if (request == null) {
+                return false;
+            }
+            if ("page".equalsIgnoreCase(request.artifactKind())) {
+                return true;
+            }
+            AgenticAuthoringResourceSearchFocus focus = request.resourceSearchFocus();
+            return focus != null
+                    && ("page".equalsIgnoreCase(focus.desiredSurface())
+                            || (focus.supportingConcepts() != null && !focus.supportingConcepts().isEmpty()));
+        }
+
         private String uniqueDomainCatalogGroundedResourceKey(
+                AgenticAuthoringResourceCandidatesRequest request,
                 AgenticAuthoringResourceCandidatesResult result) {
             if (result == null || result.candidates() == null || result.candidates().isEmpty()) {
                 return "";
@@ -1064,9 +1156,14 @@ public class AgenticAuthoringToolRegistry {
             boolean hasDomainCatalogGrounding = result.candidates().stream()
                     .filter(Objects::nonNull)
                     .anyMatch(candidate -> candidate.evidence() != null
-                            && candidate.evidence().contains(
-                                    AgenticAuthoringDomainCatalogCandidateEnhancer.DOMAIN_CATALOG_GROUNDING));
-            if (!hasDomainCatalogGrounding) {
+                            && (candidate.evidence().contains(
+                                            AgenticAuthoringDomainCatalogCandidateEnhancer.DOMAIN_CATALOG_GROUNDING)
+                                    || candidate.evidence().contains("llm-resource-focus")
+                                    || candidate.evidence().contains("domain-discovery-resource-focus")));
+            boolean hasSemanticOperationalSchemaGrounding = result.candidates().stream()
+                    .filter(Objects::nonNull)
+                    .anyMatch(SearchApiResourcesToolExecutor::isStronglyGroundedOperationalCandidate);
+            if (!hasDomainCatalogGrounding && !hasSemanticOperationalSchemaGrounding) {
                 return "";
             }
             List<AgenticAuthoringCandidate> candidates = result.candidates().stream()
@@ -1076,12 +1173,165 @@ public class AgenticAuthoringToolRegistry {
                     .map(AgenticAuthoringCandidate::resourcePath)
                     .map(SearchApiResourcesToolExecutor::canonicalResourceKey)
                     .toList();
-            if (candidates.size() != result.candidates().size()
-                    || resourceKeys.stream().anyMatch(String::isBlank)) {
-                return "";
+            if (hasDomainCatalogGrounding
+                    && candidates.size() == result.candidates().size()
+                    && resourceKeys.stream().noneMatch(String::isBlank)) {
+                List<String> distinctResourceKeys = resourceKeys.stream().distinct().toList();
+                if (distinctResourceKeys.size() == 1) {
+                    return distinctResourceKeys.get(0);
+                }
             }
-            List<String> distinctResourceKeys = resourceKeys.stream().distinct().toList();
-            return distinctResourceKeys.size() == 1 ? distinctResourceKeys.get(0) : "";
+            String focusedEntity = request != null && request.resourceSearchFocus() != null
+                    ? safeText(request.resourceSearchFocus().primaryBusinessEntity()).trim()
+                    : "";
+            if (focusedEntity.matches("^[A-Za-z0-9_-]+(?:\\.[A-Za-z0-9_-]+)+$")) {
+                boolean focusedGrounded = candidates.stream()
+                        .anyMatch(candidate -> focusedEntity.equals(canonicalResourceKey(candidate.resourcePath()))
+                                && candidate.evidence() != null
+                                && (candidate.evidence().contains(
+                                                AgenticAuthoringDomainCatalogCandidateEnhancer.DOMAIN_CATALOG_GROUNDING)
+                                        || candidate.evidence().contains("llm-resource-focus")
+                                        || candidate.evidence().contains("domain-discovery-resource-focus")
+                                        || isStronglyGroundedOperationalCandidate(candidate)));
+                if (focusedGrounded) {
+                    return focusedEntity;
+                }
+            }
+            if (request != null
+                    && request.resourceSearchFocus() != null
+                    && candidates.size() == result.candidates().size()
+                    && resourceKeys.stream().noneMatch(String::isBlank)) {
+                List<String> distinctAllResourceKeys = resourceKeys.stream().distinct().toList();
+                List<String> operationalResourceKeys = candidates.stream()
+                        .filter(SearchApiResourcesToolExecutor::isStronglyGroundedOperationalCandidate)
+                        .map(AgenticAuthoringCandidate::resourcePath)
+                        .map(SearchApiResourcesToolExecutor::canonicalResourceKey)
+                        .filter(key -> !key.isBlank())
+                        .distinct()
+                        .toList();
+                List<String> supportingConcepts = request.resourceSearchFocus().supportingConcepts() == null
+                        ? List.of()
+                        : request.resourceSearchFocus().supportingConcepts();
+                if (operationalResourceKeys.size() == 1
+                        && (distinctAllResourceKeys.size() == 1
+                                || focusedEntity.isBlank()
+                                || resourceKeyAlignsWithFocus(operationalResourceKeys.get(0), focusedEntity)
+                                || multiTokenTerminalMatchesSupportingConcepts(
+                                        operationalResourceKeys.get(0), supportingConcepts))) {
+                    return operationalResourceKeys.get(0);
+                }
+                if (!focusedEntity.isBlank() && operationalResourceKeys.size() > 1) {
+                    List<String> supportingMatchedKeys = operationalResourceKeys.stream()
+                            .filter(key -> multiTokenTerminalMatchesSupportingConcepts(key, supportingConcepts))
+                            .toList();
+                    if (supportingMatchedKeys.size() == 1) {
+                        return supportingMatchedKeys.get(0);
+                    }
+                    List<String> alignedKeys = operationalResourceKeys.stream()
+                            .filter(key -> resourceKeyAlignsWithFocus(key, focusedEntity))
+                            .toList();
+                    if (alignedKeys.size() == 1) {
+                        return alignedKeys.get(0);
+                    }
+                }
+            }
+            return "";
+        }
+
+        private static boolean multiTokenTerminalMatchesSupportingConcepts(
+                String resourceKey,
+                List<String> supportingConcepts) {
+            if (resourceKey == null || resourceKey.isBlank()
+                    || supportingConcepts == null || supportingConcepts.isEmpty()) {
+                return false;
+            }
+            String terminal = resourceKey.contains(".")
+                    ? resourceKey.substring(resourceKey.lastIndexOf('.') + 1)
+                    : resourceKey;
+            String normalizedTerminal = java.text.Normalizer.normalize(terminal, java.text.Normalizer.Form.NFD)
+                    .replaceAll("\\p{M}+", "")
+                    .toLowerCase(java.util.Locale.ROOT);
+            List<String> terminalTokens = java.util.Arrays.stream(normalizedTerminal.split("[^a-z0-9]+"))
+                    .filter(token -> token.length() >= 4)
+                    .toList();
+            if (terminalTokens.size() < 2) {
+                return false;
+            }
+            String normalizedSupporting = java.text.Normalizer.normalize(
+                            String.join(" ", supportingConcepts),
+                            java.text.Normalizer.Form.NFD)
+                    .replaceAll("\\p{M}+", "")
+                    .toLowerCase(java.util.Locale.ROOT);
+            return terminalTokens.stream().allMatch(token -> {
+                String stem = token.endsWith("oes") && token.length() > 5
+                        ? token.substring(0, token.length() - 3)
+                        : token.endsWith("ais") && token.length() > 5
+                                ? token.substring(0, token.length() - 3) + "al"
+                                : token.endsWith("is") && token.length() > 5
+                                        ? token.substring(0, token.length() - 2)
+                                        : token.endsWith("s") && token.length() > 4
+                                                ? token.substring(0, token.length() - 1)
+                                                : token;
+                return normalizedSupporting.contains(stem) || normalizedSupporting.contains(token);
+            });
+        }
+
+        private static boolean isStronglyGroundedOperationalCandidate(AgenticAuthoringCandidate candidate) {
+            if (candidate == null || candidate.evidence() == null) {
+                return false;
+            }
+            List<String> evidence = candidate.evidence();
+            boolean operationalOrVerifiedStatsRole = evidence.contains("semantic-role:operational-resource")
+                    || (evidence.contains("semantic-role:analytics-projection")
+                            && evidence.contains("stats-capabilities-verified")
+                            && !isDerivedProjectionResourcePath(candidate.resourcePath()));
+            if (!operationalOrVerifiedStatsRole
+                    || evidence.contains("weak-evidence")
+                    || evidence.contains("lexical-fallback")) {
+                return false;
+            }
+            return evidence.contains(AgenticAuthoringDomainCatalogCandidateEnhancer.DOMAIN_CATALOG_GROUNDING)
+                    || evidence.contains("llm-resource-focus")
+                    || evidence.contains("domain-discovery-resource-focus")
+                    || (evidence.contains("api-metadata")
+                            && evidence.contains("semantic-retrieval")
+                            && evidence.contains("schema-available"));
+        }
+
+        private static boolean isDerivedProjectionResourcePath(String resourcePath) {
+            String normalized = safeText(resourcePath).trim().toLowerCase(java.util.Locale.ROOT);
+            return normalized.contains("/vw-")
+                    || normalized.contains("/view-")
+                    || normalized.contains("/views/")
+                    || normalized.contains("/projection-")
+                    || normalized.contains("/projections/");
+        }
+
+        private static boolean resourceKeyAlignsWithFocus(String resourceKey, String focusedEntity) {
+            String terminal = resourceKey.contains(".")
+                    ? resourceKey.substring(resourceKey.lastIndexOf('.') + 1)
+                    : resourceKey;
+            String normalizedTerminal = java.text.Normalizer.normalize(terminal, java.text.Normalizer.Form.NFD)
+                    .replaceAll("\\p{M}+", "")
+                    .toLowerCase(java.util.Locale.ROOT);
+            String normalizedFocus = java.text.Normalizer.normalize(focusedEntity, java.text.Normalizer.Form.NFD)
+                    .replaceAll("\\p{M}+", "")
+                    .toLowerCase(java.util.Locale.ROOT);
+            for (String token : normalizedTerminal.split("[^a-z0-9]+")) {
+                if (token.length() >= 4) {
+                    String stem = token.endsWith("oes") && token.length() > 5
+                            ? token.substring(0, token.length() - 3)
+                            : token.endsWith("is") && token.length() > 5
+                                    ? token.substring(0, token.length() - 2)
+                                    : token.endsWith("s") && token.length() > 4
+                                            ? token.substring(0, token.length() - 1)
+                                            : token;
+                    if (normalizedFocus.contains(stem)) {
+                        return true;
+                    }
+                }
+            }
+            return false;
         }
 
         private static String canonicalResourceKey(String resourcePath) {
@@ -1120,6 +1370,22 @@ public class AgenticAuthoringToolRegistry {
                 AgenticAuthoringOperationalBindingVerificationService.VerificationResult verification,
                 boolean vectorRetrievalSkipped,
                 String operationalGroundingSource) {
+            return verifiedBindingResult(
+                    request,
+                    principalContext,
+                    verification,
+                    vectorRetrievalSkipped,
+                    operationalGroundingSource,
+                    null);
+        }
+
+        private AgenticAuthoringResourceCandidatesResult verifiedBindingResult(
+                AgenticAuthoringResourceCandidatesRequest request,
+                AiPrincipalContext principalContext,
+                AgenticAuthoringOperationalBindingVerificationService.VerificationResult verification,
+                boolean vectorRetrievalSkipped,
+                String operationalGroundingSource,
+                AgenticAuthoringResourceCandidatesResult discoveryResult) {
             if (verification.operations() == null || verification.operations().isEmpty()) {
                 return null;
             }
@@ -1131,15 +1397,35 @@ public class AgenticAuthoringToolRegistry {
             if (distinctResources != 1) {
                 return null;
             }
+            boolean statsVerifiedByDiscovery = discoveryResult != null
+                    && discoveryResult.candidates() != null
+                    && discoveryResult.candidates().stream()
+                            .filter(Objects::nonNull)
+                            .anyMatch(candidate -> candidate.evidence() != null
+                                    && candidate.evidence().contains("stats-capabilities-verified"));
             List<AgenticAuthoringCandidate> candidates = operationsForMaterialization(
                             verification.operations(), request)
                     .stream()
                     .filter(AgenticAuthoringOperationalBindingVerificationService.OperationProjection::executableCandidate)
-                    .map(operation -> verifiedBindingCandidate(operation, principalContext))
+                    .map(operation -> verifiedBindingCandidate(operation, principalContext, statsVerifiedByDiscovery))
                     .toList();
             if (candidates.isEmpty()) {
                 return null;
             }
+            Map<String, Object> diagnostics = new LinkedHashMap<>();
+            if (discoveryResult != null && !discoveryResult.safeDiagnostics().isEmpty()) {
+                diagnostics.putAll(discoveryResult.safeDiagnostics());
+            }
+            diagnostics.put("bindingResourceKey", verification.resourceKey());
+            diagnostics.put("bindingVerification", "schemas.filtered+resource.capabilities+schemas.actions");
+            diagnostics.put("vectorRetrievalSkipped", vectorRetrievalSkipped);
+            diagnostics.put("operationalGroundingSource", operationalGroundingSource);
+            diagnostics.put(
+                    AgenticAuthoringResourceCandidatesResult.VERIFIED_OPERATIONS_CONTEXT_KEY,
+                    List.copyOf(verification.operations()));
+            diagnostics.put(
+                    AgenticAuthoringResourceCandidatesResult.VERIFIED_RELATED_RESOURCE_SURFACES_CONTEXT_KEY,
+                    List.copyOf(verification.relatedResourceSurfaces()));
             return new AgenticAuthoringResourceCandidatesResult(
                     true,
                     SEARCH_API_RESOURCES,
@@ -1152,15 +1438,7 @@ public class AgenticAuthoringToolRegistry {
                     List.of("domain-binding-operationally-verified"),
                     request.resourceSearchFocus(),
                     null,
-                    Map.of(
-                            "bindingResourceKey", verification.resourceKey(),
-                            "bindingVerification", "schemas.filtered+resource.capabilities+schemas.actions",
-                            "vectorRetrievalSkipped", vectorRetrievalSkipped,
-                            "operationalGroundingSource", operationalGroundingSource,
-                            AgenticAuthoringResourceCandidatesResult.VERIFIED_OPERATIONS_CONTEXT_KEY,
-                            List.copyOf(verification.operations()),
-                            AgenticAuthoringResourceCandidatesResult.VERIFIED_RELATED_RESOURCE_SURFACES_CONTEXT_KEY,
-                            List.copyOf(verification.relatedResourceSurfaces())));
+                    Map.copyOf(diagnostics));
         }
 
         private List<AgenticAuthoringOperationalBindingVerificationService.OperationProjection>
@@ -1208,7 +1486,8 @@ public class AgenticAuthoringToolRegistry {
 
         private AgenticAuthoringCandidate verifiedBindingCandidate(
                 AgenticAuthoringOperationalBindingVerificationService.OperationProjection operation,
-                AiPrincipalContext principalContext) {
+                AiPrincipalContext principalContext,
+                boolean statsVerifiedByDiscovery) {
             String method = operation.apiMethod() == null
                     ? ""
                     : operation.apiMethod().toLowerCase(java.util.Locale.ROOT);
@@ -1219,6 +1498,9 @@ public class AgenticAuthoringToolRegistry {
             evidence.add("domain-binding");
             evidence.add("schema-grounding-verified");
             evidence.add("resource-capabilities-verified");
+            if (statsVerifiedByDiscovery && !evidence.contains("stats-capabilities-verified")) {
+                evidence.add("stats-capabilities-verified");
+            }
             AgenticAuthoringEvidenceBundle bundle = AgenticAuthoringEvidenceBundle.of(
                     "domain_binding",
                     List.of(

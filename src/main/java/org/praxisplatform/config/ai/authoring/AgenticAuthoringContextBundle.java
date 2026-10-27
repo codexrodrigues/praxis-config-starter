@@ -393,6 +393,20 @@ final class AgenticAuthoringContextBundle {
                 .toList();
     }
 
+    private static boolean matchesTargetComponentId(String catalogComponentId, String requestedComponentId) {
+        if (catalogComponentId == null || catalogComponentId.isBlank()
+                || requestedComponentId == null || requestedComponentId.isBlank()) {
+            return false;
+        }
+        if (catalogComponentId.equals(requestedComponentId)) {
+            return true;
+        }
+        return ("praxis page builder".equals(catalogComponentId)
+                        && "praxis dynamic page builder".equals(requestedComponentId))
+                || ("praxis dynamic page builder".equals(catalogComponentId)
+                        && "praxis page builder".equals(requestedComponentId));
+    }
+
     private static int relevanceScore(
             AgenticAuthoringComponentCapabilitiesResult.ComponentCapabilityCatalog catalog,
             String prompt,
@@ -400,7 +414,9 @@ final class AgenticAuthoringContextBundle {
             String selectedComponentId) {
         String componentId = normalizedSearchText(catalog.componentId());
         int score = 0;
-        if (!componentId.isBlank() && (componentId.equals(targetComponentId) || componentId.equals(selectedComponentId))) {
+        if (!componentId.isBlank()
+                && (matchesTargetComponentId(componentId, targetComponentId)
+                        || matchesTargetComponentId(componentId, selectedComponentId))) {
             score += 100;
         }
         for (String token : searchTokens(componentId)) {

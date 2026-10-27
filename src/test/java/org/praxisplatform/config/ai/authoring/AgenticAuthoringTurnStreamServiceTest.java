@@ -2116,6 +2116,106 @@ class AgenticAuthoringTurnStreamServiceTest {
     }
 
     @Test
+    void recordsMicrometerCountersForStreamCapacityAdmissionAndRejection() throws Exception {
+        UUID threadId = UUID.randomUUID();
+        AiPrincipalContext principalContext = new AiPrincipalContext("tenant", "user", "local", true);
+        CountDownLatch firstExecutionStarted = new CountDownLatch(1);
+        CountDownLatch releaseFirstExecution = new CountDownLatch(1);
+        CountDownLatch firstExecutionFinished = new CountDownLatch(1);
+        AgenticAuthoringTurnEngine turnEngine = blockingTurnEngine(
+                firstExecutionStarted,
+                releaseFirstExecution,
+                firstExecutionFinished);
+        stubSuccessfulStreamStart(threadId, principalContext);
+
+        io.micrometer.core.instrument.simple.SimpleMeterRegistry meterRegistry =
+                new io.micrometer.core.instrument.simple.SimpleMeterRegistry();
+        AgenticAuthoringTurnStreamService service = service(turnEngine);
+        service.setMeterRegistry(meterRegistry);
+        ReflectionTestUtils.setField(service, "maxActivePerUser", 1);
+
+        try {
+            service.start(requestWithClientTurnId("turn-metric-1"), "http://localhost", principalContext);
+            org.assertj.core.api.Assertions.assertThat(firstExecutionStarted.await(2, TimeUnit.SECONDS)).isTrue();
+
+            org.assertj.core.api.Assertions.assertThatThrownBy(() -> service.start(
+                            requestWithClientTurnId("turn-metric-2"),
+                            "http://localhost",
+                            principalContext))
+                    .isInstanceOf(ResponseStatusException.class);
+
+            org.assertj.core.api.Assertions.assertThat(
+                            meterRegistry.get("praxis_ai_authoring_stream_capacity_active_global")
+                                    .gauge()
+                                    .value())
+                    .isEqualTo(1.0);
+            org.assertj.core.api.Assertions.assertThat(
+                            meterRegistry.get("praxis_ai_authoring_stream_capacity_admitted_total")
+                                    .tag("status", "reserved")
+                                    .counter()
+                                    .count())
+                    .isEqualTo(1.0);
+            org.assertj.core.api.Assertions.assertThat(
+                            meterRegistry.get("praxis_ai_authoring_stream_capacity_rejected_total")
+                                    .tag("reason", "user")
+                                    .counter()
+                                    .count())
+                    .isEqualTo(1.0);
+        } finally {
+            releaseFirstExecution.countDown();
+            firstExecutionFinished.await(2, TimeUnit.SECONDS);
+            service.shutdown();
+        }
+    }
+
+    @Test
+    void shutdownOnlyReleasesLocalStreamPermitsAndPreservesOtherNodePermitsInSharedStore() throws Exception {
+        UUID threadId = UUID.randomUUID();
+        UUID siblingNodeStreamId = UUID.randomUUID();
+        AiPrincipalContext principalContext = new AiPrincipalContext("tenant", "user", "local", true);
+        CountDownLatch firstExecutionStarted = new CountDownLatch(1);
+        CountDownLatch releaseFirstExecution = new CountDownLatch(1);
+        CountDownLatch firstExecutionFinished = new CountDownLatch(1);
+        AgenticAuthoringTurnEngine turnEngine = blockingTurnEngine(
+                firstExecutionStarted,
+                releaseFirstExecution,
+                firstExecutionFinished);
+        stubSuccessfulStreamStart(threadId, principalContext);
+
+        InMemoryAgenticAuthoringStreamCapacityStore sharedClusterStore =
+                new InMemoryAgenticAuthoringStreamCapacityStore();
+        org.assertj.core.api.Assertions.assertThat(
+                        sharedClusterStore.tryReserve(
+                                siblingNodeStreamId, "tenant-sibling", "user-sibling", 10, 10, 10, () -> true))
+                .isEqualTo(AgenticAuthoringStreamCapacityStore.ReservationStatus.RESERVED);
+
+        AgenticAuthoringTurnStreamService nodeAService = service(turnEngine);
+        nodeAService.setCapacityStore(sharedClusterStore);
+
+        try {
+            AgenticAuthoringTurnStreamService.StartResult started =
+                    nodeAService.start(requestWithClientTurnId("turn-node-a"), "http://localhost", principalContext);
+            org.assertj.core.api.Assertions.assertThat(firstExecutionStarted.await(2, TimeUnit.SECONDS)).isTrue();
+            org.assertj.core.api.Assertions.assertThat(sharedClusterStore.activeGlobalCount()).isEqualTo(2);
+
+            nodeAService.shutdown();
+
+            // Node A's local stream permit was released, but the sibling node's permit remains intact
+            org.assertj.core.api.Assertions.assertThat(sharedClusterStore.activeGlobalCount()).isEqualTo(1);
+            org.assertj.core.api.Assertions.assertThat(sharedClusterStore.activeTenantCount("tenant-sibling"))
+                    .isEqualTo(1);
+            org.assertj.core.api.Assertions.assertThat(
+                            sharedClusterStore.release(started.response().getStreamId()))
+                    .isFalse();
+            org.assertj.core.api.Assertions.assertThat(sharedClusterStore.release(siblingNodeStreamId))
+                    .isTrue();
+        } finally {
+            releaseFirstExecution.countDown();
+            firstExecutionFinished.await(2, TimeUnit.SECONDS);
+        }
+    }
+
+    @Test
     void cancelDoesNotOverwriteTurnWhenTerminalEventWinsRace() {
         UUID streamId = UUID.randomUUID();
         UUID threadId = UUID.randomUUID();

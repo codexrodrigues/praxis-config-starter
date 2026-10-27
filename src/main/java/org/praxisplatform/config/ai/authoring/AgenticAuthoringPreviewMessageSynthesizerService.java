@@ -8,6 +8,7 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Objects;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -18,13 +19,14 @@ import org.praxisplatform.config.service.AiProviderInvocationMetrics;
 import org.praxisplatform.config.service.AiProviderInvocationTelemetry;
 import org.praxisplatform.config.service.AiProviderInvocationTrace;
 import org.praxisplatform.config.service.AiProviderManagementService;
+import org.springframework.util.StringUtils;
 
 @Slf4j
 public class AgenticAuthoringPreviewMessageSynthesizerService {
 
     private static final int MAX_MESSAGE_LENGTH = 800;
     private static final Pattern API_PATH_PATTERN = Pattern.compile(
-            "(?i)(?:\"?)((?:/api|/schemas)/[\\p{Alnum}._~:/?#\\[\\]@!$&'()*+,;=%{}-]+)(?:\"?)");
+            "(?i)(?:\"?)((?:/api|/schemas)/[\\p{Alnum}._~:/?#\\[\\]@!$&'()*+,;=%{}-]+(?<![.,;:!?)]))(?:(?:\")?)");
     private static final Pattern HTTP_OPERATION_PARENTHESIS_PATTERN = Pattern.compile(
             "(?i)\\s*\\(\\s*opera[cç][aã]o\\s+(?:GET|POST|PUT|PATCH|DELETE)\\s*\\)");
     private static final Pattern HTTP_OPERATION_PATTERN = Pattern.compile(
@@ -32,13 +34,47 @@ public class AgenticAuthoringPreviewMessageSynthesizerService {
 
     private final AiProviderManagementService providerManagementService;
     private final ObjectMapper objectMapper;
+    private final Map<String, String> previewMessageModelOverrides;
 
     public AgenticAuthoringPreviewMessageSynthesizerService(
             AiProviderManagementService providerManagementService,
             ObjectMapper objectMapper) {
+        this(providerManagementService, objectMapper, (String) null);
+    }
+
+    public AgenticAuthoringPreviewMessageSynthesizerService(
+            AiProviderManagementService providerManagementService,
+            ObjectMapper objectMapper,
+            String openAiPreviewMessageModel) {
+        this(
+                providerManagementService,
+                objectMapper,
+                StringUtils.hasText(openAiPreviewMessageModel)
+                        ? Map.of("openai", openAiPreviewMessageModel.trim())
+                        : Map.of());
+    }
+
+    public AgenticAuthoringPreviewMessageSynthesizerService(
+            AiProviderManagementService providerManagementService,
+            ObjectMapper objectMapper,
+            Map<String, String> previewMessageModelOverrides) {
         this.providerManagementService = Objects.requireNonNull(
                 providerManagementService, "providerManagementService must not be null");
         this.objectMapper = Objects.requireNonNull(objectMapper, "objectMapper must not be null");
+        this.previewMessageModelOverrides = normalizeProviderModelOverrides(previewMessageModelOverrides);
+    }
+
+    private static Map<String, String> normalizeProviderModelOverrides(Map<String, String> rawOverrides) {
+        if (rawOverrides == null || rawOverrides.isEmpty()) {
+            return Map.of();
+        }
+        java.util.LinkedHashMap<String, String> normalized = new java.util.LinkedHashMap<>();
+        rawOverrides.forEach((provider, model) -> {
+            if (StringUtils.hasText(provider) && StringUtils.hasText(model)) {
+                normalized.put(provider.trim().toLowerCase(Locale.ROOT), model.trim());
+            }
+        });
+        return Map.copyOf(normalized);
     }
 
     public String synthesize(
@@ -127,9 +163,10 @@ public class AgenticAuthoringPreviewMessageSynthesizerService {
                     AiCallConfig.agenticAuthoringBuilder()
                             .provider(request.provider())
                             .model(request.model())
+                            .providerModelOverrides(previewMessageModelOverrides)
                             .apiKey(request.apiKey())
                             .temperature(0.2d)
-                            .maxTokens(220)
+                            .maxTokens(450)
                             .invocationTrace(trace)
                             .build(),
                     tenantId,
@@ -140,7 +177,12 @@ public class AgenticAuthoringPreviewMessageSynthesizerService {
             if (localEditorialComposition && hasResourceSourceClaim(message)) {
                 return tracedResult(localEditorialPreviewMessage(valid), trace);
             }
-            return tracedResult(sanitizeTechnicalLanguage(message, intentResolution), trace);
+            String sanitized = sanitizeTechnicalLanguage(message, intentResolution);
+            if (!message.equals(fallback)
+                    && (sanitized.length() > MAX_MESSAGE_LENGTH || isTruncatedSentence(sanitized))) {
+                sanitized = sanitizeTechnicalLanguage(fallback, intentResolution);
+            }
+            return tracedResult(sanitized, trace);
         } catch (Exception ex) {
             trace.failed(AiProviderFailureClassifier.classify(ex));
             log.debug("[AgenticAuthoring] Preview assistant message synthesis failed: {}", ex.getMessage());
@@ -524,6 +566,7 @@ public class AgenticAuthoringPreviewMessageSynthesizerService {
             return "";
         }
         String goal = authoringGoal(request, intentResolution);
+        String analyticalAxes = materializedAnalyticalAxesSummary(uiCompositionPlan);
         StringBuilder message = new StringBuilder("Montei uma pre-visualizacao governada");
         if (!goal.isBlank()) {
             message.append(" para ").append(stripTrailingSentencePunctuation(lowercaseFirst(goal)));
@@ -531,9 +574,33 @@ public class AgenticAuthoringPreviewMessageSynthesizerService {
         message.append(".");
         message.append("\n\n- Fonte governada: ").append(sourceLabel).append(".");
         message.append("\n- Materializacao: ").append(componentSummary).append(".");
+        if (!analyticalAxes.isBlank()) {
+            message.append("\n- Recortes confirmados: ").append(analyticalAxes).append(".");
+        }
         message.append("\n- Validacao: usei a decisao semantica e os campos confirmados disponiveis.");
         message.append("\n- Proximo passo: revise a pre-visualizacao, peça ajustes ou salve quando estiver ok.");
         return AgenticAuthoringPresentationText.assistantReply(sanitizeTechnicalLanguage(message.toString(), intentResolution));
+    }
+
+    private String materializedAnalyticalAxesSummary(JsonNode uiCompositionPlan) {
+        ArrayNode axes = semanticAxesSummary(uiCompositionPlan);
+        if (axes == null || axes.isEmpty()) {
+            return "";
+        }
+        List<String> labels = new ArrayList<>();
+        for (JsonNode axis : axes) {
+            if ("unsupported".equalsIgnoreCase(text(axis, "schemaProbeStatus"))) {
+                continue;
+            }
+            String label = text(axis, "schemaLabel");
+            if (label.isBlank()) {
+                label = text(axis, "label");
+            }
+            if (!label.isBlank() && !labels.contains(label)) {
+                labels.add(label);
+            }
+        }
+        return humanJoin(labels);
     }
 
     private String deterministicOperationalCrudMessage(
@@ -578,7 +645,9 @@ public class AgenticAuthoringPreviewMessageSynthesizerService {
     private boolean hasGovernedResolvedCandidate(
             AgenticAuthoringIntentResolutionResult intentResolution,
             List<String> previewWarnings) {
-        if (intentResolution == null || intentResolution.selectedCandidate() == null) {
+        if (intentResolution == null
+                || intentResolution.selectedCandidate() == null
+                || containsWarning(previewWarnings, "semantic-axis-schema-verification-unsupported-axis")) {
             return false;
         }
         List<String> warnings = intentResolution.warnings();
@@ -586,15 +655,28 @@ public class AgenticAuthoringPreviewMessageSynthesizerService {
                 && containsWarning(warnings, "llm-pre-intent-resource-discovery-used")) {
             return true;
         }
-        return (containsWarning(warnings, "llm-fast-intent-resolution-used")
-                        && containsCandidateEvidence(intentResolution.selectedCandidate(), "tool-search-api-resources")
-                        && (containsCandidateEvidence(intentResolution.selectedCandidate(), "schema-available")
-                                || containsCandidateEvidence(
-                                        intentResolution.selectedCandidate(),
-                                        "schema-grounding-verified")))
+        boolean llmResolved = containsWarning(warnings, "llm-fast-intent-resolution-used")
+                || containsWarning(warnings, "llm-intent-resolution-used");
+        boolean hasGovernedDiscoveryEvidence =
+                containsCandidateEvidence(intentResolution.selectedCandidate(), "tool-search-api-resources")
+                        || containsCandidateEvidence(intentResolution.selectedCandidate(), "domain-catalog-grounding");
+        boolean hasVerifiedSchemaOrPlan =
+                containsCandidateEvidence(intentResolution.selectedCandidate(), "schema-available")
+                        || containsCandidateEvidence(intentResolution.selectedCandidate(), "schema-grounding-verified")
+                        || containsCandidateEvidence(intentResolution.selectedCandidate(), "resource-capabilities-verified")
+                        || containsCandidateEvidence(intentResolution.selectedCandidate(), "stats-capabilities-verified")
+                        || containsWarning(previewWarnings, "stats-capabilities-verified")
+                        || containsWarning(previewWarnings, "ui-composition-plan-provider:generic-resource-dashboard")
+                        || containsWarning(previewWarnings, "ui-composition-plan-provider:generic-resource-related-resource-page")
+                        || containsWarning(previewWarnings, "ui-composition-plan-provider:generic-resource-page");
+        return (llmResolved && hasGovernedDiscoveryEvidence && hasVerifiedSchemaOrPlan)
                 || (containsCandidateEvidence(intentResolution.selectedCandidate(), "domain-catalog-grounding")
                         && (containsWarning(previewWarnings, "table-query-filter-schema-grounded")
-                                || containsWarning(previewWarnings, "crud-query-filter-schema-grounded")));
+                                || containsWarning(previewWarnings, "crud-query-filter-schema-grounded")
+                                || containsWarning(previewWarnings, "stats-capabilities-verified")
+                                || containsWarning(previewWarnings, "ui-composition-plan-provider:generic-resource-dashboard")
+                                || containsWarning(previewWarnings, "ui-composition-plan-provider:generic-resource-related-resource-page")
+                                || containsWarning(previewWarnings, "ui-composition-plan-provider:generic-resource-page")));
     }
 
     private boolean containsCandidateEvidence(AgenticAuthoringCandidate candidate, String evidence) {
@@ -719,10 +801,25 @@ public class AgenticAuthoringPreviewMessageSynthesizerService {
         if (message.isBlank()
                 || message.startsWith("{")
                 || message.startsWith("[")
-                || message.length() > MAX_MESSAGE_LENGTH) {
+                || message.length() > MAX_MESSAGE_LENGTH
+                || isTruncatedSentence(message)) {
             return fallback;
         }
         return message;
+    }
+
+    private boolean isTruncatedSentence(String message) {
+        String trimmed = value(message).trim();
+        if (trimmed.isEmpty()) {
+            return true;
+        }
+        char lastChar = trimmed.charAt(trimmed.length() - 1);
+        if (lastChar != '.' && lastChar != '!' && lastChar != '?' && lastChar != ':' && lastChar != ')' && lastChar != ']') {
+            return true;
+        }
+        String withoutTrailingPunctuation = trimmed.replaceAll("[.!?:)\\]]+$", "").trim();
+        return withoutTrailingPunctuation.matches(
+                "(?is).*\\b(com|e|de|do|da|dos|das|para|por|em|no|na|nos|nas|ou|que|se|como|está|esta|estão|estao|foi|foram|será|sera|sendo|possui|incluindo|contendo|entre|sobre|até|ate|após|apos|sem)$");
     }
 
     private String sanitizeTechnicalLanguage(
@@ -745,6 +842,9 @@ public class AgenticAuthoringPreviewMessageSynthesizerService {
                 .replaceAll("(?i)\\bpraxis-table\\b", "tabela")
                 .replaceAll("(?i)\\bpraxis-filter\\b", "filtro")
                 .replaceAll("(?i)\\bpraxis-dynamic-form\\b", "formulário")
+                .replaceAll("(?i)\\bapproval-workbench\\b", "bancada de aprovação")
+                .replaceAll("(?i)\\bresource-master-detail\\b", "workspace mestre-detalhe")
+                .replaceAll("(?i)\\bparent-child-related-resource\\b", "tela pai-filho")
                 .replaceAll("(?i)\\s*\\([a-z0-9]+(?:-[a-z0-9]+){2,}\\)", "")
                 .replaceAll("(?i)\\bvw-[a-z0-9-]+\\b", "fonte selecionada")
                 .replaceAll("(?i)salve o dashboard", "salve a pré-visualização")
@@ -755,7 +855,7 @@ public class AgenticAuthoringPreviewMessageSynthesizerService {
                 .replaceAll("[\\t ]+([,.;:])", "$1")
                 .replaceAll("\\n{3,}", "\n\n")
                 .trim();
-        return sanitized.length() > MAX_MESSAGE_LENGTH ? value.substring(0, MAX_MESSAGE_LENGTH).trim() : sanitized;
+        return sanitized.length() > MAX_MESSAGE_LENGTH ? sanitized.substring(0, MAX_MESSAGE_LENGTH).trim() : sanitized;
     }
 
     private String removeTechnicalObservationSentences(String message) {
@@ -846,6 +946,12 @@ public class AgenticAuthoringPreviewMessageSynthesizerService {
         }
         if (normalized.contains("tab")) {
             return "abas";
+        }
+        if (normalized.contains("related-resource")) {
+            return "recursos relacionados";
+        }
+        if (normalized.contains("list")) {
+            return "lista";
         }
         return "componente";
     }

@@ -252,7 +252,7 @@ class AgenticAuthoringLlmPreIntentToolPlanningServiceTest {
         assertThat(configCaptor.getValue().getExecutionProfile()).isEqualTo(org.praxisplatform.config.service.AiExecutionProfile.AGENTIC_AUTHORING);
         assertThat(configCaptor.getValue().getTimeoutSeconds()).isEqualTo(7);
         assertThat(configCaptor.getValue().getProviderModelOverrides()).containsEntry("openai", "gpt-5.6-luna");
-        assertThat(configCaptor.getValue().getMaxTokens()).isEqualTo(640);
+        assertThat(configCaptor.getValue().getMaxTokens()).isEqualTo(1536);
         assertThat(configCaptor.getValue().getInvocationTrace()).isNotNull();
     }
 
@@ -1769,6 +1769,54 @@ class AgenticAuthoringLlmPreIntentToolPlanningServiceTest {
                           ]
                         }
                         """));
+    }
+
+    @Test
+    void parentChildRelatedResourceLayoutForcesFullIntentResolutionAndValidatesOutletPrimaryComponent() throws Exception {
+        ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<AiJsonSchema> schemaCaptor = ArgumentCaptor.forClass(AiJsonSchema.class);
+        when(providerManagementService.generateJson(
+                promptCaptor.capture(),
+                schemaCaptor.capture(),
+                any(),
+                eq("tenant"),
+                eq("user"),
+                eq("local"))).thenReturn(objectMapper.readTree("""
+                {
+                  "schemaVersion": "praxis-agentic-authoring-pre-intent-tool-plan.v3",
+                  "semanticIntentClass": "authoring_or_other",
+                  "assistantMessage": "",
+                  "shouldRetrieveGovernedResources": true,
+                  "requiresFullIntentResolution": false,
+                  "artifactKind": "page",
+                  "primaryComponent": "praxis-related-resource-outlet",
+                  "layoutKind": "parent-child-related-resource",
+                  "retrievalQuery": "missoes participantes funcionarios",
+                  "resourceSearchFocus": {
+                    "primaryBusinessEntity": "operations.missoes",
+                    "supportingConcepts": ["funcionarios", "participantes"],
+                    "desiredSurface": "parent-child-related-resource",
+                    "uncertainty": "",
+                    "rationale": "O usuario seleciona uma missao pai para visualizar os funcionarios participantes."
+                  },
+                  "reason": "Composicao pai-filho governada por missao."
+                }
+                """));
+        AgenticAuthoringLlmPreIntentToolPlanningService service =
+                new AgenticAuthoringLlmPreIntentToolPlanningService(providerManagementService, objectMapper, 7);
+
+        AgenticAuthoringPreIntentToolPlanningResult result = service.plan(
+                request("quero uma tela para escolher uma missao e ver os funcionarios que participam dela"),
+                new AiPrincipalContext("tenant", "user", "local", true));
+
+        assertThat(result.planned()).isTrue();
+        assertThat(result.plan().layoutKind()).isEqualTo("parent-child-related-resource");
+        assertThat(result.plan().primaryComponent()).isEqualTo("praxis-related-resource-outlet");
+        assertThat(result.plan().requiresFullIntentResolution()).isTrue();
+        assertThat(promptCaptor.getValue())
+                .contains("For parent-child-related-resource, resource-master-detail or tabs_layout where the user selects a parent record");
+        assertThat(schemaCaptor.getValue().jsonSchema())
+                .contains("use the selected parent entity as primaryBusinessEntity and put child records in supportingConcepts");
     }
 
     private AgenticAuthoringTurnStreamRequest request(

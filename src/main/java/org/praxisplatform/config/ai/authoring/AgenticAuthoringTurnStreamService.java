@@ -2,18 +2,12 @@ package org.praxisplatform.config.ai.authoring;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ArrayNode;
-import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.micrometer.core.instrument.Metrics;
 import jakarta.annotation.PreDestroy;
-import java.security.MessageDigest;
 import java.nio.charset.StandardCharsets;
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.HexFormat;
-import java.util.Iterator;
-import java.util.List;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
@@ -23,8 +17,8 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Future;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.ScheduledThreadPoolExecutor;
 import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.ScheduledThreadPoolExecutor;
 import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
@@ -33,15 +27,15 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.praxisplatform.config.domain.AiThread;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringTurnEngine.AgenticAuthoringTurnOutcome;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringTurnEngine.Completion;
+import org.praxisplatform.config.domain.AiThread;
 import org.praxisplatform.config.dto.AgenticAuthoringTurnStreamStartResponse;
 import org.praxisplatform.config.dto.AiOrchestratorRequest;
 import org.praxisplatform.config.dto.AiPatchStreamCancelResponse;
 import org.praxisplatform.config.dto.AiTurnEventEnvelope;
-import org.praxisplatform.config.service.AiPrincipalContext;
 import org.praxisplatform.config.service.AiAssistantObservationService;
+import org.praxisplatform.config.service.AiPrincipalContext;
 import org.praxisplatform.config.service.AiStreamAccessTokenService;
 import org.praxisplatform.config.service.AiThreadService;
 import org.praxisplatform.config.service.AiTurnEventService;
@@ -64,8 +58,6 @@ public class AgenticAuthoringTurnStreamService {
     private static final int SCHEDULER_POOL_SIZE = 2;
     private static final long TERMINAL_TOMBSTONE_SECONDS = 60L;
     private static final long PERSISTED_TERMINAL_RECONCILIATION_SECONDS = 5L;
-    private static final String REQUEST_FINGERPRINT_SCHEMA_VERSION =
-            "praxis-agentic-authoring-turn-request-fingerprint.v2";
     private static final String IDEMPOTENCY_CONFLICT_REASON =
             "agentic-authoring-idempotency-conflict";
     private static final String CAPACITY_REJECTED_CODE =
@@ -81,9 +73,41 @@ public class AgenticAuthoringTurnStreamService {
     private final ObjectMapper objectMapper = new ObjectMapper();
     private final AgenticAuthoringRuntimeComponentGroundingService runtimeComponentGroundingService =
             new AgenticAuthoringRuntimeComponentGroundingService(objectMapper);
+    private final AgenticAuthoringTurnStreamRequestNormalizer requestNormalizer =
+            new AgenticAuthoringTurnStreamRequestNormalizer(objectMapper, runtimeComponentGroundingService);
+    private final AgenticAuthoringStreamProgressMessageCatalog progressMessageCatalog =
+            AgenticAuthoringStreamProgressMessageCatalog.INSTANCE;
 
     @Autowired(required = false)
     private AiAssistantObservationService assistantObservationService;
+
+    private AgenticAuthoringStreamCapacityStore capacityStore =
+            new InMemoryAgenticAuthoringStreamCapacityStore();
+
+    private io.micrometer.core.instrument.MeterRegistry meterRegistry;
+
+    @Autowired(required = false)
+    public void setCapacityStore(AgenticAuthoringStreamCapacityStore capacityStore) {
+        this.capacityStore = capacityStore != null
+                ? capacityStore
+                : new InMemoryAgenticAuthoringStreamCapacityStore();
+    }
+
+    @Autowired(required = false)
+    public void setMeterRegistry(io.micrometer.core.instrument.MeterRegistry meterRegistry) {
+        if (this.meterRegistry == meterRegistry) {
+            return;
+        }
+        this.meterRegistry = meterRegistry;
+        if (meterRegistry != null) {
+            io.micrometer.core.instrument.Gauge.builder(
+                            "praxis_ai_authoring_stream_capacity_active_global",
+                            this,
+                            service -> service.capacityStore.activeGlobalCount())
+                    .description("Active Agentic Authoring SSE stream permits across the cluster or node")
+                    .register(meterRegistry);
+        }
+    }
 
     private final Map<UUID, Set<SseEmitter>> emittersByStream = new ConcurrentHashMap<>();
     private final Map<UUID, AtomicLong> replayCursorByStream = new ConcurrentHashMap<>();
@@ -97,10 +121,6 @@ public class AgenticAuthoringTurnStreamService {
     private final Map<UUID, AtomicBoolean> terminalByStream = new ConcurrentHashMap<>();
     private final Map<UUID, AiTurnEventEnvelope> latestEventByStream = new ConcurrentHashMap<>();
     private final Map<UUID, AtomicLong> persistedReconciliationNanosByStream = new ConcurrentHashMap<>();
-    private final Map<UUID, CapacityOwner> capacityOwnersByStream = new ConcurrentHashMap<>();
-    private final Map<String, AtomicInteger> tenantActiveCounts = new ConcurrentHashMap<>();
-    private final Map<String, AtomicInteger> tenantUserActiveCounts = new ConcurrentHashMap<>();
-    private final Object capacityLock = new Object();
     private final ExecutorService executor = createExecutor();
     private final ScheduledExecutorService scheduler = createScheduler();
 
@@ -144,10 +164,10 @@ public class AgenticAuthoringTurnStreamService {
             AgenticAuthoringTurnStreamRequest request,
             String baseUrl,
             AiPrincipalContext principalContext) {
-        request = withoutClientVerifiedDomainOperations(request);
+        request = requestNormalizer.withoutClientVerifiedDomainOperations(request);
         validate(request);
-        request = withGroundedRuntimeComponentContext(request);
-        request = withRequestBaseUrl(request, baseUrl);
+        request = requestNormalizer.withGroundedRuntimeComponentContext(request);
+        request = requestNormalizer.withRequestBaseUrl(request, baseUrl);
         UUID turnId = stableUuid("agentic-authoring-turn", request.clientTurnId());
         UUID requestedThreadId = requestedThreadId(request);
         AiOrchestratorRequest threadRequest = AiOrchestratorRequest.builder()
@@ -167,7 +187,7 @@ public class AgenticAuthoringTurnStreamService {
                 principalContext.environment(),
                 request.userPrompt());
         UUID threadId = thread.getThreadId();
-        request = withCanonicalSessionId(request, threadId);
+        request = requestNormalizer.withCanonicalSessionId(request, threadId);
         AiTurnEventService.StreamStartMetadata existing = turnEventService.findStartMetadata(threadId, turnId)
                 .orElse(null);
         ResolvedActiveSemanticDecision resolvedActiveSemanticDecision = resolveActiveSemanticDecision(
@@ -175,12 +195,13 @@ public class AgenticAuthoringTurnStreamService {
                 threadId,
                 principalContext,
                 existing);
-        request = withPersistedResolvedCandidates(
+        request = requestNormalizer.withPersistedResolvedCandidates(
                 request,
                 resolvedActiveSemanticDecision.issuedCandidateApis());
         AgenticAuthoringSemanticDecision activeSemanticDecision = resolvedActiveSemanticDecision.decision();
-        AgenticAuthoringTurnStreamRequest effectiveRequest = withActiveSemanticDecision(request, activeSemanticDecision);
-        String requestHash = requestHash(effectiveRequest, principalContext);
+        AgenticAuthoringTurnStreamRequest effectiveRequest =
+                requestNormalizer.withActiveSemanticDecision(request, activeSemanticDecision);
+        String requestHash = requestNormalizer.requestHash(effectiveRequest, principalContext);
 
         if (existing != null) {
             validateIdempotentRequest(existing.requestHash(), requestHash);
@@ -230,7 +251,7 @@ public class AgenticAuthoringTurnStreamService {
             if (!startAppend.appended()) {
                 releaseCapacityPermit(streamId);
                 capacityReserved = false;
-                validateIdempotentRequest(requestHash(startEvent), requestHash);
+                validateIdempotentRequest(requestNormalizer.requestHash(startEvent), requestHash);
                 UUID existingObservationId = captureObservation(
                         threadRequest,
                         principalContext,
@@ -291,35 +312,6 @@ public class AgenticAuthoringTurnStreamService {
         return activeDecision == null ? null : parseUuid(activeDecision.conversationId());
     }
 
-    private AgenticAuthoringTurnStreamRequest withActiveSemanticDecision(
-            AgenticAuthoringTurnStreamRequest request,
-            AgenticAuthoringSemanticDecision activeSemanticDecision) {
-        if (request == null || activeSemanticDecision == null) {
-            return request;
-        }
-        return new AgenticAuthoringTurnStreamRequest(
-                request.userPrompt(),
-                request.targetApp(),
-                request.targetComponentId(),
-                request.currentRoute(),
-                request.currentPage(),
-                request.selectedWidgetKey(),
-                request.provider(),
-                request.model(),
-                request.apiKey(),
-                request.sessionId(),
-                request.clientTurnId(),
-                request.conversationMessages(),
-                request.pendingClarification(),
-                request.attachmentSummaries(),
-                request.contextHints(),
-                request.componentCapabilities(),
-                activeSemanticDecision,
-                request.diagnostics(),
-                request.runtimeComponentObservations(),
-                request.runtimeComponentObservationTrustBoundary());
-    }
-
     private ResolvedActiveSemanticDecision resolveActiveSemanticDecision(
             AgenticAuthoringTurnStreamRequest request,
             UUID threadId,
@@ -346,183 +338,6 @@ public class AgenticAuthoringTurnStreamService {
                 .orElseThrow(() -> new ResponseStatusException(
                         HttpStatus.BAD_REQUEST,
                         "active-semantic-decision-not-issued-in-thread"));
-    }
-
-    private AgenticAuthoringTurnStreamRequest withPersistedResolvedCandidates(
-            AgenticAuthoringTurnStreamRequest request,
-            JsonNode issuedCandidateApis) {
-        if (request == null || issuedCandidateApis == null || !issuedCandidateApis.isArray() || issuedCandidateApis.isEmpty()) {
-            return request;
-        }
-        ObjectNode contextHints = request.contextHints() != null && request.contextHints().isObject()
-                ? request.contextHints().deepCopy()
-                : objectMapper.createObjectNode();
-        ObjectNode resolvedIntent = contextHints.path("resolvedIntent").isObject()
-                ? (ObjectNode) contextHints.path("resolvedIntent")
-                : contextHints.putObject("resolvedIntent");
-        resolvedIntent.set("candidateApis", issuedCandidateApis.deepCopy());
-        return new AgenticAuthoringTurnStreamRequest(
-                request.userPrompt(),
-                request.targetApp(),
-                request.targetComponentId(),
-                request.currentRoute(),
-                request.currentPage(),
-                request.selectedWidgetKey(),
-                request.provider(),
-                request.model(),
-                request.apiKey(),
-                request.sessionId(),
-                request.clientTurnId(),
-                request.conversationMessages(),
-                request.pendingClarification(),
-                request.attachmentSummaries(),
-                contextHints,
-                request.componentCapabilities(),
-                request.activeSemanticDecision(),
-                request.diagnostics(),
-                request.runtimeComponentObservations(),
-                request.runtimeComponentObservationTrustBoundary());
-    }
-
-    private AgenticAuthoringTurnStreamRequest withCanonicalSessionId(
-            AgenticAuthoringTurnStreamRequest request,
-            UUID threadId) {
-        if (request == null || threadId == null || threadId.toString().equals(request.sessionId())) {
-            return request;
-        }
-        return new AgenticAuthoringTurnStreamRequest(
-                request.userPrompt(),
-                request.targetApp(),
-                request.targetComponentId(),
-                request.currentRoute(),
-                request.currentPage(),
-                request.selectedWidgetKey(),
-                request.provider(),
-                request.model(),
-                request.apiKey(),
-                threadId.toString(),
-                request.clientTurnId(),
-                request.conversationMessages(),
-                request.pendingClarification(),
-                request.attachmentSummaries(),
-                request.contextHints(),
-                request.componentCapabilities(),
-                request.activeSemanticDecision(),
-                request.diagnostics(),
-                request.runtimeComponentObservations(),
-                request.runtimeComponentObservationTrustBoundary());
-    }
-
-    private AgenticAuthoringTurnStreamRequest withGroundedRuntimeComponentContext(
-            AgenticAuthoringTurnStreamRequest request) {
-        if (request == null) {
-            return request;
-        }
-        ObjectNode groundedContext = runtimeComponentGroundingService.ground(
-                request.runtimeComponentObservations(),
-                request.runtimeComponentObservationTrustBoundary());
-        ObjectNode contextHints = contextHintsWithoutClientGroundedRuntimeContext(request.contextHints());
-        if (groundedContext != null && !groundedContext.isEmpty()) {
-            contextHints.set("groundedRuntimeComponentContext", groundedContext);
-        }
-        if (contextHints.isEmpty() && request.contextHints() == null) {
-            return request;
-        }
-        return new AgenticAuthoringTurnStreamRequest(
-                request.userPrompt(),
-                request.targetApp(),
-                request.targetComponentId(),
-                request.currentRoute(),
-                request.currentPage(),
-                request.selectedWidgetKey(),
-                request.provider(),
-                request.model(),
-                request.apiKey(),
-                request.sessionId(),
-                request.clientTurnId(),
-                request.conversationMessages(),
-                request.pendingClarification(),
-                request.attachmentSummaries(),
-                contextHints,
-                request.componentCapabilities(),
-                request.activeSemanticDecision(),
-                request.diagnostics(),
-                request.runtimeComponentObservations(),
-                request.runtimeComponentObservationTrustBoundary());
-    }
-
-    private ObjectNode contextHintsWithoutClientGroundedRuntimeContext(JsonNode contextHints) {
-        ObjectNode sanitized = contextHints != null && contextHints.isObject()
-                ? contextHints.deepCopy()
-                : objectMapper.createObjectNode();
-        sanitized.remove("groundedRuntimeComponentContext");
-        return sanitized;
-    }
-
-    private AgenticAuthoringTurnStreamRequest withoutClientVerifiedDomainOperations(
-            AgenticAuthoringTurnStreamRequest request) {
-        if (request == null || request.contextHints() == null || !request.contextHints().isObject()) {
-            return request;
-        }
-        ObjectNode sanitized = ((ObjectNode) request.contextHints()).deepCopy();
-        sanitized.remove("verifiedDomainOperations");
-        return new AgenticAuthoringTurnStreamRequest(
-                request.userPrompt(),
-                request.targetApp(),
-                request.targetComponentId(),
-                request.currentRoute(),
-                request.currentPage(),
-                request.selectedWidgetKey(),
-                request.provider(),
-                request.model(),
-                request.apiKey(),
-                request.sessionId(),
-                request.clientTurnId(),
-                request.conversationMessages(),
-                request.pendingClarification(),
-                request.attachmentSummaries(),
-                sanitized.isEmpty() ? null : sanitized,
-                request.componentCapabilities(),
-                request.activeSemanticDecision(),
-                request.diagnostics(),
-                request.runtimeComponentObservations(),
-                request.runtimeComponentObservationTrustBoundary());
-    }
-
-    private AgenticAuthoringTurnStreamRequest withRequestBaseUrl(
-            AgenticAuthoringTurnStreamRequest request,
-            String baseUrl) {
-        if (request == null || baseUrl == null || baseUrl.isBlank()) {
-            return request;
-        }
-        ObjectNode contextHints = request.contextHints() != null && request.contextHints().isObject()
-                ? request.contextHints().deepCopy()
-                : objectMapper.createObjectNode();
-        if (!contextHints.path("requestBaseUrl").asText("").isBlank()) {
-            return request;
-        }
-        contextHints.put("requestBaseUrl", baseUrl.replaceAll("/+$", ""));
-        return new AgenticAuthoringTurnStreamRequest(
-                request.userPrompt(),
-                request.targetApp(),
-                request.targetComponentId(),
-                request.currentRoute(),
-                request.currentPage(),
-                request.selectedWidgetKey(),
-                request.provider(),
-                request.model(),
-                request.apiKey(),
-                request.sessionId(),
-                request.clientTurnId(),
-                request.conversationMessages(),
-                request.pendingClarification(),
-                request.attachmentSummaries(),
-                contextHints,
-                request.componentCapabilities(),
-                request.activeSemanticDecision(),
-                request.diagnostics(),
-                request.runtimeComponentObservations(),
-                request.runtimeComponentObservationTrustBoundary());
     }
 
     /**
@@ -648,11 +463,6 @@ public class AgenticAuthoringTurnStreamService {
             UUID turnId,
             String type,
             Object payload) {
-        // This service owns the active producer for a locally started stream and updates the
-        // cache after every committed append. Re-reading the persisted tail before every
-        // progress event adds one remote database round-trip per UX step. The event store remains
-        // the cross-instance authority: appendEvent locks the turn and rejects any append after a
-        // terminal marker, while explicit terminal/replay checks still reconcile persisted state.
         AiTurnEventEnvelope lastEvent = latestEvent(streamId, false);
         if (lastEvent == null && !isLocalActiveStream(streamId)) {
             lastEvent = latestEvent(streamId, true);
@@ -707,6 +517,8 @@ public class AgenticAuthoringTurnStreamService {
         if (turnEventService.isTerminalType(type)) {
             markObservationTerminal(streamId, threadId, turnId, type, payload);
             completeStreamResources(streamId);
+        } else if (isLocalActiveStream(streamId)) {
+            capacityStore.renewLease(streamId);
         }
         return new StreamAppendResult(event, true);
     }
@@ -787,7 +599,7 @@ public class AgenticAuthoringTurnStreamService {
                 payload.put("message", message);
                 payload.put("summary", message);
                 payload.put("diagnostics", diagnostics);
-                putTechnicalDuplicateDiagnostics(payload, "status", streamId, phase, tail);
+                progressMessageCatalog.putTechnicalDuplicateDiagnostics(payload, "status", streamId, phase, tail);
                 if (!isStillLatestEvent(streamId, tail)) {
                     return;
                 }
@@ -850,6 +662,7 @@ public class AgenticAuthoringTurnStreamService {
                 stopHeartbeat(streamId);
                 return;
             }
+            capacityStore.renewLease(streamId);
             emitHeartbeatKeepAlive(streamId, ownership, tail);
         } catch (Exception ex) {
             log.debug("[AgenticAuthoringTurnStreamService] Heartbeat skipped for stream {}: {}",
@@ -873,7 +686,7 @@ public class AgenticAuthoringTurnStreamService {
         payload.put("message", heartbeatSummary(tail));
         payload.put("summary", heartbeatSummary(tail));
         payload.put("lastEventType", tail == null ? "" : nonBlank(tail.getType(), ""));
-        putTechnicalDuplicateDiagnostics(payload, "heartbeat", streamId, phase, tail);
+        progressMessageCatalog.putTechnicalDuplicateDiagnostics(payload, "heartbeat", streamId, phase, tail);
         AiTurnEventEnvelope heartbeatEnvelope = AiTurnEventEnvelope.builder()
                 .eventId(null)
                 .streamId(streamId)
@@ -899,28 +712,7 @@ public class AgenticAuthoringTurnStreamService {
     }
 
     private String heartbeatPhase(AiTurnEventEnvelope tail) {
-        JsonNode payload = tail == null ? null : tail.getPayload();
-        String phase = payload == null ? "" : payload.path("phase").asText("");
-        if (phase != null && !phase.isBlank()) {
-            return phase;
-        }
-        String type = tail == null ? "" : nonBlank(tail.getType(), "");
-        return switch (type) {
-            case "intent.resolved" -> "intent.resolve.grounding";
-            default -> "agentic-authoring";
-        };
-    }
-
-    private void putTechnicalDuplicateDiagnostics(
-            Map<String, Object> payload,
-            String eventType,
-            UUID streamId,
-            String phase,
-            AiTurnEventEnvelope tail) {
-        Map<String, Object> diagnostics = technicalDuplicateStreamEventDiagnostics(eventType, streamId, phase, tail);
-        if (!diagnostics.isEmpty()) {
-            payload.put("streamEventDiagnostics", diagnostics);
-        }
+        return progressMessageCatalog.heartbeatPhase(tail);
     }
 
     private Map<String, Object> technicalDuplicateStreamEventDiagnostics(
@@ -928,128 +720,15 @@ public class AgenticAuthoringTurnStreamService {
             UUID streamId,
             String phase,
             AiTurnEventEnvelope tail) {
-        JsonNode tailDiagnostics = tail == null || tail.getPayload() == null
-                ? null
-                : tail.getPayload().path("streamEventDiagnostics");
-        if (tailDiagnostics == null || !tailDiagnostics.isObject()) {
-            return Map.of();
-        }
-        String dedupeKey = tailDiagnostics.path("dedupeKey").asText("");
-        if (dedupeKey == null || dedupeKey.isBlank()) {
-            return Map.of();
-        }
-        Map<String, Object> diagnostics = new java.util.LinkedHashMap<>();
-        diagnostics.put("schemaVersion", "praxis-authoring-stream-event-diagnostics.v1");
-        diagnostics.put("dedupeKey", dedupeKey);
-        diagnostics.put("eventUniquenessKey", safeDiagnosticText(eventType) + ":"
-                + (streamId == null ? "" : streamId) + ":"
-                + safeDiagnosticText(phase) + ":"
-                + Instant.now().toEpochMilli());
-        diagnostics.put("technicalDuplicate", true);
-        diagnostics.put("technicalDuplicateOf", dedupeKey);
-        diagnostics.put("replaySafe", true);
-        diagnostics.put("duplicatesDoNotIndicateExecution", true);
-        return diagnostics;
-    }
-
-    private String safeDiagnosticText(String value) {
-        return value == null ? "" : value.replaceAll("[^A-Za-z0-9_.:-]", "_");
+        return progressMessageCatalog.technicalDuplicateStreamEventDiagnostics(eventType, streamId, phase, tail);
     }
 
     private String heartbeatSummary(AiTurnEventEnvelope tail) {
-        JsonNode payload = tail == null ? null : tail.getPayload();
-        String explicitMessage = payload == null ? "" : payload.path("message").asText("");
-        if (explicitMessage != null && !explicitMessage.isBlank()) {
-            return explicitMessage;
-        }
-        String label = payload == null ? "" : payload.path("label").asText("");
-        if (label != null && !label.isBlank()) {
-            return label;
-        }
-        String phase = heartbeatPhase(tail);
-        return switch (phase) {
-            case "consultative.intent" ->
-                    "Estou separando pergunta consultiva de pedido de criacao para seguir pelo caminho certo.";
-            case "consultative.answer" ->
-                    "Encontrei evidencias governadas e estou transformando isso em uma resposta clara.";
-            case "intent.resolve" ->
-                    "Estou organizando o pedido, a pagina atual e as restricoes governadas.";
-            case "intent.resolve.evidence" ->
-                    "Estou avaliando os candidatos governados recuperados antes de materializar.";
-            case "intent.resolve.llm" ->
-                    "A LLM esta revisando a intencao com a evidencia governada recuperada.";
-            case "intent.resolve.grounding" ->
-                    "Estou validando a intencao com as evidencias disponiveis.";
-            case "tool.plan" ->
-                    "A LLM esta planejando quais ferramentas de leitura consultar.";
-            case "tool.plan.skipped" ->
-                    "O planejamento de ferramentas foi ignorado com diagnostico registrado.";
-            case "resource.discovery", "tool.start", "tool.result", "tool.error" ->
-                    "Estou consultando recursos, schemas e capacidades do backend.";
-            case "authoringEvidence.retrieve" ->
-                    "Estou buscando evidencias de componentes para planejar a pre-visualizacao.";
-            case "authoringEvidence.result" ->
-                    "As evidencias de componentes foram recuperadas para a pre-visualizacao.";
-            case "authoringEvidence.skipped" ->
-                    "Nao ha componente selecionado para buscar evidencia granular de autoria; vou seguir com as evidencias do recurso governado.";
-            case "component.capabilities" ->
-                    "Estou carregando capacidades governadas dos componentes para materializar a tela corretamente.";
-            case "projectKnowledge.retrieve" ->
-                    "Estou buscando conhecimento governado do projeto.";
-            case "projectKnowledge.result" ->
-                    "A busca de conhecimento governado do projeto foi concluida.";
-            case "preview.plan" ->
-                    "Estou planejando a materializacao governada da tela.";
-            case "preview.compile" ->
-                    "Estou preparando a pre-visualizacao governada.";
-            case "tool.loop" ->
-                    "Estou concluindo a validacao governada da pre-visualizacao.";
-            default ->
-                    "Ainda estou processando sua solicitacao.";
-        };
+        return progressMessageCatalog.heartbeatSummary(tail);
     }
 
     private String processingProgressMessage(AiTurnEventEnvelope tail, long elapsedSeconds) {
-        String phase = heartbeatPhase(tail);
-        String elapsed = elapsedSeconds >= 20
-                ? " Ja se passaram cerca de " + elapsedSeconds + " segundos; continuo trabalhando nisso."
-                : "";
-        return switch (phase) {
-            case "context.bundle" ->
-                    "Recebi seu pedido e estou montando o contexto governado para decidir o proximo passo." + elapsed;
-            case "runtime.context.grounding" ->
-                    "Estou conferindo o estado atual da pagina para evitar alterar o componente errado." + elapsed;
-            case "tool.plan" ->
-                    "A LLM esta planejando quais buscas governadas fazem sentido antes de escolher uma fonte." + elapsed;
-            case "tool.plan.skipped" ->
-                    "O planejamento de ferramentas foi concluido com diagnostico registrado; estou seguindo pelo caminho seguro." + elapsed;
-            case "tool.start", "resource.discovery" ->
-                    "Estou consultando o catalogo governado e procurando recursos compativeis com sua intencao." + elapsed;
-            case "tool.result" ->
-                    "Ja recuperei candidatos governados e estou usando essas evidencias para decidir a melhor fonte." + elapsed;
-            case "intent.resolve" ->
-                    "Estou organizando sua intencao em uma decisao canonica antes de montar a tela." + elapsed;
-            case "intent.resolve.evidence" ->
-                    "Estou avaliando os candidatos governados recuperados para decidir a fonte correta." + elapsed;
-            case "intent.resolve.llm" ->
-                    "A LLM esta revisando a intencao com as evidencias governadas; essa etapa pode levar alguns segundos." + elapsed;
-            case "intent.resolve.grounding" ->
-                    "Estou validando a decisao semantica contra os dados confirmados do backend." + elapsed;
-            case "preview.plan" ->
-                    "Estou planejando como materializar a decisao em uma pre-visualizacao revisavel." + elapsed;
-            case "preview.compile" ->
-                    "Estou compilando a pre-visualizacao e conferindo campos, componentes e fonte de dados." + elapsed;
-            case "authoringEvidence.skipped" ->
-                    "Nao ha componente selecionado para buscar evidencia granular de autoria; estou seguindo com as evidencias do recurso governado." + elapsed;
-            case "component.capabilities" ->
-                    "Estou carregando capacidades governadas dos componentes para decidir como materializar a tela." + elapsed;
-            case "repair.attempt" ->
-                    "Encontrei algo para ajustar e estou tentando reparar a pre-visualizacao com contexto governado." + elapsed;
-            case "consultative.intent", "consultative.answer", "consultative.post-intent.probe" ->
-                    "Estou separando orientacao de criacao de tela para responder sem perder o contexto governado." + elapsed;
-            default ->
-                    "Ainda estou processando sua solicitacao com as evidencias disponiveis." + elapsed;
-        };
+        return progressMessageCatalog.processingProgressMessage(tail, elapsedSeconds);
     }
 
     private void send(SseEmitter emitter, AiTurnEventEnvelope event) {
@@ -1107,8 +786,12 @@ public class AgenticAuthoringTurnStreamService {
             emitters.forEach(SseEmitter::complete);
         }
         replayCursorByStream.remove(streamId);
-        streamStartedAtByStream.remove(streamId);
-        releaseCapacityPermit(streamId);
+        boolean wasLocalStream = streamStartedAtByStream.remove(streamId) != null;
+        AtomicBoolean terminalState = terminalByStream.get(streamId);
+        boolean isTerminal = terminalState != null && terminalState.get();
+        if (wasLocalStream || isTerminal) {
+            releaseCapacityPermit(streamId);
+        }
         scheduleTerminalStateCleanup(streamId);
     }
 
@@ -1342,6 +1025,9 @@ public class AgenticAuthoringTurnStreamService {
 
     @PreDestroy
     void shutdown() {
+        Set<UUID> localStreams = new java.util.LinkedHashSet<>(streamStartedAtByStream.keySet());
+        localStreams.addAll(processingTasks.keySet());
+        streamStartedAtByStream.clear();
         processingTasks.values().forEach(task -> task.cancel(true));
         processingTasks.clear();
         replayTasks.values().forEach(task -> task.cancel(true));
@@ -1356,11 +1042,7 @@ public class AgenticAuthoringTurnStreamService {
         terminalCleanupTasks.clear();
         executor.shutdownNow();
         scheduler.shutdownNow();
-        synchronized (capacityLock) {
-            capacityOwnersByStream.clear();
-            tenantActiveCounts.clear();
-            tenantUserActiveCounts.clear();
-        }
+        localStreams.forEach(this::releaseCapacityPermit);
     }
 
     private void validate(AgenticAuthoringTurnStreamRequest request) {
@@ -1399,73 +1081,50 @@ public class AgenticAuthoringTurnStreamService {
         if (tenantKey == null || userKey == null) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Identity context is required.");
         }
-        String tenantUserKey = tenantUserKey(tenantKey, userKey);
-        synchronized (capacityLock) {
-            if (capacityOwnersByStream.containsKey(streamId)) {
-                return;
+        AgenticAuthoringStreamCapacityStore.ReservationStatus status = capacityStore.tryReserve(
+                streamId,
+                tenantKey,
+                userKey,
+                maxActiveGlobal,
+                maxActivePerTenant,
+                maxActivePerUser,
+                this::isLocalExecutorAvailable);
+        switch (status) {
+            case RESERVED, ALREADY_RESERVED -> {
+                counter(
+                        "praxis_ai_authoring_stream_capacity_admitted_total",
+                        "status",
+                        safeMetricTag(status.name().toLowerCase())).increment();
             }
-            if (maxActiveGlobal > 0 && capacityOwnersByStream.size() >= maxActiveGlobal) {
+            case GLOBAL_LIMIT_EXCEEDED -> {
                 recordCapacityRejection("global");
                 throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, CAPACITY_REJECTED_CODE);
             }
-            if (maxActivePerTenant > 0 && currentCount(tenantActiveCounts, tenantKey) >= maxActivePerTenant) {
+            case TENANT_LIMIT_EXCEEDED -> {
                 recordCapacityRejection("tenant");
                 throw new ResponseStatusException(HttpStatus.TOO_MANY_REQUESTS, CAPACITY_REJECTED_CODE);
             }
-            if (maxActivePerUser > 0 && currentCount(tenantUserActiveCounts, tenantUserKey) >= maxActivePerUser) {
+            case USER_LIMIT_EXCEEDED -> {
                 recordCapacityRejection("user");
                 throw new ResponseStatusException(HttpStatus.TOO_MANY_REQUESTS, CAPACITY_REJECTED_CODE);
             }
-            if (executor instanceof ThreadPoolExecutor pool
-                    && pool.getQueue().remainingCapacity() <= 0
-                    && pool.getActiveCount() >= pool.getMaximumPoolSize()) {
+            case EXECUTOR_SATURATED -> {
                 recordCapacityRejection("executor");
                 throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, EXECUTOR_REJECTED_CODE);
             }
-            capacityOwnersByStream.put(streamId, new CapacityOwner(tenantKey, tenantUserKey));
-            incrementCounter(tenantActiveCounts, tenantKey);
-            incrementCounter(tenantUserActiveCounts, tenantUserKey);
         }
+    }
+
+    private boolean isLocalExecutorAvailable() {
+        return !(executor instanceof ThreadPoolExecutor pool
+                && pool.getQueue().remainingCapacity() <= 0
+                && pool.getActiveCount() >= pool.getMaximumPoolSize());
     }
 
     private void releaseCapacityPermit(UUID streamId) {
-        if (streamId == null) {
-            return;
+        if (streamId != null) {
+            capacityStore.release(streamId);
         }
-        synchronized (capacityLock) {
-            CapacityOwner owner = capacityOwnersByStream.remove(streamId);
-            if (owner == null) {
-                return;
-            }
-            decrementCounter(tenantActiveCounts, owner.tenantKey());
-            decrementCounter(tenantUserActiveCounts, owner.tenantUserKey());
-        }
-    }
-
-    private int currentCount(Map<String, AtomicInteger> counters, String key) {
-        if (counters == null || key == null) {
-            return 0;
-        }
-        AtomicInteger value = counters.get(key);
-        return value != null ? Math.max(0, value.get()) : 0;
-    }
-
-    private void incrementCounter(Map<String, AtomicInteger> counters, String key) {
-        if (counters == null || key == null) {
-            return;
-        }
-        counters.computeIfAbsent(key, ignored -> new AtomicInteger()).incrementAndGet();
-    }
-
-    private void decrementCounter(Map<String, AtomicInteger> counters, String key) {
-        if (counters == null || key == null) {
-            return;
-        }
-        counters.computeIfPresent(key, (ignored, current) -> current.decrementAndGet() <= 0 ? null : current);
-    }
-
-    private String tenantUserKey(String tenantKey, String userKey) {
-        return tenantKey + ":" + userKey;
     }
 
     private String normalize(String value) {
@@ -1477,10 +1136,16 @@ public class AgenticAuthoringTurnStreamService {
     }
 
     private void recordCapacityRejection(String reason) {
-        Metrics.counter(
+        counter(
                 "praxis_ai_authoring_stream_capacity_rejected_total",
                 "reason",
                 safeMetricTag(reason)).increment();
+    }
+
+    private io.micrometer.core.instrument.Counter counter(String name, String... tags) {
+        return meterRegistry != null
+                ? meterRegistry.counter(name, tags)
+                : Metrics.counter(name, tags);
     }
 
     private String safeMetricTag(String value) {
@@ -1508,110 +1173,6 @@ public class AgenticAuthoringTurnStreamService {
         } catch (Exception ex) {
             log.debug("[AgenticAuthoringTurnStreamService] Failed to append capacity error event: {}", ex.getMessage());
         }
-    }
-
-    private String requestHash(AiTurnEventEnvelope startEvent) {
-        if (startEvent == null || startEvent.getPayload() == null) {
-            return null;
-        }
-        JsonNode requestHash = startEvent.getPayload().get("requestHash");
-        if (requestHash == null || requestHash.isNull()) {
-            return null;
-        }
-        String value = requestHash.asText(null);
-        return value == null || value.isBlank() ? null : value.trim();
-    }
-
-    private String requestHash(
-            AgenticAuthoringTurnStreamRequest request,
-            AiPrincipalContext principalContext) {
-        try {
-            ObjectNode fingerprint = objectMapper.createObjectNode();
-            fingerprint.put("schemaVersion", REQUEST_FINGERPRINT_SCHEMA_VERSION);
-            putIfPresent(
-                    fingerprint,
-                    "principalAuthorities",
-                    principalContext == null
-                            ? List.of()
-                            : principalContext.authorities().stream().sorted().toList());
-            putIfPresent(fingerprint, "userPrompt", request.userPrompt());
-            putIfPresent(fingerprint, "targetApp", request.targetApp());
-            putIfPresent(fingerprint, "targetComponentId", request.targetComponentId());
-            putIfPresent(fingerprint, "currentRoute", request.currentRoute());
-            putIfPresent(fingerprint, "currentPage", request.currentPage());
-            putIfPresent(fingerprint, "selectedWidgetKey", request.selectedWidgetKey());
-            putIfPresent(fingerprint, "provider", request.provider());
-            putIfPresent(fingerprint, "model", request.model());
-            putIfPresent(fingerprint, "sessionId", request.sessionId());
-            putIfPresent(fingerprint, "conversationMessages", request.conversationMessages());
-            putIfPresent(fingerprint, "pendingClarification", request.pendingClarification());
-            putIfPresent(fingerprint, "attachmentSummaries", request.attachmentSummaries());
-            putIfPresent(fingerprint, "contextHints", contextHintsForFingerprint(request.contextHints()));
-            putIfPresent(fingerprint, "componentCapabilities", request.componentCapabilities());
-            putIfPresent(fingerprint, "activeSemanticDecision", request.activeSemanticDecision());
-            putIfPresent(fingerprint, "diagnostics", request.diagnostics());
-            putIfPresent(
-                    fingerprint,
-                    "runtimeComponentObservationTrustBoundary",
-                    request.runtimeComponentObservationTrustBoundary());
-            byte[] raw = objectMapper.writeValueAsBytes(canonicalize(fingerprint));
-            MessageDigest digest = MessageDigest.getInstance("SHA-256");
-            return "sha256:" + HexFormat.of().formatHex(digest.digest(raw));
-        } catch (ResponseStatusException ex) {
-            throw ex;
-        } catch (Exception ex) {
-            throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "Failed to hash authoring turn request.", ex);
-        }
-    }
-
-    private JsonNode contextHintsForFingerprint(JsonNode contextHints) {
-        if (contextHints == null || !contextHints.isObject()) {
-            return contextHints;
-        }
-        ObjectNode copy = contextHints.deepCopy();
-        copy.remove("requestBaseUrl");
-        if (copy.isEmpty()) {
-            return null;
-        }
-        return copy;
-    }
-
-    private void putIfPresent(ObjectNode target, String fieldName, Object value) {
-        if (value == null) {
-            return;
-        }
-        JsonNode node = value instanceof JsonNode jsonNode ? jsonNode : objectMapper.valueToTree(value);
-        if (node == null || node.isNull() || node.isMissingNode()) {
-            return;
-        }
-        target.set(fieldName, node);
-    }
-
-    private JsonNode canonicalize(JsonNode node) {
-        if (node == null || node.isNull() || node.isMissingNode()) {
-            return objectMapper.nullNode();
-        }
-        if (node.isObject()) {
-            ObjectNode canonical = objectMapper.createObjectNode();
-            List<String> fieldNames = new ArrayList<>();
-            Iterator<String> iterator = node.fieldNames();
-            while (iterator.hasNext()) {
-                fieldNames.add(iterator.next());
-            }
-            Collections.sort(fieldNames);
-            for (String fieldName : fieldNames) {
-                canonical.set(fieldName, canonicalize(node.get(fieldName)));
-            }
-            return canonical;
-        }
-        if (node.isArray()) {
-            ArrayNode canonical = objectMapper.createArrayNode();
-            for (JsonNode item : node) {
-                canonical.add(canonicalize(item));
-            }
-            return canonical;
-        }
-        return node;
     }
 
     private ExecutorService createExecutor() {
@@ -1667,9 +1228,6 @@ public class AgenticAuthoringTurnStreamService {
     }
 
     public record StartResult(AgenticAuthoringTurnStreamStartResponse response, boolean created) {
-    }
-
-    private record CapacityOwner(String tenantKey, String tenantUserKey) {
     }
 
     private record ResolvedActiveSemanticDecision(

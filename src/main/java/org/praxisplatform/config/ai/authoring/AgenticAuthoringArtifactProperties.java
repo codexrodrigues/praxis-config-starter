@@ -16,6 +16,7 @@ public class AgenticAuthoringArtifactProperties {
     private String authoringReplayBundle = "authoring-replay-bundle.helpdesk-create-ticket.v0.json";
     private boolean httpEnabled = false;
     private boolean dryRunEnabled = false;
+    private boolean legacyKeywordFallbackEnabled = false;
     private Path reportPath;
 
     public Path getArtifactsDir() {
@@ -96,6 +97,14 @@ public class AgenticAuthoringArtifactProperties {
 
     public void setDryRunEnabled(boolean dryRunEnabled) {
         this.dryRunEnabled = dryRunEnabled;
+    }
+
+    public boolean isLegacyKeywordFallbackEnabled() {
+        return legacyKeywordFallbackEnabled;
+    }
+
+    public void setLegacyKeywordFallbackEnabled(boolean legacyKeywordFallbackEnabled) {
+        this.legacyKeywordFallbackEnabled = legacyKeywordFallbackEnabled;
     }
 
     public Path getReportPath() {
