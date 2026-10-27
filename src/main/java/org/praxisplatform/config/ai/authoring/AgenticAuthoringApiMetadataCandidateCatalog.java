@@ -695,7 +695,7 @@ public class AgenticAuthoringApiMetadataCandidateCatalog {
                             normalizedPrompt,
                             method,
                             null,
-                            CANDIDATE_LIMIT * 3,
+                            CANDIDATE_LIMIT,
                             null,
                             tenantId,
                             environment,

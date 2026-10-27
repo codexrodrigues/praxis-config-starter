@@ -11,11 +11,13 @@ import java.time.ZoneOffset;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringStreamCapacityStore.ReservationStatus;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
 
+@Tag("unit")
 class JdbcAgenticAuthoringStreamCapacityStoreTest {
 
     private NamedParameterJdbcTemplate sharedJdbc;

@@ -5,11 +5,13 @@ import static org.assertj.core.api.Assertions.assertThat;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.util.List;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringAssistantContentFactory.ParagraphRecordReferenceInline;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringAssistantContentFactory.ParagraphTextInline;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringAssistantContentFactory.QuickViewContentRef;
 
+@Tag("unit")
 class AgenticAuthoringAssistantContentFactoryTest {
 
     @Test

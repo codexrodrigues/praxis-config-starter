@@ -92,8 +92,6 @@ final class AgenticAuthoringIntentCandidateScoringSupport {
         if (best != null
                 && dedicatedProjection != null
                 && !sameCandidate(best.candidate(), dedicatedProjection.candidate())
-                && (!promptMatchesCandidatePathIdentity(prompt, best.candidate())
-                        || promptMatchesCandidatePathIdentity(prompt, dedicatedProjection.candidate()))
                 && dedicatedProjection.score() >= best.score() - 4) {
             return dedicatedProjection.candidate();
         }
@@ -140,16 +138,12 @@ final class AgenticAuthoringIntentCandidateScoringSupport {
             return 0;
         }
         SemanticResourceNeed resourceNeed = semanticResourceNeed(prompt, artifactKind);
-        boolean matchesPathIdentity = promptMatchesCandidatePathIdentity(prompt, candidate);
         if (resourceNeed == SemanticResourceNeed.ANALYTICS
                 && hasEvidence(candidate, SEMANTIC_ROLE_ANALYTICS_PROJECTION)) {
             score += 4;
             if (isDedicatedProjectionCandidate(candidate, SEMANTIC_ROLE_ANALYTICS_PROJECTION)) {
-                if (matchesPathIdentity || isAnalyticalComparisonPrompt(prompt)) {
-                    score += 6;
-                }
-            } else if (isMixedOperationalProjectionCandidate(candidate, SEMANTIC_ROLE_ANALYTICS_PROJECTION)
-                    && !(matchesPathIdentity && hasVerifiedStatsCapabilitiesOrProjection(candidate))) {
+                score += 6;
+            } else if (isMixedOperationalProjectionCandidate(candidate, SEMANTIC_ROLE_ANALYTICS_PROJECTION)) {
                 score -= 3;
             }
         } else if (resourceNeed == SemanticResourceNeed.ANALYTICS
@@ -159,11 +153,8 @@ final class AgenticAuthoringIntentCandidateScoringSupport {
                 && hasEvidence(candidate, SEMANTIC_ROLE_PROFILE_PROJECTION)) {
             score += 4;
             if (isDedicatedProjectionCandidate(candidate, SEMANTIC_ROLE_PROFILE_PROJECTION)) {
-                if (matchesPathIdentity || isAnalyticalComparisonPrompt(prompt)) {
-                    score += 6;
-                }
-            } else if (isMixedOperationalProjectionCandidate(candidate, SEMANTIC_ROLE_PROFILE_PROJECTION)
-                    && !matchesPathIdentity) {
+                score += 6;
+            } else if (isMixedOperationalProjectionCandidate(candidate, SEMANTIC_ROLE_PROFILE_PROJECTION)) {
                 score -= 3;
             }
         }
