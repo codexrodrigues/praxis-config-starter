@@ -29,6 +29,19 @@ class SpringAiOpenAiServiceTest {
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     @Test
+    void transcriptionAvailabilityRequiresEffectiveCredentialsWithoutOpeningAProviderConnection() {
+        SpringAiOpenAiService service = new SpringAiOpenAiService(objectMapper, new OpenAiHostedSkillProperties());
+        assertFalse(service.isAudioTranscriptionAvailable(null));
+        ReflectionTestUtils.setField(service, "apiKey", " ");
+        assertFalse(service.isAudioTranscriptionAvailable(AiCallConfig.builder().apiKey(" ").build()));
+        ReflectionTestUtils.setField(service, "apiKey", "environment-secret");
+        assertTrue(service.isAudioTranscriptionAvailable(null));
+        assertTrue(service.isAudioTranscriptionAvailable(AiCallConfig.builder().apiKey(" ").build()));
+        ReflectionTestUtils.setField(service, "apiKey", null);
+        assertTrue(service.isAudioTranscriptionAvailable(AiCallConfig.builder().apiKey("stored-secret").build()));
+    }
+
+    @Test
     void generateTextUsesResponsesApiAndCapturesSanitizedTelemetry() throws Exception {
         AtomicReference<JsonNode> capturedRequest = new AtomicReference<>();
         HttpServer server = responseServer(completedResponse("pong"), capturedRequest);

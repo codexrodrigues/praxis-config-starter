@@ -172,7 +172,29 @@ public class AiProviderManagementService {
             String tenantId,
             String userId,
             String environment) {
-        StoredAiConfig stored = resolveStoredConfigSafely(tenantId, userId, environment, null);
+        ResolvedAudioTranscription resolved = resolveAudioTranscription(tenantId, userId, environment);
+        String text = resolved.provider().transcribeAudio(request, resolved.config());
+        return new AiAudioTranscriptionResponse(
+                TRANSCRIPTION_SCHEMA_VERSION,
+                text,
+                resolved.config().getProvider(),
+                resolved.config().getModel(),
+                request.language());
+    }
+
+    public boolean isAudioTranscriptionAvailable(String tenantId, String userId, String environment) {
+        try {
+            ResolvedAudioTranscription resolved = resolveAudioTranscription(tenantId, userId, environment);
+            return resolved.provider().isAudioTranscriptionAvailable(resolved.config());
+        } catch (RuntimeException exception) {
+            // Availability is deliberately fail-closed and must not expose provider/configuration failures.
+            return false;
+        }
+    }
+
+    private ResolvedAudioTranscription resolveAudioTranscription(
+            String tenantId, String userId, String environment) {
+        StoredAiConfig stored = resolveStoredTranscriptionConfig(tenantId, userId, environment);
         String provider = resolveProviderName(transcriptionProvider, null);
         AiProvider selectedProvider = resolveProvider(provider);
         if (selectedProvider == null) {
@@ -188,14 +210,10 @@ public class AiProviderManagementService {
         if (!selectedProvider.supportsAudioTranscription(config)) {
             throw new UnsupportedOperationException("Configured provider does not support governed audio transcription: " + provider);
         }
-        String text = selectedProvider.transcribeAudio(request, config);
-        return new AiAudioTranscriptionResponse(
-                TRANSCRIPTION_SCHEMA_VERSION,
-                text,
-                provider,
-                transcriptionModel,
-                request.language());
+        return new ResolvedAudioTranscription(selectedProvider, config);
     }
+
+    private record ResolvedAudioTranscription(AiProvider provider, AiCallConfig config) {}
 
     public JsonNode generateJson(
             String prompt,
@@ -561,6 +579,11 @@ public class AiProviderManagementService {
     }
 
     private StoredAiConfig resolveStoredConfig(String tenantId, String userId, String environment) {
+        return resolveStoredConfig(tenantId, userId, environment, false);
+    }
+
+    private StoredAiConfig resolveStoredConfig(
+            String tenantId, String userId, String environment, boolean strict) {
         String resolvedTenant = trimToNull(tenantId);
         if (resolvedTenant == null || userConfigService == null) {
             return null;
@@ -577,8 +600,12 @@ public class AiProviderManagementService {
             if (resolved.isEmpty()) {
                 continue;
             }
-            JsonNode payload = parsePayload(resolved.get().config().getPayload());
+            String raw = resolved.get().config().getPayload();
+            JsonNode payload = strict ? parseTranscriptionConfig(raw) : parsePayload(raw);
             JsonNode aiNode = payload.get("ai");
+            if (strict && aiNode != null) {
+                validateTranscriptionAiConfig(aiNode);
+            }
             if (aiNode == null || !aiNode.isObject()) {
                 continue;
             }
@@ -588,12 +615,60 @@ public class AiProviderManagementService {
             if (apiKey == null) {
                 String encrypted = trimToNull(textOrNull(aiNode.get("apiKeyEncrypted")));
                 apiKey = trimToNull(apiKeyCryptoService.decrypt(encrypted));
+                if (strict && encrypted != null && apiKey == null) {
+                    throw new IllegalStateException("Transcription configuration is unavailable.");
+                }
             }
             if (provider != null || model != null || apiKey != null) {
                 return new StoredAiConfig(provider, model, apiKey);
             }
         }
         return null;
+    }
+
+    private void validateTranscriptionAiConfig(JsonNode aiNode) {
+        if (!aiNode.isObject()) {
+            throw new IllegalStateException("Transcription configuration is unavailable.");
+        }
+        for (String field : List.of("provider", "model", "apiKey", "apiKeyEncrypted")) {
+            JsonNode value = aiNode.get(field);
+            // Optional null/blank values mean unset; other JSON types are corrupted config.
+            if (value != null && !value.isNull() && !value.isTextual()) {
+                throw new IllegalStateException("Transcription configuration is unavailable.");
+            }
+        }
+    }
+
+    private JsonNode parseTranscriptionConfig(String raw) {
+        try {
+            JsonNode parsed = objectMapper.readTree(raw);
+            if (parsed == null || !parsed.isObject()) {
+                throw new IllegalStateException("Transcription configuration is unavailable.");
+            }
+            return parsed;
+        } catch (Exception failure) {
+            throw new IllegalStateException("Transcription configuration is unavailable.");
+        }
+    }
+
+    private StoredAiConfig resolveStoredTranscriptionConfig(String tenantId, String userId, String environment) {
+        if (trimToNull(tenantId) == null || userConfigService == null) {
+            throw new IllegalStateException("Transcription configuration is unavailable.");
+        }
+        CompletableFuture<StoredAiConfig> lookup = CompletableFuture.supplyAsync(
+                () -> resolveStoredConfig(tenantId, userId, environment, true));
+        try {
+            return lookup.get(DEFAULT_STORED_CONFIG_LOOKUP_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+        } catch (InterruptedException interrupted) {
+            lookup.cancel(true);
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException("Transcription configuration is unavailable.");
+        } catch (Exception failure) {
+            lookup.cancel(true);
+            // Absence may use the adapter's environment key; failed lookup must never do so.
+            // Do not attach storage/crypto exceptions that may contain sensitive configuration.
+            throw new IllegalStateException("Transcription configuration is unavailable.");
+        }
     }
 
     private StoredAiConfig resolveStoredConfigSafely(

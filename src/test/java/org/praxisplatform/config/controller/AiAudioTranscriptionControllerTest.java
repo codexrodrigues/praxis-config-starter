@@ -27,6 +27,39 @@ import org.springframework.web.server.ResponseStatusException;
 class AiAudioTranscriptionControllerTest {
 
     @Test
+    void resolvesCapabilitiesWithinTheSameServerPrincipalScope() {
+        AiProviderManagementService management = mock(AiProviderManagementService.class);
+        AiPrincipalContextResolver principals = mock(AiPrincipalContextResolver.class);
+        HttpServletRequest request = mock(HttpServletRequest.class);
+        when(principals.resolve(request, "header-tenant", "header-user", "header-env"))
+                .thenReturn(new AiPrincipalContext("principal-tenant", "principal-user", "prod", true));
+        when(management.isAudioTranscriptionAvailable("principal-tenant", "principal-user", "prod"))
+                .thenReturn(true);
+        var response = new AiAudioTranscriptionController(management, principals)
+                .capabilities("header-tenant", "header-user", "header-env", request);
+
+        assertEquals(true, response.getBody().available());
+        assertEquals("no-store", response.getHeaders().getCacheControl());
+        verify(management).isAudioTranscriptionAvailable("principal-tenant", "principal-user", "prod");
+    }
+
+    @Test
+    void doesNotDowngradePrincipalDenialIntoAnAvailabilityResponse() {
+        AiProviderManagementService management = mock(AiProviderManagementService.class);
+        AiPrincipalContextResolver principals = mock(AiPrincipalContextResolver.class);
+        HttpServletRequest request = mock(HttpServletRequest.class);
+        when(principals.resolve(request, null, null, null))
+                .thenThrow(new ResponseStatusException(HttpStatus.FORBIDDEN, "Corporate identity required"));
+
+        ResponseStatusException error = assertThrows(ResponseStatusException.class,
+                () -> new AiAudioTranscriptionController(management, principals)
+                        .capabilities(null, null, null, request));
+
+        assertEquals(HttpStatus.FORBIDDEN, error.getStatusCode());
+        verifyNoInteractions(management);
+    }
+
+    @Test
     void transcribesWithinServerResolvedPrincipalScope() throws Exception {
         AiProviderManagementService management = mock(AiProviderManagementService.class);
         AiPrincipalContextResolver principals = mock(AiPrincipalContextResolver.class);

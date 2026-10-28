@@ -19,6 +19,40 @@ tags:
   - name: domain-knowledge
 
 paths:
+  /api/praxis/config/ai/transcriptions/capabilities:
+    get:
+      tags: [ai-transcription]
+      operationId: getAssistantAudioTranscriptionCapabilities
+      summary: Consulta a prontidao local da transcricao no escopo do principal
+      description: |
+        Reutiliza a resolucao de provider e credencial do POST de transcricao.
+        available indica suporte e credencial efetiva configurada, sem chamadas ao provider;
+        nao prova conectividade, validade da credencial, quota ou permissao adicional.
+        Falhas operacionais retornam available=false sem detalhes sensiveis.
+        A resolucao canonica do principal e preservada, incluindo rejeicao de identidade.
+      parameters:
+        - $ref: '#/components/parameters/TenantIdHeader'
+        - $ref: '#/components/parameters/UserIdHeader'
+        - $ref: '#/components/parameters/EnvHeader'
+      responses:
+        '200':
+          description: Prontidao local, sem exposicao de provider, modelo ou credenciais
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                enum: [no-store]
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AiAudioTranscriptionCapabilitiesResponse'
+        '403':
+          description: Identidade corporativa nao resolvida pelo servidor
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemResponse'
+
   /api/praxis/config/ai/transcriptions:
     post:
       tags: [ai-transcription]
@@ -1676,7 +1710,7 @@ components:
       required: false
       schema:
         type: string
-        default: 02468e16f49c5be27ac584dd0592014fd4612f141d1a8ab2e9a5a153fe9c1757
+        default: 73cafc059598b3ab8cd508217f80e636fa0293f250fd36fb7bbf3d74ee753559
     LastEventIdHeader:
       name: Last-Event-ID
       in: header
@@ -1706,7 +1740,7 @@ components:
       description: Hash do schema de contrato efetivo no backend
       schema:
         type: string
-        example: 02468e16f49c5be27ac584dd0592014fd4612f141d1a8ab2e9a5a153fe9c1757
+        example: 73cafc059598b3ab8cd508217f80e636fa0293f250fd36fb7bbf3d74ee753559
 
   schemas:
     AgenticAuthoringDryRunErrorResponse:
@@ -5340,6 +5374,15 @@ components:
           type: string
           nullable: true
       additionalProperties: true
+
+    AiAudioTranscriptionCapabilitiesResponse:
+      type: object
+      additionalProperties: false
+      required: [available]
+      properties:
+        available:
+          type: boolean
+          description: Suporte e credencial efetiva configurada localmente; nao verifica conectividade ou quota.
 
     AiAudioTranscriptionResponse:
       type: object

@@ -21,6 +21,14 @@ public interface AiProvider {
         return false;
     }
 
+    /**
+     * Checks local readiness without provider requests. Implementations must use the same
+     * effective credentials as transcription and must not expose secrets or probe connectivity.
+     */
+    default boolean isAudioTranscriptionAvailable(AiCallConfig config) {
+        return false;
+    }
+
     default String transcribeAudio(AiAudioTranscriptionRequest request, AiCallConfig config) {
         throw new UnsupportedOperationException("Audio transcription is not supported by provider " + getProviderName());
     }

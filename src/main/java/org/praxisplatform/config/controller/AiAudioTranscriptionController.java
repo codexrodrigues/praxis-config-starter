@@ -4,14 +4,17 @@ import jakarta.servlet.http.HttpServletRequest;
 import java.io.IOException;
 import lombok.RequiredArgsConstructor;
 import org.praxisplatform.config.dto.AiAudioTranscriptionResponse;
+import org.praxisplatform.config.dto.AiAudioTranscriptionCapabilitiesResponse;
 import org.praxisplatform.config.service.AiAudioTranscriptionRequest;
 import org.praxisplatform.config.service.AiPrincipalContext;
 import org.praxisplatform.config.service.AiPrincipalContextResolver;
 import org.praxisplatform.config.service.AiProviderManagementService;
 import org.springframework.http.MediaType;
+import org.springframework.http.CacheControl;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -28,6 +31,18 @@ public class AiAudioTranscriptionController {
     private static final long MAX_AUDIO_BYTES = 12L * 1024L * 1024L;
     private final AiProviderManagementService managementService;
     private final AiPrincipalContextResolver principalContextResolver;
+
+    @GetMapping("/capabilities")
+    public ResponseEntity<AiAudioTranscriptionCapabilitiesResponse> capabilities(
+            @RequestHeader(value = "X-Tenant-ID", required = false) String tenantId,
+            @RequestHeader(value = "X-User-ID", required = false) String userId,
+            @RequestHeader(value = "X-Env", required = false) String environment,
+            HttpServletRequest servletRequest) {
+        AiPrincipalContext principal = principalContextResolver.resolve(servletRequest, tenantId, userId, environment);
+        return ResponseEntity.ok().cacheControl(CacheControl.noStore()).body(new AiAudioTranscriptionCapabilitiesResponse(
+                managementService.isAudioTranscriptionAvailable(
+                        principal.tenantId(), principal.userId(), principal.environment())));
+    }
 
     @PostMapping(consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public ResponseEntity<AiAudioTranscriptionResponse> transcribe(

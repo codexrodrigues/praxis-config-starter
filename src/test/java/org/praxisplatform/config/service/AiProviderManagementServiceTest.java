@@ -9,6 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doCallRealMethod;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.when;
@@ -195,7 +196,7 @@ class AiProviderManagementServiceTest {
 
         IllegalStateException error = assertThrows(
                 IllegalStateException.class,
-                () -> service.transcribeAudio(request, null, null, null));
+                () -> service.transcribeAudio(request, "tenant", "user", "prod"));
 
         assertEquals("Provider not available: missing-provider", error.getMessage());
         verify(openai, never()).supportsAudioTranscription(any());
@@ -210,12 +211,178 @@ class AiProviderManagementServiceTest {
 
         UnsupportedOperationException error = assertThrows(
                 UnsupportedOperationException.class,
-                () -> service.transcribeAudio(request, null, null, null));
+                () -> service.transcribeAudio(request, "tenant", "user", "prod"));
 
         assertEquals(
                 "Configured provider does not support governed audio transcription: openai",
                 error.getMessage());
         verify(openai, never()).transcribeAudio(any(), any());
+    }
+
+    @Test
+    void transcriptionAvailabilityUsesThePostProviderAndConfigurationInsteadOfChat() {
+        ReflectionTestUtils.setField(service, "transcriptionProvider", "openai");
+        ReflectionTestUtils.setField(service, "transcriptionModel", "gpt-4o-mini-transcribe");
+        when(openai.supportsAudioTranscription(any())).thenReturn(true);
+        when(openai.isAudioTranscriptionAvailable(any())).thenReturn(true);
+        when(openai.transcribeAudio(any(), any())).thenReturn("transcript");
+
+        assertTrue(service.isAudioTranscriptionAvailable("tenant", "user", "prod"));
+        service.transcribeAudio(new AiAudioTranscriptionRequest(new byte[] {1}, "voice.webm", "audio/webm", "pt"),
+                "tenant", "user", "prod");
+
+        ArgumentCaptor<AiCallConfig> availability = ArgumentCaptor.forClass(AiCallConfig.class);
+        ArgumentCaptor<AiCallConfig> execution = ArgumentCaptor.forClass(AiCallConfig.class);
+        verify(openai).isAudioTranscriptionAvailable(availability.capture());
+        verify(openai).transcribeAudio(any(), execution.capture());
+        for (AiCallConfig config : List.of(availability.getValue(), execution.getValue())) {
+            assertEquals("openai", config.getProvider());
+            assertEquals("gpt-4o-mini-transcribe", config.getModel());
+            assertEquals("tenant", config.getTenantId());
+            assertEquals("prod", config.getEnvironment());
+            assertEquals(null, config.getApiKey());
+        }
+        verify(gemini, never()).isAudioTranscriptionAvailable(any());
+    }
+
+    @Test
+    void transcriptionAvailabilityRejectsUnsupportedMissingOrFailingProvidersWithoutTranscribing() {
+        ReflectionTestUtils.setField(service, "transcriptionProvider", "openai");
+        assertFalse(service.isAudioTranscriptionAvailable("tenant", "user", "prod"));
+        when(openai.supportsAudioTranscription(any())).thenReturn(true);
+        assertFalse(service.isAudioTranscriptionAvailable("tenant", "user", "prod"));
+        when(openai.isAudioTranscriptionAvailable(any())).thenThrow(new IllegalStateException("sensitive failure"));
+        assertFalse(service.isAudioTranscriptionAvailable("tenant", "user", "prod"));
+        ReflectionTestUtils.setField(service, "transcriptionProvider", "missing-provider");
+        assertFalse(service.isAudioTranscriptionAvailable("tenant", "user", "prod"));
+        verify(openai, never()).transcribeAudio(any(), any());
+        verify(gemini, never()).transcribeAudio(any(), any());
+    }
+
+    @Test
+    void transcriptionAvailabilityOnlyUsesStoredCredentialsForTheSelectedProvider() throws Exception {
+        ReflectionTestUtils.setField(service, "transcriptionProvider", "openai");
+        when(openai.supportsAudioTranscription(any())).thenReturn(true);
+        when(openai.isAudioTranscriptionAvailable(any())).thenAnswer(invocation ->
+                ((AiCallConfig) invocation.getArgument(0)).getApiKey() != null);
+        UiUserConfig stored = mock(UiUserConfig.class);
+        when(stored.getPayload()).thenReturn("stored-config");
+        when(userConfigService.getResolved(any(), any(), any(), any(), any()))
+                .thenReturn(Optional.of(new UserConfigService.ResolvedConfig(stored, UserConfigService.Scope.USER)));
+        when(stored.getPayload()).thenReturn(
+                "{\"ai\":{\"provider\":\"gemini\",\"apiKey\":\"stored-secret\"}}");
+        assertFalse(service.isAudioTranscriptionAvailable("tenant", "user", "prod"));
+
+        when(stored.getPayload()).thenReturn(
+                "{\"ai\":{\"provider\":\"openai\",\"apiKey\":\"stored-secret\"}}");
+        assertTrue(service.isAudioTranscriptionAvailable("tenant", "user", "prod"));
+        verify(openai, never()).transcribeAudio(any(), any());
+    }
+
+    @Test
+    void transcriptionMayUseEnvironmentCredentialsOnlyWhenStoredConfigurationIsAbsent() {
+        AiProviderManagementService transcription = transcriptionWithEnvironmentKey();
+        when(userConfigService.getResolved(any(), any(), any(), any(), any())).thenReturn(Optional.empty());
+
+        assertTrue(transcription.isAudioTranscriptionAvailable("tenant", "user", "prod"));
+    }
+
+    @Test
+    void failedLookupDoesNotBecomeEnvironmentKeyReadinessOrTranscription() {
+        AiProviderManagementService transcription = transcriptionWithEnvironmentKey();
+        when(userConfigService.getResolved(any(), any(), any(), any(), any()))
+                .thenThrow(new IllegalStateException("sensitive storage details"));
+
+        assertFalse(transcription.isAudioTranscriptionAvailable("tenant", "user", "prod"));
+        var failure = org.junit.jupiter.api.Assertions.assertThrows(IllegalStateException.class,
+                () -> transcription.transcribeAudio(
+                        new AiAudioTranscriptionRequest(new byte[] {1}, "voice.webm", "audio/webm", "pt"),
+                        "tenant", "user", "prod"));
+        assertEquals("Transcription configuration is unavailable.", failure.getMessage());
+        assertEquals(null, failure.getCause());
+    }
+
+    @Test
+    void lookupTimeoutDoesNotAnnounceReadinessWithAnEnvironmentKey() throws Exception {
+        AiProviderManagementService transcription = transcriptionWithEnvironmentKey();
+        var release = new java.util.concurrent.CountDownLatch(1);
+        when(userConfigService.getResolved(any(), any(), any(), any(), any())).thenAnswer(call -> {
+            release.await();
+            return Optional.empty();
+        });
+        try {
+            assertFalse(transcription.isAudioTranscriptionAvailable("tenant", "user", "prod"));
+        } finally {
+            release.countDown();
+        }
+    }
+
+    @Test
+    void unreadableEncryptedOrMalformedConfigurationCannotFallBackToEnvironmentCredentials() throws Exception {
+        AiProviderManagementService transcription = transcriptionWithEnvironmentKey();
+        UiUserConfig stored = mock(UiUserConfig.class);
+        when(stored.getPayload()).thenReturn("stored-config");
+        when(userConfigService.getResolved(any(), any(), any(), any(), any()))
+                .thenReturn(Optional.of(new UserConfigService.ResolvedConfig(stored, UserConfigService.Scope.USER)));
+        when(stored.getPayload()).thenReturn(
+                "{\"ai\":{\"provider\":\"openai\",\"apiKeyEncrypted\":\"encrypted\"}}");
+        when(apiKeyCryptoService.decrypt("encrypted")).thenReturn(null);
+        assertFalse(transcription.isAudioTranscriptionAvailable("tenant", "user", "prod"));
+
+        when(apiKeyCryptoService.decrypt("encrypted")).thenThrow(new IllegalStateException("sensitive crypto details"));
+        assertFalse(transcription.isAudioTranscriptionAvailable("tenant", "user", "prod"));
+
+        when(stored.getPayload()).thenReturn("invalid-json");
+        assertFalse(transcription.isAudioTranscriptionAvailable("tenant", "user", "prod"));
+    }
+
+    @Test
+    void invalidAiShapeOrCredentialTypesCannotAnnounceReadinessOrTranscribeWithAnEnvironmentKey() throws Exception {
+        AiProviderManagementService transcription = transcriptionWithEnvironmentKey();
+        UiUserConfig stored = mock(UiUserConfig.class);
+        when(stored.getPayload()).thenReturn("stored-config");
+        when(userConfigService.getResolved(any(), any(), any(), any(), any()))
+                .thenReturn(Optional.of(new UserConfigService.ResolvedConfig(stored, UserConfigService.Scope.USER)));
+        for (String payload : List.of(
+                "{\"ai\":42}", "{\"ai\":null}", "{\"ai\":[]}", "{\"ai\":false}",
+                "{\"ai\":{\"provider\":42}}", "{\"ai\":{\"model\":{}}}",
+                "{\"ai\":{\"apiKey\":false}}", "{\"ai\":{\"apiKeyEncrypted\":[]}}")) {
+            when(stored.getPayload()).thenReturn(payload);
+            assertFalse(transcription.isAudioTranscriptionAvailable("tenant", "user", "prod"), payload);
+            var failure = org.junit.jupiter.api.Assertions.assertThrows(IllegalStateException.class,
+                    () -> transcription.transcribeAudio(
+                            new AiAudioTranscriptionRequest(new byte[] {1}, "voice.webm", "audio/webm", "pt"),
+                            "tenant", "user", "prod"), payload);
+            assertEquals("Transcription configuration is unavailable.", failure.getMessage());
+            assertEquals(null, failure.getCause());
+        }
+    }
+
+    @Test
+    void missingAiAndUnsetOptionalFieldsRemainLegitimateAbsenceForEnvironmentFallback() throws Exception {
+        AiProviderManagementService transcription = transcriptionWithEnvironmentKey();
+        UiUserConfig stored = mock(UiUserConfig.class);
+        when(stored.getPayload()).thenReturn("stored-config");
+        when(userConfigService.getResolved(any(), any(), any(), any(), any()))
+                .thenReturn(Optional.of(new UserConfigService.ResolvedConfig(stored, UserConfigService.Scope.USER)));
+        for (String payload : List.of("{\"otherSetting\":true}", "{\"ai\":{}}",
+                "{\"ai\":{\"provider\":null,\"model\":null,\"apiKey\":null,\"apiKeyEncrypted\":null}}")) {
+            when(stored.getPayload()).thenReturn(payload);
+            assertTrue(transcription.isAudioTranscriptionAvailable("tenant", "user", "prod"), payload);
+        }
+    }
+
+    private AiProviderManagementService transcriptionWithEnvironmentKey() {
+        var adapter = org.mockito.Mockito.spy(new SpringAiOpenAiService(new ObjectMapper(),
+                new OpenAiHostedSkillProperties()));
+        ReflectionTestUtils.setField(adapter, "apiKey", "environment-fixture-key-never-sent");
+        org.mockito.Mockito.lenient().doThrow(new AssertionError("No provider call is permitted in this unit fixture."))
+                .when(adapter).transcribeAudio(any(), any());
+        var transcription = new AiProviderManagementService(objectMapper, userConfigService, apiKeyCryptoService, List.of(adapter));
+        ReflectionTestUtils.setField(transcription, "transcriptionProvider", "openai");
+        ReflectionTestUtils.setField(transcription, "transcriptionModel", "gpt-4o-mini-transcribe");
+        transcription.initProviderRegistry();
+        return transcription;
     }
 
     @Test

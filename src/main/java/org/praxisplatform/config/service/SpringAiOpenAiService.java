@@ -156,6 +156,11 @@ public class SpringAiOpenAiService implements AiProvider {
     }
 
     @Override
+    public boolean isAudioTranscriptionAvailable(AiCallConfig config) {
+        return resolveApiKey(config) != null;
+    }
+
+    @Override
     public String transcribeAudio(AiAudioTranscriptionRequest request, AiCallConfig config) {
         if (request == null || request.audio() == null || request.audio().length == 0) {
             throw new IllegalArgumentException("Audio payload is required.");
@@ -941,12 +946,17 @@ public class SpringAiOpenAiService implements AiProvider {
     }
 
     private String requireApiKey(AiCallConfig config) {
+        String key = resolveApiKey(config);
+        if (key == null) {
+            throw AiProviderCallException.fromHttpStatus(PROVIDER, 401, "API key not configured");
+        }
+        return key;
+    }
+
+    private String resolveApiKey(AiCallConfig config) {
         String key = config != null ? trimToNull(config.getApiKey()) : null;
         if (key == null) {
             key = trimToNull(apiKey);
-        }
-        if (key == null) {
-            throw AiProviderCallException.fromHttpStatus(PROVIDER, 401, "API key not configured");
         }
         return key;
     }

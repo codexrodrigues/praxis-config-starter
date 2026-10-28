@@ -260,6 +260,20 @@ spring.flyway.locations=classpath:db/baseline
 Provider credentials must come from environment variables or host-owned secret management.
 Do not commit real API keys.
 
+Governed composer audio uses `POST /api/praxis/config/ai/transcriptions` and the
+dedicated `praxis.ai.transcription.provider` / `praxis.ai.transcription.model`
+selection. Hosts can query `GET /api/praxis/config/ai/transcriptions/capabilities`
+with the same principal scope before offering capture. Its `{ "available": boolean }`
+response reports local provider support and effective credential configuration;
+it makes no provider call and does not certify connectivity, credential validity,
+quota or additional permissions. Transcription configuration lookup failures return
+`false` without sensitive details and block POST; only a successful lookup without an applicable stored credential
+permits the adapter credential fallback (including legitimate configuration absence). Host identity admission runs first: the
+quickstart enterprise binding requires the current session/membership and context-version
+stamp, with 401/403/409/503 for session/scope/version/source rejection. Do not infer audio
+availability from chat status or expose provider credentials to the browser.
+
+
 ```yaml
 spring:
   ai:
