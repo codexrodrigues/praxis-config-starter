@@ -6,6 +6,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
@@ -60,6 +61,24 @@ public class ContextRetrievalService {
 
     @Value("${praxis.ai.rag.release.fallback.default-enabled:false}")
     private boolean ragReleaseFallbackToDefaultEnabled;
+
+    @Value("${praxis.ai.rag.catalog-fallback.tenant-id:}")
+    private String catalogFallbackTenantId = "";
+
+    @Value("${praxis.ai.rag.catalog-fallback.environment:}")
+    private String catalogFallbackEnvironment = "";
+
+    @Value("${praxis.ai.security.corporate-mode:true}")
+    private boolean corporateMode = false;
+
+    public void setCatalogFallbackScope(String tenantId, String environment) {
+        this.catalogFallbackTenantId = tenantId == null ? "" : tenantId.trim();
+        this.catalogFallbackEnvironment = environment == null ? "" : environment.trim();
+    }
+
+    public void setCorporateMode(boolean corporateMode) {
+        this.corporateMode = corporateMode;
+    }
 
     @Transactional(transactionManager = ConfigTransactionManagerNames.CONFIG, readOnly = true)
     /**
@@ -140,6 +159,37 @@ public class ContextRetrievalService {
         }
         if (!ragResults.isEmpty()) {
             return ragResults;
+        }
+        if (shouldFallbackToCatalogScope(tenantId, environment)) {
+            String fallbackTenant = effectiveCatalogFallbackTenantId(tenantId);
+            String fallbackEnv = effectiveCatalogFallbackEnvironment(environment);
+            ragResults = searchApiMetadataWithVectorStore(
+                    query,
+                    method,
+                    tags,
+                    limit,
+                    fallbackTenant,
+                    fallbackEnv,
+                    resolvedReleaseId);
+            if (ragResults.isEmpty() && shouldFallbackToDefaultRelease(resolvedReleaseId)) {
+                ragResults = searchApiMetadataWithVectorStore(
+                        query,
+                        method,
+                        tags,
+                        limit,
+                        fallbackTenant,
+                        fallbackEnv,
+                        resolveDefaultReleaseId());
+            }
+            if (!ragResults.isEmpty()) {
+                log.debug(
+                        "[ContextRetrievalService] API retrieval catalog scope fallback applied from ({}/{}) to ({}/{}).",
+                        safeQuery(tenantId),
+                        safeQuery(environment),
+                        safeQuery(fallbackTenant),
+                        safeQuery(fallbackEnv));
+                return ragResults;
+            }
         }
         if (ragVectorStoreService.isAvailable()) {
             log.warn(
@@ -235,6 +285,27 @@ public class ContextRetrievalService {
         if (!ragResults.isEmpty()) {
             return ragResults;
         }
+        if (shouldFallbackToCatalogScope(tenantId, environment)) {
+            String fallbackTenant = effectiveCatalogFallbackTenantId(tenantId);
+            String fallbackEnv = effectiveCatalogFallbackEnvironment(environment);
+            ragResults = searchComponentDefinitionsWithVectorStore(
+                    query,
+                    limit,
+                    fallbackTenant,
+                    fallbackEnv,
+                    resolvedReleaseId);
+            if (ragResults.isEmpty() && shouldFallbackToDefaultRelease(resolvedReleaseId)) {
+                ragResults = searchComponentDefinitionsWithVectorStore(
+                        query,
+                        limit,
+                        fallbackTenant,
+                        fallbackEnv,
+                        resolveDefaultReleaseId());
+            }
+            if (!ragResults.isEmpty()) {
+                return ragResults;
+            }
+        }
         if (ragVectorStoreService.isAvailable()) {
             log.warn(
                     "[ContextRetrievalService] No RAG results for release-scoped component retrieval (releaseId='{}', tenantId='{}', env='{}'); skipping legacy fallback.",
@@ -299,6 +370,28 @@ public class ContextRetrievalService {
                         safeQuery(defaultReleaseId));
             }
         }
+        if (results.isEmpty() && shouldFallbackToCatalogScope(tenantId, environment)) {
+            String fallbackTenant = effectiveCatalogFallbackTenantId(tenantId);
+            String fallbackEnv = effectiveCatalogFallbackEnvironment(environment);
+            results = searchComponentCorpusWithVectorStore(
+                    query,
+                    componentId,
+                    chunkKind,
+                    limit,
+                    fallbackTenant,
+                    fallbackEnv,
+                    resolvedReleaseId);
+            if (results.isEmpty() && shouldFallbackToDefaultRelease(resolvedReleaseId)) {
+                results = searchComponentCorpusWithVectorStore(
+                        query,
+                        componentId,
+                        chunkKind,
+                        limit,
+                        fallbackTenant,
+                        fallbackEnv,
+                        resolveDefaultReleaseId());
+            }
+        }
         return results;
     }
 
@@ -320,6 +413,34 @@ public class ContextRetrievalService {
 
     private boolean hasTenantScope(String tenantId, String environment) {
         return (tenantId != null && !tenantId.isBlank()) || (environment != null && !environment.isBlank());
+    }
+
+    private boolean shouldFallbackToCatalogScope(String tenantId, String environment) {
+        String fallbackTenant = trimToNull(catalogFallbackTenantId);
+        String fallbackEnv = trimToNull(catalogFallbackEnvironment);
+        if (fallbackTenant == null && fallbackEnv == null) {
+            return false;
+        }
+        String effectiveTenant = effectiveCatalogFallbackTenantId(tenantId);
+        String effectiveEnv = effectiveCatalogFallbackEnvironment(environment);
+        return !Objects.equals(trimToNull(tenantId), trimToNull(effectiveTenant))
+                || !Objects.equals(trimToNull(environment), trimToNull(effectiveEnv));
+    }
+
+    private String effectiveCatalogFallbackTenantId(String tenantId) {
+        String fallbackTenant = trimToNull(catalogFallbackTenantId);
+        if (fallbackTenant == null) {
+            return tenantId;
+        }
+        if (corporateMode && !"GLOBAL".equalsIgnoreCase(fallbackTenant)) {
+            return tenantId;
+        }
+        return fallbackTenant;
+    }
+
+    private String effectiveCatalogFallbackEnvironment(String environment) {
+        String fallbackEnv = trimToNull(catalogFallbackEnvironment);
+        return fallbackEnv != null ? fallbackEnv : environment;
     }
 
     private String resolveReleaseId(String releaseId) {

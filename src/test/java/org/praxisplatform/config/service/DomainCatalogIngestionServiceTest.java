@@ -2334,4 +2334,66 @@ class DomainCatalogIngestionServiceTest {
     private DomainCatalogSchemaValidationService validationService() {
         return new DomainCatalogSchemaValidationService(objectMapper);
     }
+
+    @Test
+    void fallsBackToConfiguredCatalogScopeWhenPrimaryTenantHasNoDomainCatalogReleases() {
+        DomainCatalogReleaseRepository releaseRepository = mock(DomainCatalogReleaseRepository.class);
+        DomainCatalogItemRepository itemRepository = mock(DomainCatalogItemRepository.class);
+        RagVectorStoreService ragVectorStoreService = mock(RagVectorStoreService.class);
+        DomainCatalogIngestionService service = new DomainCatalogIngestionService(
+                releaseRepository,
+                itemRepository,
+                objectMapper,
+                ragVectorStoreService,
+                validationService()
+        );
+        service.setCatalogFallbackScope("desenv", "local");
+
+        DomainCatalogRelease sharedRelease = DomainCatalogRelease.builder()
+                .id(UUID.fromString("e180c524-b67a-4cc0-b754-d652d7424e14"))
+                .releaseKey("praxis-service:operations.missoes:hash")
+                .schemaVersion("praxis.domain-catalog/v0.2")
+                .serviceKey("praxis-service")
+                .tenantId("desenv")
+                .environment("local")
+                .generatedAt(Instant.parse("2026-04-21T12:00:00Z"))
+                .createdAt(Instant.parse("2026-04-21T12:00:01Z"))
+                .build();
+        DomainCatalogItem missionConcept = DomainCatalogItem.builder()
+                .release(sharedRelease)
+                .itemType("node")
+                .itemKey("operations.missoes")
+                .contextKey("operations")
+                .nodeType("concept")
+                .payload("{\"nodeKey\":\"operations.missoes\",\"nodeType\":\"concept\",\"label\":\"Missoes\"}")
+                .build();
+
+        when(releaseRepository.findLatestSummaries(eq("praxis-service"), eq(null), eq("shield-hq"), eq("local"), any(Pageable.class)))
+                .thenReturn(List.of());
+        when(releaseRepository.findLatestSummaries(eq("praxis-service"), eq(null), eq("desenv"), eq("local"), any(Pageable.class)))
+                .thenReturn(releaseSummaries(sharedRelease));
+        when(itemRepository.searchSummariesAcrossReleaseIds(
+                eq(releaseIds(sharedRelease)),
+                eq("node"),
+                eq(null),
+                eq("concept"),
+                eq(null),
+                any(Pageable.class)))
+                .thenReturn(itemSummaries(missionConcept));
+
+        var context = service.contextLatest(
+                "praxis-service",
+                "shield-hq",
+                "local",
+                "node",
+                null,
+                "concept",
+                null,
+                12);
+
+        assertThat(context.items()).singleElement()
+                .satisfies(item -> assertThat(item.itemKey()).isEqualTo("operations.missoes"));
+        verify(releaseRepository).findLatestSummaries(eq("praxis-service"), eq(null), eq("shield-hq"), eq("local"), any(Pageable.class));
+        verify(releaseRepository).findLatestSummaries(eq("praxis-service"), eq(null), eq("desenv"), eq("local"), any(Pageable.class));
+    }
 }

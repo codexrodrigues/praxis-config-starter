@@ -790,6 +790,7 @@ final class AgenticAuthoringIntentContextCandidateSupport {
             operation = "form".equals(artifactKind)
                     || "table".equals(artifactKind)
                     || "dashboard".equals(artifactKind)
+                    || "chart".equals(artifactKind)
                     || "page".equals(artifactKind)
                     ? "post"
                     : "get";
@@ -1084,7 +1085,7 @@ final class AgenticAuthoringIntentContextCandidateSupport {
                 return normalizedSubmitUrl + "/filter/cursor";
             }
         }
-        if ("dashboard".equals(normalizedArtifactKind)
+        if (("dashboard".equals(normalizedArtifactKind) || "chart".equals(normalizedArtifactKind))
                 && normalizedSubmitUrl.equals(normalizedResourcePath)
                 && !normalizedSubmitUrl.contains("/{")) {
             return normalizedSubmitUrl + "/stats/group-by";

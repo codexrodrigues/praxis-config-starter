@@ -984,6 +984,46 @@ class AgenticAuthoringApiMetadataCandidateCatalogTest {
                 .isEqualTo("/api/human-resources/historicos-salariais");
     }
 
+    @Test
+    void fallsBackToConfiguredCatalogScopeWhenScopedTenantHasNoStructuredApiMetadata() {
+        ApiMetadataRepository repository = Mockito.mock(ApiMetadataRepository.class);
+        Mockito.when(repository.findCandidateProjectionsByScope("shield-hq", "local", "default", "v1"))
+                .thenReturn(List.of());
+        Mockito.when(repository.findCandidateProjectionsByScope("desenv", "local", "default", "v1"))
+                .thenReturn(projections(apiMetadata(
+                        "/api/operations/missoes/filter/cursor",
+                        "POST",
+                        "operations.missoes",
+                        "Consultar missoes operacionais em andamento",
+                        "Listagem e filtragem de missoes por status EM_ANDAMENTO.")));
+        ContextRetrievalService retrievalService = Mockito.mock(ContextRetrievalService.class);
+        Mockito.when(retrievalService.searchApiMetadata(
+                        Mockito.anyString(),
+                        Mockito.nullable(String.class),
+                        Mockito.isNull(),
+                        Mockito.anyInt(),
+                        Mockito.isNull(),
+                        Mockito.eq("shield-hq"),
+                        Mockito.eq("local"),
+                        Mockito.isNull()))
+                .thenReturn(List.of());
+
+        AgenticAuthoringApiMetadataCandidateCatalog catalog =
+                new AgenticAuthoringApiMetadataCandidateCatalog(repository, retrievalService, "desenv", "local");
+
+        List<AgenticAuthoringCandidate> candidates = catalog.discover(
+                "mostrar as missoes em andamento",
+                "table",
+                "shield-hq",
+                "local",
+                null);
+
+        assertThat(candidates).isNotEmpty();
+        assertThat(candidates.get(0).resourcePath()).isEqualTo("/api/operations/missoes");
+        Mockito.verify(repository).findCandidateProjectionsByScope("shield-hq", "local", "default", "v1");
+        Mockito.verify(repository).findCandidateProjectionsByScope("desenv", "local", "default", "v1");
+    }
+
     private ApiMetadata apiMetadata(
             String path,
             String method,

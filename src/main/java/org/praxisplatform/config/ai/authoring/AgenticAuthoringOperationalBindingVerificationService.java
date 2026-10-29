@@ -151,7 +151,7 @@ public class AgenticAuthoringOperationalBindingVerificationService {
                     "principal_capability",
                     new AvailabilityProjection(true, "", "resource_capabilities"),
                     binding.sourceRelease(),
-                    binding.evidence()));
+                    withStatsCapabilitiesEvidence(binding.evidence(), capabilities.getCapabilities())));
         }
         supplementCanonicalCapabilityOperations(
                 resourceKey,
@@ -170,7 +170,9 @@ public class AgenticAuthoringOperationalBindingVerificationService {
                 bindings,
                 verified,
                 failures);
-        boolean actionCatalogVerified = failures.size() == failuresBeforeActionCatalog;
+        boolean actionCatalogVerified = failures.subList(failuresBeforeActionCatalog, failures.size())
+                .stream()
+                .allMatch("operational-binding-action-catalog-collection-unavailable"::equals);
         List<RelatedResourceSurfaceProjection> relatedResourceSurfaces = verifyRelatedResourceSurfaces(
                 resourceKey,
                 capabilitiesResourcePath,
@@ -350,7 +352,8 @@ public class AgenticAuthoringOperationalBindingVerificationService {
                 || !StringUtils.hasText(operationId)) {
             return ActionDecision.blocked("operational-binding-action-catalog-contract-mismatch");
         }
-        boolean itemPath = apiPath.matches(".*/\\{[^/]+}/actions/[^/]+$");
+        boolean itemPath = apiPath.matches(".*/\\{[^/]+}/actions/[^/]+$")
+                || ("duplicate-draft".equals(actionId) && apiPath.matches(".*/\\{[^/]+}/duplicate-draft$"));
         boolean collectionPath = apiPath.matches(".*/actions/[^/]+$") && !itemPath;
         if (("ITEM".equals(scope) && !itemPath)
                 || ("COLLECTION".equals(scope) && !collectionPath)) {
@@ -363,7 +366,9 @@ public class AgenticAuthoringOperationalBindingVerificationService {
         boolean allowed = availability.path("allowed").asBoolean(false);
         String reason = availability.path("reason").asText("").trim();
         if ("ITEM".equals(scope)) {
-            if (allowed || !"resource-context-required".equals(reason)) {
+            boolean canonicalItemUnavailable = "resource-context-required".equals(reason)
+                    || ("duplicate-draft".equals(actionId) && "duplicate-draft-unavailable".equals(reason));
+            if (allowed || !canonicalItemUnavailable) {
                 return ActionDecision.blocked("operational-binding-action-catalog-item-context-invalid");
             }
             return ActionDecision.verified(
@@ -492,15 +497,15 @@ public class AgenticAuthoringOperationalBindingVerificationService {
         if (schemaRetrievalService == null
                 || principalContext == null
                 || capabilitiesByResource.isEmpty()
-                || !StringUtils.hasText(capabilitiesResourcePath)
-                || bindings.stream().anyMatch(binding ->
+                || !StringUtils.hasText(capabilitiesResourcePath)) {
+            return;
+        }
+        boolean hasExplicitCollectionOrResourceBinding = bindings.stream().anyMatch(binding ->
                         "api_resource".equals(binding.bindingType())
                                 || "api_operation".equals(binding.bindingType()))
                 || verified.stream().anyMatch(operation ->
                         operation.apiPath().endsWith("/filter")
-                                || operation.apiPath().endsWith("/filter/cursor"))) {
-            return;
-        }
+                                || operation.apiPath().endsWith("/filter/cursor"));
         ResourceCapabilitiesFetchResult capabilities =
                 capabilitiesByResource.get(canonicalPath(capabilitiesResourcePath));
         if (capabilities == null || !capabilities.isSuccess()) {
@@ -509,6 +514,10 @@ public class AgenticAuthoringOperationalBindingVerificationService {
         List<AgenticAuthoringDomainBindingService.BindingProjection> canonicalBindings =
                 synthesizeCanonicalCapabilityBindings(resourceKey, capabilitiesResourcePath, capabilities);
         for (AgenticAuthoringDomainBindingService.BindingProjection binding : canonicalBindings) {
+            if (hasExplicitCollectionOrResourceBinding
+                    && !"stats_endpoint".equals(binding.bindingType())) {
+                continue;
+            }
             String method = binding.apiMethod().trim().toLowerCase(Locale.ROOT);
             String canonicalBindingPath = canonicalPath(binding.apiPath());
             boolean alreadyVerified = verified.stream().anyMatch(existing ->
@@ -659,6 +668,19 @@ public class AgenticAuthoringOperationalBindingVerificationService {
                     resourcePath + "/filter",
                     "POST",
                     "/schemas/filtered?path=" + resourcePath + "/filter&operation=post&schemaType=response",
+                    1.0,
+                    "canonical-metadata-capabilities",
+                    evidence));
+        }
+        if (isSupportedAndAllowed(operations.path("statsGroupBy"))) {
+            synthesized.add(new AgenticAuthoringDomainBindingService.BindingProjection(
+                    resourceKey + ".workspace",
+                    "stats_endpoint",
+                    "statsGroupBy",
+                    resourceKey,
+                    resourcePath + "/stats/group-by",
+                    "POST",
+                    "/schemas/filtered?path=" + resourcePath + "/stats/group-by&operation=post&schemaType=response",
                     1.0,
                     "canonical-metadata-capabilities",
                     evidence));

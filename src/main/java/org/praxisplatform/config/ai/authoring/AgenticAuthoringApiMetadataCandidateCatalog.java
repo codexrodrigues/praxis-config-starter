@@ -39,16 +39,28 @@ public class AgenticAuthoringApiMetadataCandidateCatalog {
 
     private final ApiMetadataRepository repository;
     private final ContextRetrievalService retrievalService;
+    private final String catalogFallbackTenantId;
+    private final String catalogFallbackEnvironment;
 
     public AgenticAuthoringApiMetadataCandidateCatalog(ApiMetadataRepository repository) {
-        this(repository, null);
+        this(repository, null, "", "");
     }
 
     public AgenticAuthoringApiMetadataCandidateCatalog(
             ApiMetadataRepository repository,
             ContextRetrievalService retrievalService) {
+        this(repository, retrievalService, "", "");
+    }
+
+    public AgenticAuthoringApiMetadataCandidateCatalog(
+            ApiMetadataRepository repository,
+            ContextRetrievalService retrievalService,
+            String catalogFallbackTenantId,
+            String catalogFallbackEnvironment) {
         this.repository = repository;
         this.retrievalService = retrievalService;
+        this.catalogFallbackTenantId = catalogFallbackTenantId == null ? "" : catalogFallbackTenantId.trim();
+        this.catalogFallbackEnvironment = catalogFallbackEnvironment == null ? "" : catalogFallbackEnvironment.trim();
     }
 
     public List<AgenticAuthoringCandidate> discover(String normalizedPrompt, String artifactKind) {
@@ -73,10 +85,14 @@ public class AgenticAuthoringApiMetadataCandidateCatalog {
             return repository == null ? List.of() : new BroadArtifactCandidateRetriever().retrieve(context);
         }
         List<AgenticAuthoringCandidate> llmFocusedCandidates = discoverLlmAuthoredResourceFocusCandidates(context);
-        if (!llmFocusedCandidates.isEmpty()) {
+        if (!llmFocusedCandidates.isEmpty() && !"api_catalog".equals(artifactKind)) {
             return mergeCandidates(llmFocusedCandidates, List.of(), artifactKind, normalizedPrompt);
         }
-        List<AgenticAuthoringCandidate> semanticCandidates = new SemanticCandidateRetriever().retrieve(context);
+        List<AgenticAuthoringCandidate> semanticCandidates = mergeCandidates(
+                llmFocusedCandidates,
+                new SemanticCandidateRetriever().retrieve(context),
+                artifactKind,
+                normalizedPrompt);
         if (repository == null) {
             return semanticCandidates;
         }
@@ -287,7 +303,6 @@ public class AgenticAuthoringApiMetadataCandidateCatalog {
                 context.normalizedPrompt(),
                 context.artifactKind());
         if (repository == null
-                || "api_catalog".equals(context.artifactKind())
                 || resourceNeed == SemanticResourceNeed.PROFILE) {
             return List.of();
         }
@@ -318,7 +333,9 @@ public class AgenticAuthoringApiMetadataCandidateCatalog {
         String resourcePath = resourceFocusToApiBasePath(resourceFocus);
         String submitUrl = "form".equals(context.artifactKind())
                 ? resourcePath
-                : resourcePath + "/filter/cursor";
+                : ("dashboard".equals(context.artifactKind()) || "chart".equals(context.artifactKind()))
+                        ? resourcePath + "/stats/group-by"
+                        : resourcePath + "/filter/cursor";
         String operation = "post";
         double score = 0.76d;
         return new AgenticAuthoringCandidate(
@@ -373,6 +390,9 @@ public class AgenticAuthoringApiMetadataCandidateCatalog {
                 ? List.of("POST", "GET")
                 : List.of(context.expectedMethod().toUpperCase(Locale.ROOT));
         LinkedHashSet<String> paths = new LinkedHashSet<>();
+        if ("chart".equals(context.artifactKind()) || "dashboard".equals(context.artifactKind())) {
+            paths.add(basePath + "/stats/group-by");
+        }
         paths.add(basePath + "/filter/cursor");
         paths.add(basePath + "/filter");
         paths.add(basePath);
@@ -533,7 +553,19 @@ public class AgenticAuthoringApiMetadataCandidateCatalog {
         if (replacementCreate != existingCreate) {
             return replacementCreate ? replacement : existing;
         }
+        if (Math.abs(replacement.score() - existing.score()) < 1e-6) {
+            boolean existingPreferredOperation = isDefaultResourceOperationSubmitUrl(existing.submitUrl());
+            boolean replacementPreferredOperation = isDefaultResourceOperationSubmitUrl(replacement.submitUrl());
+            if (replacementPreferredOperation != existingPreferredOperation) {
+                return replacementPreferredOperation ? replacement : existing;
+            }
+        }
         return replacement.score() > existing.score() ? replacement : existing;
+    }
+
+    private boolean isDefaultResourceOperationSubmitUrl(String submitUrl) {
+        String normalized = normalizePath(submitUrl);
+        return normalized.endsWith("/stats/group-by") || normalized.endsWith("/filter/cursor");
     }
 
     private int primaryBusinessEntityAlignmentScore(
@@ -776,11 +808,22 @@ public class AgenticAuthoringApiMetadataCandidateCatalog {
 
     private List<ApiMetadataCandidateEvidence> structuredMetadata(RetrievalContext context) {
         if (context != null && hasScope(context.tenantId(), context.environment())) {
-            return new ArrayList<>(repository.findCandidateProjectionsByScope(
-                    normalizeOrDefault(context.tenantId(), "GLOBAL"),
-                    normalizeOrDefault(context.environment(), "default"),
+            String primaryTenant = normalizeOrDefault(context.tenantId(), "GLOBAL");
+            String primaryEnv = normalizeOrDefault(context.environment(), "default");
+            String releaseId = normalizeOrDefault(context.releaseId(), "v1");
+            List<ApiMetadataCandidateEvidence> scoped = new ArrayList<>(repository.findCandidateProjectionsByScope(
+                    primaryTenant,
+                    primaryEnv,
                     "default",
-                    normalizeOrDefault(context.releaseId(), "v1")));
+                    releaseId));
+            if (scoped.isEmpty() && shouldFallbackToCatalogScope(context.tenantId(), context.environment())) {
+                scoped = new ArrayList<>(repository.findCandidateProjectionsByScope(
+                        effectiveCatalogFallbackTenantId(primaryTenant),
+                        effectiveCatalogFallbackEnvironment(primaryEnv),
+                        "default",
+                        releaseId));
+            }
+            return scoped;
         }
         return new ArrayList<>(repository.findAllCandidateProjections());
     }
@@ -790,20 +833,54 @@ public class AgenticAuthoringApiMetadataCandidateCatalog {
             String path,
             String method) {
         if (context != null && hasScope(context.tenantId(), context.environment())) {
-            return repository.findByTenantIdAndEnvironmentAndServiceKeyAndReleaseIdAndPathAndMethod(
-                    normalizeOrDefault(context.tenantId(), "GLOBAL"),
-                    normalizeOrDefault(context.environment(), "default"),
-                    "default",
-                    normalizeOrDefault(context.releaseId(), "v1"),
-                    path,
-                    method)
+            String primaryTenant = normalizeOrDefault(context.tenantId(), "GLOBAL");
+            String primaryEnv = normalizeOrDefault(context.environment(), "default");
+            String releaseId = normalizeOrDefault(context.releaseId(), "v1");
+            Optional<ApiMetadataCandidateEvidence> scoped = repository
+                    .findByTenantIdAndEnvironmentAndServiceKeyAndReleaseIdAndPathAndMethod(
+                            primaryTenant,
+                            primaryEnv,
+                            "default",
+                            releaseId,
+                            path,
+                            method)
                     .map(metadata -> (ApiMetadataCandidateEvidence) metadata);
+            if (scoped.isEmpty() && shouldFallbackToCatalogScope(context.tenantId(), context.environment())) {
+                scoped = repository
+                        .findByTenantIdAndEnvironmentAndServiceKeyAndReleaseIdAndPathAndMethod(
+                                effectiveCatalogFallbackTenantId(primaryTenant),
+                                effectiveCatalogFallbackEnvironment(primaryEnv),
+                                "default",
+                                releaseId,
+                                path,
+                                method)
+                        .map(metadata -> (ApiMetadataCandidateEvidence) metadata);
+            }
+            return scoped;
         }
         return repository.findAllCandidateProjections().stream()
                 .filter(metadata -> path.equals(metadata.getPath()))
                 .filter(metadata -> method.equalsIgnoreCase(metadata.getMethod()))
                 .map(metadata -> (ApiMetadataCandidateEvidence) metadata)
                 .findFirst();
+    }
+
+    private boolean shouldFallbackToCatalogScope(String tenantId, String environment) {
+        if (catalogFallbackTenantId.isBlank() && catalogFallbackEnvironment.isBlank()) {
+            return false;
+        }
+        String effectiveTenant = effectiveCatalogFallbackTenantId(normalizeOrDefault(tenantId, ""));
+        String effectiveEnv = effectiveCatalogFallbackEnvironment(normalizeOrDefault(environment, ""));
+        return !Objects.equals(normalizeOrDefault(tenantId, ""), effectiveTenant)
+                || !Objects.equals(normalizeOrDefault(environment, ""), effectiveEnv);
+    }
+
+    private String effectiveCatalogFallbackTenantId(String primaryTenant) {
+        return catalogFallbackTenantId.isBlank() ? primaryTenant : catalogFallbackTenantId;
+    }
+
+    private String effectiveCatalogFallbackEnvironment(String primaryEnv) {
+        return catalogFallbackEnvironment.isBlank() ? primaryEnv : catalogFallbackEnvironment;
     }
 
     private String normalizeOrDefault(String value, String defaultValue) {
@@ -896,7 +973,7 @@ public class AgenticAuthoringApiMetadataCandidateCatalog {
             String environment,
             String releaseId) {
         String operation = result.getMethod().toLowerCase(Locale.ROOT);
-        String submitUrl = canonicalSubmitUrl(result.getPath(), operation, artifactKind, normalizedPrompt);
+        String submitUrl = canonicalSubmitUrl(result.getPath(), operation, artifactKind);
         String submitMethod = canonicalSubmitMethod(submitUrl, operation);
         String resourcePath = baseResourcePath(result.getPath());
         double score = Math.max(0.45d, Math.min(0.98d, result.getSimilarityScore()));
@@ -982,7 +1059,7 @@ public class AgenticAuthoringApiMetadataCandidateCatalog {
         }
         score = Math.max(0d, Math.min(0.99d, score));
         String operation = metadata.getMethod().toLowerCase(Locale.ROOT);
-        String submitUrl = canonicalSubmitUrl(metadata.getPath(), operation, artifactKind, normalizedPrompt);
+        String submitUrl = canonicalSubmitUrl(metadata.getPath(), operation, artifactKind);
         String submitMethod = canonicalSubmitMethod(submitUrl, operation);
         String resourcePath = baseResourcePath(metadata.getPath());
         ResourceSemanticRole semanticRole = semanticRole(
@@ -1050,7 +1127,7 @@ public class AgenticAuthoringApiMetadataCandidateCatalog {
         }
         score = Math.max(0d, Math.min(0.90d, score));
         String operation = metadata.getMethod().toLowerCase(Locale.ROOT);
-        String submitUrl = canonicalSubmitUrl(metadata.getPath(), operation, artifactKind, normalizedPrompt);
+        String submitUrl = canonicalSubmitUrl(metadata.getPath(), operation, artifactKind);
         String submitMethod = canonicalSubmitMethod(submitUrl, operation);
         String resourcePath = baseResourcePath(metadata.getPath());
         ResourceSemanticRole semanticRole = semanticRole(
@@ -1095,8 +1172,7 @@ public class AgenticAuthoringApiMetadataCandidateCatalog {
         String submitUrl = canonicalSubmitUrl(
                 metadata.getPath(),
                 operation,
-                context.artifactKind(),
-                context.normalizedPrompt());
+                context.artifactKind());
         String submitMethod = canonicalSubmitMethod(submitUrl, operation);
         String resourcePath = baseResourcePath(metadata.getPath());
         ResourceSemanticRole semanticRole = semanticRole(
@@ -1783,7 +1859,7 @@ public class AgenticAuthoringApiMetadataCandidateCatalog {
         return "/schemas/filtered?path=" + resourcePath + "&operation=" + operation + "&schemaType=" + schemaType;
     }
 
-    private String canonicalSubmitUrl(String path, String operation, String artifactKind, String normalizedPrompt) {
+    private String canonicalSubmitUrl(String path, String operation, String artifactKind) {
         if (path == null || path.isBlank()) {
             return "";
         }
@@ -1792,12 +1868,9 @@ public class AgenticAuthoringApiMetadataCandidateCatalog {
                 && normalized.endsWith("/filter")) {
             return normalized + "/cursor";
         }
-        if ("dashboard".equals(artifactKind)
-                && normalized.endsWith("/stats/comparison")
-                && !containsAny(normalize(valueOrEmpty(normalizedPrompt)), "comparar", "comparacao", "comparativo", "compare", "comparison", "versus")) {
-            return baseResourcePath(normalized) + "/stats/group-by";
-        }
-        if ("dashboard".equals(artifactKind) && !isKnownCollectionOperation(normalized) && !normalized.contains("/{")) {
+        if (("dashboard".equals(artifactKind) || "chart".equals(artifactKind))
+                && !isKnownCollectionOperation(normalized)
+                && !normalized.contains("/{")) {
             return normalized + "/stats/group-by";
         }
         if (("table".equals(artifactKind) || "page".equals(artifactKind) || "unknown".equals(artifactKind))

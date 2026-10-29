@@ -798,6 +798,7 @@ public class AgenticAuthoringToolRegistry {
                         text(payload, "safeSummary"),
                         text(payload, "summary"),
                         text(payload, "description"),
+                        enrichedContextSummary(contextKey, text(payload, "label"), principalContext),
                         text(payload, "label"),
                         conceptKey);
                 String sourceSummary = firstNonBlank(text(payload, "source"), item.releaseKey(), "domain_catalog");
@@ -828,6 +829,46 @@ public class AgenticAuthoringToolRegistry {
                         evidence));
             }
             return List.copyOf(projections.values());
+        }
+
+        private String enrichedContextSummary(
+                String contextKey,
+                String contextLabel,
+                AiPrincipalContext principalContext) {
+            if (domainCatalogIngestionService == null || !StringUtils.hasText(contextKey)) {
+                return null;
+            }
+            try {
+                DomainCatalogContextResponse nodes = domainCatalogIngestionService.contextLatest(
+                        domainCatalogServiceKey,
+                        principalContext.tenantId(),
+                        principalContext.environment(),
+                        "node",
+                        contextKey,
+                        "concept",
+                        null,
+                        10);
+                if (nodes == null || nodes.items() == null || nodes.items().isEmpty()) {
+                    return null;
+                }
+                List<String> conceptLabels = nodes.items().stream()
+                        .filter(Objects::nonNull)
+                        .map(node -> firstNonBlank(
+                                text(node.payload(), "label"),
+                                text(node.payload(), "summary"),
+                                node.itemKey()))
+                        .filter(StringUtils::hasText)
+                        .distinct()
+                        .limit(8)
+                        .toList();
+                if (conceptLabels.isEmpty()) {
+                    return null;
+                }
+                String baseLabel = StringUtils.hasText(contextLabel) ? contextLabel.trim() : contextKey.trim();
+                return baseLabel + " — assuntos governados: " + String.join("; ", conceptLabels);
+            } catch (RuntimeException ex) {
+                return null;
+            }
         }
     }
 
@@ -1180,6 +1221,20 @@ public class AgenticAuthoringToolRegistry {
                 if (distinctResourceKeys.size() == 1) {
                     return distinctResourceKeys.get(0);
                 }
+                List<String> distinctFocusedCatalogKeys = candidates.stream()
+                        .filter(candidate -> candidate.evidence() != null
+                                && (candidate.evidence().contains(
+                                                AgenticAuthoringDomainCatalogCandidateEnhancer.DOMAIN_CATALOG_GROUNDING)
+                                        || candidate.evidence().contains("llm-resource-focus")
+                                        || candidate.evidence().contains("domain-discovery-resource-focus")))
+                        .map(AgenticAuthoringCandidate::resourcePath)
+                        .map(SearchApiResourcesToolExecutor::canonicalResourceKey)
+                        .filter(key -> !key.isBlank())
+                        .distinct()
+                        .toList();
+                if (distinctFocusedCatalogKeys.size() == 1) {
+                    return distinctFocusedCatalogKeys.get(0);
+                }
             }
             String focusedEntity = request != null && request.resourceSearchFocus() != null
                     ? safeText(request.resourceSearchFocus().primaryBusinessEntity()).trim()
@@ -1202,6 +1257,16 @@ public class AgenticAuthoringToolRegistry {
                     && candidates.size() == result.candidates().size()
                     && resourceKeys.stream().noneMatch(String::isBlank)) {
                 List<String> distinctAllResourceKeys = resourceKeys.stream().distinct().toList();
+                List<String> distinctNonDerivedNonWeakResourceKeys = candidates.stream()
+                        .filter(candidate -> candidate.evidence() == null
+                                || (!candidate.evidence().contains("weak-evidence")
+                                        && !candidate.evidence().contains("lexical-fallback")))
+                        .filter(candidate -> !isDerivedProjectionResourcePath(candidate.resourcePath()))
+                        .map(AgenticAuthoringCandidate::resourcePath)
+                        .map(SearchApiResourcesToolExecutor::canonicalResourceKey)
+                        .filter(key -> !key.isBlank())
+                        .distinct()
+                        .toList();
                 List<String> operationalResourceKeys = candidates.stream()
                         .filter(SearchApiResourcesToolExecutor::isStronglyGroundedOperationalCandidate)
                         .map(AgenticAuthoringCandidate::resourcePath)
@@ -1212,6 +1277,18 @@ public class AgenticAuthoringToolRegistry {
                 List<String> supportingConcepts = request.resourceSearchFocus().supportingConcepts() == null
                         ? List.of()
                         : request.resourceSearchFocus().supportingConcepts();
+                boolean singleNonDerivedLeadWithoutDerivedFocusMatch =
+                        distinctNonDerivedNonWeakResourceKeys.size() == 1
+                                && !candidates.isEmpty()
+                                && operationalResourceKeys.contains(distinctNonDerivedNonWeakResourceKeys.get(0))
+                                && candidates.stream()
+                                        .filter(candidate -> isDerivedProjectionResourcePath(candidate.resourcePath()))
+                                        .noneMatch(candidate -> resourceKeyAlignsWithFocus(
+                                                canonicalResourceKey(candidate.resourcePath()),
+                                                focusedEntity));
+                if (singleNonDerivedLeadWithoutDerivedFocusMatch) {
+                    return distinctNonDerivedNonWeakResourceKeys.get(0);
+                }
                 if (operationalResourceKeys.size() == 1
                         && (distinctAllResourceKeys.size() == 1
                                 || focusedEntity.isBlank()
@@ -1233,6 +1310,26 @@ public class AgenticAuthoringToolRegistry {
                     if (alignedKeys.size() == 1) {
                         return alignedKeys.get(0);
                     }
+                    if (alignedKeys.size() > 1) {
+                        List<String> fullyAlignedKeys = alignedKeys.stream()
+                                .filter(key -> allTerminalTokensAlignWithFocus(key, focusedEntity))
+                                .toList();
+                        if (fullyAlignedKeys.size() == 1) {
+                            return fullyAlignedKeys.get(0);
+                        }
+                        if (fullyAlignedKeys.size() > 1) {
+                            int maxTokens = fullyAlignedKeys.stream()
+                                    .mapToInt(SearchApiResourcesToolExecutor::terminalTokenCount)
+                                    .max()
+                                    .orElse(0);
+                            List<String> mostSpecificKeys = fullyAlignedKeys.stream()
+                                    .filter(key -> terminalTokenCount(key) == maxTokens)
+                                    .toList();
+                            if (mostSpecificKeys.size() == 1) {
+                                return mostSpecificKeys.get(0);
+                            }
+                        }
+                    }
                 }
             }
             return "";
@@ -1245,39 +1342,19 @@ public class AgenticAuthoringToolRegistry {
                     || supportingConcepts == null || supportingConcepts.isEmpty()) {
                 return false;
             }
-            String terminal = resourceKey.contains(".")
-                    ? resourceKey.substring(resourceKey.lastIndexOf('.') + 1)
-                    : resourceKey;
-            String normalizedTerminal = java.text.Normalizer.normalize(terminal, java.text.Normalizer.Form.NFD)
-                    .replaceAll("\\p{M}+", "")
-                    .toLowerCase(java.util.Locale.ROOT);
-            List<String> terminalTokens = java.util.Arrays.stream(normalizedTerminal.split("[^a-z0-9]+"))
-                    .filter(token -> token.length() >= 4)
-                    .toList();
+            List<String> terminalTokens = terminalTokens(resourceKey);
             if (terminalTokens.size() < 2) {
                 return false;
             }
-            String normalizedSupporting = java.text.Normalizer.normalize(
-                            String.join(" ", supportingConcepts),
-                            java.text.Normalizer.Form.NFD)
-                    .replaceAll("\\p{M}+", "")
-                    .toLowerCase(java.util.Locale.ROOT);
-            return terminalTokens.stream().allMatch(token -> {
-                String stem = token.endsWith("oes") && token.length() > 5
-                        ? token.substring(0, token.length() - 3)
-                        : token.endsWith("ais") && token.length() > 5
-                                ? token.substring(0, token.length() - 3) + "al"
-                                : token.endsWith("is") && token.length() > 5
-                                        ? token.substring(0, token.length() - 2)
-                                        : token.endsWith("s") && token.length() > 4
-                                                ? token.substring(0, token.length() - 1)
-                                                : token;
-                return normalizedSupporting.contains(stem) || normalizedSupporting.contains(token);
-            });
+            Set<String> supportingStems = normalizedTokenStems(String.join(" ", supportingConcepts));
+            return terminalTokens.stream()
+                    .map(SearchApiResourcesToolExecutor::resourceKeyTokenStem)
+                    .allMatch(supportingStems::contains);
         }
 
         private static boolean isStronglyGroundedOperationalCandidate(AgenticAuthoringCandidate candidate) {
-            if (candidate == null || candidate.evidence() == null) {
+            if (candidate == null || candidate.evidence() == null
+                    || isDerivedProjectionResourcePath(candidate.resourcePath())) {
                 return false;
             }
             List<String> evidence = candidate.evidence();
@@ -1308,30 +1385,79 @@ public class AgenticAuthoringToolRegistry {
         }
 
         private static boolean resourceKeyAlignsWithFocus(String resourceKey, String focusedEntity) {
+            List<String> terminalTokens = terminalTokens(resourceKey);
+            if (terminalTokens.isEmpty()) {
+                return false;
+            }
+            Set<String> focusStems = normalizedTokenStems(focusedEntity);
+            for (String token : terminalTokens) {
+                String stem = resourceKeyTokenStem(token);
+                if (focusStems.contains(stem)) {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        private static boolean allTerminalTokensAlignWithFocus(String resourceKey, String focusedEntity) {
+            List<String> terminalTokens = terminalTokens(resourceKey);
+            if (terminalTokens.isEmpty()) {
+                return false;
+            }
+            Set<String> focusStems = normalizedTokenStems(focusedEntity);
+            return terminalTokens.stream()
+                    .map(SearchApiResourcesToolExecutor::resourceKeyTokenStem)
+                    .allMatch(focusStems::contains);
+        }
+
+        private static Set<String> normalizedTokenStems(String text) {
+            if (text == null || text.isBlank()) {
+                return Set.of();
+            }
+            String normalized = java.text.Normalizer.normalize(text, java.text.Normalizer.Form.NFD)
+                    .replaceAll("\\p{M}+", "")
+                    .toLowerCase(java.util.Locale.ROOT);
+            Set<String> stems = new LinkedHashSet<>();
+            for (String token : normalized.split("[^a-z0-9]+")) {
+                if (token.length() >= 4) {
+                    stems.add(token);
+                    stems.add(resourceKeyTokenStem(token));
+                }
+            }
+            return Set.copyOf(stems);
+        }
+
+        private static int terminalTokenCount(String resourceKey) {
+            return terminalTokens(resourceKey).size();
+        }
+
+        private static List<String> terminalTokens(String resourceKey) {
+            if (resourceKey == null || resourceKey.isBlank()) {
+                return List.of();
+            }
             String terminal = resourceKey.contains(".")
                     ? resourceKey.substring(resourceKey.lastIndexOf('.') + 1)
                     : resourceKey;
             String normalizedTerminal = java.text.Normalizer.normalize(terminal, java.text.Normalizer.Form.NFD)
                     .replaceAll("\\p{M}+", "")
                     .toLowerCase(java.util.Locale.ROOT);
-            String normalizedFocus = java.text.Normalizer.normalize(focusedEntity, java.text.Normalizer.Form.NFD)
-                    .replaceAll("\\p{M}+", "")
-                    .toLowerCase(java.util.Locale.ROOT);
-            for (String token : normalizedTerminal.split("[^a-z0-9]+")) {
-                if (token.length() >= 4) {
-                    String stem = token.endsWith("oes") && token.length() > 5
-                            ? token.substring(0, token.length() - 3)
-                            : token.endsWith("is") && token.length() > 5
-                                    ? token.substring(0, token.length() - 2)
-                                    : token.endsWith("s") && token.length() > 4
-                                            ? token.substring(0, token.length() - 1)
-                                            : token;
-                    if (normalizedFocus.contains(stem)) {
-                        return true;
-                    }
-                }
-            }
-            return false;
+            return java.util.Arrays.stream(normalizedTerminal.split("[^a-z0-9]+"))
+                    .filter(token -> token.length() >= 4)
+                    .toList();
+        }
+
+        private static String resourceKeyTokenStem(String token) {
+            return token.endsWith("oes") && token.length() > 5
+                    ? token.substring(0, token.length() - 3)
+                    : token.endsWith("ao") && token.length() > 4
+                            ? token.substring(0, token.length() - 2)
+                            : token.endsWith("ais") && token.length() > 5
+                                    ? token.substring(0, token.length() - 3) + "al"
+                                    : token.endsWith("is") && token.length() > 5
+                                            ? token.substring(0, token.length() - 2)
+                                            : token.endsWith("s") && token.length() > 4
+                                                    ? token.substring(0, token.length() - 1)
+                                                    : token;
         }
 
         private static String canonicalResourceKey(String resourcePath) {
@@ -1448,12 +1574,24 @@ public class AgenticAuthoringToolRegistry {
             if (operations == null || operations.isEmpty()) {
                 return List.of();
             }
-            String desiredSurface = request != null && request.resourceSearchFocus() != null
-                    ? safeText(request.resourceSearchFocus().desiredSurface())
-                    : "";
-            String artifactKind = firstNonBlank(desiredSurface, request == null ? "" : request.artifactKind())
+            String requestedArtifactKind = request == null ? "" : safeText(request.artifactKind())
                     .trim()
                     .toLowerCase(java.util.Locale.ROOT);
+            String desiredSurface = request != null && request.resourceSearchFocus() != null
+                    ? safeText(request.resourceSearchFocus().desiredSurface())
+                            .trim()
+                            .toLowerCase(java.util.Locale.ROOT)
+                    : "";
+            String artifactKind = Set.of("chart", "dashboard", "table", "list").contains(requestedArtifactKind)
+                    ? requestedArtifactKind
+                    : firstNonBlank(desiredSurface, requestedArtifactKind);
+            if ("chart".equals(artifactKind) || "dashboard".equals(artifactKind)) {
+                return operations.stream()
+                        .sorted(java.util.Comparator.comparingInt(
+                                        SearchApiResourcesToolExecutor::analyticsOperationFit)
+                                .reversed())
+                        .toList();
+            }
             if (!"table".equals(artifactKind) && !"list".equals(artifactKind)) {
                 return operations;
             }
@@ -1465,6 +1603,24 @@ public class AgenticAuthoringToolRegistry {
                                     SearchApiResourcesToolExecutor::rowCollectionOperationFit)
                             .reversed())
                     .toList();
+        }
+
+        private static int analyticsOperationFit(
+                AgenticAuthoringOperationalBindingVerificationService.OperationProjection operation) {
+            if (operation == null || !operation.executableCandidate()) {
+                return 0;
+            }
+            String apiPath = safeText(operation.apiPath()).trim();
+            if (apiPath.endsWith("/stats/group-by")) {
+                return 6;
+            }
+            if (apiPath.endsWith("/stats/timeseries") || apiPath.endsWith("/stats/distribution")) {
+                return 5;
+            }
+            if (apiPath.endsWith("/stats/comparison")) {
+                return 4;
+            }
+            return rowCollectionOperationFit(operation);
         }
 
         private static int rowCollectionOperationFit(

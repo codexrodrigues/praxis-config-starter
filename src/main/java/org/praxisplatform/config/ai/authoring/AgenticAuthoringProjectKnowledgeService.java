@@ -26,6 +26,24 @@ public class AgenticAuthoringProjectKnowledgeService {
     private final AiSensitiveDataRedactor redactor;
     private final AgenticAuthoringProjectKnowledgeCandidateRetriever candidateRetriever;
 
+    @org.springframework.beans.factory.annotation.Value("${praxis.ai.rag.catalog-fallback.tenant-id:}")
+    private String catalogFallbackTenantId = "";
+
+    @org.springframework.beans.factory.annotation.Value("${praxis.ai.rag.catalog-fallback.environment:}")
+    private String catalogFallbackEnvironment = "";
+
+    @org.springframework.beans.factory.annotation.Value("${praxis.ai.security.corporate-mode:true}")
+    private boolean corporateMode = false;
+
+    public void setCatalogFallbackScope(String tenantId, String environment) {
+        this.catalogFallbackTenantId = tenantId == null ? "" : tenantId.trim();
+        this.catalogFallbackEnvironment = environment == null ? "" : environment.trim();
+    }
+
+    public void setCorporateMode(boolean corporateMode) {
+        this.corporateMode = corporateMode;
+    }
+
     public AgenticAuthoringProjectKnowledgeService(
             DomainKnowledgeConceptRepository conceptRepository,
             DomainKnowledgeEvidenceRepository evidenceRepository,
@@ -77,6 +95,18 @@ public class AgenticAuthoringProjectKnowledgeService {
             return List.of();
         }
         List<DomainKnowledgeConcept> candidates = candidateRetriever.retrieve(query);
+        if ((candidates == null || candidates.isEmpty())
+                && shouldFallbackToCatalogScope(query.tenantId(), query.environment())) {
+            candidates = candidateRetriever.retrieve(new AgenticAuthoringProjectKnowledgeQuery(
+                    effectiveCatalogFallbackTenantId(query.tenantId()),
+                    effectiveCatalogFallbackEnvironment(query.environment()),
+                    query.contextKey(),
+                    query.resourceKey(),
+                    query.kinds(),
+                    query.nodeType(),
+                    query.limit(),
+                    query.semanticQuery()));
+        }
         List<AgenticAuthoringProjectKnowledgeProjection> projections = new ArrayList<>();
         for (DomainKnowledgeConcept candidate : candidates) {
             if (!isGovernedCandidate(candidate) || !matchesScope(candidate, query)) {
@@ -149,6 +179,31 @@ public class AgenticAuthoringProjectKnowledgeService {
     private boolean matchesScope(DomainKnowledgeConcept concept, AgenticAuthoringProjectKnowledgeQuery query) {
         return matchesOptionalScope(concept.getContextKey(), query.contextKey())
                 && matchesOptionalScope(concept.getResourceKey(), query.resourceKey());
+    }
+
+    private boolean shouldFallbackToCatalogScope(String tenantId, String environment) {
+        if (!StringUtils.hasText(catalogFallbackTenantId) && !StringUtils.hasText(catalogFallbackEnvironment)) {
+            return false;
+        }
+        String effectiveTenant = effectiveCatalogFallbackTenantId(tenantId);
+        String effectiveEnv = effectiveCatalogFallbackEnvironment(environment);
+        return !java.util.Objects.equals(clean(tenantId), clean(effectiveTenant))
+                || !java.util.Objects.equals(clean(environment), clean(effectiveEnv));
+    }
+
+    private String effectiveCatalogFallbackTenantId(String tenantId) {
+        if (!StringUtils.hasText(catalogFallbackTenantId)) {
+            return tenantId;
+        }
+        String trimmed = catalogFallbackTenantId.trim();
+        if (corporateMode && !"GLOBAL".equalsIgnoreCase(trimmed)) {
+            return tenantId;
+        }
+        return trimmed;
+    }
+
+    private String effectiveCatalogFallbackEnvironment(String environment) {
+        return StringUtils.hasText(catalogFallbackEnvironment) ? catalogFallbackEnvironment.trim() : environment;
     }
 
     private boolean matchesOptionalScope(String candidateValue, String queryValue) {

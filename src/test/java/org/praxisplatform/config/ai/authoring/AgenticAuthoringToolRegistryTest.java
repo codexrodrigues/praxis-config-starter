@@ -507,6 +507,259 @@ class AgenticAuthoringToolRegistryTest {
     }
 
     @Test
+    void promotesPrimaryEntityWhenSingularFocusMatchesCompositeChildResources() {
+        AgenticAuthoringResourceDiscoveryService resourceDiscoveryService =
+                Mockito.mock(AgenticAuthoringResourceDiscoveryService.class);
+        AgenticAuthoringOperationalBindingVerificationService verificationService =
+                Mockito.mock(AgenticAuthoringOperationalBindingVerificationService.class);
+        AgenticAuthoringResourceSearchFocus singularFocus = new AgenticAuthoringResourceSearchFocus(
+                "missao",
+                List.of("em andamento"),
+                "table",
+                "Qual o recurso exato para missões em andamento?",
+                "LLM-authored business subject");
+        AgenticAuthoringCandidate missoes = new AgenticAuthoringCandidate(
+                "/api/operations/missoes",
+                "post",
+                "schema-missoes",
+                "/api/operations/missoes/filter",
+                "POST",
+                0.94d,
+                "",
+                List.of("api-metadata", "domain-catalog-grounding", "semantic-retrieval", "semantic-role:operational-resource", "schema-available"));
+        AgenticAuthoringCandidate missaoParticipantes = new AgenticAuthoringCandidate(
+                "/api/operations/missao-participantes",
+                "post",
+                "schema-participantes",
+                "/api/operations/missao-participantes/filter",
+                "POST",
+                0.88d,
+                "",
+                List.of("api-metadata", "domain-catalog-grounding", "semantic-retrieval", "semantic-role:operational-resource", "schema-available"));
+        AgenticAuthoringCandidate missaoEventos = new AgenticAuthoringCandidate(
+                "/api/operations/missao-eventos",
+                "post",
+                "schema-eventos",
+                "/api/operations/missao-eventos/filter",
+                "POST",
+                0.86d,
+                "",
+                List.of("api-metadata", "domain-catalog-grounding", "semantic-retrieval", "semantic-role:operational-resource", "schema-available"));
+        when(resourceDiscoveryService.search(
+                        Mockito.any(),
+                        Mockito.any(AiPrincipalContext.class),
+                        eq("http://localhost:8088")))
+                .thenReturn(new AgenticAuthoringResourceCandidatesResult(
+                        true,
+                        "searchApiResources",
+                        "missoes em andamento",
+                        "table",
+                        "",
+                        null,
+                        List.of(missoes, missaoParticipantes, missaoEventos),
+                        List.of(),
+                        List.of(),
+                        singularFocus,
+                        null,
+                        Map.of()));
+        when(verificationService.verify(
+                        eq("operations.missoes"),
+                        eq("http://localhost:8088"),
+                        Mockito.any(AiPrincipalContext.class)))
+                .thenReturn(new AgenticAuthoringOperationalBindingVerificationService.VerificationResult(
+                        true,
+                        "operations.missoes",
+                        List.of(new AgenticAuthoringOperationalBindingVerificationService.OperationProjection(
+                                "operations:missions",
+                                "resource:operations.missoes",
+                                "resource_operation",
+                                "operations.missoes",
+                                "/api/operations/missoes",
+                                "/api/operations/missoes/filter",
+                                "post",
+                                "request",
+                                "http://localhost:8088/schemas/filtered?path=%2Fapi%2Foperations%2Fmissoes%2Ffilter&operation=post&schemaType=request",
+                                "http://localhost:8088/api/operations/missoes/capabilities",
+                                "filter",
+                                "",
+                                "",
+                                "principal_capability",
+                                new AgenticAuthoringOperationalBindingVerificationService.AvailabilityProjection(
+                                        true, "", "resource_capabilities"),
+                                "ops-v1",
+                                List.of("domain-knowledge:evidence-status:active"))),
+                        List.of()));
+        AgenticAuthoringToolRegistry registry = new AgenticAuthoringToolRegistry(
+                resourceDiscoveryService,
+                null,
+                null,
+                null,
+                objectMapper,
+                null,
+                null,
+                null,
+                verificationService);
+
+        AgenticAuthoringToolResult result = registry.execute(
+                new AgenticAuthoringToolCall(
+                        AgenticAuthoringToolRegistry.SEARCH_API_RESOURCES,
+                        "pre_intent_resource_discovery",
+                        new AgenticAuthoringResourceCandidatesRequest(
+                                "missoes em andamento",
+                                "mostrar as missões em andamento",
+                                "table",
+                                6,
+                                singularFocus)),
+                new AiPrincipalContext("shield-hq", "nick.fury", "local", false),
+                "retrieveEvidence",
+                "http://localhost:8088");
+
+        assertThat(result.valid()).isTrue();
+        AgenticAuthoringResourceCandidatesResult payload =
+                (AgenticAuthoringResourceCandidatesResult) result.payload();
+        assertThat(payload.resourceSearchFocus().primaryBusinessEntity()).isEqualTo("operations.missoes");
+        assertThat(payload.resourceSearchFocus().uncertainty()).isEmpty();
+        Mockito.verify(verificationService).verify(
+                eq("operations.missoes"),
+                eq("http://localhost:8088"),
+                Mockito.any(AiPrincipalContext.class));
+    }
+
+    @Test
+    void promotesSingleNonDerivedStatsVerifiedLeadWhenAccompaniedOnlyByUnrelatedDerivedView() {
+        AgenticAuthoringResourceDiscoveryService resourceDiscoveryService =
+                Mockito.mock(AgenticAuthoringResourceDiscoveryService.class);
+        AgenticAuthoringOperationalBindingVerificationService verificationService =
+                Mockito.mock(AgenticAuthoringOperationalBindingVerificationService.class);
+        AgenticAuthoringResourceSearchFocus naturalLanguageFocus = new AgenticAuthoringResourceSearchFocus(
+                "criminosos e supervilões monitorados",
+                List.of("planeta de origem", "comparação", "monitoramento"),
+                "gráfico comparativo agrupado por planeta de origem",
+                "Verificar se o catálogo expõe um recurso de ameaças monitoradas.",
+                "LLM-authored natural-language focus");
+        AgenticAuthoringCandidate ameacas = new AgenticAuthoringCandidate(
+                "/api/risk-intelligence/ameacas",
+                "post",
+                "schema-ameacas",
+                "/api/risk-intelligence/ameacas/stats/group-by",
+                "POST",
+                0.78d,
+                "",
+                List.of(
+                        "api-metadata",
+                        "semantic-retrieval",
+                        "schema-available",
+                        "semantic-role:analytics-projection",
+                        "stats-capabilities-verified"));
+        AgenticAuthoringCandidate vwPerfilHeroi = new AgenticAuthoringCandidate(
+                "/api/human-resources/vw-perfil-heroi",
+                "post",
+                "schema-vw-perfil",
+                "/api/human-resources/vw-perfil-heroi/stats/group-by",
+                "POST",
+                0.55d,
+                "",
+                List.of(
+                        "api-metadata",
+                        "semantic-retrieval",
+                        "schema-available",
+                        "semantic-role:analytics-projection",
+                        "stats-capabilities-verified"));
+        AgenticAuthoringCandidate vwResumoMissoes = new AgenticAuthoringCandidate(
+                "/api/operations/vw-resumo-missoes",
+                "post",
+                "schema-vw-resumo",
+                "/api/operations/vw-resumo-missoes/filter/cursor",
+                "POST",
+                0.45d,
+                "",
+                List.of(
+                        "api-metadata",
+                        "semantic-retrieval",
+                        "schema-available",
+                        "semantic-role:operational-resource",
+                        "stats-capabilities-verified"));
+        when(resourceDiscoveryService.search(
+                        Mockito.any(),
+                        Mockito.any(AiPrincipalContext.class),
+                        eq("http://localhost:8088")))
+                .thenReturn(new AgenticAuthoringResourceCandidatesResult(
+                        true,
+                        "searchApiResources",
+                        "criminosos e superviloes monitorados planeta de origem",
+                        "chart",
+                        "",
+                        null,
+                        List.of(vwPerfilHeroi, ameacas, vwResumoMissoes),
+                        List.of(),
+                        List.of(),
+                        naturalLanguageFocus,
+                        null,
+                        Map.of()));
+        when(verificationService.verify(
+                        eq("risk-intelligence.ameacas"),
+                        eq("http://localhost:8088"),
+                        Mockito.any(AiPrincipalContext.class)))
+                .thenReturn(new AgenticAuthoringOperationalBindingVerificationService.VerificationResult(
+                        true,
+                        "risk-intelligence.ameacas",
+                        List.of(new AgenticAuthoringOperationalBindingVerificationService.OperationProjection(
+                                "risk-intelligence:threats",
+                                "resource:risk-intelligence.ameacas",
+                                "resource_operation",
+                                "risk-intelligence.ameacas",
+                                "/api/risk-intelligence/ameacas",
+                                "/api/risk-intelligence/ameacas/stats/group-by",
+                                "post",
+                                "request",
+                                "http://localhost:8088/schemas/filtered?path=%2Fapi%2Frisk-intelligence%2Fameacas%2Fstats%2Fgroup-by&operation=post&schemaType=request",
+                                "http://localhost:8088/api/risk-intelligence/ameacas/capabilities",
+                                "groupByStats",
+                                "",
+                                "",
+                                "principal_capability",
+                                new AgenticAuthoringOperationalBindingVerificationService.AvailabilityProjection(
+                                        true, "", "resource_capabilities"),
+                                "risk-v1",
+                                List.of("domain-knowledge:evidence-status:active"))),
+                        List.of()));
+        AgenticAuthoringToolRegistry registry = new AgenticAuthoringToolRegistry(
+                resourceDiscoveryService,
+                null,
+                null,
+                null,
+                objectMapper,
+                null,
+                null,
+                null,
+                verificationService);
+
+        AgenticAuthoringToolResult result = registry.execute(
+                new AgenticAuthoringToolCall(
+                        AgenticAuthoringToolRegistry.SEARCH_API_RESOURCES,
+                        "pre_intent_resource_discovery",
+                        new AgenticAuthoringResourceCandidatesRequest(
+                                "criminosos e superviloes monitorados planeta de origem",
+                                "gere um gráfico comparando os criminosos e supervilões monitorados por planeta de origem",
+                                "chart",
+                                6,
+                                naturalLanguageFocus)),
+                new AiPrincipalContext("shield-hq", "nick.fury", "local", false),
+                "retrieveEvidence",
+                "http://localhost:8088");
+
+        assertThat(result.valid()).isTrue();
+        AgenticAuthoringResourceCandidatesResult payload =
+                (AgenticAuthoringResourceCandidatesResult) result.payload();
+        assertThat(payload.resourceSearchFocus().primaryBusinessEntity()).isEqualTo("risk-intelligence.ameacas");
+        assertThat(payload.resourceSearchFocus().uncertainty()).isEmpty();
+        Mockito.verify(verificationService).verify(
+                eq("risk-intelligence.ameacas"),
+                eq("http://localhost:8088"),
+                Mockito.any(AiPrincipalContext.class));
+    }
+
+    @Test
     void prioritizesVerifiedRowCollectionOperationForTableMaterialization() {
         AgenticAuthoringResourceDiscoveryService resourceDiscoveryService =
                 Mockito.mock(AgenticAuthoringResourceDiscoveryService.class);

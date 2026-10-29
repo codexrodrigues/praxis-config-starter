@@ -360,7 +360,7 @@ public class AgenticAuthoringResourceDiscoveryService {
                 continue;
             }
             fieldCatalogs.put(candidate.resourcePath(), analyticsFieldCatalog(result));
-            verified.add(withVerifiedStatsEvidence(candidate, principalContext));
+            verified.add(withVerifiedStatsEvidence(candidate, result, principalContext));
         }
         diagnostics.put("analyticsCapabilityVerifiedCandidateCount", verified.size());
         diagnostics.put("analyticsCapabilityExcludedCandidateCount", excludedCount);
@@ -476,9 +476,40 @@ public class AgenticAuthoringResourceDiscoveryService {
         return fields != null && fields.isArray() && !fields.isEmpty();
     }
 
+    private boolean hasGroupByEligibleStatsField(ResourceCapabilitiesFetchResult result) {
+        if (result == null || !result.isSuccess()) {
+            return false;
+        }
+        JsonNode root = result.getCapabilities();
+        if (root != null && root.path("data").path("stats").isObject()) {
+            root = root.path("data");
+        }
+        JsonNode fields = root == null ? null : root.path("stats").path("fields");
+        if (fields == null || !fields.isArray()) {
+            return false;
+        }
+        for (JsonNode field : fields) {
+            if (!field.path("field").asText("").isBlank() && field.path("groupByEligible").asBoolean(false)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     private AgenticAuthoringCandidate withVerifiedStatsEvidence(
             AgenticAuthoringCandidate candidate,
+            ResourceCapabilitiesFetchResult result,
             AiPrincipalContext principalContext) {
+        boolean promoteGroupByEndpoint = hasGroupByEligibleStatsField(result)
+                && (candidate.submitUrl() == null || !candidate.submitUrl().contains("/stats/"));
+        String submitUrl = promoteGroupByEndpoint
+                ? candidate.resourcePath() + "/stats/group-by"
+                : candidate.submitUrl();
+        String submitMethod = promoteGroupByEndpoint ? "post" : candidate.submitMethod();
+        String operation = promoteGroupByEndpoint ? "post" : candidate.operation();
+        String schemaUrl = promoteGroupByEndpoint
+                ? "/schemas/filtered?path=" + submitUrl + "&operation=post&schemaType=response"
+                : candidate.schemaUrl();
         LinkedHashSet<String> evidence = new LinkedHashSet<>(candidate.evidence() == null
                 ? List.of()
                 : candidate.evidence());
@@ -508,10 +539,10 @@ public class AgenticAuthoringResourceDiscoveryService {
                 items);
         return new AgenticAuthoringCandidate(
                 candidate.resourcePath(),
-                candidate.operation(),
-                candidate.schemaUrl(),
-                candidate.submitUrl(),
-                candidate.submitMethod(),
+                operation,
+                schemaUrl,
+                submitUrl,
+                submitMethod,
                 candidate.score(),
                 candidate.reason(),
                 List.copyOf(evidence),

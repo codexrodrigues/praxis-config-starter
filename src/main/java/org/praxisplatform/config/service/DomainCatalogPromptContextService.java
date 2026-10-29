@@ -153,6 +153,8 @@ public class DomainCatalogPromptContextService {
                         .append(" | label=")
                         .append(label(item));
                 String description = firstText(
+                        text(payload, "safeSummary"),
+                        text(payload, "summary"),
                         text(payload, "description"),
                         text(payload == null ? null : payload.path("businessGlossary"), "description"));
                 if (StringUtils.hasText(description)) {
@@ -351,41 +353,15 @@ public class DomainCatalogPromptContextService {
 
     private String formatContext(DomainCatalogRequest request, String tenantId, String environment) {
         try {
-            DomainCatalogContextResponse context = domainCatalogIngestionService.contextLatestSemantic(
-                    request.serviceKey(),
-                    request.resourceKey(),
-                    tenantId,
-                    environment,
-                    request.itemType(),
-                    request.contextKey(),
-                    request.nodeType(),
-                    request.query(),
-                    request.limit());
-            if (context != null && context.items() != null && !context.items().isEmpty()) {
-                return formatContext(context);
-            }
-            context = StringUtils.hasText(request.resourceKey())
-                    ? domainCatalogIngestionService.contextLatest(
-                            request.serviceKey(),
-                            request.resourceKey(),
-                            tenantId,
-                            environment,
-                            request.itemType(),
-                            request.contextKey(),
-                            request.nodeType(),
-                            request.query(),
-                            request.limit())
-                    : domainCatalogIngestionService.contextLatest(
-                            request.serviceKey(),
-                            tenantId,
-                            environment,
-                            request.itemType(),
-                            request.contextKey(),
-                            request.nodeType(),
-                            request.query(),
-                            request.limit());
-            return formatContext(context);
+            return formatContextForServiceKey(request, request.serviceKey(), tenantId, environment);
         } catch (RuntimeException ex) {
+            if (StringUtils.hasText(defaultServiceKey) && !defaultServiceKey.equals(request.serviceKey())) {
+                try {
+                    return formatContextForServiceKey(request, defaultServiceKey, tenantId, environment);
+                } catch (RuntimeException ignored) {
+                    // Preserve original warning below when fallback also misses.
+                }
+            }
             log.warn(
                     "Could not build domain catalog prompt context for serviceKey={}, resourceKey={}, tenant={}, environment={}: {}",
                     request.serviceKey(),
@@ -395,6 +371,47 @@ public class DomainCatalogPromptContextService {
                     ex.getMessage());
             return "";
         }
+    }
+
+    private String formatContextForServiceKey(
+            DomainCatalogRequest request,
+            String serviceKey,
+            String tenantId,
+            String environment) {
+        DomainCatalogContextResponse context = domainCatalogIngestionService.contextLatestSemantic(
+                serviceKey,
+                request.resourceKey(),
+                tenantId,
+                environment,
+                request.itemType(),
+                request.contextKey(),
+                request.nodeType(),
+                request.query(),
+                request.limit());
+        if (context != null && context.items() != null && !context.items().isEmpty()) {
+            return formatContext(context);
+        }
+        context = StringUtils.hasText(request.resourceKey())
+                ? domainCatalogIngestionService.contextLatest(
+                        serviceKey,
+                        request.resourceKey(),
+                        tenantId,
+                        environment,
+                        request.itemType(),
+                        request.contextKey(),
+                        request.nodeType(),
+                        request.query(),
+                        request.limit())
+                : domainCatalogIngestionService.contextLatest(
+                        serviceKey,
+                        tenantId,
+                        environment,
+                        request.itemType(),
+                        request.contextKey(),
+                        request.nodeType(),
+                        request.query(),
+                        request.limit());
+        return formatContext(context);
     }
 
     private String formatRelationships(RelationshipRequest request, String tenantId, String environment) {

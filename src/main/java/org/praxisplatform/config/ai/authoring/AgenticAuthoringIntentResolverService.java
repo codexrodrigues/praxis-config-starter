@@ -473,7 +473,15 @@ public class AgenticAuthoringIntentResolverService {
             artifactKind = valueOrUnknown(llmIntent.artifactKind());
             changeKind = valueOrUnknown(llmIntent.changeKind());
             boolean llmCandidateBundleHasExplicitSource = hasExplicitSourceCandidate(llmCandidateOptions);
-            String llmResourceSearchQuery = llmCandidateBundleHasExplicitSource
+            String llmSelectedResourcePath = valueOrDefault(llmIntent.selectedResourcePath(), "");
+            boolean llmSelectedGovernedToolCandidate = !llmSelectedResourcePath.isBlank()
+                    && llmCandidateOptions != null
+                    && llmCandidateOptions.stream().anyMatch(candidate ->
+                            candidate != null
+                                    && llmSelectedResourcePath.equals(candidate.resourcePath())
+                                    && hasEvidence(candidate, "tool-search-api-resources")
+                                    && hasTrustedSelectionEvidence(candidate));
+            String llmResourceSearchQuery = llmCandidateBundleHasExplicitSource || llmSelectedGovernedToolCandidate
                     ? ""
                     : consultativePlatformCapabilityQuestion
                     && (!isDomainDataCatalogQuestion(prompt) || isConsultativeFormPolicyQuestion(prompt))
@@ -501,7 +509,9 @@ public class AgenticAuthoringIntentResolverService {
                 candidates = deduplicateCandidates(refinedCandidates);
                 if (!emptyCandidateSetBeforeSearch) {
                     List<AgenticAuthoringCandidate> verifiedOperations = candidates.stream()
-                            .filter(candidate -> verifiedOperationForCandidate(request, candidate) != null)
+                            .filter(candidate -> verifiedOperationForCandidate(request, candidate) != null
+                                    || (hasVerifiedOperationalBindingEvidence(candidate)
+                                            && hasEvidence(candidate, "tool-search-api-resources")))
                             .toList();
                     List<AgenticAuthoringCandidate> documentaryCandidates = candidates.stream()
                             .filter(candidate -> !verifiedOperations.contains(candidate))
@@ -897,7 +907,7 @@ public class AgenticAuthoringIntentResolverService {
                 && !consultativeWeakLexicalSelectionDeferred
                 && !apiCatalogWeakLexicalSelectionDeferred) {
             selectedCandidate = selectCandidate(candidates, target, operationKind, artifactKind, prompt);
-            if (selectedCandidate == null) {
+            if (selectedCandidate == null && !shouldDetachCurrentTarget(prompt, artifactKind, target)) {
                 selectedCandidate = targetCandidate(target);
             }
             if (selectedCandidate != null) {
@@ -2270,17 +2280,25 @@ public class AgenticAuthoringIntentResolverService {
         return contextCandidateSupport.hasMaterializableResourceDiscoveryContext(request);
     }
 
+    private boolean hasBlockingActiveSemanticDecision(AgenticAuthoringIntentResolutionRequest request) {
+        return candidateScoringSupport.hasBlockingActiveSemanticDecision(request);
+    }
+
     private boolean shouldUsePreIntentResourceDiscoveryAsPrimaryEvidence(
             boolean shouldResolveLlmIntent,
             AgenticAuthoringIntentResolutionRequest request,
             AgenticAuthoringTarget target) {
+        boolean detachTargetForReplacement = shouldDetachCurrentTarget(
+                normalize(request == null ? "" : valueOrDefault(request.userPrompt(), "")),
+                materializableResourceDiscoveryArtifactKind(request, "unknown"),
+                target);
         if (!shouldResolveLlmIntent
                 || request == null
                 || request.pendingClarification() != null
-                || request.activeSemanticDecision() != null
+                || hasBlockingActiveSemanticDecision(request)
                 || !hasMaterializableResourceDiscoveryContext(request)
                 || !hasLlmAuthoredMaterializableResourceFocus(request)
-                || target != null && !valueOrDefault(target.widgetKey(), "").isBlank()) {
+                || (target != null && !valueOrDefault(target.widgetKey(), "").isBlank() && !detachTargetForReplacement)) {
             return false;
         }
         List<AgenticAuthoringCandidate> candidates = contextHintCandidates(request);
@@ -2465,7 +2483,7 @@ public class AgenticAuthoringIntentResolverService {
             trace.add("skipped:pending-clarification");
             return null;
         }
-        if (request.activeSemanticDecision() != null) {
+        if (hasBlockingActiveSemanticDecision(request)) {
             trace.add("skipped:active-semantic-decision");
             return null;
         }
@@ -2473,7 +2491,11 @@ public class AgenticAuthoringIntentResolverService {
             trace.add("skipped:materializable-resource-context-missing");
             return null;
         }
-        if (target != null && !valueOrDefault(target.widgetKey(), "").isBlank()) {
+        boolean detachTargetForReplacement = shouldDetachCurrentTarget(
+                normalize(request == null ? "" : valueOrDefault(request.userPrompt(), "")),
+                materializableResourceDiscoveryArtifactKind(request, "unknown"),
+                target);
+        if (target != null && !valueOrDefault(target.widgetKey(), "").isBlank() && !detachTargetForReplacement) {
             trace.add("skipped:selected-widget-target");
             return null;
         }
@@ -2722,7 +2744,14 @@ public class AgenticAuthoringIntentResolverService {
                 && !hasEvidence(candidate, "explicit-source-match")
                 && !hasEvidence(candidate, "explicit-resource-path")
                 && !hasEvidence(candidate, "quick-reply-context")
-                && !hasEvidence(candidate, "current-page-target-resource");
+                && !hasEvidence(candidate, "current-page-target-resource")
+                && !((hasEvidence(candidate, AgenticAuthoringDomainCatalogCandidateEnhancer.DOMAIN_CATALOG_GROUNDING)
+                                || (hasEvidence(candidate, "api-metadata")
+                                        && hasEvidence(candidate, "semantic-retrieval")
+                                        && hasEvidence(candidate, "schema-available")
+                                        && !hasEvidence(candidate, "weak-evidence")
+                                        && !hasEvidence(candidate, "lexical-fallback")))
+                        && hasEvidence(candidate, "llm-resource-focus"));
     }
 
     private boolean hasUnconfirmedAiAuthoredResourceFocus(

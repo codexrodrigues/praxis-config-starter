@@ -231,7 +231,7 @@ public class AgenticAuthoringLlmPreIntentToolPlanningService implements AgenticA
         if (request.pendingClarification() != null) {
             return AgenticAuthoringPreIntentToolPlanningResult.skipped("pending-clarification-present");
         }
-        if (request.activeSemanticDecision() != null) {
+        if (hasBlockingActiveSemanticDecision(request)) {
             return AgenticAuthoringPreIntentToolPlanningResult.skipped("active-semantic-decision-present");
         }
         if (hasResourceDiscoveryContext(request)) {
@@ -441,6 +441,62 @@ public class AgenticAuthoringLlmPreIntentToolPlanningService implements AgenticA
         long requiredNanos = TimeUnit.SECONDS.toNanos(MIN_RETRY_BUDGET_SECONDS)
                 + TimeUnit.MILLISECONDS.toNanos(providerRetryDelayMs);
         return deadlineNanos - System.nanoTime() >= requiredNanos;
+    }
+
+    private boolean hasBlockingActiveSemanticDecision(AgenticAuthoringTurnStreamRequest request) {
+        AgenticAuthoringSemanticDecision decision = request == null ? null : request.activeSemanticDecision();
+        if (decision == null) {
+            return false;
+        }
+        String constraintSource = decision.constraints() == null
+                ? ""
+                : decision.constraints().path("source").asText("").trim();
+        if ("server-issued-quick-reply".equalsIgnoreCase(constraintSource)) {
+            return true;
+        }
+        String resourcePath = decision.selectedResource() == null
+                ? ""
+                : valueOrEmpty(decision.selectedResource().resourcePath()).trim();
+        if (!StringUtils.hasText(resourcePath)) {
+            return false;
+        }
+        String operation = valueOrEmpty(decision.operationKind()).trim().toLowerCase(Locale.ROOT);
+        String artifact = valueOrEmpty(decision.artifactKind()).trim().toLowerCase(Locale.ROOT);
+        String change = valueOrEmpty(decision.changeKind()).trim().toLowerCase(Locale.ROOT);
+        if ("explore".equals(operation)
+                || "explain".equals(operation)
+                || "api_catalog".equals(artifact)
+                || "unknown".equals(artifact)
+                || change.startsWith("answer_")
+                || "api_catalog_followup".equals(change)) {
+            return false;
+        }
+        return !isDataSourceReplacementPrompt(request.userPrompt());
+    }
+
+    private boolean isDataSourceReplacementPrompt(String prompt) {
+        String normalized = normalizeIdentity(prompt);
+        if (normalized.isBlank()) {
+            return false;
+        }
+        if (normalized.contains("mantem os dados")
+                || normalized.contains("mantenha os dados")
+                || normalized.contains("mantem a fonte")
+                || normalized.contains("mantenha a fonte")
+                || normalized.contains("mantem o recurso")
+                || normalized.contains("mantenha o recurso")
+                || normalized.contains("mesma fonte")
+                || normalized.contains("mesmos dados")
+                || normalized.contains("preserve a fonte")) {
+            return false;
+        }
+        return normalized.contains("troca a fonte")
+                || normalized.contains("troque a fonte")
+                || normalized.contains("mude a fonte")
+                || normalized.contains("outra fonte")
+                || normalized.contains("nova fonte")
+                || normalized.contains("fonte deve ser")
+                || normalized.contains("fonte precisa ser");
     }
 
     private boolean hasResourceDiscoveryContext(AgenticAuthoringTurnStreamRequest request) {
@@ -740,8 +796,6 @@ public class AgenticAuthoringLlmPreIntentToolPlanningService implements AgenticA
                 not yet concrete artifact authoring. A question such as "sobre quais assuntos posso criar
                 tabelas ou dashboards para obter informações visuais?" is domain discovery: the user is asking for the
                 available business subjects, not yet commanding creation of either artifact. The same remains true with
-                tabelas ou dashboards para obter informações visuais?" is domain discovery: the user is asking for the
-                available business subjects, not yet commanding creation of either artifact. The same remains true with
                 grammar errors, omitted words, or without the literal word "available". This discovery must happen before capability, concept,
                 binding or API-resource discovery.
 
@@ -751,8 +805,8 @@ public class AgenticAuthoringLlmPreIntentToolPlanningService implements AgenticA
                 A request to show records on an empty canvas is UI authoring even without a component name.
                 Preserve its constraints for schema-grounded materialization.
                 Set queryConstraints.appliesToDataSelection=true and populate filters only for record selection.
-                For headers, labels, renderers, formatting, composed cells, displayed values, or no subset, use false and
-                filters=[]; retrieval metadata is never a filter.
+                For headers, labels, renderers, formatting, composed cells, displayed columns, chart axes, or resource subjects, use false and
+                filters=[]; retrieval metadata and grouping axes are never filters, and never invent filter values.
                 Preserve a semantic category, such as an organizational area, as text or a text list on this first pass.
                 After resource and field grounding, live option resolution replaces it with current canonical IDs.
                 Never invent an option value or use textual contains.
@@ -765,7 +819,6 @@ public class AgenticAuthoringLlmPreIntentToolPlanningService implements AgenticA
                 Use api_resource when an operational
                 resource is needed.
                 Use API resource retrieval when
-                resource, field, dataset, binding or endpoint is actually needed. Use API resource retrieval when
                 governed resources, fields, datasets or
                 API-backed sources are needed for a page, view, table, dashboard, form, overview, analysis,
                 monitoring surface, or data-source change. User wording may be vague, misspelled, colloquial, multilingual
@@ -780,7 +833,7 @@ public class AgenticAuthoringLlmPreIntentToolPlanningService implements AgenticA
                 individual or single-record profile only when requested. Select another analytical projection only when
                 its subject, such as payroll, is itself requested. Decide by what is being measured or explained:
                 payroll is primaryBusinessEntity for employee salary or compensation; employee headcount, status, role
-                or department stays on employees. For KPI/chart dashboards, prefer the governed analytical projection
+                or department stays on employees. Dedicated period/leave/occurrence resources in DOMAIN_RESOURCE_IDENTITY_CATALOG win over filtering employees (use filters=[] unless a sub-filter is requested). For KPI/chart dashboards, prefer the governed analytical projection
                 of the measured subject over contributing operational/history records. After confirmation, select the
                 canonical payroll analytical resource. A related category constraining displayed records belongs in
                 supportingConcepts/queryConstraints, never as primaryBusinessEntity because it ranks higher. For parent-child-related-resource, resource-master-detail or tabs_layout where the user selects a parent record to view/manage related child records, primaryBusinessEntity is that parent entity and child records go in supportingConcepts.
@@ -1214,9 +1267,12 @@ public class AgenticAuthoringLlmPreIntentToolPlanningService implements AgenticA
                 .put("type", "boolean")
                 .put(
                         "description",
-                        "True only when filters constrain which backend records are retrieved or displayed; false for headers, labels, renderers, formatting, composed cells, and displayed-value edits.");
+                        "True ONLY when filters constrain which backend rows are retrieved by a specific attribute value; false for requested columns/fields to display in a table (e.g. 'mostrando a função e a remuneração'), analytical chart grouping dimensions ('por X'), the subject already represented by the selected resource itself, headers, labels, renderers, formatting, composed cells, and displayed-value edits.");
         ObjectNode queryFilters = queryConstraintProperties.putObject("filters");
         queryFilters.put("type", "array");
+        queryFilters.put(
+                "description",
+                "Row-level filter predicates explicitly stated by the user to narrow a resource's records. Must be empty [] when appliesToDataSelection is false. Never put requested table columns to display, chart grouping axes, the canonical key or subject of the selected resource itself, or invented example values in filters.");
         ObjectNode queryFilter = queryFilters.putObject("items");
         queryFilter.put("type", "object");
         ObjectNode queryFilterProperties = queryFilter.putObject("properties");
@@ -1283,7 +1339,7 @@ public class AgenticAuthoringLlmPreIntentToolPlanningService implements AgenticA
         focus.put("type", "object");
         ObjectNode focusProperties = focus.putObject("properties");
         nullableString(focusProperties, "primaryBusinessEntity")
-                .put("description", "Canonical business subject explicitly requested by the user. When domainDiscovery provides the matching subject, return its resourceKey exactly. Use the entity being governed, filtered, listed, or analyzed; never substitute a UI surface, profile/view name, or related analytical projection. For parent-child-related-resource, resource-master-detail, or tabs_layout where the user selects a parent record to inspect related child records, use the selected parent entity as primaryBusinessEntity and put child records in supportingConcepts.");
+                .put("description", "Canonical business subject explicitly requested by the user. When domainDiscovery or DOMAIN_RESOURCE_IDENTITY_CATALOG provides the matching subject, return its canonical resourceKey (e.g. domain.resource) exactly. Use the entity being governed, filtered, listed, or analyzed; never substitute a UI surface, profile/view name, or related analytical projection. When an operational period, leave/vacation, allocation, or occurrence has its own dedicated resource in DOMAIN_RESOURCE_IDENTITY_CATALOG (even when phrased around the people in that period), use that dedicated resource as primaryBusinessEntity rather than filtering the person master entity. For parent-child-related-resource, resource-master-detail, or tabs_layout where the user selects a parent record to inspect related child records, use the selected parent entity as primaryBusinessEntity and put child records in supportingConcepts.");
         ObjectNode supportingConcepts = focusProperties.putObject("supportingConcepts");
         supportingConcepts.put("type", "array");
         supportingConcepts.putObject("items").put("type", "string");

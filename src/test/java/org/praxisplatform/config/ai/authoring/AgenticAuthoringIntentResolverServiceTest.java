@@ -15805,7 +15805,7 @@ class AgenticAuthoringIntentResolverServiceTest {
                         List.of("funcionários", "cadastro", "departamento")),
                         "tool-search-api-resources"),
                 "semantic-role:operational-resource");
-        employeeCandidate = withEvidence(employeeCandidate, "lexical-fallback");
+
         Mockito.when(llmIntentResolver.resolve(
                         Mockito.any(),
                         Mockito.anyString(),

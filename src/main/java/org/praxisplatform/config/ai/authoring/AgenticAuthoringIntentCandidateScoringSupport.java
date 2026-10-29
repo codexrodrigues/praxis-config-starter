@@ -321,16 +321,57 @@ final class AgenticAuthoringIntentCandidateScoringSupport {
                         .thenComparing(Comparator.comparingInt(
                                 (AgenticAuthoringCandidate candidate) -> hasEvidence(candidate, "tool-search-api-resources") ? 1 : 0)
                                 .reversed())
+                        .thenComparing(Comparator.comparingInt(
+                                (AgenticAuthoringCandidate candidate) -> hasEvidence(candidate, "domain-binding") ? 1 : 0)
+                                .reversed())
                         .thenComparing(Comparator.comparingDouble(
                                 (AgenticAuthoringCandidate candidate) -> semanticRoleFit(candidate, resourceNeed)).reversed())
                         .thenComparing(Comparator.comparingInt(
                                 (AgenticAuthoringCandidate candidate) -> promptCandidateIdentityFit(prompt, candidate)).reversed())
-                        .thenComparing(Comparator.comparingDouble(AgenticAuthoringCandidate::score).reversed()))
+                        .thenComparing(Comparator.comparingDouble(AgenticAuthoringCandidate::score).reversed())
+                        .thenComparing(Comparator.comparingInt(
+                                (AgenticAuthoringCandidate candidate) -> operationFitForArtifact(artifactKind, candidate)).reversed()))
                 .toList();
     }
 
     int promptCandidateIdentityFit(String prompt, AgenticAuthoringCandidate candidate) {
         return promptMatchesCandidatePathIdentity(prompt, candidate) ? 1 : 0;
+    }
+
+    int operationFitForArtifact(String artifactKind, AgenticAuthoringCandidate candidate) {
+        if (candidate == null) {
+            return 0;
+        }
+        String submitUrl = normalizePath(valueOrDefault(candidate.submitUrl(), ""));
+        String operation = valueOrDefault(candidate.operation(), "").toLowerCase(Locale.ROOT);
+        if ("chart".equals(artifactKind) || "dashboard".equals(artifactKind)) {
+            if (submitUrl.endsWith("/stats/group-by")) {
+                return 4;
+            }
+            if (submitUrl.contains("/stats/")) {
+                return 3;
+            }
+            if (submitUrl.endsWith("/filter/cursor")) {
+                return 2;
+            }
+            if (submitUrl.endsWith("/filter") || "get".equals(operation)) {
+                return 1;
+            }
+            return 0;
+        }
+        if ("table".equals(artifactKind) || "list".equals(artifactKind) || "page".equals(artifactKind)) {
+            if (submitUrl.endsWith("/filter/cursor")) {
+                return 3;
+            }
+            if (submitUrl.endsWith("/filter") || ("get".equals(operation) && !submitUrl.contains("{"))) {
+                return 2;
+            }
+            if (submitUrl.contains("/stats/")) {
+                return 1;
+            }
+            return 0;
+        }
+        return 0;
     }
 
     double semanticRoleFit(AgenticAuthoringCandidate candidate, SemanticResourceNeed resourceNeed) {
@@ -402,6 +443,7 @@ final class AgenticAuthoringIntentCandidateScoringSupport {
         }
         if (hasEvidence(candidate, "semantic-retrieval")
                 || hasEvidence(candidate, "explicit-source-match")
+                || hasEvidence(candidate, "domain-binding")
                 || hasEvidence(candidate, AgenticAuthoringDomainCatalogCandidateEnhancer.DOMAIN_CATALOG_GROUNDING)) {
             return 3;
         }
@@ -1740,7 +1782,7 @@ final class AgenticAuthoringIntentCandidateScoringSupport {
                 || request.conversationMessages() == null
                 || request.conversationMessages().isEmpty()
                 || request.pendingClarification() != null
-                || request.activeSemanticDecision() != null
+                || hasBlockingActiveSemanticDecision(request)
                 || hasPageWidgets(request.currentPage())
                 || !valueOrDefault(request.selectedWidgetKey(), "").isBlank()
                 || !"create".equals(valueOrDefault(operationKind, ""))
@@ -1749,6 +1791,38 @@ final class AgenticAuthoringIntentCandidateScoringSupport {
             return false;
         }
         return true;
+    }
+
+    boolean hasBlockingActiveSemanticDecision(AgenticAuthoringIntentResolutionRequest request) {
+        AgenticAuthoringSemanticDecision decision = request == null ? null : request.activeSemanticDecision();
+        if (decision == null) {
+            return false;
+        }
+        String constraintSource = decision.constraints() == null
+                ? ""
+                : decision.constraints().path("source").asText("").trim();
+        if ("server-issued-quick-reply".equalsIgnoreCase(constraintSource)) {
+            return true;
+        }
+        String resourcePath = decision.selectedResource() == null
+                ? ""
+                : valueOrDefault(decision.selectedResource().resourcePath(), "").trim();
+        if (resourcePath.isBlank()) {
+            return false;
+        }
+        String operation = valueOrDefault(decision.operationKind(), "").trim().toLowerCase(Locale.ROOT);
+        String artifact = valueOrDefault(decision.artifactKind(), "").trim().toLowerCase(Locale.ROOT);
+        String change = valueOrDefault(decision.changeKind(), "").trim().toLowerCase(Locale.ROOT);
+        if ("explore".equals(operation)
+                || "explain".equals(operation)
+                || "api_catalog".equals(artifact)
+                || "unknown".equals(artifact)
+                || change.startsWith("answer_")
+                || "api_catalog_followup".equals(change)) {
+            return false;
+        }
+        String normalizedPrompt = normalize(valueOrDefault(request.userPrompt(), ""));
+        return !(isDataSourceReplacementPrompt(normalizedPrompt) && !isExplicitSourcePreservePrompt(normalizedPrompt));
     }
 
     AgenticAuthoringIntentResolutionRequest withoutConversationMessages(

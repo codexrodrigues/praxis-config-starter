@@ -650,6 +650,70 @@ class AgenticAuthoringDomainCatalogCandidateEnhancerTest {
                 .contains(AgenticAuthoringDomainCatalogCandidateEnhancer.DOMAIN_CATALOG_GROUNDING);
     }
 
+    @Test
+    void groundsStructuredFocusCandidateThroughSupportingConceptTokensWhenPrimaryEntityHasMultipleWords() {
+        DomainCatalogIngestionService domainCatalogIngestionService = Mockito.mock(DomainCatalogIngestionService.class);
+        Mockito.when(domainCatalogIngestionService.contextLatest(
+                        Mockito.eq("praxis-service"),
+                        Mockito.eq("risk-intelligence.ameacas"),
+                        Mockito.eq("shield-hq"),
+                        Mockito.eq("local"),
+                        Mockito.isNull(),
+                        Mockito.isNull(),
+                        Mockito.isNull(),
+                        Mockito.anyString(),
+                        Mockito.eq(8)))
+                .thenReturn(new DomainCatalogContextResponse(
+                        "praxis.domain-catalog-context/v0.1",
+                        null,
+                        "",
+                        null,
+                        null,
+                        null,
+                        List.of(),
+                        List.of()));
+        Mockito.when(domainCatalogIngestionService.contextLatest(
+                        Mockito.eq("praxis-service"),
+                        Mockito.eq("risk-intelligence.ameacas"),
+                        Mockito.eq("shield-hq"),
+                        Mockito.eq("local"),
+                        Mockito.isNull(),
+                        Mockito.isNull(),
+                        Mockito.isNull(),
+                        Mockito.eq("planeta"),
+                        Mockito.eq(8)))
+                .thenReturn(new DomainCatalogContextResponse(
+                        "praxis.domain-catalog-context/v0.1",
+                        null,
+                        "planeta",
+                        null,
+                        null,
+                        null,
+                        List.of(),
+                        List.of(item("node", "risk-intelligence.ameacas.field.planeta", "Planeta de origem da ameaça"))));
+        AgenticAuthoringDomainCatalogCandidateEnhancer enhancer =
+                new AgenticAuthoringDomainCatalogCandidateEnhancer(domainCatalogIngestionService, "praxis-service");
+        AgenticAuthoringCandidate threatsCandidate = new AgenticAuthoringCandidate(
+                "/api/risk-intelligence/ameacas",
+                "post",
+                "/schemas/filtered?path=/api/risk-intelligence/ameacas/stats/group-by&operation=post&schemaType=response",
+                "/api/risk-intelligence/ameacas/stats/group-by",
+                "post",
+                0.55d,
+                "api_metadata semantic retrieval",
+                List.of("api-metadata", "semantic-retrieval", "schema-available", "semantic-role:operational-resource"));
+
+        List<AgenticAuthoringCandidate> enhanced = enhancer.enhance(
+                "primary business entity: criminosos e supervilões monitorados. supporting concepts: planeta de origem, comparação por categoria. desired surface: chart. semantic query: Localize ameaças por planeta de origem.",
+                List.of(threatsCandidate),
+                "shield-hq",
+                "local");
+
+        assertThat(enhanced).hasSize(1);
+        assertThat(enhanced.get(0).evidence())
+                .contains(AgenticAuthoringDomainCatalogCandidateEnhancer.DOMAIN_CATALOG_GROUNDING);
+    }
+
     private DomainCatalogItemResponse item(String itemType, String itemKey, String label) {
         return new DomainCatalogItemResponse(
                 UUID.randomUUID(),

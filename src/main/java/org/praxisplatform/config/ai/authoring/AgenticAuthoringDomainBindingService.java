@@ -15,6 +15,13 @@ public class AgenticAuthoringDomainBindingService {
     private final DomainKnowledgeBindingRepository bindingRepository;
     private final DomainKnowledgeEvidenceRepository evidenceRepository;
     private final ObjectMapper objectMapper;
+    private String catalogFallbackTenantId = "";
+    private String catalogFallbackEnvironment = "";
+
+    public void setCatalogFallbackScope(String tenantId, String environment) {
+        this.catalogFallbackTenantId = tenantId == null ? "" : tenantId.trim();
+        this.catalogFallbackEnvironment = environment == null ? "" : environment.trim();
+    }
 
     public AgenticAuthoringDomainBindingService(
             DomainKnowledgeBindingRepository bindingRepository,
@@ -40,14 +47,47 @@ public class AgenticAuthoringDomainBindingService {
         int effectiveLimit = Math.min(Math.max(limit, 1), 12);
         String scopedTenant = tenantId.trim();
         String scopedEnvironment = environment.trim();
+        List<BindingProjection> resolved = resolveExactScope(scopedTenant, scopedEnvironment, resourceKey.trim(), effectiveLimit);
+        if (resolved.isEmpty() && shouldFallbackToCatalogScope(scopedTenant, scopedEnvironment)) {
+            resolved = resolveExactScope(
+                    effectiveCatalogFallbackTenantId(scopedTenant),
+                    effectiveCatalogFallbackEnvironment(scopedEnvironment),
+                    resourceKey.trim(),
+                    effectiveLimit);
+        }
+        return resolved;
+    }
+
+    private List<BindingProjection> resolveExactScope(
+            String scopedTenant,
+            String scopedEnvironment,
+            String resourceKey,
+            int effectiveLimit) {
         return bindingRepository.findGovernedOperationalBindings(
-                        scopedTenant, scopedEnvironment, resourceKey.trim()).stream()
+                        scopedTenant, scopedEnvironment, resourceKey).stream()
                 .filter(binding -> belongsToScope(binding, scopedTenant, scopedEnvironment))
                 .filter(this::releaseIsCurrentForConcept)
                 .filter(this::hasActiveConceptEvidence)
                 .map(this::projection)
                 .limit(effectiveLimit)
                 .toList();
+    }
+
+    private boolean shouldFallbackToCatalogScope(String tenantId, String environment) {
+        if (!StringUtils.hasText(catalogFallbackTenantId) && !StringUtils.hasText(catalogFallbackEnvironment)) {
+            return false;
+        }
+        String effectiveTenant = effectiveCatalogFallbackTenantId(tenantId);
+        String effectiveEnv = effectiveCatalogFallbackEnvironment(environment);
+        return !Objects.equals(tenantId, effectiveTenant) || !Objects.equals(environment, effectiveEnv);
+    }
+
+    private String effectiveCatalogFallbackTenantId(String tenantId) {
+        return StringUtils.hasText(catalogFallbackTenantId) ? catalogFallbackTenantId : tenantId;
+    }
+
+    private String effectiveCatalogFallbackEnvironment(String environment) {
+        return StringUtils.hasText(catalogFallbackEnvironment) ? catalogFallbackEnvironment : environment;
     }
 
     private boolean belongsToScope(

@@ -118,10 +118,14 @@ public class AgenticAuthoringAutoConfiguration {
     @ConditionalOnMissingBean
     public AgenticAuthoringApiMetadataCandidateCatalog agenticAuthoringApiMetadataCandidateCatalog(
             ObjectProvider<ApiMetadataRepository> apiMetadataRepository,
-            ObjectProvider<ContextRetrievalService> contextRetrievalService) {
+            ObjectProvider<ContextRetrievalService> contextRetrievalService,
+            @Value("${praxis.ai.rag.catalog-fallback.tenant-id:}") String catalogFallbackTenantId,
+            @Value("${praxis.ai.rag.catalog-fallback.environment:}") String catalogFallbackEnvironment) {
         return new AgenticAuthoringApiMetadataCandidateCatalog(
                 apiMetadataRepository.getIfAvailable(),
-                contextRetrievalService.getIfAvailable());
+                contextRetrievalService.getIfAvailable(),
+                catalogFallbackTenantId,
+                catalogFallbackEnvironment);
     }
 
     @Bean
@@ -170,15 +174,26 @@ public class AgenticAuthoringAutoConfiguration {
             @Value("${praxis.domain-catalog.service-key:praxis-service}") String domainCatalogServiceKey,
             @Value("${praxis.ai.authoring.consultative.api-catalog.compact-cache-ttl-ms:60000}") long compactProjectionCacheTtlMs,
             @Value("${praxis.ai.authoring.consultative.api-catalog.compact-cache-max-entries:256}") int compactProjectionCacheMaxEntries,
-            @Value("${praxis.ai.authoring.consultative.api-catalog.api-metadata-cache-ttl-ms:60000}") long apiMetadataCacheTtlMs) {
-        return new AgenticAuthoringConsultativeApiCatalogProjectionService(
-                domainCatalogIngestionService::getIfAvailable,
-                apiMetadataRepository.getIfAvailable(),
-                domainCatalogServiceKey,
-                compactProjectionCacheTtlMs,
-                compactProjectionCacheMaxEntries,
-                apiMetadataCacheTtlMs,
-                schemaRetrievalService.getIfAvailable());
+            @Value("${praxis.ai.authoring.consultative.api-catalog.api-metadata-cache-ttl-ms:60000}") long apiMetadataCacheTtlMs,
+            @Value("${praxis.ai.rag.catalog-fallback.tenant-id:}") String catalogFallbackTenantId,
+            @Value("${praxis.ai.rag.catalog-fallback.environment:}") String catalogFallbackEnvironment,
+            @Value("${praxis.ai.security.corporate-mode:true}") boolean corporateMode) {
+        AgenticAuthoringConsultativeApiCatalogProjectionService service =
+                new AgenticAuthoringConsultativeApiCatalogProjectionService(
+                        domainCatalogIngestionService::getIfAvailable,
+                        apiMetadataRepository.getIfAvailable(),
+                        domainCatalogServiceKey,
+                        compactProjectionCacheTtlMs,
+                        compactProjectionCacheMaxEntries,
+                        apiMetadataCacheTtlMs,
+                        schemaRetrievalService.getIfAvailable());
+        String effectiveFallbackTenantId = corporateMode
+                && org.springframework.util.StringUtils.hasText(catalogFallbackTenantId)
+                && !"GLOBAL".equalsIgnoreCase(catalogFallbackTenantId.trim())
+                        ? ""
+                        : catalogFallbackTenantId;
+        service.setCatalogFallbackScope(effectiveFallbackTenantId, catalogFallbackEnvironment);
+        return service;
     }
 
     @Bean
@@ -369,14 +384,24 @@ public class AgenticAuthoringAutoConfiguration {
                     ObjectProvider<org.praxisplatform.config.repository.DomainKnowledgeBindingRepository>
                             bindingRepositoryProvider,
                     ObjectProvider<org.praxisplatform.config.repository.DomainKnowledgeEvidenceRepository>
-                            evidenceRepositoryProvider) {
+                            evidenceRepositoryProvider,
+                    @Value("${praxis.ai.rag.catalog-fallback.tenant-id:}") String catalogFallbackTenantId,
+                    @Value("${praxis.ai.rag.catalog-fallback.environment:}") String catalogFallbackEnvironment,
+                    @Value("${praxis.ai.security.corporate-mode:true}") boolean corporateMode) {
         var bindingRepository = bindingRepositoryProvider.getIfAvailable();
         var evidenceRepository = evidenceRepositoryProvider.getIfAvailable();
         if (bindingRepository == null || evidenceRepository == null) {
             return null;
         }
-        return new org.praxisplatform.config.ai.authoring.AgenticAuthoringDomainBindingService(
+        var service = new org.praxisplatform.config.ai.authoring.AgenticAuthoringDomainBindingService(
                 bindingRepository, evidenceRepository, objectMapper);
+        String effectiveFallbackTenantId = corporateMode
+                && org.springframework.util.StringUtils.hasText(catalogFallbackTenantId)
+                && !"GLOBAL".equalsIgnoreCase(catalogFallbackTenantId.trim())
+                        ? ""
+                        : catalogFallbackTenantId;
+        service.setCatalogFallbackScope(effectiveFallbackTenantId, catalogFallbackEnvironment);
+        return service;
     }
 
     @Bean

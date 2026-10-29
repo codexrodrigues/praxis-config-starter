@@ -23,6 +23,7 @@ public class AgenticAuthoringDomainCatalogCandidateEnhancer {
     private static final int CONTEXT_LIMIT = 8;
     private static final int MAX_CANDIDATES_TO_GROUND = 16;
     private static final int MAX_CONTEXT_QUERIES = 3;
+    private static final int MAX_STRUCTURED_CONTEXT_QUERIES = 6;
 
     private final Supplier<DomainCatalogIngestionService> domainCatalogIngestionService;
     private final String serviceKey;
@@ -203,15 +204,23 @@ public class AgenticAuthoringDomainCatalogCandidateEnhancer {
 
     private List<String> contextQueries(String resourceKey, String query) {
         Set<String> queries = new LinkedHashSet<>();
-        if (!valueOrEmpty(query).isBlank()) {
-            queries.add(query);
-        }
-        String meaningful = meaningfulQuery(query);
-        if (!meaningful.isBlank()) {
-            queries.add(meaningful);
+        boolean structuredFocus = isStructuredRetrievalFocusQuery(query);
+        if (!structuredFocus) {
+            if (!valueOrEmpty(query).isBlank()) {
+                queries.add(query);
+            }
+            String meaningful = meaningfulQuery(query);
+            if (!meaningful.isBlank()) {
+                queries.add(meaningful);
+            }
         }
         queries.addAll(meaningfulQueryTerms(query));
-        return queries.stream().limit(MAX_CONTEXT_QUERIES).toList();
+        int maxQueries = structuredFocus ? MAX_STRUCTURED_CONTEXT_QUERIES : MAX_CONTEXT_QUERIES;
+        return queries.stream().limit(maxQueries).toList();
+    }
+
+    private boolean isStructuredRetrievalFocusQuery(String query) {
+        return normalizePrompt(query).startsWith("primary business entity");
     }
 
     private boolean shouldAttemptGrounding(AgenticAuthoringCandidate candidate) {
@@ -222,12 +231,28 @@ public class AgenticAuthoringDomainCatalogCandidateEnhancer {
 
     private List<String> meaningfulQueryTerms(String query) {
         Set<String> terms = new LinkedHashSet<>();
-        for (String token : normalizePrompt(query).split("\\s+")) {
+        for (String rawToken : extractDomainTermsText(query).split("\\s+")) {
+            String token = trimTokenPunctuation(rawToken);
             if (isMeaningfulToken(token)) {
                 terms.add(token);
             }
         }
         return List.copyOf(terms);
+    }
+
+    private String extractDomainTermsText(String query) {
+        String normalized = normalizePrompt(query);
+        if (!isStructuredRetrievalFocusQuery(query)) {
+            return normalized;
+        }
+        return normalized
+                .replaceAll("\\bprimary business entity:?\\s*", " ")
+                .replaceAll("\\bsupporting concepts:?\\s*", " ")
+                .replaceAll("\\bdesired surface:?\\s*.*?(?=\\bsemantic query\\b|$)", " ")
+                .replaceAll("\\bsemantic query:?\\s*", " ")
+                .replaceAll("\\b(none|unspecified)\\b", " ")
+                .replaceAll("\\s+", " ")
+                .trim();
     }
 
     private List<String> resourceKeyVerificationQueries(String resourceKey) {
@@ -245,7 +270,8 @@ public class AgenticAuthoringDomainCatalogCandidateEnhancer {
 
     private String meaningfulQuery(String query) {
         Set<String> tokens = new LinkedHashSet<>();
-        for (String token : normalizePrompt(query).split("\\s+")) {
+        for (String rawToken : extractDomainTermsText(query).split("\\s+")) {
+            String token = trimTokenPunctuation(rawToken);
             if (isMeaningfulToken(token)) {
                 tokens.add(token);
             }
@@ -253,8 +279,12 @@ public class AgenticAuthoringDomainCatalogCandidateEnhancer {
         return String.join(" ", tokens);
     }
 
+    private String trimTokenPunctuation(String token) {
+        return valueOrEmpty(token).replaceAll("^[^\\p{L}\\p{N}]+|[^\\p{L}\\p{N}]+$", "");
+    }
+
     private boolean isMeaningfulToken(String token) {
-        String normalized = valueOrEmpty(token);
+        String normalized = trimTokenPunctuation(token);
         if (normalized.length() <= 2) {
             return false;
         }

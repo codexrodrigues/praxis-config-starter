@@ -807,21 +807,45 @@ public class AgenticAuthoringPreviewService {
      * table message.
      */
     private String componentEditAssistantMessage(JsonNode compiledPlan) {
-        List<String> operationIds = new ArrayList<>();
+        List<String> operationDescriptions = new ArrayList<>();
         if (compiledPlan != null && compiledPlan.path("operations").isArray()) {
             compiledPlan.path("operations").forEach(operation -> {
-                String operationId = value(operation.path("operationId").asText());
-                if (!operationId.isBlank() && !operationIds.contains(operationId)) {
-                    operationIds.add(operationId);
+                String description = humanizeComponentEditOperation(operation);
+                if (!description.isBlank() && !operationDescriptions.contains(description)) {
+                    operationDescriptions.add(description);
                 }
             });
         }
-        String operations = operationIds.isEmpty()
-                ? "operações validadas"
-                : String.join(", ", operationIds);
+        String operations = operationDescriptions.isEmpty()
+                ? "as alterações solicitadas"
+                : String.join(", ", operationDescriptions);
         return AgenticAuthoringPresentationText.assistantReply(
                 "Preparei uma prévia com " + operations
                         + ". As demais configurações atuais serão preservadas.");
+    }
+
+    private String humanizeComponentEditOperation(JsonNode operation) {
+        if (operation == null || !operation.isObject()) {
+            return "";
+        }
+        String operationId = value(operation.path("operationId").asText()).toLowerCase(Locale.ROOT);
+        if (operationId.isBlank()) {
+            return "";
+        }
+        return switch (operationId) {
+            case "chart.type.set" -> "a alteração do tipo de gráfico";
+            case "chart.dimension.set" -> "a alteração da dimensão do gráfico";
+            case "chart.metric.set" -> "a alteração da métrica do gráfico";
+            case "chart.legend.set", "chart.legend.toggle" -> "o ajuste da legenda do gráfico";
+            case "table.columns.include", "table.column.add" -> "a inclusão das colunas solicitadas";
+            case "table.columns.exclude", "table.column.remove", "table.column.hide" -> "a remoção das colunas solicitadas";
+            case "table.columns.reorder" -> "a reordenação das colunas";
+            case "table.sort.set" -> "o ajuste da ordenação da tabela";
+            case "table.filter.add", "table.filters.set" -> "o ajuste dos filtros da tabela";
+            default -> operationId.contains(".")
+                    ? "os ajustes solicitados no componente"
+                    : operationId;
+        };
     }
 
     private boolean isDirectComponentEditRequest(

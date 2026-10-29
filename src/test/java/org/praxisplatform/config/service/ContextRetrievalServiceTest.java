@@ -443,6 +443,32 @@ class ContextRetrievalServiceTest {
         assertTrue(String.valueOf(filterCaptor.getAllValues().get(1)).contains("release-default"));
     }
 
+    @Test
+    void shouldFallbackToConfiguredCatalogScopeWhenPrimaryTenantHasNoApiMetadataVectorResults() {
+        contextRetrievalService.setCatalogFallbackScope("desenv", "local");
+        when(ragVectorStoreService.isAvailable()).thenReturn(true);
+        when(ragVectorStoreService.search(eq("missoes em andamento"), eq(20), any(Filter.Expression.class)))
+                .thenReturn(List.of())
+                .thenReturn(List.of(buildApiDocument("/api/operations/missoes/filter/cursor")));
+
+        List<ApiSearchResult> results = contextRetrievalService.searchApiMetadata(
+                "missoes em andamento",
+                null,
+                null,
+                5,
+                null,
+                "shield-hq",
+                "local");
+
+        ArgumentCaptor<Filter.Expression> filterCaptor = ArgumentCaptor.forClass(Filter.Expression.class);
+        verify(ragVectorStoreService, times(2)).search(eq("missoes em andamento"), eq(20), filterCaptor.capture());
+
+        assertEquals(1, results.size());
+        assertEquals("/api/operations/missoes/filter/cursor", results.get(0).getPath());
+        assertTrue(String.valueOf(filterCaptor.getAllValues().get(0)).contains("shield-hq"));
+        assertTrue(String.valueOf(filterCaptor.getAllValues().get(1)).contains("desenv"));
+    }
+
     private Document buildApiDocument(String path) {
         return buildApiDocument(path, null);
     }

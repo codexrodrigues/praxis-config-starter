@@ -96,6 +96,24 @@ public class DomainCatalogIngestionService {
     private final ExecutorService ragPublicationExecutor;
     private final ApplicationEventPublisher applicationEventPublisher;
 
+    @Value("${praxis.ai.rag.catalog-fallback.tenant-id:}")
+    private String catalogFallbackTenantId = "";
+
+    @Value("${praxis.ai.rag.catalog-fallback.environment:}")
+    private String catalogFallbackEnvironment = "";
+
+    @Value("${praxis.ai.security.corporate-mode:true}")
+    private boolean corporateMode = false;
+
+    public void setCatalogFallbackScope(String tenantId, String environment) {
+        this.catalogFallbackTenantId = tenantId == null ? "" : tenantId.trim();
+        this.catalogFallbackEnvironment = environment == null ? "" : environment.trim();
+    }
+
+    public void setCorporateMode(boolean corporateMode) {
+        this.corporateMode = corporateMode;
+    }
+
     public DomainCatalogIngestionService(
             DomainCatalogReleaseRepository releaseRepository,
             DomainCatalogItemRepository itemRepository,
@@ -503,6 +521,17 @@ public class DomainCatalogIngestionService {
             String nodeType,
             String query,
             int limit) {
+        return searchSummaries(releases, null, itemType, contextKey, nodeType, query, limit);
+    }
+
+    private List<DomainCatalogItemResponse> searchSummaries(
+            List<DomainCatalogReleaseSummary> releases,
+            String resourceKey,
+            String itemType,
+            String contextKey,
+            String nodeType,
+            String query,
+            int limit) {
         if (releases == null || releases.isEmpty()) {
             return List.of();
         }
@@ -514,16 +543,67 @@ public class DomainCatalogIngestionService {
             return List.of();
         }
         int resolvedLimit = Math.min(Math.max(limit, 1), 200);
-        return itemRepository.searchSummariesAcrossReleaseIds(
-                        releaseIds,
-                        normalize(itemType),
-                        normalize(contextKey),
-                        normalize(nodeType),
-                        normalize(query),
-                        PageRequest.of(0, resolvedLimit))
-                .stream()
+        String normalizedResourceKey = normalize(resourceKey);
+        boolean filterContextBundleItemsByResourceKey = StringUtils.hasText(normalizedResourceKey)
+                && releases.stream().anyMatch(release -> !StringUtils.hasText(normalize(release.resourceKey())));
+        int queryLimit = filterContextBundleItemsByResourceKey || releases.size() > 1
+                ? Math.max(resolvedLimit * 10, 200)
+                : resolvedLimit;
+        Map<String, DomainCatalogItemSummary> deduplicated = new LinkedHashMap<>();
+        for (DomainCatalogItemSummary item : itemRepository.searchSummariesAcrossReleaseIds(
+                releaseIds,
+                normalize(itemType),
+                normalize(contextKey),
+                normalize(nodeType),
+                normalize(query),
+                PageRequest.of(0, queryLimit))) {
+            if (filterContextBundleItemsByResourceKey && !itemMatchesResourceKey(item, normalizedResourceKey)) {
+                continue;
+            }
+            String dedupKey = releases.size() > 1
+                    ? normalize(item.itemType()) + ":" + normalize(item.itemKey())
+                    : String.valueOf(item.id());
+            deduplicated.putIfAbsent(dedupKey, item);
+            if (deduplicated.size() >= resolvedLimit) {
+                break;
+            }
+        }
+        return deduplicated.values().stream()
+                .limit(resolvedLimit)
                 .map(this::toResponse)
                 .toList();
+    }
+
+    private boolean itemMatchesResourceKey(DomainCatalogItemSummary item, String normalizedResourceKey) {
+        if (item == null || !StringUtils.hasText(normalizedResourceKey)) {
+            return true;
+        }
+        if (matchesResourceIdentity(normalize(item.itemKey()), normalizedResourceKey)) {
+            return true;
+        }
+        String rawPayload = item.payload();
+        if (!StringUtils.hasText(rawPayload) || !rawPayload.contains(normalizedResourceKey)) {
+            return false;
+        }
+        JsonNode payload = read(rawPayload);
+        return matchesResourceIdentity(text(payload, "resourceKey"), normalizedResourceKey)
+                || matchesResourceIdentity(text(payload, "canonicalKey"), normalizedResourceKey)
+                || matchesResourceIdentity(text(payload, "nodeKey"), normalizedResourceKey)
+                || matchesResourceIdentity(text(payload, "sourceNodeKey"), normalizedResourceKey)
+                || matchesResourceIdentity(text(payload.path("target"), "resourceKey"), normalizedResourceKey);
+    }
+
+    private boolean matchesResourceIdentity(String candidate, String normalizedResourceKey) {
+        String normalizedCandidate = normalize(candidate);
+        if (!StringUtils.hasText(normalizedCandidate)) {
+            return false;
+        }
+        return normalizedCandidate.equals(normalizedResourceKey)
+                || normalizedCandidate.startsWith(normalizedResourceKey + ".")
+                || normalizedCandidate.startsWith(normalizedResourceKey + ":")
+                || normalizedCandidate.endsWith(":" + normalizedResourceKey)
+                || normalizedCandidate.contains(":" + normalizedResourceKey + ".")
+                || normalizedCandidate.contains(":" + normalizedResourceKey + ":");
     }
 
     @Transactional(transactionManager = ConfigTransactionManagerNames.CONFIG, readOnly = true)
@@ -534,13 +614,21 @@ public class DomainCatalogIngestionService {
             String environment,
             int limit) {
         int resolvedLimit = Math.min(Math.max(limit, 1), 100);
-        return releaseRepository.findLatestSummaries(
-                        normalize(serviceKey),
-                        normalize(resourceKey),
-                        normalize(tenantId),
-                        normalize(environment),
-                        PageRequest.of(0, resolvedLimit))
-                .stream()
+        List<DomainCatalogReleaseSummary> summaries = releaseRepository.findLatestSummaries(
+                normalize(serviceKey),
+                normalize(resourceKey),
+                normalize(tenantId),
+                normalize(environment),
+                PageRequest.of(0, resolvedLimit));
+        if (summaries.isEmpty() && shouldFallbackToCatalogScope(tenantId, environment)) {
+            summaries = releaseRepository.findLatestSummaries(
+                    normalize(serviceKey),
+                    normalize(resourceKey),
+                    normalize(effectiveCatalogFallbackTenantId(tenantId)),
+                    normalize(effectiveCatalogFallbackEnvironment(environment)),
+                    PageRequest.of(0, resolvedLimit));
+        }
+        return summaries.stream()
                 .map(this::toReleaseResponse)
                 .toList();
     }
@@ -640,6 +728,7 @@ public class DomainCatalogIngestionService {
         int resolvedLimit = Math.min(Math.max(limit, 1), 200);
         return searchSummaries(
                 latestReleaseSummariesForScope(serviceKey, tenantId, environment, resourceKey),
+                resourceKey,
                 itemType,
                 contextKey,
                 nodeType,
@@ -676,6 +765,7 @@ public class DomainCatalogIngestionService {
                 serviceKey, tenantId, environment, resourceKey);
         List<DomainCatalogItemResponse> items = searchSummaries(
                 releases,
+                resourceKey,
                 itemType,
                 contextKey,
                 nodeType,
@@ -710,10 +800,12 @@ public class DomainCatalogIngestionService {
                 tenantId,
                 environment,
                 resourceKey);
+        String effectiveTenantId = releases.isEmpty() ? tenantId : releases.get(0).tenantId();
+        String effectiveEnvironment = releases.isEmpty() ? environment : releases.get(0).environment();
         List<DomainCatalogItemResponse> items = semanticContextItems(
                 releases,
-                tenantId,
-                environment,
+                effectiveTenantId,
+                effectiveEnvironment,
                 itemType,
                 contextKey,
                 nodeType,
@@ -1450,18 +1542,53 @@ public class DomainCatalogIngestionService {
 
     private DomainCatalogRelease latestRelease(String serviceKey, String tenantId, String environment, String resourceKey) {
         String normalizedResourceKey = normalize(resourceKey);
-        return releaseRepository.findLatest(
+        Optional<DomainCatalogRelease> primary = releaseRepository.findLatest(
                         normalize(serviceKey),
                         normalizedResourceKey,
                         normalize(tenantId),
                         normalize(environment),
                         PageRequest.of(0, 1))
                 .stream()
-                .findFirst()
-                .orElseThrow(() -> new IllegalArgumentException("No domain catalog release found for the requested scope"));
+                .findFirst();
+        if (primary.isPresent()) {
+            return primary.get();
+        }
+        if (shouldFallbackToCatalogScope(tenantId, environment)) {
+            Optional<DomainCatalogRelease> fallback = releaseRepository.findLatest(
+                            normalize(serviceKey),
+                            normalizedResourceKey,
+                            normalize(effectiveCatalogFallbackTenantId(tenantId)),
+                            normalize(effectiveCatalogFallbackEnvironment(environment)),
+                            PageRequest.of(0, 1))
+                    .stream()
+                    .findFirst();
+            if (fallback.isPresent()) {
+                return fallback.get();
+            }
+        }
+        throw new IllegalArgumentException("No domain catalog release found for the requested scope");
     }
 
     private List<DomainCatalogReleaseSummary> latestReleaseSummariesForScope(
+            String serviceKey,
+            String tenantId,
+            String environment,
+            String resourceKey) {
+        try {
+            return latestReleaseSummariesForExactScope(serviceKey, tenantId, environment, resourceKey);
+        } catch (IllegalArgumentException primaryMissing) {
+            if (shouldFallbackToCatalogScope(tenantId, environment)) {
+                return latestReleaseSummariesForExactScope(
+                        serviceKey,
+                        effectiveCatalogFallbackTenantId(tenantId),
+                        effectiveCatalogFallbackEnvironment(environment),
+                        resourceKey);
+            }
+            throw primaryMissing;
+        }
+    }
+
+    private List<DomainCatalogReleaseSummary> latestReleaseSummariesForExactScope(
             String serviceKey,
             String tenantId,
             String environment,
@@ -1470,21 +1597,67 @@ public class DomainCatalogIngestionService {
         String normalizedResourceKey = normalize(resourceKey);
         if (StringUtils.hasText(normalizedServiceKey)) {
             if (StringUtils.hasText(normalizedResourceKey)) {
-                return releaseRepository.findLatestSummaries(
+                Optional<DomainCatalogReleaseSummary> direct = releaseRepository.findLatestSummaries(
                                 normalizedServiceKey,
                                 normalizedResourceKey,
                                 normalize(tenantId),
                                 normalize(environment),
                                 PageRequest.of(0, 1))
                         .stream()
-                        .findFirst()
-                        .map(List::of)
-                        .orElseThrow(() -> new IllegalArgumentException(
-                                "No domain catalog release found for the requested scope"));
+                        .findFirst();
+                if (direct.isPresent()) {
+                    return List.of(direct.get());
+                }
+                int dotIndex = normalizedResourceKey.indexOf('.');
+                if (dotIndex > 0) {
+                    String contextPrefix = normalizedResourceKey.substring(0, dotIndex);
+                    Optional<DomainCatalogReleaseSummary> contextBundle = releaseRepository.findLatestSummaries(
+                                    normalizedServiceKey,
+                                    null,
+                                    normalize(tenantId),
+                                    normalize(environment),
+                                    PageRequest.of(0, 100))
+                            .stream()
+                            .filter(release -> !StringUtils.hasText(normalize(release.resourceKey())))
+                            .filter(release -> contextPrefix.equals(resourceKeyFromReleaseKey(release.releaseKey())))
+                            .findFirst();
+                    if (contextBundle.isPresent()) {
+                        return List.of(contextBundle.get());
+                    }
+                }
+                throw new IllegalArgumentException("No domain catalog release found for the requested scope");
             }
             return latestReleaseSummariesForServiceScope(normalizedServiceKey, tenantId, environment);
         }
         return latestReleaseSummariesByService(tenantId, environment, normalizedResourceKey);
+    }
+
+    private boolean shouldFallbackToCatalogScope(String tenantId, String environment) {
+        String fallbackTenant = normalize(catalogFallbackTenantId);
+        String fallbackEnv = normalize(catalogFallbackEnvironment);
+        if (!StringUtils.hasText(fallbackTenant) && !StringUtils.hasText(fallbackEnv)) {
+            return false;
+        }
+        String effectiveTenant = effectiveCatalogFallbackTenantId(tenantId);
+        String effectiveEnv = effectiveCatalogFallbackEnvironment(environment);
+        return !Objects.equals(normalize(tenantId), normalize(effectiveTenant))
+                || !Objects.equals(normalize(environment), normalize(effectiveEnv));
+    }
+
+    private String effectiveCatalogFallbackTenantId(String tenantId) {
+        String fallbackTenant = normalize(catalogFallbackTenantId);
+        if (!StringUtils.hasText(fallbackTenant)) {
+            return tenantId;
+        }
+        if (corporateMode && !"GLOBAL".equalsIgnoreCase(fallbackTenant)) {
+            return tenantId;
+        }
+        return fallbackTenant;
+    }
+
+    private String effectiveCatalogFallbackEnvironment(String environment) {
+        String fallbackEnv = normalize(catalogFallbackEnvironment);
+        return StringUtils.hasText(fallbackEnv) ? fallbackEnv : environment;
     }
 
     private List<DomainCatalogReleaseSummary> latestReleaseSummariesForServiceScope(

@@ -417,6 +417,36 @@ class AgenticAuthoringPreviewMessageSynthesizerServiceTest {
     }
 
     @Test
+    void doesNotLeakPreIntentSemanticCompositionSentinelAndIgnoresMutationVerbResourceLabel() {
+        AgenticAuthoringEvidenceBundle bundle = new AgenticAuthoringEvidenceBundle(
+                "praxis-agentic-authoring-evidence-bundle.v1",
+                "semantic_retrieval",
+                List.of(new AgenticAuthoringEvidenceBundle.Evidence(
+                        "api_metadata",
+                        "retrieved_candidate",
+                        "/api/risk-intelligence/ameacas",
+                        "Cadastrar ameaça monitorada",
+                        0.82,
+                        List.of("ameacas"),
+                        "tenant",
+                        "local",
+                        "v1")),
+                1);
+        AgenticAuthoringCandidate candidate = new AgenticAuthoringCandidate(
+                "/api/risk-intelligence/ameacas",
+                "post",
+                "/schemas/filtered?path=/api/risk-intelligence/ameacas/filter/cursor&operation=post&schemaType=response",
+                "/api/risk-intelligence/ameacas/filter/cursor",
+                "post",
+                0.82,
+                "semantic retrieval",
+                List.of("api-metadata", "semantic-retrieval"),
+                bundle);
+        assertThat(AgenticAuthoringResourcePresentationLabel.fromCandidate(candidate))
+                .isEqualTo("Ameacas");
+    }
+
+    @Test
     void synthesizeReusesFastGovernedIntentResolutionWithoutExtraProviderCall() {
         String result = service().synthesize(
                 governedFastIntentRequest(),

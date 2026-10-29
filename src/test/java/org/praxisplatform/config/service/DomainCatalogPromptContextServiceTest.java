@@ -848,4 +848,54 @@ class DomainCatalogPromptContextServiceTest {
                 "folha",
                 12);
     }
+
+    @Test
+    void buildsResourceIdentityContextUsingSafeSummaryWhenDescriptionIsAbsent() throws Exception {
+        DomainCatalogIngestionService ingestionService = mock(DomainCatalogIngestionService.class);
+        DomainCatalogPromptContextService service = new DomainCatalogPromptContextService(ingestionService);
+        when(ingestionService.contextLatest(
+                "praxis-service",
+                "tenant-a",
+                "dev",
+                "node",
+                null,
+                "concept",
+                null,
+                30))
+                .thenReturn(new DomainCatalogContextResponse(
+                        "praxis.domain-catalog-context/v0.1",
+                        null,
+                        null,
+                        "node",
+                        null,
+                        "concept",
+                        List.of(),
+                        List.of(new DomainCatalogItemResponse(
+                                UUID.randomUUID(),
+                                "praxis-service:risk-intelligence.ameacas:latest",
+                                "node",
+                                "risk-intelligence.ameacas",
+                                "risk-intelligence",
+                                "concept",
+                                null,
+                                null,
+                                objectMapper.readTree("""
+                                    {
+                                      "label": "Ameaca",
+                                      "safeSummary": "Entidade corporativa que representa viloes, criminosos e ameacas monitoradas pelo QG.",
+                                      "metadata": {
+                                        "resourceKey": "risk-intelligence.ameacas",
+                                        "resourcePath": "/api/risk-intelligence/ameacas"
+                                      }
+                                    }
+                                    """)))));
+
+        String context = service.buildResourceIdentityContext("tenant-a", "dev", 30);
+
+        assertThat(context)
+                .contains("DOMAIN_RESOURCE_IDENTITY_CATALOG")
+                .contains("resourceKey=risk-intelligence.ameacas")
+                .contains("label=Ameaca")
+                .contains("description=Entidade corporativa que representa viloes, criminosos e ameacas monitoradas pelo QG.");
+    }
 }

@@ -8,6 +8,7 @@ import org.praxisplatform.config.dto.GovernedColorPaletteCapabilitiesResponse.Op
 import org.praxisplatform.config.dto.GovernedColorPalettePreviewRequest;
 import org.praxisplatform.config.dto.GovernedColorPalettePreviewResponse;
 import org.praxisplatform.config.dto.GovernedColorPaletteResponse;
+import org.praxisplatform.config.repository.DomainRuleMaterializationRepository;
 import org.praxisplatform.config.service.DomainRuleGovernancePrincipal;
 import org.praxisplatform.config.service.DomainRuleGovernancePrincipalResolver;
 import org.praxisplatform.config.service.GovernedColorPaletteProjectionService;
@@ -29,7 +30,7 @@ import org.springframework.web.bind.annotation.RestController;
 @RestController
 @RequestMapping("/api/praxis/config/color-palettes")
 @RequiredArgsConstructor
-@ConditionalOnBean(GovernedColorPaletteProjectionService.class)
+@ConditionalOnBean({GovernedColorPaletteProjectionService.class, DomainRuleMaterializationRepository.class})
 public class GovernedColorPaletteController {
 
     private final GovernedColorPaletteProjectionService service;

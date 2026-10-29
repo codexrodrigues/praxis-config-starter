@@ -20,6 +20,7 @@ import org.praxisplatform.config.service.DomainRuleChangeWorkspaceService;
 import org.praxisplatform.config.service.DomainRuleGovernancePrincipal;
 import org.praxisplatform.config.service.DomainRuleGovernancePrincipalResolver;
 import org.praxisplatform.config.service.DomainRuleTestRunService;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 import org.springframework.http.CacheControl;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -37,6 +38,11 @@ import org.springframework.web.server.ResponseStatusException;
 @RestController("configDomainRuleChangeWorkspaceController")
 @RequestMapping(DomainRuleChangeWorkspaceContract.RESOURCE_PATH)
 @RequiredArgsConstructor
+@ConditionalOnBean({
+  DomainRuleChangeWorkspaceService.class,
+  DomainRuleGovernancePrincipalResolver.class,
+  DomainRuleTestRunService.class
+})
 public class DomainRuleChangeWorkspaceController {
   private final DomainRuleChangeWorkspaceService service;
   private final DomainRuleGovernancePrincipalResolver principalResolver;

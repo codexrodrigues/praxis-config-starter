@@ -8,6 +8,7 @@ import org.praxisplatform.config.dto.*;
 import org.praxisplatform.config.exception.DomainRuleSnapshotControlPlaneException;
 import org.praxisplatform.config.service.DomainRuleGovernancePrincipalResolver;
 import org.praxisplatform.config.service.DomainRuleRolloutService;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
@@ -15,6 +16,7 @@ import org.springframework.web.bind.annotation.*;
 @RestController("configDomainRuleRolloutController")
 @RequestMapping("/api/praxis/config/domain-rules/snapshots/rollouts")
 @RequiredArgsConstructor
+@ConditionalOnBean({DomainRuleRolloutService.class, DomainRuleGovernancePrincipalResolver.class})
 public class DomainRuleRolloutController {
   private final DomainRuleRolloutService service;
   private final DomainRuleGovernancePrincipalResolver principals;

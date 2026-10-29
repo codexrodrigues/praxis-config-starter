@@ -6872,7 +6872,7 @@ public class AgenticAuthoringConsultativeAnswerService {
                 .replace('\r', '\n')
                 .replaceAll("[ \\t]{2,}", " ")
                 .replaceAll("[ \\t]+(?=\\n)", "")
-                .replaceAll("(?<!\\n)(#{1,6}[ \\t]+)", "\n\n$1")
+                .replaceAll("(?<!\\n)(?<!#)(#{1,6}[ \\t]+)", "\n\n$1")
                 .replaceAll("\\n{3,}", "\n\n")
                 .trim();
         if (sanitized.endsWith("?")) {

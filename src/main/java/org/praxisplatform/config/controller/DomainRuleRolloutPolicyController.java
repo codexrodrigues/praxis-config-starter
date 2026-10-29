@@ -13,6 +13,7 @@ import org.praxisplatform.config.exception.DomainRuleSnapshotControlPlaneExcepti
 import org.praxisplatform.config.http.HttpEntityTagCondition;
 import org.praxisplatform.config.service.DomainRuleGovernancePrincipalResolver;
 import org.praxisplatform.config.service.DomainRuleRolloutPolicyService;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 import org.springframework.http.CacheControl;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -30,6 +31,7 @@ import org.springframework.web.bind.annotation.RestController;
 @RestController("configDomainRuleRolloutPolicyController")
 @RequestMapping("/api/praxis/config/domain-rules/snapshots/rollout-policies")
 @RequiredArgsConstructor
+@ConditionalOnBean({DomainRuleRolloutPolicyService.class, DomainRuleGovernancePrincipalResolver.class})
 public class DomainRuleRolloutPolicyController {
   private final DomainRuleRolloutPolicyService service;
   private final DomainRuleGovernancePrincipalResolver principals;

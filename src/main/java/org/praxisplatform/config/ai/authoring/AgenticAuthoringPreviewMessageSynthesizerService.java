@@ -723,7 +723,11 @@ public class AgenticAuthoringPreviewMessageSynthesizerService {
             goal = "";
         }
         if (goal.isBlank() && semanticDecision != null && semanticDecision.visualizationDecision() != null) {
-            goal = collapseRepeatedAdjacentText(semanticDecision.visualizationDecision().intent());
+            String candidateIntent = collapseRepeatedAdjacentText(semanticDecision.visualizationDecision().intent());
+            if (!"pre-intent-semantic-composition".equalsIgnoreCase(candidateIntent)
+                    && !looksLikeEnglishIntent(candidateIntent)) {
+                goal = candidateIntent;
+            }
         }
         if (goal.isBlank()) {
             String effectivePrompt = intentResolution == null ? "" : value(intentResolution.effectivePrompt());
@@ -733,10 +737,31 @@ public class AgenticAuthoringPreviewMessageSynthesizerService {
         }
         goal = goal.replaceAll("\\s+", " ").trim();
         goal = collapseRepeatedAdjacentText(goal);
-        if (!goal.isBlank() && goal.equalsIgnoreCase(originalPrompt)) {
+        if (!goal.isBlank() && (goal.equalsIgnoreCase(originalPrompt) || looksLikeEnglishIntent(goal))) {
             goal = "";
         }
         return goal.length() > 120 ? "" : goal;
+    }
+
+    private boolean looksLikeEnglishIntent(String text) {
+        String normalized = " " + value(text).toLowerCase(Locale.ROOT).replaceAll("[^a-z]+", " ").trim() + " ";
+        if (normalized.isBlank()) {
+            return false;
+        }
+        return normalized.contains(" create ")
+                || normalized.contains(" build ")
+                || normalized.contains(" show ")
+                || normalized.contains(" showing ")
+                || normalized.contains(" display ")
+                || normalized.contains(" displaying ")
+                || normalized.contains(" table ")
+                || normalized.contains(" chart ")
+                || normalized.contains(" with ")
+                || normalized.contains(" the ")
+                || normalized.contains(" and ")
+                || normalized.contains(" each ")
+                || normalized.contains(" employee ")
+                || normalized.contains(" staff ");
     }
 
     private String collapseRepeatedAdjacentText(String text) {

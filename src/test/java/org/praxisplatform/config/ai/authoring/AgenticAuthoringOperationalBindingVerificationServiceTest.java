@@ -663,6 +663,129 @@ class AgenticAuthoringOperationalBindingVerificationServiceTest {
                         "/api/operations/missoes/{id}/actions/approve");
     }
 
+    @Test
+    void acceptsCanonicalDuplicateDraftItemActionAndSynthesizesStatsGroupByCapabilityWhenSupported()
+            throws Exception {
+        when(bindingService.resolve("tenant", "dev", "human-resources.funcionarios", 12))
+                .thenReturn(List.of());
+        when(schemaService.fetchSchemaResult(any(), any(), any(), any(), any()))
+                .thenReturn(SchemaFetchResult.success(
+                        objectMapper.readTree("{\"type\":\"object\"}"), "schema-url"));
+        when(capabilitiesService.fetchCapabilitiesResult(
+                "/api/human-resources/funcionarios", "http://localhost", "tenant", "user", "dev"))
+                .thenReturn(ResourceCapabilitiesFetchResult.success(
+                        objectMapper.readTree("""
+                                {
+                                  "operations": {
+                                    "cursor": {"supported":true,"availability":{"allowed":true}},
+                                    "statsGroupBy": {"supported":true,"availability":{"allowed":true}}
+                                  }
+                                }
+                                """),
+                        "http://localhost/api/human-resources/funcionarios/capabilities"));
+        when(actionCatalogService.fetchCatalogResult(
+                "human-resources.funcionarios", "http://localhost", "tenant", "user", "dev"))
+                .thenReturn(ResourceActionCatalogFetchResult.success(
+                        objectMapper.readTree("""
+                                {
+                                  "resourceKey": "human-resources.funcionarios",
+                                  "resourcePath": "/api/human-resources/funcionarios",
+                                  "actions": [{
+                                    "id": "duplicate-draft",
+                                    "resourceKey": "human-resources.funcionarios",
+                                    "scope": "ITEM",
+                                    "operationId": "prepareDuplicateDraft",
+                                    "path": "/api/human-resources/funcionarios/{id}/duplicate-draft",
+                                    "method": "POST",
+                                    "availability": {
+                                      "allowed": false,
+                                      "reason": "duplicate-draft-unavailable"
+                                    }
+                                  }]
+                                }
+                                """),
+                        "http://localhost/schemas/actions?resource=human-resources.funcionarios"));
+
+        AgenticAuthoringOperationalBindingVerificationService.VerificationResult result = service.verify(
+                "human-resources.funcionarios",
+                "http://localhost",
+                new AiPrincipalContext("tenant", "user", "dev", true));
+
+        assertThat(result.verified()).isTrue();
+        assertThat(result.failureCodes()).isEmpty();
+        assertThat(result.operations()).extracting(
+                        AgenticAuthoringOperationalBindingVerificationService.OperationProjection::apiPath)
+                .containsExactly(
+                        "/api/human-resources/funcionarios/filter/cursor",
+                        "/api/human-resources/funcionarios/stats/group-by",
+                        "/api/human-resources/funcionarios/{id}/duplicate-draft");
+    }
+
+    @Test
+    void supplementsStatsGroupByCapabilityEvenWhenUiSurfaceBindingsAlreadyIncludeFilterCursor()
+            throws Exception {
+        AgenticAuthoringDomainBindingService.BindingProjection createSurface =
+                new AgenticAuthoringDomainBindingService.BindingProjection(
+                        "risk-intelligence.ameacas.surface.create",
+                        "ui_surface",
+                        "binding:risk-intelligence.ameacas.surface.create:ui-surface",
+                        "create",
+                        "risk-intelligence.ameacas",
+                        "/api/risk-intelligence/ameacas",
+                        "POST",
+                        null,
+                        1.0,
+                        "risk-v1",
+                        List.of("domain-knowledge:evidence-status:active"));
+        AgenticAuthoringDomainBindingService.BindingProjection cursorSurface =
+                new AgenticAuthoringDomainBindingService.BindingProjection(
+                        "risk-intelligence.ameacas.surface.cursor",
+                        "ui_surface",
+                        "binding:risk-intelligence.ameacas.surface.cursor:ui-surface",
+                        "cursor",
+                        "risk-intelligence.ameacas",
+                        "/api/risk-intelligence/ameacas/filter/cursor",
+                        "POST",
+                        "/schemas/filtered?path=/api/risk-intelligence/ameacas/filter/cursor&operation=post&schemaType=response",
+                        1.0,
+                        "risk-v1",
+                        List.of("domain-knowledge:evidence-status:active"));
+        when(bindingService.resolve("tenant", "dev", "risk-intelligence.ameacas", 12))
+                .thenReturn(List.of(createSurface, cursorSurface));
+        when(schemaService.fetchSchemaResult(any(), any(), any(), any(), any()))
+                .thenReturn(SchemaFetchResult.success(
+                        objectMapper.readTree("{\"type\":\"object\"}"), "schema-url"));
+        when(capabilitiesService.fetchCapabilitiesResult(
+                "/api/risk-intelligence/ameacas", "http://localhost", "tenant", "user", "dev"))
+                .thenReturn(ResourceCapabilitiesFetchResult.success(
+                        objectMapper.readTree("""
+                                {
+                                  "operations": {
+                                    "create": {"supported":true,"availability":{"allowed":true}},
+                                    "cursor": {"supported":true,"availability":{"allowed":true}},
+                                    "statsGroupBy": {"supported":true,"availability":{"allowed":true}}
+                                  }
+                                }
+                                """),
+                        "http://localhost/api/risk-intelligence/ameacas/capabilities"));
+
+        AgenticAuthoringOperationalBindingVerificationService.VerificationResult result = service.verify(
+                "risk-intelligence.ameacas",
+                "http://localhost",
+                new AiPrincipalContext("tenant", "user", "dev", true));
+
+        assertThat(result.verified()).isTrue();
+        assertThat(result.operations()).extracting(
+                        AgenticAuthoringOperationalBindingVerificationService.OperationProjection::apiPath)
+                .containsExactly(
+                        "/api/risk-intelligence/ameacas",
+                        "/api/risk-intelligence/ameacas/filter/cursor",
+                        "/api/risk-intelligence/ameacas/stats/group-by");
+        assertThat(result.operations())
+                .allSatisfy(operation -> assertThat(operation.evidence())
+                        .contains("stats-capabilities-verified"));
+    }
+
     private void stubValidResourceOperation() throws Exception {
         AgenticAuthoringDomainBindingService.BindingProjection binding =
                 new AgenticAuthoringDomainBindingService.BindingProjection(

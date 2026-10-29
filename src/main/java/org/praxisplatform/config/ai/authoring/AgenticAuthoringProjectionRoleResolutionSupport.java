@@ -152,7 +152,8 @@ final class AgenticAuthoringProjectionRoleResolutionSupport {
         if (topCandidate == null || candidateScoringSupport.sameCandidate(topCandidate, selectedCandidate)) {
             return false;
         }
-        if (resourceDiscoveryFocusSupportsLowerRankedSelectionAsScoreTie(request, selectedCandidate, topCandidate)) {
+        if (resourceDiscoveryFocusSupportsLowerRankedSelectionAsScoreTie(request, selectedCandidate, topCandidate)
+                || isGroundedByResourceDiscoveryFocus(request, selectedCandidate, rankedCandidates)) {
             return false;
         }
         SemanticResourceNeed resourceNeed = candidateScoringSupport.semanticResourceNeed(prompt, artifactKind);

@@ -63,6 +63,13 @@ public class AgenticAuthoringConsultativeApiCatalogProjectionService {
     private final Map<CompactProjectionCacheKey, CompactProjectionCacheEntry> compactProjectionCache =
             new ConcurrentHashMap<>();
     private volatile ApiMetadataCacheEntry apiMetadataCache;
+    private String catalogFallbackTenantId = "";
+    private String catalogFallbackEnvironment = "";
+
+    public void setCatalogFallbackScope(String tenantId, String environment) {
+        this.catalogFallbackTenantId = tenantId == null ? "" : tenantId.trim();
+        this.catalogFallbackEnvironment = environment == null ? "" : environment.trim();
+    }
 
     public AgenticAuthoringConsultativeApiCatalogProjectionService(
             Supplier<DomainCatalogIngestionService> domainCatalogIngestionServiceSupplier,
@@ -235,6 +242,12 @@ public class AgenticAuthoringConsultativeApiCatalogProjectionService {
                     tenantId,
                     environment,
                     candidate.resourcePath());
+            if ((entries == null || entries.isEmpty()) && shouldFallbackToCatalogScope(tenantId, environment)) {
+                entries = apiMetadataRepository.findAllByTenantAndEnvironmentAndResourcePath(
+                        effectiveCatalogFallbackTenantId(tenantId),
+                        effectiveCatalogFallbackEnvironment(environment),
+                        candidate.resourcePath());
+            }
             for (ApiMetadata entry : entries == null ? List.<ApiMetadata>of() : entries) {
                 if (entry != null) {
                     metadata.putIfAbsent(
@@ -244,6 +257,24 @@ public class AgenticAuthoringConsultativeApiCatalogProjectionService {
             }
         }
         return List.copyOf(metadata.values());
+    }
+
+    private boolean shouldFallbackToCatalogScope(String tenantId, String environment) {
+        if (!StringUtils.hasText(catalogFallbackTenantId) && !StringUtils.hasText(catalogFallbackEnvironment)) {
+            return false;
+        }
+        String effectiveTenant = effectiveCatalogFallbackTenantId(tenantId);
+        String effectiveEnv = effectiveCatalogFallbackEnvironment(environment);
+        return !Objects.equals(safe(tenantId), safe(effectiveTenant))
+                || !Objects.equals(safe(environment), safe(effectiveEnv));
+    }
+
+    private String effectiveCatalogFallbackTenantId(String tenantId) {
+        return StringUtils.hasText(catalogFallbackTenantId) ? catalogFallbackTenantId : tenantId;
+    }
+
+    private String effectiveCatalogFallbackEnvironment(String environment) {
+        return StringUtils.hasText(catalogFallbackEnvironment) ? catalogFallbackEnvironment : environment;
     }
 
     private AgenticAuthoringConsultativeApiCatalogProjection.Resource resolvedCandidateResource(

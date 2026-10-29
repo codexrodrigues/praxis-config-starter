@@ -16,6 +16,8 @@ final class AgenticAuthoringResourcePresentationLabel {
             "(?iu)\\b(?:llm|authored|governed\\s+resource|resource\\s+focus|semantic\\s+retrieval|api[_\\s-]*metadata|retrieved[_\\s-]*candidate|canonical\\s+filtered\\s+schema|selected\\s+operation|candidate\\s+operation|materialization\\s+endpoint)\\b");
     private static final Pattern GENERIC_OPERATION_LABEL_PATTERN = Pattern.compile(
             "(?iu)^(?:registro|registros|dados|informa[cç][oõ]es|lista|listagem|consulta|resultado|resultados|recurso|recursos)$");
+    private static final Pattern MUTATION_OPERATION_SUMMARY_PATTERN = Pattern.compile(
+            "(?iu)^(?:cadastrar|criar|incluir|inserir|atualizar|alterar|editar|excluir|remover|deletar|apagar)\\s+");
 
     private AgenticAuthoringResourcePresentationLabel() {
     }
@@ -74,6 +76,11 @@ final class AgenticAuthoringResourcePresentationLabel {
         }
         String firstSentence = cleaned.split("[\\.;]", 2)[0].trim();
         if (firstSentence.length() > 100) {
+            return "";
+        }
+        if (MUTATION_OPERATION_SUMMARY_PATTERN.matcher(firstSentence).find()
+                && !value(fallbackLabel).isBlank()
+                && !"o recurso selecionado".equals(value(fallbackLabel))) {
             return "";
         }
         String candidate = LEADING_OPERATION_PATTERN.matcher(firstSentence).replaceFirst("").trim();

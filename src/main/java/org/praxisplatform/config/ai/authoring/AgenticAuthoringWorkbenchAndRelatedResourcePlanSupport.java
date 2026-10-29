@@ -99,6 +99,9 @@ final class AgenticAuthoringWorkbenchAndRelatedResourcePlanSupport {
                     ? existingFilters
                     : queryContext.putObject("filters");
             for (JsonNode filter : authoredFilters) {
+                if (isResourceSubjectSelfFilter(filter, request)) {
+                    continue;
+                }
                 String field = provider.valueOrDefault(
                         filter.path("field").asText(""),
                         filter.path("concept").asText(""));
@@ -124,6 +127,19 @@ final class AgenticAuthoringWorkbenchAndRelatedResourcePlanSupport {
                 diagnostics.put("queryConstraintsRequested", true);
             }
         }
+    }
+
+    private boolean isResourceSubjectSelfFilter(JsonNode filter, AgenticAuthoringPlanRequest request) {
+        if (filter == null || !filter.isObject() || request == null || request.intentResolution() == null) {
+            return false;
+        }
+        AgenticAuthoringCandidate candidate = request.intentResolution().selectedCandidate();
+        String resourcePath = candidate == null ? "" : provider.normalize(provider.valueOrDefault(candidate.resourcePath(), ""));
+        String canonicalResourceKey = resourcePath.replaceFirst("^/api/+", "").replace('/', '.');
+        String concept = provider.normalize(filter.path("concept").asText(""));
+        String field = provider.normalize(filter.path("field").asText(""));
+        return !canonicalResourceKey.isBlank()
+                && (canonicalResourceKey.equals(concept) || canonicalResourceKey.equals(field));
     }
 
     private boolean containsText(ArrayNode values, String expected) {

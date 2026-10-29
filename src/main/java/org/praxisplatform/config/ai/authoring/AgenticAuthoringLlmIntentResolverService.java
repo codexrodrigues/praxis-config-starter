@@ -160,10 +160,14 @@ public class AgenticAuthoringLlmIntentResolverService {
             return Optional.of(failedResolutionForFailureKind(preIntentTerminalFailureKind, request));
         }
         boolean liveOptionRefinement = hasLiveOptionRefinementContext(request);
+
         // Resource, field and current candidates are already governed before this terminal
         // classifier runs. Rebuilding the broader domain/RAG prompt here is both redundant and
+        boolean focusedResourceAuthoring = shouldUseFocusedResourceAuthoringPrompt(
+                request,
+                fastIntentCandidateOptions(usableCandidates));
         // expensive, and the focused live-option prompt deliberately does not consume it.
-        String governedDomainContext = liveOptionRefinement
+        String governedDomainContext = (liveOptionRefinement || focusedResourceAuthoring)
                 ? ""
                 : governedDomainContext(
                         request,
@@ -569,6 +573,7 @@ public class AgenticAuthoringLlmIntentResolverService {
             return Optional.empty();
         }
         boolean liveOptionRefinement = hasLiveOptionRefinementContext(request);
+
         boolean focusedResourceAuthoring = shouldUseFocusedResourceAuthoringPrompt(
                 request,
                 fastCandidates);
@@ -687,7 +692,7 @@ public class AgenticAuthoringLlmIntentResolverService {
             AgenticAuthoringIntentResolutionRequest request,
             List<AgenticAuthoringCandidate> candidateOptions) {
         if (request == null
-                || request.activeSemanticDecision() != null
+                || hasBlockingActiveSemanticDecision(request)
                 || request.contextHints() == null
                 || candidateOptions == null
                 || candidateOptions.isEmpty()) {
@@ -696,13 +701,69 @@ public class AgenticAuthoringLlmIntentResolverService {
         JsonNode resourceDiscovery = request.contextHints().path("resourceDiscovery");
         JsonNode semanticOrientation = request.contextHints().path("preIntentSemanticOrientation");
         JsonNode filters = semanticOrientation.path("queryConstraints").path("filters");
+        String layoutKind = semanticOrientation.path("visualizationDecision").path("layoutKind").asText("");
+        String primaryComponent = semanticOrientation.path("visualizationDecision").path("primaryComponent").asText("");
+        boolean singleTableVisualization = (!StringUtils.hasText(layoutKind)
+                        || "single-table".equals(layoutKind)
+                        || "single_table".equals(layoutKind))
+                && (!StringUtils.hasText(primaryComponent)
+                        || "praxis-table".equals(primaryComponent));
         return resourceDiscovery.isObject()
                 && "table".equals(resourceDiscovery.path("artifactKind").asText(""))
                 && semanticOrientation.isObject()
                 && "authoring_or_other".equals(semanticOrientation.path("semanticIntentClass").asText(""))
-                && semanticOrientation.path("requiresFullIntentResolution").asBoolean(false)
-                && filters.isArray()
-                && !filters.isEmpty();
+                && singleTableVisualization
+                && (filters.isArray() || filters.isMissingNode() || filters.isNull());
+    }
+
+    private boolean hasBlockingActiveSemanticDecision(AgenticAuthoringIntentResolutionRequest request) {
+        AgenticAuthoringSemanticDecision decision = request == null ? null : request.activeSemanticDecision();
+        if (decision == null) {
+            return false;
+        }
+        String constraintSource = decision.constraints() == null
+                ? ""
+                : decision.constraints().path("source").asText("").trim();
+        if ("server-issued-quick-reply".equalsIgnoreCase(constraintSource)) {
+            return true;
+        }
+        String resourcePath = decision.selectedResource() == null
+                ? ""
+                : valueOrDefault(decision.selectedResource().resourcePath(), "").trim();
+        if (!StringUtils.hasText(resourcePath)) {
+            return false;
+        }
+        String operation = valueOrDefault(decision.operationKind(), "").trim().toLowerCase(Locale.ROOT);
+        String artifact = valueOrDefault(decision.artifactKind(), "").trim().toLowerCase(Locale.ROOT);
+        String change = valueOrDefault(decision.changeKind(), "").trim().toLowerCase(Locale.ROOT);
+        if ("explore".equals(operation)
+                || "explain".equals(operation)
+                || "api_catalog".equals(artifact)
+                || "unknown".equals(artifact)
+                || change.startsWith("answer_")
+                || "api_catalog_followup".equals(change)) {
+            return false;
+        }
+        String normalizedPrompt = AgenticAuthoringTextNormalizationSupport.normalize(
+                valueOrDefault(request.userPrompt(), ""));
+        if (normalizedPrompt.contains("mantem os dados")
+                || normalizedPrompt.contains("mantenha os dados")
+                || normalizedPrompt.contains("mantem a fonte")
+                || normalizedPrompt.contains("mantenha a fonte")
+                || normalizedPrompt.contains("mantem o recurso")
+                || normalizedPrompt.contains("mantenha o recurso")
+                || normalizedPrompt.contains("mesma fonte")
+                || normalizedPrompt.contains("mesmos dados")
+                || normalizedPrompt.contains("preserve a fonte")) {
+            return true;
+        }
+        return !(normalizedPrompt.contains("troca a fonte")
+                || normalizedPrompt.contains("troque a fonte")
+                || normalizedPrompt.contains("mude a fonte")
+                || normalizedPrompt.contains("outra fonte")
+                || normalizedPrompt.contains("nova fonte")
+                || normalizedPrompt.contains("fonte deve ser")
+                || normalizedPrompt.contains("fonte precisa ser"));
     }
 
     private String focusedResourceAuthoringPrompt(
@@ -1696,6 +1757,7 @@ public class AgenticAuthoringLlmIntentResolverService {
             return false;
         }
         boolean liveOptionRefinement = hasLiveOptionRefinementContext(request);
+
         boolean targetedComponentEdit = hasTargetedComponentCapabilities(target, componentCapabilities);
         if (!targetedComponentEdit
                 && !liveOptionRefinement
@@ -2237,7 +2299,7 @@ public class AgenticAuthoringLlmIntentResolverService {
                 Keep requiresGovernedAuthoring=false only for local visual formatting, masks, badges, labels, component configuration, layout, filters, columns, and consultative catalog questions.
                 For component authoring that requests a data subset, set queryConstraints.appliesToDataSelection=true and
                 preserve every requested predicate in queryConstraints.filters. Set appliesToDataSelection=false and
-                filters=[] when the request changes presentation rather than the selected backend records. Headers, labels,
+                filters=[] when the request changes presentation rather than the selected backend records, when the user specifies which columns/fields to display in a table ("mostrando X e Y"), when the user specifies an analytical grouping/comparison dimension ("por X", "by X") without restricting which records are included (never invent example filter values), or when the phrase merely names the business subject already represented by the selected resource itself (e.g. "em período de descanso remunerado" when the resource is ferias-afastamentos). Headers, labels,
                 renderers, formatting, composed cells, and displayed-value mappings are presentation intent even when
                 their text resembles a current record value.
                 When liveOptionFieldGrounding is present, it is a governed projection of canonical option-source filter
@@ -3016,9 +3078,12 @@ public class AgenticAuthoringLlmIntentResolverService {
                 .put("type", "boolean")
                 .put(
                         "description",
-                        "True only when filters constrain which backend records are retrieved or displayed; false for headers, labels, renderers, formatting, composed cells, and displayed-value edits.");
+                        "True ONLY when filters constrain which backend rows are retrieved by a specific attribute value; false for requested columns/fields to display in a table (e.g. 'mostrando a função e a remuneração'), analytical chart grouping dimensions ('por X'), the subject already represented by the selected resource itself, headers, labels, renderers, formatting, composed cells, and displayed-value edits.");
         ObjectNode filters = properties.putObject("filters");
         filters.put("type", "array");
+        filters.put(
+                "description",
+                "Row-level filter predicates explicitly stated by the user to narrow a resource's records. Must be empty [] when appliesToDataSelection is false. Never put requested table columns to display, chart grouping axes, the canonical key or subject of the selected resource itself, or invented example values in filters.");
         ObjectNode filter = filters.putObject("items");
         filter.put("type", "object");
         ObjectNode filterProperties = filter.putObject("properties");
