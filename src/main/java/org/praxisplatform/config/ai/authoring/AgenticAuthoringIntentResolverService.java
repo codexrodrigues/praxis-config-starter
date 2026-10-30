@@ -1280,7 +1280,8 @@ public class AgenticAuthoringIntentResolverService {
                         request.attachmentSummaries());
         List<AgenticAuthoringQuickReply> llmAuthoredQuickReplies = quickReplySupport.governedLlmQuickReplies(
                 llmIntent,
-                selectedCandidate);
+                selectedCandidate,
+                gate);
         List<AgenticAuthoringQuickReply> fallbackQuickReplies = quickReplySupport.quickReplies(
                 effectivePrompt,
                 prompt,
@@ -1506,11 +1507,13 @@ public class AgenticAuthoringIntentResolverService {
                 && !containsAny(prompt, "grafico", "gráfico", "chart")
                 ? "dashboard"
                 : artifactKind;
+        AgenticAuthoringCandidate decisionSelectedCandidate =
+                gate != null && "blocked".equals(gate.status()) ? null : selectedCandidate;
         AgenticAuthoringSemanticDecision semanticDecision = AgenticAuthoringSemanticDecision.from(
                 operationKind,
                 semanticDecisionArtifactKind,
                 changeKind,
-                selectedCandidate,
+                decisionSelectedCandidate,
                 presentationCandidates,
                 visualizationDecision,
                 warnings,
@@ -1521,7 +1524,7 @@ public class AgenticAuthoringIntentResolverService {
                 request.clientTurnId(),
                 semanticRawPrompt(request, rawPrompt),
                 activeDecisionObjective(activeDecision, semanticRawPrompt(request, rawPrompt)),
-                decisionRationale(decisionMemoryRefinement, selectedCandidate),
+                decisionRationale(decisionMemoryRefinement, decisionSelectedCandidate),
                 semanticRefinement);
         if (serverIssuedQuickReplyContinuation) {
             semanticDecision = semanticDecision.withConstraints(

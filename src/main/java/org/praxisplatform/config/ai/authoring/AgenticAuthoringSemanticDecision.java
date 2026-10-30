@@ -149,6 +149,45 @@ public record AgenticAuthoringSemanticDecision(
                 confidence);
     }
 
+    /**
+     * Re-parents a server-issued continuation to the decision persisted by the turn that issued
+     * it. Continuations may be authored before the turn finalises its own decision (for example a
+     * consultative answer reconciled after semantic resolution); the thread only admits a
+     * continuation whose parent is the latest persisted decision, so lineage must be bound to the
+     * issuing decision rather than to the decision that was active when the turn started.
+     */
+    AgenticAuthoringSemanticDecision withIssuingDecision(String issuingDecisionId) {
+        String parent = safe(issuingDecisionId);
+        if (parent.isBlank() || parent.equals(safe(previousDecisionId))) {
+            return this;
+        }
+        return new AgenticAuthoringSemanticDecision(
+                schemaVersion,
+                decisionId,
+                operationKind,
+                artifactKind,
+                changeKind,
+                selectedResource,
+                visualizationDecision,
+                retrievalEvidence,
+                retrievedEvidence,
+                reviewRequired,
+                reviewReason,
+                previousDecisionRef,
+                refinementOf,
+                conversationId,
+                turnId,
+                userGoal,
+                activeObjective,
+                artifactIntent,
+                visualIntent,
+                constraints,
+                refinement,
+                parent,
+                rationale,
+                confidence).withConstraints(constraints);
+    }
+
     static AgenticAuthoringSemanticDecision from(
             String operationKind,
             String artifactKind,

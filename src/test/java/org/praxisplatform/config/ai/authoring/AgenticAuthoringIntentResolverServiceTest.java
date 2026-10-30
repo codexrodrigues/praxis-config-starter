@@ -16571,6 +16571,84 @@ class AgenticAuthoringIntentResolverServiceTest {
     }
 
     @Test
+    void blockedGovernanceResourceDoesNotContaminateDiscoveryQuickRepliesOrSemanticDecisionSelectedResource() {
+        AgenticAuthoringIntentQuickReplySupport support = new AgenticAuthoringIntentQuickReplySupport(
+                objectMapper,
+                "praxis-api-quickstart",
+                new AgenticAuthoringPresentationAffordanceDiscoveryService(List.of()));
+        AgenticAuthoringCandidate blockedCandidate = new AgenticAuthoringCandidate(
+                "/api/risk-intelligence/ameacas",
+                "filter",
+                "/schemas/filtered?path=/api/risk-intelligence/ameacas/filter&operation=post&schemaType=response",
+                "/api/risk-intelligence/ameacas/filter",
+                "POST",
+                0.98,
+                "Radar de ameaças confidenciais",
+                List.of("resource-ai-usage-restricted"));
+        AgenticAuthoringLlmIntentResolution llmIntent = new AgenticAuthoringLlmIntentResolution(
+                true,
+                "create",
+                "dashboard",
+                "create_dashboard",
+                "/api/risk-intelligence/ameacas",
+                "ameacas",
+                "none",
+                "Este recurso possui restrição de governança para IA.",
+                List.of(
+                        new AgenticAuthoringQuickReply(
+                                "search-risk-sources",
+                                "action",
+                                "Procurar fontes no catálogo",
+                                "Quais fontes de dados relacionadas a risco estão disponíveis?",
+                                "Explorar o catálogo para encontrar fontes permitidas.",
+                                "search",
+                                "primary",
+                                null),
+                        new AgenticAuthoringQuickReply(
+                                "explain-risk-restriction",
+                                "info",
+                                "Por que os dados estão restritos?",
+                                "Explique por que o recurso de ameaças possui restrição para IA.",
+                                "Entender a política de governança.",
+                                "help_outline",
+                                "neutral",
+                                null)),
+                List.of(),
+                List.of(),
+                null,
+                null,
+                false,
+                "governed_resource_authoring");
+        AgenticAuthoringGateResult blockedGate = new AgenticAuthoringGateResult(
+                "governed-authoring-gate",
+                "blocked",
+                List.of("resource-ai-usage-restricted"));
+
+        List<AgenticAuthoringQuickReply> replies = support.governedLlmQuickReplies(
+                llmIntent, blockedCandidate, blockedGate);
+
+        assertThat(replies).hasSize(2);
+        assertThat(replies).allSatisfy(reply -> {
+            if (reply.contextHints() != null) {
+                assertThat(reply.contextHints().has("resourcePath")).isFalse();
+            }
+        });
+
+        AgenticAuthoringGateResult clarificationGate = new AgenticAuthoringGateResult(
+                "governed-authoring-gate",
+                "clarification_required",
+                List.of("intent-clarification-required"));
+        List<AgenticAuthoringQuickReply> nonBlockedReplies = support.governedLlmQuickReplies(
+                llmIntent, blockedCandidate, clarificationGate);
+        assertThat(nonBlockedReplies).hasSize(2);
+        assertThat(nonBlockedReplies).allSatisfy(reply -> {
+            if (reply.contextHints() != null) {
+                assertThat(reply.contextHints().has("resourcePath")).isFalse();
+            }
+        });
+    }
+
+    @Test
     void rejectsBlankPrompt() {
         assertThatThrownBy(() -> service.resolve(new AgenticAuthoringIntentResolutionRequest(
                 " ",

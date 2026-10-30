@@ -19,6 +19,9 @@ import org.praxisplatform.config.service.DomainCatalogIngestionService;
 
 public class AgenticAuthoringDomainCatalogCandidateEnhancer {
 
+    private static final org.slf4j.Logger log =
+            org.slf4j.LoggerFactory.getLogger(AgenticAuthoringDomainCatalogCandidateEnhancer.class);
+
     static final String DOMAIN_CATALOG_GROUNDING = "domain-catalog-grounding";
     private static final int CONTEXT_LIMIT = 8;
     private static final int MAX_CANDIDATES_TO_GROUND = 16;
@@ -195,7 +198,19 @@ public class AgenticAuthoringDomainCatalogCandidateEnhancer {
                 if (response != null && response.items() != null && !response.items().isEmpty()) {
                     return response;
                 }
-            } catch (RuntimeException ignored) {
+            } catch (IllegalArgumentException missingRelease) {
+                // No published catalog release for this resource scope: an expected governance gap,
+                // so the candidate simply stays ungrounded.
+                log.debug("[DomainCatalogGrounding] No catalog release for scope; serviceKey={}, resourceKey={}, "
+                                + "tenantId={}, environment={}",
+                        candidateServiceKey, resourceKey, tenantId, environment);
+                return null;
+            } catch (RuntimeException ex) {
+                // Grounding failures degrade to an ungrounded candidate; keep the cause observable so an
+                // infrastructure failure is not mistaken for a missing canonical binding.
+                log.warn("[DomainCatalogGrounding] Context lookup failed; serviceKey={}, resourceKey={}, "
+                                + "tenantId={}, environment={}, cause={}",
+                        candidateServiceKey, resourceKey, tenantId, environment, ex.toString());
                 return null;
             }
         }

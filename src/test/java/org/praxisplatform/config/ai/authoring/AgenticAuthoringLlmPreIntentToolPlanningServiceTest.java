@@ -30,6 +30,28 @@ import org.springframework.test.util.ReflectionTestUtils;
 @Tag("unit")
 class AgenticAuthoringLlmPreIntentToolPlanningServiceTest {
 
+    @Test
+    void domainDecisionCatalogQueryUsesAiAuthoredFocusAndHonoursCatalogQueryBound() {
+        AgenticAuthoringResourceSearchFocus focus = new AgenticAuthoringResourceSearchFocus(
+                "human-resources.ferias-afastamentos",
+                List.of("afastamento ativo", "aprovacao de ferias"),
+                "regra governada",
+                "",
+                "");
+        String narrative = "primary business entity: ferias. semantic query: " + "x".repeat(400);
+
+        assertThat(AgenticAuthoringLlmPreIntentToolPlanningService.domainDecisionCatalogQuery(narrative, focus))
+                .isEqualTo("human-resources.ferias-afastamentos");
+
+        String fallback = AgenticAuthoringLlmPreIntentToolPlanningService.domainDecisionCatalogQuery(
+                "regra de ferias " + "palavra ".repeat(60), null);
+        assertThat(fallback.length())
+                .isLessThanOrEqualTo(org.praxisplatform.config.service.DomainRuleCatalogQueryService.MAX_QUERY_LENGTH);
+        assertThat(fallback).startsWith("regra de ferias").doesNotEndWith(" ");
+
+        assertThat(AgenticAuthoringLlmPreIntentToolPlanningService.domainDecisionCatalogQuery(null, null)).isEmpty();
+    }
+
     @Mock
     private AiProviderManagementService providerManagementService;
 

@@ -488,6 +488,45 @@ final class AgenticAuthoringTurnConsultativeQuickReplySupport {
         }
     }
 
+    /**
+     * Binds server-issued continuation decisions to the decision persisted as this turn's result,
+     * which is the parent the thread validates when the user selects one of them.
+     */
+    List<AgenticAuthoringQuickReply> withIssuingDecision(
+            List<AgenticAuthoringQuickReply> replies,
+            AgenticAuthoringSemanticDecision issuingDecision) {
+        if (replies == null || replies.isEmpty()
+                || issuingDecision == null
+                || !StringUtils.hasText(issuingDecision.decisionId())) {
+            return replies;
+        }
+        List<AgenticAuthoringQuickReply> bound = new ArrayList<>(replies.size());
+        for (AgenticAuthoringQuickReply reply : replies) {
+            JsonNode decisionNode = reply == null ? null : reply.semanticDecision();
+            if (decisionNode == null
+                    || !decisionNode.isObject()
+                    || !"server-issued-quick-reply".equals(
+                            decisionNode.path("constraints").path("source").asText(""))) {
+                bound.add(reply);
+                continue;
+            }
+            AgenticAuthoringSemanticDecision decision =
+                    objectMapper.convertValue(decisionNode, AgenticAuthoringSemanticDecision.class);
+            bound.add(new AgenticAuthoringQuickReply(
+                    reply.id(),
+                    reply.kind(),
+                    reply.label(),
+                    reply.prompt(),
+                    reply.description(),
+                    reply.icon(),
+                    reply.tone(),
+                    reply.contextHints(),
+                    objectMapper.valueToTree(decision.withIssuingDecision(issuingDecision.decisionId())),
+                    reply.value()));
+        }
+        return List.copyOf(bound);
+    }
+
     List<AgenticAuthoringQuickReply> consultativeQuickReplies(
             AgenticAuthoringTurnStreamRequest request,
             AgenticAuthoringConsultativeAnswer answer,
@@ -496,7 +535,9 @@ final class AgenticAuthoringTurnConsultativeQuickReplySupport {
             return List.of();
         }
         if (answer.quickReplies() != null && !answer.quickReplies().isEmpty()) {
-            return answer.quickReplies();
+            return withIssuingDecision(
+                    answer.quickReplies(),
+                    intentResolution == null ? null : intentResolution.semanticDecision());
         }
         AgenticAuthoringConsultativeApiCatalogProjection projection = answer.apiCatalogProjection();
         if (projection == null || !projection.hasResources()) {

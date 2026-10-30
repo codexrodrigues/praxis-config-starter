@@ -14,7 +14,8 @@ public class DomainRuleCatalogQueryService {
 
     private static final int MAX_LIMIT = 12;
     private static final int MAX_PAGE = 100;
-    private static final int MAX_QUERY_LENGTH = 256;
+    /** Public bound of the catalog query so programmatic callers can honour the same contract. */
+    public static final int MAX_QUERY_LENGTH = 256;
 
     private final DomainRuleDefinitionRepository definitions;
 

@@ -193,10 +193,18 @@ final class AgenticAuthoringIntentQuickReplySupport {
     List<AgenticAuthoringQuickReply> governedLlmQuickReplies(
             AgenticAuthoringLlmIntentResolution llmIntent,
             AgenticAuthoringCandidate selectedCandidate) {
+        return governedLlmQuickReplies(llmIntent, selectedCandidate, null);
+    }
+
+    List<AgenticAuthoringQuickReply> governedLlmQuickReplies(
+            AgenticAuthoringLlmIntentResolution llmIntent,
+            AgenticAuthoringCandidate selectedCandidate,
+            AgenticAuthoringGateResult gate) {
         if (llmIntent == null || llmIntent.quickReplies() == null || llmIntent.quickReplies().isEmpty()) {
             return List.of();
         }
-        ObjectNode selectedCandidateHints = selectedCandidate == null
+        boolean blockedGate = gate != null && "blocked".equals(gate.status());
+        ObjectNode selectedCandidateHints = selectedCandidate == null || blockedGate
                 ? null
                 : dashboardContextHints("", selectedCandidate);
         return llmIntent.quickReplies().stream()
@@ -288,7 +296,7 @@ final class AgenticAuthoringIntentQuickReplySupport {
     private AgenticAuthoringQuickReply enrichLlmQuickReply(
             AgenticAuthoringQuickReply reply,
             ObjectNode selectedCandidateHints) {
-        if (selectedCandidateHints == null) {
+        if (selectedCandidateHints == null || !shouldAttachSelectedCandidateHints(reply)) {
             return reply;
         }
         ObjectNode mergedHints = selectedCandidateHints.deepCopy();
@@ -309,6 +317,19 @@ final class AgenticAuthoringIntentQuickReplySupport {
                 reply.icon(),
                 reply.tone(),
                 mergedHints);
+    }
+
+    /**
+     * Only continuations whose declared semantic role may consume the selected resource receive its
+     * binding. The decision relies on the quick-reply {@code kind} contract authored with the reply;
+     * identifiers are opaque and are never interpreted as intent.
+     */
+    private boolean shouldAttachSelectedCandidateHints(AgenticAuthoringQuickReply reply) {
+        if (reply == null) {
+            return false;
+        }
+        String kind = valueOrDefault(reply.kind(), "").trim().toLowerCase(Locale.ROOT);
+        return !Set.of("cancel", "revise", "action", "info").contains(kind);
     }
 
     List<AgenticAuthoringQuickReply> canonicalizePresentationAffordanceQuickReplies(

@@ -35,6 +35,9 @@ import org.springframework.util.StringUtils;
 
 public class AgenticAuthoringToolRegistry {
 
+    private static final org.slf4j.Logger log =
+            org.slf4j.LoggerFactory.getLogger(AgenticAuthoringToolRegistry.class);
+
     static final String SEARCH_API_RESOURCES = "searchApiResources";
     static final String SEARCH_COMPONENT_CORPUS = "searchComponentCorpus";
     static final String GET_COMPONENT_AUTHORING_CONTEXT = "getComponentAuthoringContext";
@@ -933,6 +936,10 @@ public class AgenticAuthoringToolRegistry {
         try {
             return executor.execute(call, principalContext, requestBaseUrl);
         } catch (Exception ex) {
+            // The failure stays a governed tool result, but it must remain observable: a silent
+            // infrastructure failure would otherwise surface only as a misleading semantic outcome.
+            log.warn("[AgenticAuthoringTool] Tool execution failed; tool={}, routeClass={}, phase={}",
+                    call.name(), safeRoute(call.routeClass()), phase, ex);
             return AgenticAuthoringToolResult.failure(
                     call.name(),
                     "tool-execution-failed",

@@ -465,9 +465,13 @@ public class AgenticAuthoringLlmPreIntentToolPlanningService implements AgenticA
         String change = valueOrEmpty(decision.changeKind()).trim().toLowerCase(Locale.ROOT);
         if ("explore".equals(operation)
                 || "explain".equals(operation)
+                || "unknown".equals(operation)
                 || "api_catalog".equals(artifact)
+                || "component".equals(artifact)
                 || "unknown".equals(artifact)
                 || change.startsWith("answer_")
+                || change.startsWith("recommend_")
+                || "needs_clarification".equals(change)
                 || "api_catalog_followup".equals(change)) {
             return false;
         }
@@ -649,8 +653,9 @@ public class AgenticAuthoringLlmPreIntentToolPlanningService implements AgenticA
             AgenticAuthoringResourceSearchFocus resourceSearchFocus) {
         if ("domain_decision".equals(groundingProfile)) {
             ObjectNode payload = objectMapper.createObjectNode();
-            if (StringUtils.hasText(retrievalQuery)) {
-                payload.put("query", retrievalQuery.trim());
+            String catalogQuery = domainDecisionCatalogQuery(retrievalQuery, resourceSearchFocus);
+            if (StringUtils.hasText(catalogQuery)) {
+                payload.put("query", catalogQuery);
             }
             payload.put("page", 0);
             payload.put("limit", 6);
@@ -687,6 +692,27 @@ public class AgenticAuthoringLlmPreIntentToolPlanningService implements AgenticA
             default -> new DomainKnowledgeToolRequest(contextKey, resourceKey, 0);
         };
         return new AgenticAuthoringToolCall(toolName, "advisory_authoring", payload);
+    }
+
+    /**
+     * The governed decision catalog matches the query against canonical identities (rule, context,
+     * resource, service and owner keys) and bounds it to {@link
+     * org.praxisplatform.config.service.DomainRuleCatalogQueryService#MAX_QUERY_LENGTH}. The
+     * AI-authored primary business entity is the canonical focus for that lookup; the composed
+     * multi-section retrieval narrative is only a fallback and is never sent beyond the contract bound.
+     */
+    static String domainDecisionCatalogQuery(
+            String retrievalQuery,
+            AgenticAuthoringResourceSearchFocus resourceSearchFocus) {
+        String focus = resourceSearchFocus == null ? "" : resourceSearchFocus.primaryBusinessEntity();
+        String candidate = StringUtils.hasText(focus) ? focus.trim()
+                : retrievalQuery == null ? "" : retrievalQuery.trim();
+        int maxLength = org.praxisplatform.config.service.DomainRuleCatalogQueryService.MAX_QUERY_LENGTH;
+        if (candidate.length() <= maxLength) {
+            return candidate;
+        }
+        int boundary = candidate.lastIndexOf(' ', maxLength);
+        return (boundary > 0 ? candidate.substring(0, boundary) : candidate.substring(0, maxLength)).trim();
     }
 
     private boolean isRetryableProviderFailure(RuntimeException error) {

@@ -1815,9 +1815,13 @@ final class AgenticAuthoringIntentCandidateScoringSupport {
         String change = valueOrDefault(decision.changeKind(), "").trim().toLowerCase(Locale.ROOT);
         if ("explore".equals(operation)
                 || "explain".equals(operation)
+                || "unknown".equals(operation)
                 || "api_catalog".equals(artifact)
+                || "component".equals(artifact)
                 || "unknown".equals(artifact)
                 || change.startsWith("answer_")
+                || change.startsWith("recommend_")
+                || "needs_clarification".equals(change)
                 || "api_catalog_followup".equals(change)) {
             return false;
         }
