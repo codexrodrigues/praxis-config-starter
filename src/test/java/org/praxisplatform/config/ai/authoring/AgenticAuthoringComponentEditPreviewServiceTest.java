@@ -79,9 +79,10 @@ class AgenticAuthoringComponentEditPreviewServiceTest {
         assertThat(page.toString()).doesNotContain("availableTargets").doesNotContain("contextDiagnostics");
         assertThat(result.compiledFormPatch().path("componentEdit").path("componentId").asText())
                 .isEqualTo("praxis-chart");
+        // User-facing copy describes the edit in product language and never leaks operation ids.
         assertThat(result.assistantMessage())
-                .contains("crossFilter.configure")
-                .doesNotContain("column.visibility.set", "uncompiled-operation");
+                .contains("Preparei uma prévia com", "demais configurações atuais serão preservadas")
+                .doesNotContain("crossFilter.configure", "column.visibility.set", "uncompiled-operation");
 
         ArgumentCaptor<JsonNode> config = ArgumentCaptor.forClass(JsonNode.class);
         ArgumentCaptor<JsonNode> validationContext = ArgumentCaptor.forClass(JsonNode.class);
@@ -139,7 +140,8 @@ class AgenticAuthoringComponentEditPreviewServiceTest {
         assertThat(inputs.at("/config/columns/0/order").asInt()).isZero();
         assertThat(result.warnings()).contains("component-edit-plan-config-input-bound:config");
         assertThat(result.assistantMessage())
-                .contains("column.order.set", "demais configurações atuais serão preservadas");
+                .contains("Preparei uma prévia com", "demais configurações atuais serão preservadas")
+                .doesNotContain("column.order.set");
         verify(planService, never()).generateMinimalFormPlan(any(), any(), any(), any());
     }
 
@@ -289,7 +291,8 @@ class AgenticAuthoringComponentEditPreviewServiceTest {
                 "/config/behavior/filtering/advancedFilters/settings/selectedFieldIds/1").asText())
                 .isEqualTo("estadoCivil");
         assertThat(result.assistantMessage())
-                .contains("filter.advanced.fields.add", "demais configurações atuais serão preservadas")
+                .contains("Preparei uma prévia com", "demais configurações atuais serão preservadas")
+                .doesNotContain("filter.advanced.fields.add")
                 .doesNotContain("demais configurações de filtro serão preservadas");
         verify(planService, never()).generateMinimalFormPlan(any(), any(), any(), any());
     }

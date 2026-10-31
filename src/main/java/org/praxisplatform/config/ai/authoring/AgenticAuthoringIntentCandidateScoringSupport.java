@@ -441,9 +441,11 @@ final class AgenticAuthoringIntentCandidateScoringSupport {
         if (candidate == null || candidate.evidence() == null) {
             return 0;
         }
+        // A bare domain-binding marker is not documentary grounding. Verified operational bindings are
+        // retained through same-operation reconciliation (canRetainVerifiedBinding) instead of being
+        // promoted here, so incomplete, weak or out-of-scope bindings never outrank catalog grounding.
         if (hasEvidence(candidate, "semantic-retrieval")
                 || hasEvidence(candidate, "explicit-source-match")
-                || hasEvidence(candidate, "domain-binding")
                 || hasEvidence(candidate, AgenticAuthoringDomainCatalogCandidateEnhancer.DOMAIN_CATALOG_GROUNDING)) {
             return 3;
         }

@@ -473,15 +473,9 @@ public class AgenticAuthoringIntentResolverService {
             artifactKind = valueOrUnknown(llmIntent.artifactKind());
             changeKind = valueOrUnknown(llmIntent.changeKind());
             boolean llmCandidateBundleHasExplicitSource = hasExplicitSourceCandidate(llmCandidateOptions);
-            String llmSelectedResourcePath = valueOrDefault(llmIntent.selectedResourcePath(), "");
-            boolean llmSelectedGovernedToolCandidate = !llmSelectedResourcePath.isBlank()
-                    && llmCandidateOptions != null
-                    && llmCandidateOptions.stream().anyMatch(candidate ->
-                            candidate != null
-                                    && llmSelectedResourcePath.equals(candidate.resourcePath())
-                                    && hasEvidence(candidate, "tool-search-api-resources")
-                                    && hasTrustedSelectionEvidence(candidate));
-            String llmResourceSearchQuery = llmCandidateBundleHasExplicitSource || llmSelectedGovernedToolCandidate
+            // Documentary refinement always runs; verified operations are preserved below only when
+            // the server-reconstructed verification envelope proves them (never from candidate markers).
+            String llmResourceSearchQuery = llmCandidateBundleHasExplicitSource
                     ? ""
                     : consultativePlatformCapabilityQuestion
                     && (!isDomainDataCatalogQuestion(prompt) || isConsultativeFormPolicyQuestion(prompt))
@@ -509,9 +503,7 @@ public class AgenticAuthoringIntentResolverService {
                 candidates = deduplicateCandidates(refinedCandidates);
                 if (!emptyCandidateSetBeforeSearch) {
                     List<AgenticAuthoringCandidate> verifiedOperations = candidates.stream()
-                            .filter(candidate -> verifiedOperationForCandidate(request, candidate) != null
-                                    || (hasVerifiedOperationalBindingEvidence(candidate)
-                                            && hasEvidence(candidate, "tool-search-api-resources")))
+                            .filter(candidate -> verifiedOperationForCandidate(request, candidate) != null)
                             .toList();
                     List<AgenticAuthoringCandidate> documentaryCandidates = candidates.stream()
                             .filter(candidate -> !verifiedOperations.contains(candidate))
