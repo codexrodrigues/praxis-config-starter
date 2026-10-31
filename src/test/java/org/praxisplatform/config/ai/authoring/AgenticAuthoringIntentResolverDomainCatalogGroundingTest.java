@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
@@ -48,7 +49,7 @@ class AgenticAuthoringIntentResolverDomainCatalogGroundingTest {
         AgenticAuthoringIntentResolverService resolver = new AgenticAuthoringIntentResolverService(
                 objectMapper,
                 candidateCatalog,
-                null,
+                llmIntentResolver("create", "table", "create_artifact", "/api/operations/missoes", "component_authoring"),
                 new AgenticAuthoringComponentCapabilitiesService(),
                 "praxis-service",
                 enhancer);
@@ -104,7 +105,7 @@ class AgenticAuthoringIntentResolverDomainCatalogGroundingTest {
         AgenticAuthoringIntentResolverService resolver = new AgenticAuthoringIntentResolverService(
                 objectMapper,
                 candidateCatalog,
-                null,
+                llmIntentResolver("explore", "api_catalog", "answer_api_catalog_question", "/api/human-resources/funcionarios", "api_catalog_guidance"),
                 new AgenticAuthoringComponentCapabilitiesService(),
                 "praxis-service",
                 enhancer);
@@ -159,7 +160,7 @@ class AgenticAuthoringIntentResolverDomainCatalogGroundingTest {
         AgenticAuthoringIntentResolverService resolver = new AgenticAuthoringIntentResolverService(
                 objectMapper,
                 candidateCatalog,
-                null,
+                llmIntentResolver("create", "table", "create_artifact", null, "component_authoring"),
                 new AgenticAuthoringComponentCapabilitiesService(),
                 "praxis-service",
                 enhancer);
@@ -237,7 +238,7 @@ class AgenticAuthoringIntentResolverDomainCatalogGroundingTest {
         AgenticAuthoringIntentResolverService resolver = new AgenticAuthoringIntentResolverService(
                 objectMapper,
                 candidateCatalog,
-                null,
+                llmIntentResolver("create", "table", "create_artifact", "/api/human-resources/funcionarios", "component_authoring"),
                 new AgenticAuthoringComponentCapabilitiesService(),
                 "praxis-service",
                 enhancer);
@@ -269,6 +270,44 @@ class AgenticAuthoringIntentResolverDomainCatalogGroundingTest {
         assertThat(result.llmDiagnostics().path("resolutionTelemetry")
                 .path("selectedCandidateUsesDomainCatalogGrounding").asBoolean()).isTrue();
         assertThat(result.semanticDecision().reviewRequired()).isFalse();
+    }
+
+    private AgenticAuthoringLlmIntentResolverService llmIntentResolver(
+            String operationKind,
+            String artifactKind,
+            String changeKind,
+            String selectedResourcePath,
+            String semanticIntentClass) {
+        AgenticAuthoringLlmIntentResolverService llm = Mockito.mock(AgenticAuthoringLlmIntentResolverService.class);
+        Mockito.when(llm.resolve(
+                        Mockito.any(),
+                        Mockito.anyString(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.anyList(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.any()))
+                .thenReturn(Optional.of(new AgenticAuthoringLlmIntentResolution(
+                        true,
+                        operationKind,
+                        artifactKind,
+                        changeKind,
+                        selectedResourcePath,
+                        null,
+                        "none",
+                        "explore".equals(operationKind)
+                                ? "Você pode consultar os dados confirmados desta fonte de negócio."
+                                : "Vou montar a tabela com a fonte confirmada.",
+                        List.of(),
+                        List.of(),
+                        List.of(),
+                        null,
+                        null,
+                        false,
+                        semanticIntentClass)));
+        return llm;
     }
 
     private AgenticAuthoringCandidate lexicalCandidate() {

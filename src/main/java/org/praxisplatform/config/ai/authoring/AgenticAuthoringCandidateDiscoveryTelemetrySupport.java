@@ -76,12 +76,16 @@ final class AgenticAuthoringCandidateDiscoveryTelemetrySupport {
         if (llmIntent == null) {
             return false;
         }
-        if ("provider_error".equals(valueOrDefault(llmIntent.followUpKind(), ""))) {
+        if ("provider_error".equals(valueOrDefault(llmIntent.followUpKind(), ""))
+                || "provider_error".equals(valueOrDefault(llmIntent.changeKind(), ""))) {
             return true;
         }
         return hasLlmWarning(llmIntent, "llm-intent-resolution-failed")
                 || hasLlmWarning(llmIntent, "llm-provider-error")
-                || hasLlmWarning(llmIntent, "llm-provider-timeout");
+                || hasLlmWarning(llmIntent, "llm-provider-timeout")
+                || (llmIntent.warnings() != null
+                        && llmIntent.warnings().stream()
+                                .anyMatch(w -> w != null && w.startsWith("llm-intent-provider-failure:")));
     }
 
     boolean hasLlmWarning(AgenticAuthoringLlmIntentResolution llmIntent, String warning) {
@@ -119,9 +123,8 @@ final class AgenticAuthoringCandidateDiscoveryTelemetrySupport {
             String artifactKind,
             List<AgenticAuthoringCandidate> candidates) {
         if (!"api_catalog".equals(artifactKind)
-                || !candidateScoringSupport.isApiCatalogResourceListPrompt(prompt)
                 || candidates == null
-                || candidates.isEmpty()) {
+                || candidates.size() <= 1) {
             return candidates == null ? List.of() : candidates;
         }
         boolean hasGroundedCandidate = candidates.stream()
@@ -146,13 +149,7 @@ final class AgenticAuthoringCandidateDiscoveryTelemetrySupport {
             AgenticAuthoringLlmIntentResolution llmIntent,
             AgenticAuthoringGateResult gate,
             List<String> fallbackQuestions) {
-        boolean unconfirmedAiAuthoredResourceSelection = hasLlmWarning(
-                llmIntent,
-                "llm-resource-selection-unconfirmed-by-ai-authored-focus");
         if (llmIntent == null
-                || (!llmIntent.resolved()
-                        && !isLlmProviderFailure(llmIntent)
-                        && !unconfirmedAiAuthoredResourceSelection)
                 || gate == null
                 || !"clarification_required".equals(gate.status())
                 || llmIntent.clarificationQuestions() == null
@@ -349,67 +346,6 @@ final class AgenticAuthoringCandidateDiscoveryTelemetrySupport {
                 && candidate.evidence().contains(evidence);
     }
 
-    boolean isGovernedDeterministicResolution(
-            boolean deterministicFallbackApplied,
-            AgenticAuthoringGateResult gate,
-            String operationKind,
-            String artifactKind,
-            String changeKind,
-            AgenticAuthoringCandidate selectedCandidate) {
-        if (!deterministicFallbackApplied
-                || selectedCandidate == null
-                || gate == null
-                || !"eligible".equals(gate.status())
-                || "unknown".equals(valueOrUnknown(operationKind))
-                || "unknown".equals(valueOrUnknown(artifactKind))
-                || "unknown".equals(valueOrUnknown(changeKind))) {
-            return false;
-        }
-        if (hasEvidence(selectedCandidate, "lexical-fallback")
-                || hasEvidence(selectedCandidate, "weak-evidence")) {
-            return false;
-        }
-        boolean groundedByLlmAuthoredToolSearch = hasEvidence(selectedCandidate, "tool-search-api-resources")
-                && hasEvidence(selectedCandidate, "semantic-retrieval")
-                && hasTrustedSelectionEvidence(selectedCandidate)
-                && hasEvidence(selectedCandidate, SEMANTIC_ROLE_OPERATIONAL_RESOURCE);
-        if (hasEvidence(selectedCandidate, "broad-artifact-discovery")
-                && !groundedByLlmAuthoredToolSearch
-                && !hasStrongGroundingEvidence(selectedCandidate)) {
-            return false;
-        }
-        if (hasEvidence(selectedCandidate, "domain-anchor") && !hasStrongGroundingEvidence(selectedCandidate)) {
-            return false;
-        }
-        return selectedCandidate.score() >= 0.75d
-                || hasStrongGroundingEvidence(selectedCandidate)
-                || hasEvidence(selectedCandidate, "semantic-retrieval")
-                || hasEvidence(selectedCandidate, "tool-search-api-resources")
-                || hasEvidence(selectedCandidate, "quick-reply-context")
-                || hasEvidence(selectedCandidate, "explicit-resource-path");
-    }
-
-    boolean shouldSuppressWeakUnresolvedLlmSelection(
-            boolean deterministicFallbackApplied,
-            AgenticAuthoringLlmIntentResolution llmIntent,
-            String operationKind,
-            String artifactKind,
-            AgenticAuthoringCandidate selectedCandidate) {
-        if (!deterministicFallbackApplied
-                || llmIntent == null
-                || llmIntent.resolved()
-                || selectedCandidate == null) {
-            return false;
-        }
-        if (!"unknown".equals(valueOrUnknown(operationKind))
-                && !"unknown".equals(valueOrUnknown(artifactKind))) {
-            return false;
-        }
-        return hasEvidence(selectedCandidate, "lexical-fallback")
-                || hasEvidence(selectedCandidate, "weak-evidence")
-                || hasEvidence(selectedCandidate, "broad-artifact-discovery");
-    }
-
     boolean shouldDeferWeakLexicalApiCatalogSelection(
             String operationKind,
             String artifactKind,
@@ -550,72 +486,13 @@ final class AgenticAuthoringCandidateDiscoveryTelemetrySupport {
         return diagnostics;
     }
 
-    boolean isExplicitCreateConfirmation(String prompt) {
-        return containsAny(prompt,
-                "confirmed: criar",
-                "confirmed: create",
-                "confirmado: criar",
-                "confirmado: crie",
-                "sim, crie",
-                "sim crie",
-                "pode criar",
-                "pode fazer",
-                "fazer agora",
-                "faz agora",
-                "pode montar",
-                "pode gerar",
-                "confirmo criar",
-                "confirmo, crie");
-    }
-
-    boolean isConsultativePrompt(String prompt) {
-        return containsAny(prompt, "melhor forma", "como visualizar", "visualizar informacoes",
-                "visualizar informacao", "visualizar", "analisar", "analise", "explorar", "explore",
-                "me ajude", "ajude", "escolher", "sugerir", "sugira", "como ver",
-                "opcao", "opcoes", "alternativa", "alternativas", "indicar", "indique", "voce indica", "me indica",
-                "recomendar", "recomende", "recomendacao", "recomendacoes", "comparar", "compare",
-                "comparativo", "orientar", "oriente", "me oriente", "faz mais sentido", "devo usar",
-                "ver", "visao", "mostrar", "mostre");
-    }
-
-    boolean isApiCatalogQuestion(String prompt) {
-        if (!containsApiCatalogSubject(prompt)) {
-            return false;
-        }
-        return containsAny(prompt,
-                "qual", "quais", "que api", "que apis", "que endpoint", "que endpoints",
-                "que schema", "que schemas", "o que", "essa", "esse", "esta", "este", "existe", "existem",
-                "listar", "liste", "mostrar", "mostre", "consultar", "consulta", "devo usar",
-                "usar para", "campos existem", "suporta", "permite", "relacionad", "complement",
-                "combinar", "combine", "vincul");
-    }
-
-    private boolean containsApiCatalogSubject(String prompt) {
-        String wordPadded = " " + prompt.replaceAll("[^a-z0-9]+", " ") + " ";
-        if (wordPadded.contains(" api ") || wordPadded.contains(" apis ")
-                || wordPadded.contains(" acao ") || wordPadded.contains(" acoes ")
-                || wordPadded.contains(" action ") || wordPadded.contains(" actions ")) {
-            return true;
-        }
-        return containsAny(prompt, "endpoint", "endpoints", "schema", "schemas", "filtro", "filtros", "filtrar");
-    }
-
-    boolean isBareDomainPrompt(String prompt) {
-        String normalized = normalize(prompt);
-        if (normalized.isBlank() || !explicitResourcePath(normalized).isBlank()) {
-            return false;
-        }
-        String[] tokens = normalized.replaceAll("[^a-z0-9]+", " ").trim().split("\\s+");
-        return tokens.length <= 2;
-    }
-
     List<AgenticAuthoringCandidate> discoverCandidates(
             String prompt,
             String artifactKind,
             AgenticAuthoringTarget target,
             String tenantId,
             String environment) {
-        String effectiveArtifactKind = discoveryArtifactKindForPrompt(prompt, artifactKind);
+        String effectiveArtifactKind = valueOrUnknown(artifactKind);
         if ("component".equals(effectiveArtifactKind)) {
             return List.of();
         }
@@ -638,7 +515,7 @@ final class AgenticAuthoringCandidateDiscoveryTelemetrySupport {
         if (metadataCandidates.isEmpty()
                 && "api_catalog".equals(effectiveArtifactKind)
                 && apiMetadataCandidateCatalog != null) {
-            metadataCandidates = apiMetadataCandidateCatalog.discover("", "unknown", tenantId, environment, null);
+            metadataCandidates = apiMetadataCandidateCatalog.discover(prompt, "page", tenantId, environment, null);
         }
         if (metadataCandidates.isEmpty() && apiMetadataCandidateCatalog != null) {
             metadataCandidates = apiMetadataCandidateCatalog.discover("", effectiveArtifactKind, tenantId, environment, null);
@@ -646,7 +523,7 @@ final class AgenticAuthoringCandidateDiscoveryTelemetrySupport {
         if (metadataCandidates.isEmpty()
                 && "api_catalog".equals(effectiveArtifactKind)
                 && apiMetadataCandidateCatalog != null) {
-            metadataCandidates = apiMetadataCandidateCatalog.discover("", "unknown", tenantId, environment, null);
+            metadataCandidates = apiMetadataCandidateCatalog.discover("", "page", tenantId, environment, null);
         }
         if (!metadataCandidates.isEmpty()) {
             candidates.addAll(metadataCandidates);
@@ -661,7 +538,7 @@ final class AgenticAuthoringCandidateDiscoveryTelemetrySupport {
             String tenantId,
             String environment) {
         List<AgenticAuthoringCandidate> candidates = new ArrayList<>();
-        String effectiveArtifactKind = discoveryArtifactKindForPrompt(prompt, artifactKind);
+        String effectiveArtifactKind = valueOrUnknown(artifactKind);
         if ("component".equals(effectiveArtifactKind)) {
             return List.of();
         }
@@ -678,24 +555,25 @@ final class AgenticAuthoringCandidateDiscoveryTelemetrySupport {
                     "current-page"));
         }
         if (apiMetadataCandidateCatalog != null) {
-            if (!"unknown".equals(effectiveArtifactKind)) {
-                candidates.addAll(apiMetadataCandidateCatalog.discover(
-                        prompt,
-                        effectiveArtifactKind,
-                        tenantId,
-                        environment,
-                        null));
-                if (hasExplicitSourceCandidate(candidates)) {
-                    return groundCandidates(prompt, explicitSourceDiscoveryScope(candidates), tenantId, environment);
-                }
+            String initialPromptDiscoveryArtifactKind = "unknown".equals(effectiveArtifactKind)
+                    ? "page"
+                    : effectiveArtifactKind;
+            candidates.addAll(apiMetadataCandidateCatalog.discover(
+                    prompt,
+                    initialPromptDiscoveryArtifactKind,
+                    tenantId,
+                    environment,
+                    null));
+            if (hasExplicitSourceCandidate(candidates)) {
+                return groundCandidates(prompt, explicitSourceDiscoveryScope(candidates), tenantId, environment);
             }
-            candidates.addAll(apiMetadataCandidateCatalog.discover("", "unknown", tenantId, environment, null));
+            candidates.addAll(apiMetadataCandidateCatalog.discover("", "page", tenantId, environment, null));
             if (hasExplicitSourceCandidate(candidates)) {
                 return groundCandidates(prompt, explicitSourceDiscoveryScope(candidates), tenantId, environment);
             }
             candidates.addAll(apiMetadataCandidateCatalog.discover(
                     "",
-                    !"unknown".equals(effectiveArtifactKind) ? effectiveArtifactKind : "unknown",
+                    initialPromptDiscoveryArtifactKind,
                     tenantId,
                     environment,
                     null));
@@ -707,7 +585,7 @@ final class AgenticAuthoringCandidateDiscoveryTelemetrySupport {
             String prompt,
             String artifactKind,
             AgenticAuthoringTarget target) {
-        String effectiveArtifactKind = discoveryArtifactKindForPrompt(prompt, artifactKind);
+        String effectiveArtifactKind = valueOrUnknown(artifactKind);
         if ("component".equals(effectiveArtifactKind)
                 || target == null
                 || target.resourcePath() == null
@@ -724,14 +602,6 @@ final class AgenticAuthoringCandidateDiscoveryTelemetrySupport {
                 0.95d,
                 "resource resolved from current target widget",
                 "current-page"));
-    }
-
-    String discoveryArtifactKindForPrompt(String prompt, String artifactKind) {
-        String effectiveArtifactKind = valueOrUnknown(artifactKind);
-        if (candidateScoringSupport.isExplicitGovernedBusinessRulePrompt(prompt)) {
-            return "form";
-        }
-        return effectiveArtifactKind;
     }
 
     boolean hasExplicitSourceCandidate(List<AgenticAuthoringCandidate> candidates) {
@@ -1047,10 +917,6 @@ final class AgenticAuthoringCandidateDiscoveryTelemetrySupport {
         }
         Matcher matcher = EXPLICIT_API_PATH_PATTERN.matcher(prompt);
         return matcher.find() ? normalizePath(matcher.group(1).replaceAll("[.,;:!?]+$", "")) : "";
-    }
-
-    private boolean containsAny(String value, String... tokens) {
-        return AgenticAuthoringTextNormalizationSupport.containsAny(value, tokens);
     }
 
     private String normalize(String value) {

@@ -240,41 +240,6 @@ class AiOrchestratorServiceDeterministicFallbackTest {
         assertThat(((JsonNode) provided).asText()).isEqualTo("xml");
     }
 
-    @Test
-    void shouldApplyRelevanceFallbackWhenDensityPromptReturnsIrrelevantPatch() throws Exception {
-        AiOrchestratorRequest request = baseRequest("Troque a densidade da tabela para compacta.");
-        List<String> warnings = new ArrayList<>();
-        JsonNode irrelevantPatch = objectMapper.readTree("""
-                {
-                  "columns": [
-                    {
-                      "field": "idade",
-                      "computed": {
-                        "expression": "floor(yearsSince(id))",
-                        "outputType": "number",
-                        "format": "1.0-0"
-                      }
-                    }
-                  ]
-                }
-                """);
-
-        AiOrchestratorResponse response = ReflectionTestUtils.invokeMethod(
-                service,
-                "tryResolveDeterministicPatchRelevanceFallback",
-                request,
-                irrelevantPatch,
-                baseState(),
-                warnings,
-                tableCapabilities(),
-                List.<AiCapability>of(),
-                null);
-
-        assertThat(response).isNotNull();
-        assertThat(response.getPatch().path("appearance").path("density").asText()).isEqualTo("compact");
-        assertThat(warnings).anyMatch(w -> w.contains("nao aderiu ao pedido de densidade"));
-    }
-
     private AiOrchestratorRequest baseRequest(String prompt) {
         return AiOrchestratorRequest.builder()
                 .componentId("praxis-table")

@@ -316,9 +316,13 @@ Use a production-grade secret in deployed environments and rotate it through the
 Agentic authoring keeps bounded host-local caches only for performance. These caches must not be treated as a
 source of truth: `ai_registry`, `api_metadata`, runtime metadata and persisted turn events remain canonical.
 
+Intent resolution is strictly **semantic-first and fail-closed**:
+- User intent is classified through the structured LLM contract (`AgenticAuthoringLlmIntentResolution`, including `semanticIntentClass`, `operationKind`, `artifactKind`, `changeKind`, `requiresGovernedAuthoring`, `localEditorialComposition`, `semanticRefinement`, `queryConstraints`, `visualizationDecision`, and `consultativeRetrievalPlan`) or through server-signed continuation tokens (`semanticDecision`, `governedResourceConfirmation`, `contextualPreviewAction`).
+- Lexical keyword fallbacks over raw user prompts are prohibited. When the LLM provider fails (`provider_error`) or cannot resolve an actionable intent (`resolved=false`), the turn fails closed without executing mutations, synthesizing unauthorized quick replies, or mutating prior session decision memory (`activeSemanticDecision`).
+- Governed resource authoring (`requiresGovernedAuthoring=true` or non-blank `selectedResourcePath`) always takes precedence over `localEditorialComposition`.
+
 | Property | Default | Notes |
 | --- | --- | --- |
-| `praxis.ai.authoring.legacy-keyword-fallback-enabled` | `false` | Compatibility switch for old deterministic keyword intent fallback. Keep disabled in canonical hosts; enable only for legacy smoke/test fixtures while migrating to semantic intent resolution. |
 | `praxis.ai.authoring.component-capabilities.cache-ttl-ms` | `600000` | TTL for component capability discovery. Registry bootstrap and committed component-definition changes refresh or invalidate this cache explicitly, so normal turns reuse the governed projection without minute-by-minute reloads. Use `0` to disable local caching when validating registry changes without restarting the host. |
 | `praxis.ai.authoring.component-capabilities.registry-load-timeout-ms` | `30000` | Maximum time allowed for the focal AI Registry projection. A timeout is reported as degraded provenance and never stored for the normal cache TTL. |
 | `praxis.ai.authoring.component-capabilities.degraded-retry-ms` | `5000` | Short retry window used after registry timeout or failure. During this window the service exposes last-known-good data when available, otherwise an observable built-in fallback. |

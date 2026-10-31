@@ -3,7 +3,9 @@ package org.praxisplatform.config.ai.authoring;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.fail;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -17,6 +19,7 @@ import java.util.Arrays;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Optional;
 import java.util.OptionalDouble;
 import java.util.Set;
 import org.junit.jupiter.api.Tag;
@@ -77,7 +80,7 @@ class AgenticAuthoringLlmIntentMatrixShadowIntegrationTest {
         int divergentCases = 0;
         for (MatrixCase matrixCase : cases) {
             JsonNode llmCase = findLlmCase(llmResult.path("cases"), matrixCase.id());
-            AgenticAuthoringIntentResolutionResult deterministic = deterministicResolve(matrixCase);
+            AgenticAuthoringIntentResolutionResult deterministic = deterministicResolve(matrixCase, llmCase);
             ObjectNode reportCase = reportCase(providerName, matrixCase, llmCase, deterministic, capabilities);
             if (reportCase.path("divergences").isEmpty()) {
                 exactMatches++;
@@ -230,8 +233,30 @@ class AgenticAuthoringLlmIntentMatrixShadowIntegrationTest {
         return context;
     }
 
-    private AgenticAuthoringIntentResolutionResult deterministicResolve(MatrixCase matrixCase) {
-        return new AgenticAuthoringIntentResolverService(objectMapper).resolve(new AgenticAuthoringIntentResolutionRequest(
+    private AgenticAuthoringIntentResolutionResult deterministicResolve(MatrixCase matrixCase, JsonNode llmCase) {
+        AgenticAuthoringLlmIntentResolverService llmResolver = mock(AgenticAuthoringLlmIntentResolverService.class);
+        boolean resolved = !"unknown".equals(text(llmCase, "operationKind"))
+                && !"unknown".equals(text(llmCase, "artifactKind"));
+        when(llmResolver.resolve(any(), any(), any(), any(), any(), any(), any(), any(), any()))
+                .thenReturn(Optional.of(new AgenticAuthoringLlmIntentResolution(
+                        resolved,
+                        text(llmCase, "operationKind"),
+                        text(llmCase, "artifactKind"),
+                        text(llmCase, "changeKind"),
+                        nullableText(llmCase, "resourcePath"),
+                        null,
+                        "none",
+                        "",
+                        List.of(),
+                        llmCase.path("requiresClarification").asBoolean(false)
+                                ? List.of(value(nullableText(llmCase, "clarificationCode")))
+                                : List.of(),
+                        List.of("llm-intent-resolution-used"))));
+        return new AgenticAuthoringIntentResolverService(
+                objectMapper,
+                null,
+                llmResolver,
+                new AgenticAuthoringComponentCapabilitiesService()).resolve(new AgenticAuthoringIntentResolutionRequest(
                 matrixCase.userPrompt(),
                 TARGET_APP,
                 TARGET_COMPONENT,

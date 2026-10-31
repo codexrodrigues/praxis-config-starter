@@ -13,7 +13,8 @@ public record AgenticAuthoringPreIntentToolPlan(
         JsonNode queryConstraints,
         String artifactKind,
         String primaryComponent,
-        String layoutKind
+        String layoutKind,
+        List<AgenticAuthoringQuickReply> quickReplies
 ) {
 
     public AgenticAuthoringPreIntentToolPlan {
@@ -29,6 +30,32 @@ public record AgenticAuthoringPreIntentToolPlan(
         artifactKind = artifactKind == null || artifactKind.isBlank() ? "unknown" : artifactKind.trim();
         primaryComponent = primaryComponent == null ? "" : primaryComponent.trim();
         layoutKind = layoutKind == null ? "" : layoutKind.trim();
+        quickReplies = quickReplies == null ? List.of() : List.copyOf(quickReplies);
+    }
+
+    public AgenticAuthoringPreIntentToolPlan(
+            String schemaVersion,
+            String reason,
+            List<AgenticAuthoringToolCall> toolCalls,
+            String semanticIntentClass,
+            String assistantMessage,
+            boolean requiresFullIntentResolution,
+            JsonNode queryConstraints,
+            String artifactKind,
+            String primaryComponent,
+            String layoutKind) {
+        this(
+                schemaVersion,
+                reason,
+                toolCalls,
+                semanticIntentClass,
+                assistantMessage,
+                requiresFullIntentResolution,
+                queryConstraints,
+                artifactKind,
+                primaryComponent,
+                layoutKind,
+                List.of());
     }
 
     public AgenticAuthoringPreIntentToolPlan(

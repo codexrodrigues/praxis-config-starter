@@ -737,21 +737,22 @@ final class AgenticAuthoringIntentContextCandidateSupport {
             AgenticAuthoringIntentResolutionRequest request,
             AgenticAuthoringConversationTurn turn) {
         JsonNode contextHints = request == null ? null : request.contextHints();
-        String prompt = normalize(String.join(" ",
+        String userPrompt = normalize(request == null ? "" : valueOrDefault(request.userPrompt(), ""));
+        String combinedPrompt = normalize(String.join(" ",
                 request == null ? "" : valueOrDefault(request.userPrompt(), ""),
                 turn == null ? "" : valueOrDefault(turn.effectivePrompt(), "")));
         String hintedResourcePath = contextHints != null && contextHints.isObject()
                 ? jsonText(contextHints, "resourcePath")
                 : "";
-        if (hintedResourcePath.isBlank() && explicitResourcePath(prompt).isBlank()) {
+        if (hintedResourcePath.isBlank() && explicitResourcePath(combinedPrompt).isBlank()) {
             return false;
         }
-        return prompt.contains("confirmed:")
-                || prompt.contains("confirmado:")
-                || prompt.contains("confirmada:")
-                || prompt.contains("confirmo")
+        return userPrompt.contains("confirmed:")
+                || userPrompt.contains("confirmado:")
+                || userPrompt.contains("confirmada:")
+                || userPrompt.contains("confirmo")
                 || containsAny(
-                prompt,
+                userPrompt,
                 "gerar previa",
                 "gerar pre visualizacao");
     }

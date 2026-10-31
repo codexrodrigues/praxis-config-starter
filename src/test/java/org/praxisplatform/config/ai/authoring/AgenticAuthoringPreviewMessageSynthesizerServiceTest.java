@@ -475,6 +475,61 @@ class AgenticAuthoringPreviewMessageSynthesizerServiceTest {
     }
 
     @Test
+    void synthesizeReplacesBoilerplateOpeningWithLlmAuthoredPreviewLead() {
+        AgenticAuthoringIntentResolutionResult base = governedFastIntent();
+        AgenticAuthoringIntentResolutionResult authoredIntent = new AgenticAuthoringIntentResolutionResult(
+                base.valid(),
+                base.operationKind(),
+                base.artifactKind(),
+                base.changeKind(),
+                base.authoringProfile(),
+                base.targetApp(),
+                base.targetComponentId(),
+                base.target(),
+                base.selectedCandidate(),
+                base.candidates(),
+                base.gate(),
+                base.effectivePrompt(),
+                "Preparei uma tabela interativa de missões para você acompanhar o andamento da equipe.",
+                base.assistantContent(),
+                base.apiCatalogAnswer(),
+                base.quickReplies(),
+                base.pendingClarification(),
+                base.clarificationQuestions(),
+                base.warnings(),
+                base.failureCodes(),
+                base.currentPageSummary(),
+                base.llmDiagnostics(),
+                base.visualizationDecision(),
+                base.semanticDecision());
+
+        String result = service().synthesize(
+                governedFastIntentRequest(),
+                authoredIntent,
+                uiCompositionPlan(),
+                true,
+                List.of(),
+                List.of("compiled-form-patch-materialized-by-page-builder"),
+                "fallback seguro",
+                "tenant",
+                "user",
+                "local");
+
+        assertThat(result)
+                .startsWith("Preparei uma tabela interativa de missões para você acompanhar o andamento da equipe.")
+                .doesNotContain("Montei uma pré-visualização governada")
+                .contains("Fonte governada: Resumo missoes")
+                .contains("Materialização: tabela")
+                .contains("Próximo passo: revise a pré-visualização");
+        org.mockito.Mockito.verify(providerManagementService, org.mockito.Mockito.never()).generateText(
+                any(String.class),
+                any(AiCallConfig.class),
+                any(String.class),
+                any(String.class),
+                any(String.class));
+    }
+
+    @Test
     void synthesizeReusesGovernedDashboardWithVerifiedStatsWithoutExtraProviderCall() {
         ObjectNode plan = objectMapper.createObjectNode();
         plan.put("kind", "dashboard");

@@ -6,4 +6,7 @@ public record AgenticAuthoringConversationMessage(
         String text,
         String createdAt
 ) {
+    public AgenticAuthoringConversationMessage(String role, String text) {
+        this(null, role, text, null);
+    }
 }

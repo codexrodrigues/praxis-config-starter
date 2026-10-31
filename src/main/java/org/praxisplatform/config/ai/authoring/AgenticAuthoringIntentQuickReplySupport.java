@@ -85,9 +85,7 @@ final class AgenticAuthoringIntentQuickReplySupport {
             AgenticAuthoringGateResult gate,
             List<String> questions,
             List<AgenticAuthoringCandidate> candidates,
-            boolean answeredBareDomainClarification,
-            Predicate<String> consultativePlatformCapabilityQuestionPredicate,
-            Predicate<String> apiCatalogCandidateChoicePromptPredicate) {
+            boolean answeredBareDomainClarification) {
         if (gate.messages().contains("assistant-choice-confirmation-required")) {
             return assistantChoiceQuickReplies(effectivePrompt, questions.isEmpty() ? "" : questions.get(0));
         }
@@ -104,8 +102,7 @@ final class AgenticAuthoringIntentQuickReplySupport {
             return dashboardExplorationQuickReplies(effectivePrompt, selectedCandidate);
         }
         if ("component".equals(artifactKind)
-                && consultativePlatformCapabilityQuestionPredicate != null
-                && consultativePlatformCapabilityQuestionPredicate.test(prompt)) {
+                && ("explain".equals(operationKind) || "explore".equals(operationKind))) {
             return platformCapabilityQuickReplies(effectivePrompt, null);
         }
         if (!"explore".equals(operationKind) && !"clarification_required".equals(gate.status())) {
@@ -137,22 +134,23 @@ final class AgenticAuthoringIntentQuickReplySupport {
             return candidateResourceQuickReplies(effectivePrompt, candidates);
         }
         if ("api_catalog".equals(artifactKind)) {
-            if (consultativePlatformCapabilityQuestionPredicate != null
-                    && consultativePlatformCapabilityQuestionPredicate.test(prompt)) {
-                return platformCapabilityQuickReplies(effectivePrompt, null);
+            if ("resource_discovery_for_indicators".equals(changeKind) && candidates != null && !candidates.isEmpty()) {
+                return apiCatalogQuickReplies(
+                        effectivePrompt,
+                        changeKind,
+                        selectedCandidate != null ? selectedCandidate : candidates.get(0));
             }
-            if (isLiteralApiCatalogResourceListPrompt(prompt) && candidates != null && !candidates.isEmpty()) {
+            boolean contextBoundCandidate = selectedCandidate != null
+                    && selectedCandidate.evidence() != null
+                    && (selectedCandidate.evidence().contains("quick-reply-context")
+                    || selectedCandidate.evidence().contains("explicit-resource-path")
+                    || selectedCandidate.evidence().contains("current-page-target-resource"));
+            if ((selectedCandidate == null || ("answer_api_catalog_question".equals(changeKind) && !contextBoundCandidate))
+                    && candidates != null
+                    && !candidates.isEmpty()) {
                 return candidateResourceQuickReplies(effectivePrompt, candidates);
             }
-            if (selectedCandidate == null && candidates != null && !candidates.isEmpty()) {
-                if ((apiCatalogCandidateChoicePromptPredicate != null
-                        && apiCatalogCandidateChoicePromptPredicate.test(prompt))
-                        || isLiteralApiCatalogResourceListPrompt(prompt)) {
-                    return candidateResourceQuickReplies(effectivePrompt, candidates);
-                }
-                return apiCatalogQuickReplies(effectivePrompt, prompt, candidates.get(0));
-            }
-            return apiCatalogQuickReplies(effectivePrompt, prompt, selectedCandidate);
+            return apiCatalogQuickReplies(effectivePrompt, changeKind, selectedCandidate);
         }
         if ("explore".equals(operationKind)
                 && "dashboard".equals(artifactKind)
@@ -522,8 +520,7 @@ final class AgenticAuthoringIntentQuickReplySupport {
             AgenticAuthoringCandidate selectedCandidate,
             boolean selectedCandidateHasTrustedSelectionEvidence) {
         if (isApiCatalogQuestion(operationKind, artifactKind, changeKind)) {
-            return selectedCandidate != null
-                    && selectedCandidateHasTrustedSelectionEvidence
+            return (selectedCandidate == null || selectedCandidateHasTrustedSelectionEvidence)
                     && llmAuthoredQuickReplies != null
                     && !llmAuthoredQuickReplies.isEmpty();
         }
@@ -532,6 +529,12 @@ final class AgenticAuthoringIntentQuickReplySupport {
                     && !llmAuthoredQuickReplies.isEmpty()
                     && llmAuthoredQuickReplies.stream()
                     .noneMatch(reply -> valueOrDefault(reply.id(), "").startsWith("llm-"));
+        }
+        if ("explain".equals(operationKind) || "explore".equals(operationKind)) {
+            return llmAuthoredQuickReplies != null
+                    && !llmAuthoredQuickReplies.isEmpty()
+                    && !contextHintSelectionApplied
+                    && !promotedAssistantChoiceToClarification;
         }
         return llmAuthoredQuickReplies != null
                 && !llmAuthoredQuickReplies.isEmpty()
@@ -1047,13 +1050,13 @@ final class AgenticAuthoringIntentQuickReplySupport {
 
     private List<AgenticAuthoringQuickReply> apiCatalogQuickReplies(
             String effectivePrompt,
-            String prompt,
+            String changeKind,
             AgenticAuthoringCandidate selectedCandidate) {
         ObjectNode contextHints = selectedCandidate == null
                 ? null
                 : dashboardContextHints(effectivePrompt, selectedCandidate);
         List<AgenticAuthoringQuickReply> replies = new ArrayList<>();
-        if (!containsAny(prompt, "schema", "schemas", "campo", "campos")) {
+        if (!"answer_api_catalog_question".equals(changeKind) || selectedCandidate == null) {
             replies.add(new AgenticAuthoringQuickReply(
                         "api-create-dashboard",
                         contextHints == null ? "suggestion" : "confirm",
@@ -1099,18 +1102,6 @@ final class AgenticAuthoringIntentQuickReplySupport {
                                 "Retorna acoes, filtros e capacidades expostas pelo catalogo governado.",
                                 "Clique para explorar as acoes suportadas pela fonte.")));
         return List.copyOf(replies);
-    }
-
-    private boolean isLiteralApiCatalogResourceListPrompt(String prompt) {
-        String normalized = normalize(prompt);
-        return containsAny(normalized,
-                "quais apis",
-                "que apis",
-                "apis relacionadas",
-                "apis disponiveis",
-                "fontes de dados",
-                "fontes disponiveis",
-                "fontes relacionadas");
     }
 
     private ObjectNode quickReplyPresentation(String bestFor, String returns, String nextStep) {

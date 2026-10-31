@@ -79,7 +79,31 @@ final class AgenticAuthoringContextBundle {
             AgenticAuthoringIntentResolutionRequest request,
             List<AgenticAuthoringCandidate> candidateOptions) {
         ObjectNode retrieval = objectMapper.createObjectNode();
-        retrieval.set("candidateResources", objectMapper.valueToTree(candidateOptions == null ? List.of() : candidateOptions));
+        List<AgenticAuthoringCandidate> safeCandidates = candidateOptions == null ? List.of() : candidateOptions;
+        retrieval.set("candidateResources", objectMapper.valueToTree(safeCandidates));
+        ObjectNode eligibility = objectMapper.createObjectNode();
+        int candidateCount = safeCandidates.size();
+        boolean hasGroundedCandidate = safeCandidates.stream()
+                .anyMatch(candidate -> candidate != null
+                        && candidate.evidence() != null
+                        && (candidate.evidence().contains("explicit-source-match")
+                                || candidate.evidence().contains("explicit-resource-path")
+                                || candidate.evidence().contains("quick-reply-context")
+                                || candidate.evidence().contains("current-page-target-resource")
+                                || candidate.evidence().contains("domain-binding-operationally-verified")
+                                || candidate.evidence().contains("domain-catalog-context")));
+        long distinctResourcePaths = safeCandidates.stream()
+                .filter(candidate -> candidate != null && candidate.resourcePath() != null && !candidate.resourcePath().isBlank())
+                .map(AgenticAuthoringCandidate::resourcePath)
+                .distinct()
+                .count();
+        boolean hasAmbiguousCandidates = distinctResourcePaths > 1 && !hasGroundedCandidate;
+        eligibility.put("candidateCount", candidateCount);
+        eligibility.put("distinctResourceCount", distinctResourcePaths);
+        eligibility.put("hasGroundedCandidate", hasGroundedCandidate);
+        eligibility.put("hasAmbiguousCandidates", hasAmbiguousCandidates);
+        eligibility.put("requiresResourceSelection", candidateCount == 0 || hasAmbiguousCandidates);
+        retrieval.set("candidateEligibility", eligibility);
         JsonNode liveOptionFieldGrounding = request == null || request.contextHints() == null
                 ? null
                 : request.contextHints().path("liveOptionFieldGrounding");

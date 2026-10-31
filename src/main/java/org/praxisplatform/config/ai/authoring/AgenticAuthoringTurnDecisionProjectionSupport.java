@@ -54,9 +54,26 @@ final class AgenticAuthoringTurnDecisionProjectionSupport {
             Map<String, Object> decisionDiagnostics,
             AgenticAuthoringComponentCapabilitiesResult capabilities) {
         List<AgenticAuthoringQuickReply> replies = terminalQuickReplies(intentResolution, businessCatalogDiscovery);
+        if (!canApply && !replies.isEmpty()) {
+            replies = replies.stream()
+                    .filter(reply -> !isUnexecutableConfirmationQuickReply(reply))
+                    .toList();
+        }
         List<AgenticAuthoringQuickReply> contextual =
                 contextualPreviewQuickReplies(request, intentResolution, preview, capabilities);
+        String blockReason = decisionDiagnostics == null
+                ? ""
+                : safeText((String) decisionDiagnostics.get("terminalPreviewApplyBlockReason"));
+        String reviewReason = decisionDiagnostics == null
+                ? ""
+                : safeText((String) decisionDiagnostics.get("reviewReason"));
         boolean requiresGovernedRepair = !canApply
+                && preview != null
+                && preview.valid()
+                && !"local-component-patch-blocked-by-policy".equals(blockReason)
+                && !"component-edit-no-op".equals(blockReason)
+                && !"local-component-patch-blocked-by-policy".equals(reviewReason)
+                && !"component-edit-no-op".equals(reviewReason)
                 && intentResolution != null
                 && List.of("create", "modify", "remove", "compose", "connect", "undo")
                         .contains(safeText(intentResolution.operationKind()))
@@ -97,6 +114,29 @@ final class AgenticAuthoringTurnDecisionProjectionSupport {
             }
         }
         return false;
+    }
+
+    List<AgenticAuthoringQuickReply> filterExecutableQuickReplies(
+            List<AgenticAuthoringQuickReply> replies,
+            boolean canApply) {
+        if (replies == null || replies.isEmpty() || canApply) {
+            return replies == null ? List.of() : replies;
+        }
+        return replies.stream()
+                .filter(reply -> !isUnexecutableConfirmationQuickReply(reply))
+                .toList();
+    }
+
+    private boolean isUnexecutableConfirmationQuickReply(AgenticAuthoringQuickReply reply) {
+        if (reply == null) {
+            return false;
+        }
+        String id = safeText(reply.id()).toLowerCase( java.util.Locale.ROOT);
+        if (id.startsWith("resource-discovery-confirm:")) {
+            return false;
+        }
+        String kind = safeText(reply.kind()).toLowerCase(java.util.Locale.ROOT);
+        return "confirm".equals(kind) || "apply".equals(kind);
     }
 
     private AgenticAuthoringQuickReply governedReviewRepairQuickReply(

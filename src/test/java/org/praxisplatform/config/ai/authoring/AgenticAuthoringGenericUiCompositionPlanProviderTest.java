@@ -1753,6 +1753,39 @@ class AgenticAuthoringGenericUiCompositionPlanProviderTest {
     }
 
     @Test
+    void canonicalSingleChartDecisionCannotBeReinterpretedAsDashboardFromPromptText() {
+        AgenticAuthoringVisualizationDecision decision = new AgenticAuthoringVisualizationDecision(
+                "praxis-agentic-authoring-visualization-decision.v1",
+                "single-chart",
+                "single_chart",
+                "praxis-chart",
+                List.of(axis("severity", "severidade", "Severidade", "bar", "vertical")),
+                false,
+                false,
+                "llm-authored-semantic-decision");
+
+        AgenticAuthoringUiCompositionPlanResult result = provider.plan(new AgenticAuthoringPlanRequest(
+                "Use a fonte Indicadores Incidentes do painel anterior para montar o gráfico de barras por severidade.",
+                "openai",
+                "gpt-5.4-mini",
+                "test-key",
+                intent("create", "chart", "create_artifact",
+                        "/api/risk-intelligence/vw-indicadores-incidentes",
+                        decision))).orElseThrow();
+
+        JsonNode plan = result.uiCompositionPlan();
+        assertThat(result.warnings()).containsExactly("ui-composition-plan-provider:generic-resource-chart");
+        assertThat(plan.path("layoutPreset").asText()).isEqualTo("single-chart-page");
+        assertThat(plan.path("widgets")).hasSize(1);
+        assertThat(plan.path("widgets").path(0).path("componentId").asText())
+                .isEqualTo("praxis-chart");
+        assertThat(plan.toString())
+                .doesNotContain("praxis-table")
+                .doesNotContain("praxis-filter")
+                .doesNotContain("kpi-band");
+    }
+
+    @Test
     void normalizesTimeseriesCandidateToBusinessResourceButPreservesTimeseriesStatsOperation() {
         AgenticAuthoringUiCompositionPlanResult result = provider.plan(new AgenticAuthoringPlanRequest(
                 "Crie grafico temporal de incidentes por ocorrido em",

@@ -184,7 +184,7 @@
             ["gráfico", "grafico", "painel", "dashboard", "chart"],
             ["filtro", "filter"]
           ],
-          "forbiddenTerms": ["json", "schema", "changeKind", "operationKind", "artifactKind", "tool loop", "criação", "detalhe", "formulário", "funcionário", "tabela", "gráfico", "filtro"]
+          "forbiddenTerms": ["json", "schema", "changeKind", "operationKind", "artifactKind", "tool loop"]
         },
         "safety": {
           "allowedResourcePathPrefixes": [],

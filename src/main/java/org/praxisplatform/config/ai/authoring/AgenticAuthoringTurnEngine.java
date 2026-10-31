@@ -69,6 +69,7 @@ public class AgenticAuthoringTurnEngine {
     private final AgenticAuthoringPersistedUiCompositionSourceResolver persistedUiCompositionSourceResolver;
     private final long componentCapabilitiesPreloadTimeoutMs;
     private final AgenticAuthoringRuntimeComponentGroundingService runtimeComponentGroundingService;
+    private final AgenticAuthoringRuntimeFormValueGroundingService runtimeFormValueGroundingService;
     private final AgenticAuthoringTurnAdvisorySupport advisorySupport;
     private final AgenticAuthoringTurnDecisionProjectionSupport decisionProjectionSupport;
     private final AgenticAuthoringTurnLiveOptionGroundingSupport liveOptionGroundingSupport;
@@ -290,6 +291,8 @@ public class AgenticAuthoringTurnEngine {
         this.persistedUiCompositionSourceResolver = persistedUiCompositionSourceResolver;
         this.componentCapabilitiesPreloadTimeoutMs = Math.max(1L, componentCapabilitiesPreloadTimeoutMs);
         this.runtimeComponentGroundingService = new AgenticAuthoringRuntimeComponentGroundingService(objectMapper);
+        this.runtimeFormValueGroundingService =
+                new AgenticAuthoringRuntimeFormValueGroundingService(objectMapper, schemaRetrievalService);
         this.advisorySupport = new AgenticAuthoringTurnAdvisorySupport(schemaRetrievalService);
         this.decisionProjectionSupport =
                 new AgenticAuthoringTurnDecisionProjectionSupport(objectMapper, this.advisorySupport);
@@ -793,7 +796,9 @@ public class AgenticAuthoringTurnEngine {
             request = withComponentSelectionContext(request, intentResolution, route, eventSink);
             AgenticAuthoringPreviewResult preview = null;
             AgenticAuthoringToolLoopResult toolLoopResult = null;
-            if (route.allowsPreview() && intentResolution.valid()) {
+            if (route.allowsPreview()
+                    && intentResolution.valid()
+                    && !isRuntimeFormValueAssistanceTurn(request, intentResolution)) {
                 AgenticAuthoringTurnStreamRequest contextualPreviewRequest =
                         withImplicitChartDetailModalActionContext(request, intentResolution);
                 AgenticAuthoringTurnStreamRequest previewRequest = withProjectKnowledgeContext(
@@ -900,19 +905,51 @@ public class AgenticAuthoringTurnEngine {
             }
             AgenticAuthoringIntentResolutionResult terminalIntentResolution =
                     terminalIntentResolution(intentResolution, decisionDiagnostics);
-            boolean canApply = preview != null
-                    && preview.valid()
+            AgenticAuthoringRuntimeFormValueGroundingService.GroundingResult runtimeValueGrounding =
+                    maybeGroundRuntimeFormValueProposal(request, terminalIntentResolution, principalContext, schemaBaseUrl);
+            if (runtimeValueGrounding != null) {
+                decisionDiagnostics.put("runtimeValueProposalGrounded", true);
+                decisionDiagnostics.put("runtimeValueProposalValid", runtimeValueGrounding.valid());
+                if (!runtimeValueGrounding.valid() && StringUtils.hasText(runtimeValueGrounding.blockReason())) {
+                    terminalPreviewApplyBlockReason = runtimeValueGrounding.blockReason();
+                    decisionDiagnostics.put("terminalPreviewApplyEligible", false);
+                    decisionDiagnostics.put("terminalPreviewApplyBlockReason", terminalPreviewApplyBlockReason);
+                    if (StringUtils.hasText(runtimeValueGrounding.blockMessage())) {
+                        assistantMessage = runtimeValueGrounding.blockMessage();
+                    }
+                } else if (runtimeValueGrounding.valid()) {
+                    terminalPreviewApplyBlockReason = "";
+                    decisionDiagnostics.put("terminalPreviewApplyEligible", true);
+                    decisionDiagnostics.remove("terminalPreviewApplyBlockReason");
+                    decisionDiagnostics.put("requiresReview", false);
+                    decisionDiagnostics.remove("reviewReason");
+                }
+            }
+            boolean canApply = (runtimeValueGrounding != null ? runtimeValueGrounding.valid() : (preview != null && preview.valid()))
                     && terminalPreviewApplyBlockReason.isBlank()
                     && !requiresDecisionReview(decisionDiagnostics)
                     && (toolLoopResult == null || toolLoopResult.completed());
+            String effectiveApplyBlockReason = firstNonBlank(
+                    terminalPreviewApplyBlockReason,
+                    requiresDecisionReview(decisionDiagnostics)
+                            ? firstNonBlank(
+                                    safeText((String) decisionDiagnostics.get("reviewReason")),
+                                    "decision-review-required")
+                            : "",
+                    toolLoopResult != null && !toolLoopResult.completed()
+                            ? "tool-loop-incomplete"
+                            : "");
             assistantMessage = ensureReviewablePreviewMessage(
                     assistantMessage,
                     request,
                     canApply,
-                    terminalPreviewApplyBlockReason);
+                    effectiveApplyBlockReason);
             Map<String, Object> resultPayload = new LinkedHashMap<>();
             resultPayload.put("intentResolution", terminalIntentResolution);
             resultPayload.put("preview", preview != null ? preview : objectMapper.createObjectNode());
+            if (runtimeValueGrounding != null && runtimeValueGrounding.proposal() != null) {
+                resultPayload.put("runtimeValueProposal", runtimeValueGrounding.proposal());
+            }
             resultPayload.put("assistantMessage", publicAssistantMessage(assistantMessage));
             resultPayload.put("assistantContent", assistantContent(
                     terminalIntentResolution,
@@ -928,7 +965,9 @@ public class AgenticAuthoringTurnEngine {
                             canApply,
                             decisionDiagnostics));
             resultPayload.put("canApply", canApply);
-            JsonNode localComponentResponse = localComponentEditResponse(preview, assistantMessage);
+            JsonNode localComponentResponse = canApply
+                    ? localComponentEditResponse(preview, assistantMessage)
+                    : null;
             if (localComponentResponse != null) {
                 resultPayload.put("response", localComponentResponse);
             }
@@ -974,6 +1013,9 @@ public class AgenticAuthoringTurnEngine {
             return persistedSourceResolution.failureCode();
         }
         if (isLocalComponentEditPreview(request, preview)) {
+            if (!isLocalComponentPatchAllowed(request)) {
+                return "local-component-patch-blocked-by-policy";
+            }
             return "";
         }
         String compiledPageBlockReason = AgenticAuthoringCompiledPagePatchValidator.terminalApplyBlockReason(
@@ -1009,6 +1051,78 @@ public class AgenticAuthoringTurnEngine {
         return !componentId.isBlank()
                 && request != null
                 && componentId.equals(request.targetComponentId());
+    }
+
+    private AgenticAuthoringRuntimeFormValueGroundingService.GroundingResult maybeGroundRuntimeFormValueProposal(
+            AgenticAuthoringTurnStreamRequest request,
+            AgenticAuthoringIntentResolutionResult intentResolution,
+            AiPrincipalContext principalContext,
+            String schemaBaseUrl) {
+        if (!isRuntimeFormValueAssistanceTurn(request, intentResolution)) {
+            return null;
+        }
+        JsonNode candidateAssignments = extractRuntimeFormValueCandidateAssignments(request, intentResolution);
+        return runtimeFormValueGroundingService.groundProposal(
+                request,
+                candidateAssignments,
+                principalContext,
+                schemaBaseUrl);
+    }
+
+    private boolean isRuntimeFormValueAssistanceTurn(
+            AgenticAuthoringTurnStreamRequest request,
+            AgenticAuthoringIntentResolutionResult intentResolution) {
+        if (intentResolution != null) {
+            String op = safeText(intentResolution.operationKind()).toLowerCase(Locale.ROOT);
+            String change = safeText(intentResolution.changeKind()).toLowerCase(Locale.ROOT);
+            if ("assist_runtime_values".equals(op)
+                    || "fill_form_values".equals(op)
+                    || "fill_form_values".equals(change)
+                    || "runtime_form_values".equals(change)) {
+                return true;
+            }
+        }
+        if (request == null || request.contextHints() == null || !request.contextHints().isObject()) {
+            return false;
+        }
+        JsonNode assistance = request.contextHints().path("runtimeValueAssistance");
+        if (!assistance.isObject()) {
+            return false;
+        }
+        return assistance.path("requested").asBoolean(false)
+                || assistance.has("candidateAssignments");
+    }
+
+    private JsonNode extractRuntimeFormValueCandidateAssignments(
+            AgenticAuthoringTurnStreamRequest request,
+            AgenticAuthoringIntentResolutionResult intentResolution) {
+        if (request != null && request.contextHints() != null && request.contextHints().isObject()) {
+            JsonNode assistance = request.contextHints().path("runtimeValueAssistance");
+            if (assistance.has("candidateAssignments")) {
+                return assistance.get("candidateAssignments");
+            }
+        }
+        if (intentResolution != null
+                && intentResolution.semanticDecision() != null
+                && intentResolution.semanticDecision().constraints() != null
+                && intentResolution.semanticDecision().constraints().has("runtimeValueAssignments")) {
+            return intentResolution.semanticDecision().constraints().get("runtimeValueAssignments");
+        }
+        return null;
+    }
+
+    private boolean isLocalComponentPatchAllowed(AgenticAuthoringTurnStreamRequest request) {
+        if (request == null || request.contextHints() == null || !request.contextHints().isObject()) {
+            return true;
+        }
+        JsonNode policy = request.contextHints().path("runtimeAuthoringPolicy");
+        if (!policy.isObject()) {
+            policy = request.contextHints().path("formContext").path("runtimeAuthoringPolicy");
+        }
+        if (policy.isObject() && policy.has("canApplyLocalPatch")) {
+            return policy.path("canApplyLocalPatch").asBoolean(true);
+        }
+        return true;
     }
 
     private JsonNode localComponentEditResponse(
@@ -1331,15 +1445,42 @@ public class AgenticAuthoringTurnEngine {
     private AgenticAuthoringTurnEventAppendResult appendTerminalResult(
             AgenticAuthoringTurnEventSink eventSink,
             Object payload) {
-        if (payload instanceof Map<?, ?> payloadMap
-                && payloadMap.get("intentResolution") instanceof AgenticAuthoringIntentResolutionResult resolution
-                && requiresTerminalClarificationReplies(resolution)
-                // An explicit list (including an empty one) is the terminal route's decision.
-                // Never restore pre-gate suggestions after a route deliberately suppressed them.
-                && !(payloadMap.get("quickReplies") instanceof List<?>)) {
+        if (payload instanceof Map<?, ?> payloadMap) {
             @SuppressWarnings("unchecked")
             Map<String, Object> mutablePayload = (Map<String, Object>) payloadMap;
-            mutablePayload.put("quickReplies", terminalClarificationQuickReplies(resolution));
+            if (payloadMap.get("intentResolution") instanceof AgenticAuthoringIntentResolutionResult resolution
+                    && requiresTerminalClarificationReplies(resolution)
+                    // An explicit list (including an empty one) is the terminal route's decision.
+                    // Never restore pre-gate suggestions after a route deliberately suppressed them.
+                    && !(payloadMap.get("quickReplies") instanceof List<?>)) {
+                mutablePayload.put("quickReplies", terminalClarificationQuickReplies(resolution));
+            }
+            boolean canApply = Boolean.TRUE.equals(payloadMap.get("canApply"));
+            if (!canApply) {
+                if (payloadMap.get("quickReplies") instanceof List<?> rawReplies && !rawReplies.isEmpty()) {
+                    List<AgenticAuthoringQuickReply> typedReplies = rawReplies.stream()
+                            .filter(AgenticAuthoringQuickReply.class::isInstance)
+                            .map(AgenticAuthoringQuickReply.class::cast)
+                            .toList();
+                    if (typedReplies.size() == rawReplies.size()) {
+                        mutablePayload.put(
+                                "quickReplies",
+                                decisionProjectionSupport.filterExecutableQuickReplies(typedReplies, false));
+                    }
+                }
+                Map<?, ?> diagnostics = payloadMap.get("decisionDiagnostics") instanceof Map<?, ?> map
+                        ? map
+                        : Map.of();
+                boolean clientActionAvailable = Boolean.TRUE.equals(diagnostics.get("clientActionAvailable"));
+                if (!clientActionAvailable
+                        && payloadMap.get("assistantMessage") instanceof String currentMessage
+                        && !currentMessage.isBlank()) {
+                    String sanitized = ensureReviewablePreviewMessage(currentMessage, null, false, "");
+                    if (!sanitized.equals(currentMessage)) {
+                        mutablePayload.put("assistantMessage", sanitized);
+                    }
+                }
+            }
         }
         return eventSink.append("result", payload);
     }
@@ -1753,8 +1894,10 @@ public class AgenticAuthoringTurnEngine {
                 ? consultativeQuickReplySupport.unconfirmedAiAuthoredResourceFocusMessage()
                 : consultativeQuickReplySupport.groundedResourceDiscoveryClarificationMessage(
                         request,
+                        intentResolution,
                         presentableCandidates,
-                        projection);
+                        projection,
+                        providerFailure);
         eventSink.append("thought.step", streamEventPayload(
                 "consultative.grounded-clarification",
                 "Answered clarification from governed resource discovery evidence.",
@@ -1814,6 +1957,12 @@ public class AgenticAuthoringTurnEngine {
         resolvedIntent.put("artifactKind", safeText(intentResolution.artifactKind()));
         resolvedIntent.put("changeKind", safeText(intentResolution.changeKind()));
         resolvedIntent.put("valid", intentResolution.valid());
+        putText(resolvedIntent, "assistantMessage", intentResolution.assistantMessage());
+        resolvedIntent.put(
+                "llmResolved",
+                contains(intentResolution.warnings(), "llm-semantic-orientation-used")
+                        || contains(intentResolution.warnings(), "llm-fast-intent-resolution-used")
+                        || contains(intentResolution.warnings(), "llm-intent-resolution-used"));
         if (intentResolution.apiCatalogAnswer() != null
                 && intentResolution.apiCatalogAnswer().path("candidateApis").isArray()) {
             resolvedIntent.set(
@@ -2850,7 +2999,7 @@ public class AgenticAuthoringTurnEngine {
                 || route == null
                 || route.allowsPreview()
                 || !"advisory_authoring".equals(safeText(route.routeClass()))
-                || isPlatformGuidancePrompt(request == null ? "" : request.userPrompt())
+                || isPlatformGuidanceIntent(intentResolution)
                 || (!isAdvisoryCatalogIntent(intentResolution)
                 && !isUnresolvedAdvisoryIntent(intentResolution))) {
             return null;
@@ -3895,8 +4044,8 @@ public class AgenticAuthoringTurnEngine {
         return AgenticAuthoringTurnAdvisorySupport.isAdvisoryCatalogIntent(intentResolution);
     }
 
-    private boolean isPlatformGuidancePrompt(String prompt) {
-        return AgenticAuthoringTurnAdvisorySupport.isPlatformGuidancePrompt(prompt);
+    private boolean isPlatformGuidanceIntent(AgenticAuthoringIntentResolutionResult intentResolution) {
+        return AgenticAuthoringTurnAdvisorySupport.isPlatformGuidanceIntent(intentResolution);
     }
 
     private boolean isUnresolvedAdvisoryIntent(AgenticAuthoringIntentResolutionResult intentResolution) {

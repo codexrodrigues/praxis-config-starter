@@ -298,7 +298,8 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements
         String prompt = request == null ? "" : request.userPrompt();
         return hasLayoutKind(visualizationDecision, "dashboard", "analytical-dashboard", "analytics-dashboard")
                 || hasVisualIntent(visualizationDecision, "chart", "charts", "grafico", "graficos", "painel", "dashboard")
-                || containsAny(prompt, "chart", "charts", "grafico", "graficos", "painel", "dashboard");
+                || (visualizationDecision == null
+                        && containsAny(prompt, "chart", "charts", "grafico", "graficos", "painel", "dashboard"));
     }
 
     boolean isPrimaryComponent(
@@ -311,6 +312,19 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements
             AgenticAuthoringPlanRequest request,
             AgenticAuthoringVisualizationDecision visualizationDecision) {
         if (!isPrimaryComponent(visualizationDecision, "praxis-chart")) {
+            return false;
+        }
+        String layoutKind = normalize(visualizationDecision.layoutKind()).replaceAll("[^a-z0-9]+", " ").trim();
+        String intent = normalize(visualizationDecision.intent()).replaceAll("[^a-z0-9]+", " ").trim();
+        boolean explicitSingleChartDecision = List.of("chart", "single chart", "single visualization").contains(layoutKind)
+                || intent.contains("single chart")
+                || intent.contains("chart only");
+        if (explicitSingleChartDecision
+                && !visualizationDecision.includeSummary()
+                && !visualizationDecision.includeDetailTable()) {
+            return true;
+        }
+        if (hasLayoutKind(visualizationDecision, "dashboard", "analytical-dashboard", "analytics-dashboard")) {
             return false;
         }
         String prompt = normalize(request == null ? "" : request.userPrompt());
@@ -326,11 +340,7 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements
                         "chart only", "single chart", "only one chart", "just a chart")) {
             return false;
         }
-        String layoutKind = normalize(visualizationDecision.layoutKind()).replaceAll("[^a-z0-9]+", " ").trim();
-        String intent = normalize(visualizationDecision.intent()).replaceAll("[^a-z0-9]+", " ").trim();
-        if (List.of("chart", "single chart", "single visualization").contains(layoutKind)
-                || intent.contains("single chart")
-                || intent.contains("chart only")) {
+        if (explicitSingleChartDecision) {
             return true;
         }
         if (request != null
@@ -651,8 +661,10 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements
         return "praxis-chart".equals(safe(visualizationDecision.primaryComponent()))
                 || hasLayoutKind(visualizationDecision, "dashboard", "analytical-dashboard", "analytics-dashboard")
                 || hasVisualIntent(visualizationDecision, "chart", "charts", "grafico", "graficos", "painel", "dashboard")
-                || containsAny(request == null ? "" : request.userPrompt(),
-                "chart", "charts", "grafico", "graficos", "painel", "dashboard");
+                || (safe(visualizationDecision.layoutKind()).isBlank()
+                        && safe(visualizationDecision.intent()).isBlank()
+                        && containsAny(request == null ? "" : request.userPrompt(),
+                                "chart", "charts", "grafico", "graficos", "painel", "dashboard"));
     }
 
     private ObjectNode singleChartPlan(

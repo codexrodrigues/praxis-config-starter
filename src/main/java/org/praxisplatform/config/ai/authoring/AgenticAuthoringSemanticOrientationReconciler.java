@@ -142,7 +142,7 @@ public final class AgenticAuthoringSemanticOrientationReconciler {
                 null,
                 "none",
                 semanticOrientation.assistantMessage(),
-                List.of(),
+                semanticOrientation.quickReplies(),
                 List.of(),
                 List.of(
                         "llm-semantic-orientation-used",
@@ -215,7 +215,9 @@ public final class AgenticAuthoringSemanticOrientationReconciler {
                 resolution.requiresGovernedAuthoring(),
                 resolution.semanticIntentClass(),
                 governedConstraints,
-                resolution.providerInvocations());
+                resolution.providerInvocations(),
+                resolution.localEditorialComposition(),
+                resolution.semanticRefinement());
     }
 
     public boolean preservesPreIntentQueryConstraints(JsonNode planned, JsonNode resolved) {
@@ -414,7 +416,9 @@ public final class AgenticAuthoringSemanticOrientationReconciler {
                 resolution.requiresGovernedAuthoring(),
                 resolution.semanticIntentClass(),
                 resolution.queryConstraints(),
-                resolution.providerInvocations());
+                resolution.providerInvocations(),
+                resolution.localEditorialComposition(),
+                resolution.semanticRefinement());
     }
 
     private String valueOrDefault(String value, String fallback) {

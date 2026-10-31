@@ -3944,46 +3944,6 @@ public class AiOrchestratorService {
         return AiJsonSchema.ofSchema(schema.toString());
     }
 
-    private void appendActionParamsSchema(ObjectNode actionProps, Set<String> paramKeys) {
-        if (paramKeys == null || paramKeys.isEmpty()) {
-            return;
-        }
-        ObjectNode params = actionProps.putObject("params");
-        params.put("type", "object");
-        params.put("nullable", true);
-        params.put("additionalProperties", false);
-        ObjectNode properties = params.putObject("properties");
-        for (String key : paramKeys) {
-            if (key == null || key.isBlank()) continue;
-            ObjectNode prop = properties.putObject(key);
-            ArrayNode anyOf = prop.putArray("anyOf");
-            anyOf.addObject().put("type", "string");
-            anyOf.addObject().put("type", "number");
-            anyOf.addObject().put("type", "boolean");
-            ObjectNode obj = anyOf.addObject();
-            obj.put("type", "object");
-            obj.put("additionalProperties", true);
-            ObjectNode arr = anyOf.addObject();
-            arr.put("type", "array");
-            arr.putObject("items");
-            anyOf.addObject().put("type", "null");
-        }
-    }
-
-    private Set<String> extractParamKeysFromCatalog(List<ComponentAction> actionCatalog) {
-        java.util.LinkedHashSet<String> keys = new java.util.LinkedHashSet<>();
-        if (actionCatalog == null || actionCatalog.isEmpty()) {
-            return keys;
-        }
-        for (ComponentAction action : actionCatalog) {
-            if (action == null || action.patchTemplate == null || action.patchTemplate.isNull()) {
-                continue;
-            }
-            collectParamKeys(action.patchTemplate, keys);
-        }
-        return keys;
-    }
-
     private void collectParamKeys(JsonNode node, Set<String> keys) {
         if (node == null || node.isNull()) {
             return;
@@ -7028,28 +6988,6 @@ public class AiOrchestratorService {
                 ? Long.toString((long) threshold.value)
                 : Double.toString(threshold.value);
         return base + comparator + value;
-    }
-
-    private ObjectNode currentStateWithColumnThreshold(
-            String field,
-            ThresholdCondition threshold,
-            String ruleCollectionName) {
-        ObjectNode state = objectMapper.createObjectNode();
-        ArrayNode columns = state.putArray("columns");
-        ObjectNode column = columns.addObject();
-        column.put("field", field);
-        ArrayNode rules = column.putArray(ruleCollectionName);
-        ObjectNode rule = rules.addObject();
-        rule.set("condition", buildJsonLogicCondition(field, threshold.operator, threshold.value));
-        return state;
-    }
-
-    private ObjectNode currentStateWithRowThreshold(String field, ThresholdCondition threshold) {
-        ObjectNode state = objectMapper.createObjectNode();
-        ArrayNode renderers = state.putArray("rowConditionalRenderers");
-        ObjectNode renderer = renderers.addObject();
-        renderer.set("condition", buildJsonLogicCondition(field, threshold.operator, threshold.value));
-        return state;
     }
 
     private String inferConditionalRendererLabel(
@@ -12385,30 +12323,6 @@ public class AiOrchestratorService {
             }
         }
         return null;
-    }
-
-    private List<AiActionItem> mergeActions(List<AiActionItem> primary, List<AiActionItem> secondary) {
-        if (secondary == null || secondary.isEmpty()) {
-            return primary != null ? primary : List.of();
-        }
-        Map<String, AiActionItem> byKey = new LinkedHashMap<>();
-        if (primary != null) {
-            for (AiActionItem item : primary) {
-                if (item == null) continue;
-                String key = actionKey(item);
-                if (key != null) {
-                    byKey.put(key, item);
-                }
-            }
-        }
-        for (AiActionItem item : secondary) {
-            if (item == null) continue;
-            String key = actionKey(item);
-            if (key != null && !byKey.containsKey(key)) {
-                byKey.put(key, item);
-            }
-        }
-        return new ArrayList<>(byKey.values());
     }
 
     private List<AiActionItem> applyPlanValueFallback(
@@ -19233,31 +19147,6 @@ public class AiOrchestratorService {
         return trimmed;
     }
 
-    private boolean isConsultativeTableGuidanceQuestion(String userPrompt) {
-        if (isBlank(userPrompt)) {
-            return false;
-        }
-        String normalizedPrompt = normalizeText(userPrompt);
-        String lowerPrompt = userPrompt.toLowerCase(Locale.ROOT);
-        boolean asksForGuidance = lowerPrompt.contains("?")
-                || normalizedPrompt.startsWith("como")
-                || normalizedPrompt.contains("qual")
-                || normalizedPrompt.contains("quais")
-                || normalizedPrompt.contains("recomenda")
-                || normalizedPrompt.contains("opcoes")
-                || normalizedPrompt.contains("suporta")
-                || normalizedPrompt.contains("posso");
-        if (!asksForGuidance) {
-            return false;
-        }
-        return !(normalizedPrompt.startsWith("formate")
-                || normalizedPrompt.startsWith("aplique")
-                || normalizedPrompt.startsWith("alterar")
-                || normalizedPrompt.startsWith("altere")
-                || normalizedPrompt.startsWith("mude")
-                || normalizedPrompt.startsWith("configure"));
-    }
-
     private boolean isDateFormatOption(String value) {
         if (value == null || value.isBlank()) {
             return false;
@@ -19266,25 +19155,6 @@ public class AiOrchestratorService {
             case "shortDate", "mediumDate", "longDate", "fullDate", "MMM/yyyy",
                     "shortTime", "short", "yyyy-MM-dd", "dd/MM/yyyy", "yyyy-MM-dd HH:mm" -> true;
             default -> false;
-        };
-    }
-
-    private String describeDateFormat(String value) {
-        if (value == null) {
-            return "formato de data.";
-        }
-        return switch (value) {
-            case "shortDate" -> "data curta pelo locale.";
-            case "mediumDate" -> "data média com mês abreviado.";
-            case "longDate" -> "data longa, boa para leitura humana.";
-            case "fullDate" -> "data por extenso com dia da semana.";
-            case "MMM/yyyy" -> "mês e ano, útil para competência ou agrupamento mensal.";
-            case "shortTime" -> "hora curta.";
-            case "short" -> "data e hora curtas.";
-            case "yyyy-MM-dd" -> "data em padrão técnico ISO simplificado.";
-            case "dd/MM/yyyy" -> "dia, mês e ano no padrão brasileiro.";
-            case "yyyy-MM-dd HH:mm" -> "data e hora em padrão técnico.";
-            default -> "formato DatePipe suportado pela tabela.";
         };
     }
 
@@ -22089,17 +21959,6 @@ public class AiOrchestratorService {
         return allowed;
     }
 
-    private String normalizeCatalogActionType(String actionId, Set<String> allowedActionTypes) {
-        if (actionId == null || actionId.isBlank()) {
-            return null;
-        }
-        if (allowedActionTypes == null || allowedActionTypes.isEmpty()) {
-            return null;
-        }
-        String normalized = actionId.trim().toUpperCase(Locale.ROOT);
-        return allowedActionTypes.contains(normalized) ? normalized : null;
-    }
-
     private List<String> resolveFieldResolverKeys(JsonNode componentContext, String path) {
         if (componentContext == null || path == null || path.isBlank()) {
             return List.of();
@@ -22719,65 +22578,6 @@ public class AiOrchestratorService {
         return merged.isEmpty() ? List.of() : new ArrayList<>(merged.values());
     }
 
-    private AiIntentClassification enforceFormatIntentWhenFieldExists(
-            AiIntentClassification intent,
-            AiOrchestratorRequest request,
-            List<ColumnDescriptor> columnDescriptors,
-            JsonNode dataProfile,
-            List<String> warnings) {
-        if (intent == null || request == null) {
-            return intent;
-        }
-        if (!COMPONENT_ID_TABLE.equals(request.getComponentId())) {
-            return intent;
-        }
-        if (!"add_column_computed".equalsIgnoreCase(intent.getIntent())) {
-            return intent;
-        }
-        String prompt = request.getUserPrompt();
-        if (isBlank(prompt)) {
-            return intent;
-        }
-        String targetField = intent.getTargetField();
-        if (isBlank(targetField)) {
-            targetField = resolveTargetFieldFromPrompt(prompt, columnDescriptors, List.of("field", "header"));
-        }
-        if (isBlank(targetField)) {
-            targetField = resolveTargetFieldFromDataProfile(prompt, dataProfile);
-        }
-        if (isBlank(targetField) || !hasFieldInDataProfile(targetField, dataProfile)) {
-            return intent;
-        }
-        String promptLower = prompt.toLowerCase(Locale.ROOT);
-        boolean displayIntent = indicatesDisplayIntent(promptLower, targetField, dataProfile);
-        boolean computeIntent = indicatesComputedIntent(promptLower, request);
-        if (displayIntent && computeIntent) {
-            intent.setNeedsClarification(true);
-            intent.setMissingContext(List.of("format_intent"));
-            intent.setOptions(List.of("Formatar coluna existente", "Criar coluna calculada"));
-            if (warnings != null) {
-                warnings.add("Ambiguidade detectada entre formatação e cálculo; solicitando clarificação.");
-            }
-            return intent;
-        }
-        if (!displayIntent) {
-            return intent;
-        }
-        intent.setIntent("update_column");
-        intent.setTargetField(targetField);
-        intent.setNewField(null);
-        intent.setBaseFields(List.of());
-        intent.setComputedFormat(null);
-        intent.setExpression(null);
-        intent.setNeedsClarification(false);
-        intent.setMissingContext(null);
-        intent.setOptions(null);
-        if (warnings != null) {
-            warnings.add("Intent ajustado para update_column devido a campo existente no dataProfile.");
-        }
-        return intent;
-    }
-
     private boolean indicatesDisplayIntent(String promptLower, String targetField, JsonNode dataProfile) {
         if (promptLower == null || promptLower.isBlank()) {
             return false;
@@ -23326,153 +23126,6 @@ public class AiOrchestratorService {
             return null;
         }
         return patch;
-    }
-
-    private AiOrchestratorResponse tryResolveFilteringPrompt(
-            AiOrchestratorRequest request,
-            JsonNode currentState,
-            List<ColumnDescriptor> columnDescriptors,
-            List<String> warnings,
-            List<AiCapability> configCapabilities,
-            List<AiCapability> componentCapabilities,
-            JsonNode componentContext,
-            JsonNode authoringManifest) {
-        if (request == null || !COMPONENT_ID_TABLE.equals(request.getComponentId())) {
-            return null;
-        }
-        String prompt = request.getUserPrompt();
-        if (!promptMentionsFiltering(prompt)) {
-            return null;
-        }
-        List<String> fields = resolveFilterFieldsFromPrompt(
-                prompt,
-                columnDescriptors,
-                request.getSchemaFields(),
-                request.getDataProfile());
-        boolean removeFilterFields = looksLikeFilterFieldRemovalPrompt(prompt);
-        if (isFilteringModeUncertain(prompt)) {
-            boolean mixedTypes = hasMixedFilterTypes(request.getSchemaFields(), request.getDataProfile(), fields);
-            List<AiOption> payloads = buildFilteringModePayloads(
-                    fields,
-                    request.getSchemaFields(),
-                    request.getDataProfile(),
-                    mixedTypes);
-            List<String> labels = buildAiOptionLabels(payloads);
-            return clarification(
-                    mixedTypes
-                            ? "Você prefere filtros simples (por coluna) ou avançados (painel)? Para combinar status e data, o avançado costuma funcionar melhor (no simples, o tipo do filtro é único para todas as colunas)."
-                            : "Você prefere filtros simples (por coluna) ou avançados (painel)?",
-                    labels.isEmpty() ? List.of("Simples (coluna)", "Avançado (card)", "Avançado (filter)") : labels,
-                    payloads.isEmpty() ? null : payloads);
-        }
-        String explicitMode = resolveFilteringModeFromPrompt(prompt);
-        if (explicitMode == null && looksLikeContextualFilteringContinuation(prompt, currentState)) {
-            explicitMode = resolveFilteringModeFromCurrentState(currentState);
-        }
-        List<ColumnDescriptor> dateCandidates = resolveDateFilterCandidates(
-                prompt,
-                columnDescriptors,
-                request.getSchemaFields(),
-                request.getDataProfile());
-        List<String> dateFields = extractColumnNames(dateCandidates);
-        List<String> explicitDateMatches = resolveExplicitDateMatches(prompt, dateCandidates);
-        if (dateFields.size() > 1 && explicitDateMatches.isEmpty()) {
-            List<String> otherFields = new ArrayList<>(fields);
-            otherFields.removeAll(dateFields);
-            String modeForHints = explicitMode != null ? explicitMode : "column";
-            ClarificationPayload datePayload = buildDateFilterClarificationPayloads(
-                    dateCandidates,
-                    otherFields,
-                    modeForHints,
-                    request.getSchemaFields(),
-                    request.getDataProfile());
-            if (datePayload != null && !datePayload.options.isEmpty()) {
-                return clarification(
-                        "Qual coluna de data você deseja filtrar?",
-                        datePayload.options,
-                        datePayload.payloads);
-            }
-        }
-        if (explicitDateMatches.size() == 1 && !dateFields.isEmpty()) {
-            String chosenDate = explicitDateMatches.get(0);
-            List<String> normalized = new ArrayList<>();
-            for (String field : fields) {
-                if (dateFields.contains(field) && !chosenDate.equalsIgnoreCase(field)) {
-                    continue;
-                }
-                normalized.add(field);
-            }
-            fields = normalized;
-        }
-        if (explicitMode == null) {
-            return null;
-        }
-        ObjectNode hints = objectMapper.createObjectNode();
-        ObjectNode filtering = hints.putObject("filtering");
-        filtering.put("mode", explicitMode);
-        String advMode = resolveAdvancedFilterMode(prompt);
-        if (isBlank(advMode)
-                && ("advanced".equalsIgnoreCase(explicitMode) || "both".equalsIgnoreCase(explicitMode))) {
-            advMode = textOrNull(pathOrMissing(currentState, "/behavior/filtering/advancedFilters/settings/mode"));
-        }
-        if (!isBlank(advMode)) {
-            filtering.put("advancedMode", advMode);
-        }
-        String defaultType = inferDefaultFilterType(request.getSchemaFields(), request.getDataProfile(), fields);
-        if (!isBlank(defaultType)) {
-            filtering.put("defaultType", defaultType);
-        }
-        if (fields != null && !fields.isEmpty()) {
-            List<String> fieldsForHints = fields;
-            if (removeFilterFields) {
-                fieldsForHints = removeFieldsFromCurrentAdvancedFilters(currentState, fields);
-                ArrayNode alwaysVisible = filtering.putArray("alwaysVisibleFields");
-                ArrayNode selected = filtering.putArray("selectedFieldIds");
-                for (String field : fieldsForHints) {
-                    if (!isBlank(field)) {
-                        alwaysVisible.add(field);
-                        selected.add(field);
-                    }
-                }
-            } else if (looksLikeFilterFieldReplacementPrompt(prompt)) {
-                ArrayNode alwaysVisible = filtering.putArray("alwaysVisibleFields");
-                ArrayNode selected = filtering.putArray("selectedFieldIds");
-                for (String field : fieldsForHints) {
-                    if (!isBlank(field)) {
-                        alwaysVisible.add(field);
-                        selected.add(field);
-                    }
-                }
-            }
-            ArrayNode arr = filtering.putArray("fields");
-            for (String field : fieldsForHints) {
-                if (!isBlank(field)) arr.add(field);
-            }
-        }
-        JsonNode patch = buildFilteringPatchFromHints(filtering, currentState);
-        if (patch == null) {
-            return null;
-        }
-        JsonNode componentEditPlan = buildFilteringComponentEditPlan(
-                patch,
-                fields,
-                "column".equalsIgnoreCase(explicitMode) || "both".equalsIgnoreCase(explicitMode),
-                authoringManifest);
-        if (componentEditPlan != null) {
-            ObjectNode result = objectMapper.createObjectNode();
-            result.put("explanation", buildFilteringExplanation(fields, explicitMode, advMode));
-            result.set("componentEditPlan", componentEditPlan);
-            warnings.add("componentEditPlan de filtros gerado a partir do authoringManifest.");
-            return componentEditPlanResponse(result, request, warnings, authoringManifest);
-        }
-        return applySuggestedPatch(
-                patch,
-                currentState,
-                request.getComponentId(),
-                warnings,
-                configCapabilities,
-                componentCapabilities,
-                componentContext);
     }
 
     private String buildFilteringExplanation(List<String> fields, String mode, String advancedMode) {
@@ -25234,81 +24887,6 @@ public class AiOrchestratorService {
                 || normalized.contains("competencia");
     }
 
-    private AiOrchestratorResponse tryResolveDeterministicPatchRelevanceFallback(
-            AiOrchestratorRequest request,
-            JsonNode patchNode,
-            JsonNode currentState,
-            List<String> warnings,
-            List<AiCapability> configCapabilities,
-            List<AiCapability> componentCapabilities,
-            JsonNode componentContext) {
-        if (request == null || patchNode == null || !patchNode.isObject()
-                || !COMPONENT_ID_TABLE.equals(request.getComponentId())) {
-            return null;
-        }
-        String prompt = request.getUserPrompt();
-        if (isBlank(prompt)) {
-            return null;
-        }
-        String promptLower = prompt.toLowerCase(Locale.ROOT);
-
-        String density = resolveDensityValue(promptLower);
-        if (!isBlank(density) && mentionsDensityPrompt(promptLower) && !patchHasDensityConfig(patchNode)) {
-            warnings.add("Patch gerado nao aderiu ao pedido de densidade; aplicado fallback deterministico.");
-            return applySuggestedPatch(
-                    buildDensityPatch(density),
-                    currentState,
-                    request.getComponentId(),
-                    warnings,
-                    configCapabilities,
-                    componentCapabilities,
-                    componentContext);
-        }
-
-        SelectionDirective selection = resolveSelectionDirective(promptLower);
-        if (selection != null && !patchHasSelectionConfig(patchNode)) {
-            warnings.add("Patch gerado nao aderiu ao pedido de selecao; aplicado fallback deterministico.");
-            return applySuggestedPatch(
-                    buildSelectionPatch(selection),
-                    currentState,
-                    request.getComponentId(),
-                    warnings,
-                    configCapabilities,
-                    componentCapabilities,
-                    componentContext);
-        }
-
-        List<ColumnDescriptor> columns = mergeColumnDescriptors(
-                extractColumnDescriptors(currentState),
-                request.getDataProfile());
-        JsonNode alignPatch = buildDeterministicAlignmentPatch(promptLower, columns);
-        if (alignPatch != null && !patchHasAnyColumnAlign(patchNode)) {
-            warnings.add("Patch gerado nao aderiu ao pedido de alinhamento; aplicado fallback deterministico.");
-            return applySuggestedPatch(
-                    alignPatch,
-                    currentState,
-                    request.getComponentId(),
-                    warnings,
-                    configCapabilities,
-                    componentCapabilities,
-                    componentContext);
-        }
-
-        JsonNode statusHighlightPatch = buildDeterministicStatusHighlightPatch(request, currentState, promptLower);
-        if (statusHighlightPatch != null && !patchTouchesField(patchNode, "status")) {
-            warnings.add("Patch gerado nao aderiu ao pedido contextual de status; aplicado fallback deterministico.");
-            return applySuggestedPatch(
-                    statusHighlightPatch,
-                    currentState,
-                    request.getComponentId(),
-                    warnings,
-                    configCapabilities,
-                    componentCapabilities,
-                    componentContext);
-        }
-        return null;
-    }
-
     private boolean mentionsDensityPrompt(String promptLower) {
         if (isBlank(promptLower)) {
             return false;
@@ -26439,231 +26017,6 @@ public class AiOrchestratorService {
                 true);
     }
 
-    private AiOrchestratorResponse tryResolveComputedFastPath(
-            AiIntentClassification intent,
-            AiOrchestratorRequest request,
-            JsonNode currentState,
-            List<String> warnings,
-            List<AiCapability> configCapabilities,
-            List<AiCapability> componentCapabilities,
-            JsonNode componentContext) {
-        if (intent == null || request == null || request.getUserPrompt() == null) {
-            return null;
-        }
-        if (!COMPONENT_ID_TABLE.equals(request.getComponentId())) {
-            return null;
-        }
-        String intentType = normalizeIntentType(intent.getIntent());
-        if (!"add_column_computed".equalsIgnoreCase(intentType)
-                && !"update_column".equalsIgnoreCase(intentType)) {
-            return null;
-        }
-        String prompt = request.getUserPrompt();
-        String promptLower = prompt.toLowerCase(Locale.ROOT);
-        if (!mentionsComputed(promptLower) && !mentionsTenure(promptLower) && !mentionsAgeComputation(promptLower)) {
-            return null;
-        }
-        if (mentionsComputedPresentationOverride(promptLower)) {
-            return null;
-        }
-        String explicitBaseField = extractExplicitComputedBaseField(prompt);
-        if (!isBlank(explicitBaseField)) {
-            List<String> knownFields = resolveKnownFieldNames(currentState, request.getSchemaFields());
-            if (!containsFieldIgnoreCase(knownFields, explicitBaseField)) {
-                List<String> options = extractDateFieldOptions(request.getDataProfile(), knownFields);
-                return clarification("Qual campo de data devo usar para o cálculo?", options);
-            }
-        }
-        ComputedSpec spec = parseComputedSpec(prompt, currentState, request.getSchemaFields());
-        if (spec == null || isBlank(spec.field) || isBlank(spec.expression)) {
-            return null;
-        }
-        ObjectNode patch = objectMapper.createObjectNode();
-        ArrayNode columns = patch.putArray("columns");
-        ObjectNode column = columns.addObject();
-        column.put("field", spec.field);
-        column.put("header", resolveComputedHeader(spec));
-        ObjectNode computed = column.putObject("computed");
-        computed.put("expression", spec.expression);
-        String outputType = !isBlank(spec.outputType) ? spec.outputType : "number";
-        computed.put("outputType", outputType);
-        String format = !isBlank(spec.format) ? spec.format : "1.0-0";
-        if (!isBlank(format) && !"string".equalsIgnoreCase(outputType)) {
-            computed.put("format", format);
-        }
-        addComputedDependencies(computed, spec.dependencies);
-        warnings.add("Patch deterministico aplicado para coluna calculada.");
-        return applySuggestedPatch(
-                patch,
-                currentState,
-                request.getComponentId(),
-                warnings,
-                configCapabilities,
-                componentCapabilities,
-                componentContext,
-                true);
-    }
-
-    private AiOrchestratorResponse handleComputedCreationIntent(
-            AiIntentClassification intent,
-            AiOrchestratorRequest request,
-            JsonNode currentState,
-            List<String> warnings,
-            List<AiCapability> configCapabilities,
-            List<AiCapability> componentCapabilities,
-            JsonNode componentContext) {
-        if (intent == null || request == null) {
-            return null;
-        }
-        if (!COMPONENT_ID_TABLE.equals(request.getComponentId())) {
-            return null;
-        }
-        if (!"add_column_computed".equalsIgnoreCase(intent.getIntent())) {
-            return null;
-        }
-
-        String promptLower = request.getUserPrompt() != null
-                ? request.getUserPrompt().toLowerCase(Locale.ROOT)
-                : "";
-        if (!mentionsComputed(promptLower) && !mentionsAgeComputation(promptLower) && !mentionsTenure(promptLower)
-                && !promptHasExplicitExpression(request.getUserPrompt())) {
-            return null;
-        }
-        if (mentionsComputedPresentationOverride(promptLower)) {
-            return null;
-        }
-
-        String explicitBaseField = extractExplicitComputedBaseField(request.getUserPrompt());
-        if (!isBlank(explicitBaseField)) {
-            List<String> knownFields = resolveKnownFieldNames(currentState, request.getSchemaFields());
-            if (!containsFieldIgnoreCase(knownFields, explicitBaseField)) {
-                List<String> options = extractDateFieldOptions(request.getDataProfile(), knownFields);
-                return clarification("Qual campo de data devo usar para o cálculo?", options);
-            }
-        }
-
-        String newField = normalizeFieldName(intent.getNewField());
-        List<String> baseFields = intent.getBaseFields() != null
-                ? intent.getBaseFields()
-                : List.of();
-        String baseField = baseFields.stream()
-                .filter(v -> v != null && !v.isBlank())
-                .findFirst()
-                .orElse(null);
-        List<String> columnNames = extractColumnNames(currentState);
-
-        if (isBlank(newField)) {
-            List<String> options = suggestNewFieldOptions(request.getUserPrompt());
-            return clarification("Qual o nome do novo campo da coluna?", options);
-        }
-
-        if (isBlank(baseField) || (columnNames != null && !columnNames.isEmpty() && !columnNames.contains(baseField))) {
-            List<String> options = extractDateFieldOptions(request.getDataProfile(), columnNames);
-            return clarification("Qual campo de data devo usar para o cálculo?", options);
-        }
-
-        String computedFormat = normalizeComputedFormatOrNull(intent.getComputedFormat());
-        String expression = null;
-        String outputType = null;
-        String format = null;
-
-        if ("custom_expression".equals(computedFormat)) {
-            if (!promptHasExplicitExpression(request.getUserPrompt())) {
-                computedFormat = null;
-            }
-        }
-        if ("custom_expression".equals(computedFormat)) {
-            expression = intent.getExpression();
-            if (isBlank(expression)) {
-                computedFormat = null;
-            } else if (containsDisallowedExpressionTokens(expression)) {
-                return clarification("A expressão contém tokens não permitidos. Informe uma expressão DSL válida.", List.of());
-            } else {
-                outputType = inferOutputTypeFromExpression(expression);
-                if ("number".equalsIgnoreCase(outputType)) {
-                    format = "1.0-0";
-                }
-            }
-        }
-
-        if (computedFormat == null) {
-            computedFormat = mentionsTenure(promptLower) ? "years_months" : "years";
-        }
-
-        if (!"custom_expression".equals(computedFormat)) {
-            switch (computedFormat) {
-                case "years_months" -> {
-                    outputType = "string";
-                    expression = buildTenureYearsMonthsExpression(baseField);
-                }
-                case "months_total" -> {
-                    outputType = "number";
-                    format = "1.0-0";
-                    expression = "floor(monthsSince(" + baseField + "))";
-                }
-                case "decimal_years" -> {
-                    outputType = "number";
-                    format = "1.2-2";
-                    expression = "monthsSince(" + baseField + ") / 12";
-                }
-                default -> {
-                    outputType = "number";
-                    format = "1.0-0";
-                    expression = "floor(yearsSince(" + baseField + "))";
-                }
-            }
-        }
-
-        if (isBlank(expression)) {
-            return clarification("Não consegui montar a expressão da coluna calculada.", List.of());
-        }
-
-        ObjectNode patch = objectMapper.createObjectNode();
-        ArrayNode columns = patch.putArray("columns");
-        ObjectNode column = columns.addObject();
-        column.put("field", newField);
-        String header = titleCase(newField);
-        if ("tempoempresa".equalsIgnoreCase(newField) || mentionsTenure(promptLower)) {
-            header = "Tempo de Empresa";
-        }
-        column.put("header", header);
-        column.put("visible", true);
-        if (!isBlank(outputType)) {
-            column.put("type", outputType);
-        }
-        ObjectNode computed = column.putObject("computed");
-        computed.put("expression", expression);
-        if (!isBlank(outputType)) {
-            computed.put("outputType", outputType);
-        }
-        if (!isBlank(format) && !"string".equalsIgnoreCase(outputType)) {
-            computed.put("format", format);
-        }
-        addComputedDependencies(computed, List.of(baseField));
-
-        warnings.add("Patch deterministico aplicado para coluna calculada.");
-        return applySuggestedPatch(
-                patch,
-                currentState,
-                request.getComponentId(),
-                warnings,
-                configCapabilities,
-                componentCapabilities,
-                componentContext,
-                true);
-    }
-
-    private String normalizeComputedFormat(String computedFormat) {
-        if (computedFormat == null || computedFormat.isBlank()) {
-            return "years";
-        }
-        String normalized = computedFormat.trim().toLowerCase(Locale.ROOT);
-        return switch (normalized) {
-            case "years_months", "months_total", "decimal_years", "custom_expression", "years" -> normalized;
-            default -> "years";
-        };
-    }
-
     private String normalizeComputedFormatOrNull(String computedFormat) {
         if (computedFormat == null || computedFormat.isBlank()) {
             return null;
@@ -27215,42 +26568,6 @@ public class AiOrchestratorService {
             }
         }
         return values;
-    }
-
-    private JsonNode buildConditionalChipPatch(
-            String field,
-            Map<String, String> colorMap,
-            boolean quoteValues) {
-        if (isBlank(field) || colorMap == null || colorMap.isEmpty()) {
-            return null;
-        }
-        ObjectNode patch = objectMapper.createObjectNode();
-        ArrayNode columns = patch.putArray("columns");
-        ObjectNode column = columns.addObject();
-        column.put("field", field);
-        ObjectNode renderer = column.putObject("renderer");
-        renderer.put("type", "chip");
-        ObjectNode chip = renderer.putObject("chip");
-        chip.put("textField", field);
-        chip.put("variant", "filled");
-
-        ArrayNode conditional = column.putArray("conditionalRenderers");
-        for (Map.Entry<String, String> entry : colorMap.entrySet()) {
-            if (entry.getKey() == null || entry.getKey().isBlank()) {
-                continue;
-            }
-            ObjectNode rule = conditional.addObject();
-            rule.put("condition", buildEqualityCondition(field, entry.getKey(), quoteValues));
-            ObjectNode ruleRenderer = rule.putObject("renderer");
-            ruleRenderer.put("type", "chip");
-            ObjectNode ruleChip = ruleRenderer.putObject("chip");
-            ruleChip.put("textField", field);
-            ruleChip.put("variant", "filled");
-            if (!isBlank(entry.getValue())) {
-                ruleChip.put("color", entry.getValue());
-            }
-        }
-        return patch;
     }
 
     private JsonNode buildNeutralBadgeLikePatch(String field, String rendererType) {
@@ -27855,133 +27172,6 @@ public class AiOrchestratorService {
     private boolean looksLikeJsonPatchObject(JsonNode node) {
         if (node == null || !node.isObject()) return false;
         return node.has("op") || node.has("path") || node.has("from");
-    }
-
-    private JsonNode convertJsonPatchToSemantic(
-            JsonNode patchOps,
-            JsonNode currentState) {
-        if (patchOps == null || !patchOps.isArray()) {
-            return null;
-        }
-        JsonNode columns = currentState != null ? currentState.get("columns") : null;
-        if (columns == null || !columns.isArray()) {
-            return null;
-        }
-
-        Map<String, ObjectNode> columnPatches = new LinkedHashMap<>();
-        for (JsonNode opNode : patchOps) {
-            if (opNode == null || !opNode.isObject()) {
-                return null;
-            }
-            String op = textOrNull(opNode.get("op"));
-            if (op == null) {
-                return null;
-            }
-            if ("test".equalsIgnoreCase(op)) {
-                continue;
-            }
-            if (!"replace".equalsIgnoreCase(op) && !"add".equalsIgnoreCase(op)) {
-                return null;
-            }
-            String path = textOrNull(opNode.get("path"));
-            if (path == null || path.isBlank()) {
-                return null;
-            }
-            JsonNode value = opNode.get("value");
-            if (value == null || value.isNull()) {
-                return null;
-            }
-            if (path.startsWith("/columns/")) {
-                String[] parts = path.split("/");
-                if (parts.length < 4) {
-                    return null;
-                }
-                String indexPart = parts[2];
-                int idx;
-                try {
-                    idx = Integer.parseInt(indexPart);
-                } catch (NumberFormatException ex) {
-                    return null;
-                }
-                if (idx < 0 || idx >= columns.size()) {
-                    return null;
-                }
-                JsonNode columnNode = columns.get(idx);
-                String field = textOrNull(columnNode != null ? columnNode.get("field") : null);
-                if (field == null || field.isBlank()) {
-                    return null;
-                }
-                List<String> propPath = new ArrayList<>();
-                for (int i = 3; i < parts.length; i++) {
-                    if (parts[i] == null || parts[i].isBlank()) {
-                        return null;
-                    }
-                    propPath.add(parts[i]);
-                }
-                if (propPath.isEmpty()) {
-                    return null;
-                }
-                if ("field".equals(propPath.get(0))) {
-                    continue;
-                }
-                ObjectNode colPatch = columnPatches.computeIfAbsent(field, key -> {
-                    ObjectNode node = objectMapper.createObjectNode();
-                    node.put("field", key);
-                    return node;
-                });
-                applyNestedValue(colPatch, propPath, value);
-                continue;
-            }
-            if (path.startsWith("columns[")) {
-                java.util.regex.Matcher matcher =
-                        java.util.regex.Pattern.compile("^columns\\[field=([^\\]]+)]\\.(.+)$")
-                                .matcher(path);
-                if (!matcher.matches()) {
-                    return null;
-                }
-                String field = matcher.group(1);
-                String propPathRaw = matcher.group(2);
-                if (field == null || field.isBlank() || propPathRaw == null || propPathRaw.isBlank()) {
-                    return null;
-                }
-                if (propPathRaw.contains("[") || propPathRaw.contains("]")) {
-                    return null;
-                }
-                String[] propParts = propPathRaw.split("\\.");
-                List<String> propPath = new ArrayList<>();
-                for (String part : propParts) {
-                    if (part == null || part.isBlank()) {
-                        return null;
-                    }
-                    propPath.add(part);
-                }
-                if (propPath.isEmpty()) {
-                    return null;
-                }
-                if ("field".equals(propPath.get(0))) {
-                    continue;
-                }
-                ObjectNode colPatch = columnPatches.computeIfAbsent(field, key -> {
-                    ObjectNode node = objectMapper.createObjectNode();
-                    node.put("field", key);
-                    return node;
-                });
-                applyNestedValue(colPatch, propPath, value);
-                continue;
-            }
-            return null;
-        }
-
-        if (columnPatches.isEmpty()) {
-            return null;
-        }
-        ObjectNode out = objectMapper.createObjectNode();
-        ArrayNode cols = objectMapper.createArrayNode();
-        for (ObjectNode node : columnPatches.values()) {
-            cols.add(node);
-        }
-        out.set("columns", cols);
-        return out;
     }
 
     private void applyNestedValue(ObjectNode root, List<String> path, JsonNode value) {
@@ -28958,10 +28148,6 @@ public class AiOrchestratorService {
                 || "addcolumncomputed".equals(normalizedOperationId)
                 || "setcomputedcolumn".equals(normalizedOperationId)
                 || "setcolumncomputed".equals(normalizedOperationId);
-    }
-
-    private boolean isComputedColumnComposeRenderer(JsonNode operation, Set<String> computedFields) {
-        return isComputedColumnAuxiliaryRenderer(operation, computedFields);
     }
 
     private boolean isComputedColumnAuxiliaryRenderer(JsonNode operation, Set<String> computedFields) {
@@ -31868,63 +31054,6 @@ public class AiOrchestratorService {
         return values;
     }
 
-    private Map<String, String> readStringMap(JsonNode node) {
-        if (node == null || !node.isObject()) {
-            return Map.of();
-        }
-        Map<String, String> out = new LinkedHashMap<>();
-        java.util.Iterator<Map.Entry<String, JsonNode>> fields = node.fields();
-        while (fields.hasNext()) {
-            Map.Entry<String, JsonNode> entry = fields.next();
-            String key = entry.getKey();
-            JsonNode valueNode = entry.getValue();
-            if (key == null || key.isBlank() || valueNode == null || valueNode.isNull()) {
-                continue;
-            }
-            String value = valueNode.asText();
-            if (!isBlank(value)) {
-                out.put(key, value.trim());
-            }
-        }
-        return out;
-    }
-
-    private JsonNode buildConditionalBadgePatch(
-            String field,
-            Map<String, String> colorMap,
-            boolean quoteValues) {
-        if (isBlank(field) || colorMap == null || colorMap.isEmpty()) {
-            return null;
-        }
-        ObjectNode patch = objectMapper.createObjectNode();
-        ArrayNode columns = patch.putArray("columns");
-        ObjectNode column = columns.addObject();
-        column.put("field", field);
-        ObjectNode renderer = column.putObject("renderer");
-        renderer.put("type", "badge");
-        ObjectNode badge = renderer.putObject("badge");
-        badge.put("textField", field);
-        badge.put("variant", "filled");
-
-        ArrayNode conditional = column.putArray("conditionalRenderers");
-        for (Map.Entry<String, String> entry : colorMap.entrySet()) {
-            if (entry.getKey() == null || entry.getKey().isBlank()) {
-                continue;
-            }
-            ObjectNode rule = conditional.addObject();
-            rule.put("condition", buildEqualityCondition(field, entry.getKey(), quoteValues));
-            ObjectNode ruleRenderer = rule.putObject("renderer");
-            ruleRenderer.put("type", "badge");
-            ObjectNode ruleBadge = ruleRenderer.putObject("badge");
-            ruleBadge.put("textField", field);
-            ruleBadge.put("variant", "filled");
-            if (!isBlank(entry.getValue())) {
-                ruleBadge.put("color", entry.getValue());
-            }
-        }
-        return patch;
-    }
-
     private String buildEqualityCondition(String field, String value, boolean quoteValue) {
         String safeValue = escapeDslString(value);
         if (!quoteValue) {
@@ -32453,11 +31582,6 @@ public class AiOrchestratorService {
         public String reason;
 
         public CreateTemplateSelection() {}
-    }
-
-    private JsonNode resolveSchemaJustInTime(AiOrchestratorRequest request) {
-        SchemaFetchResult result = resolveSchemaJustInTimeResult(request);
-        return result != null && result.isSuccess() ? result.getSchema() : null;
     }
 
     private SchemaFetchResult resolveSchemaJustInTimeResult(AiOrchestratorRequest request) {

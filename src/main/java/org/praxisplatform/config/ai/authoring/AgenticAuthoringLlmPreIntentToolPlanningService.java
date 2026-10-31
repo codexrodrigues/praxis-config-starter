@@ -460,63 +460,8 @@ public class AgenticAuthoringLlmPreIntentToolPlanningService implements AgenticA
     }
 
     private boolean hasBlockingActiveSemanticDecision(AgenticAuthoringTurnStreamRequest request) {
-        AgenticAuthoringSemanticDecision decision = request == null ? null : request.activeSemanticDecision();
-        if (decision == null) {
-            return false;
-        }
-        String constraintSource = decision.constraints() == null
-                ? ""
-                : decision.constraints().path("source").asText("").trim();
-        if ("server-issued-quick-reply".equalsIgnoreCase(constraintSource)) {
-            return true;
-        }
-        String resourcePath = decision.selectedResource() == null
-                ? ""
-                : valueOrEmpty(decision.selectedResource().resourcePath()).trim();
-        if (!StringUtils.hasText(resourcePath)) {
-            return false;
-        }
-        String operation = valueOrEmpty(decision.operationKind()).trim().toLowerCase(Locale.ROOT);
-        String artifact = valueOrEmpty(decision.artifactKind()).trim().toLowerCase(Locale.ROOT);
-        String change = valueOrEmpty(decision.changeKind()).trim().toLowerCase(Locale.ROOT);
-        if ("explore".equals(operation)
-                || "explain".equals(operation)
-                || "unknown".equals(operation)
-                || "api_catalog".equals(artifact)
-                || "component".equals(artifact)
-                || "unknown".equals(artifact)
-                || change.startsWith("answer_")
-                || change.startsWith("recommend_")
-                || "needs_clarification".equals(change)
-                || "api_catalog_followup".equals(change)) {
-            return false;
-        }
-        return !isDataSourceReplacementPrompt(request.userPrompt());
-    }
-
-    private boolean isDataSourceReplacementPrompt(String prompt) {
-        String normalized = normalizeIdentity(prompt);
-        if (normalized.isBlank()) {
-            return false;
-        }
-        if (normalized.contains("mantem os dados")
-                || normalized.contains("mantenha os dados")
-                || normalized.contains("mantem a fonte")
-                || normalized.contains("mantenha a fonte")
-                || normalized.contains("mantem o recurso")
-                || normalized.contains("mantenha o recurso")
-                || normalized.contains("mesma fonte")
-                || normalized.contains("mesmos dados")
-                || normalized.contains("preserve a fonte")) {
-            return false;
-        }
-        return normalized.contains("troca a fonte")
-                || normalized.contains("troque a fonte")
-                || normalized.contains("mude a fonte")
-                || normalized.contains("outra fonte")
-                || normalized.contains("nova fonte")
-                || normalized.contains("fonte deve ser")
-                || normalized.contains("fonte precisa ser");
+        return AgenticAuthoringIntentCandidateScoringSupport.hasBlockingActiveSemanticDecision(
+                request == null ? null : request.activeSemanticDecision());
     }
 
     private boolean hasResourceDiscoveryContext(AgenticAuthoringTurnStreamRequest request) {
@@ -554,9 +499,10 @@ public class AgenticAuthoringLlmPreIntentToolPlanningService implements AgenticA
                     "",
                     ""));
         }
-        String assistantMessage = "platform_guidance".equals(semanticIntentClass)
+        String assistantMessage = !"governed_domain_discovery".equals(semanticIntentClass)
                 ? text(result, "assistantMessage")
                 : "";
+        List<AgenticAuthoringQuickReply> quickReplies = quickReplies(result.path("quickReplies"));
         if ("platform_guidance".equals(semanticIntentClass)) {
             if (!StringUtils.hasText(assistantMessage)) {
                 return AgenticAuthoringPreIntentToolPlanningResult.skipped(
@@ -576,7 +522,8 @@ public class AgenticAuthoringLlmPreIntentToolPlanningService implements AgenticA
                             : "approval-workbench".equals(layoutKind(result))
                                     ? "praxis-table"
                                     : primaryComponent(result),
-                    layoutKind(result)));
+                    layoutKind(result),
+                    quickReplies));
         }
         if (!result.path("shouldRetrieveGovernedResources").asBoolean(false)) {
             return AgenticAuthoringPreIntentToolPlanningResult.planned(new AgenticAuthoringPreIntentToolPlan(
@@ -584,7 +531,7 @@ public class AgenticAuthoringLlmPreIntentToolPlanningService implements AgenticA
                     text(result, "reason"),
                     List.of(),
                     semanticIntentClass,
-                    "",
+                    assistantMessage,
                     result.path("requiresFullIntentResolution").asBoolean(false),
                     result.path("queryConstraints").deepCopy(),
                     text(result, "artifactKind"),
@@ -593,7 +540,8 @@ public class AgenticAuthoringLlmPreIntentToolPlanningService implements AgenticA
                             : "approval-workbench".equals(layoutKind(result))
                                     ? "praxis-table"
                                     : primaryComponent(result),
-                    layoutKind(result)));
+                    layoutKind(result),
+                    quickReplies));
         }
         String groundingProfile = text(result, "groundingProfile");
         if (!List.of("domain_context", "domain_capability", "domain_concept", "domain_binding", "operation_verification", "api_resource", "domain_decision")
@@ -649,7 +597,7 @@ public class AgenticAuthoringLlmPreIntentToolPlanningService implements AgenticA
                 text(result, "reason"),
                 List.of(toolCall),
                 semanticIntentClass,
-                "",
+                assistantMessage,
                 requiresFullIntentResolution,
                 result.path("queryConstraints").deepCopy(),
                 artifactKind,
@@ -658,7 +606,8 @@ public class AgenticAuthoringLlmPreIntentToolPlanningService implements AgenticA
                         : "approval-workbench".equals(layoutKind(result))
                                 ? "praxis-table"
                                 : primaryComponent(result),
-                layoutKind(result)));
+                layoutKind(result),
+                quickReplies));
     }
 
     private AgenticAuthoringToolCall progressiveToolCall(
@@ -1618,6 +1567,43 @@ public class AgenticAuthoringLlmPreIntentToolPlanningService implements AgenticA
             return retrievalQuery;
         }
         return prefix + " semantic query: " + retrievalQuery;
+    }
+
+    private List<AgenticAuthoringQuickReply> quickReplies(JsonNode node) {
+        if (node == null || !node.isArray()) {
+            return List.of();
+        }
+        java.util.ArrayList<AgenticAuthoringQuickReply> replies = new java.util.ArrayList<>();
+        for (JsonNode item : node) {
+            if (item == null || !item.isObject()) {
+                continue;
+            }
+            String id = text(item, "id");
+            String kind = text(item, "kind");
+            String label = text(item, "label");
+            String prompt = text(item, "prompt");
+            if (!StringUtils.hasText(id) || !StringUtils.hasText(kind) || !StringUtils.hasText(label)) {
+                continue;
+            }
+            if (!StringUtils.hasText(prompt) || "[REDACTED]".equalsIgnoreCase(prompt.trim())) {
+                prompt = label;
+            }
+            String description = text(item, "description");
+            String icon = text(item, "icon");
+            String tone = text(item, "tone");
+            replies.add(new AgenticAuthoringQuickReply(
+                    id,
+                    kind,
+                    label,
+                    prompt,
+                    StringUtils.hasText(description) ? description : null,
+                    StringUtils.hasText(icon) ? icon : null,
+                    StringUtils.hasText(tone) ? tone : null,
+                    item.path("contextHints").isObject() ? item.path("contextHints") : null,
+                    item.path("semanticDecision").isObject() ? item.path("semanticDecision") : null,
+                    item.path("value").isMissingNode() ? null : item.path("value")));
+        }
+        return List.copyOf(replies);
     }
 
     private String valueOrEmpty(String value) {

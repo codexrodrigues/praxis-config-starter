@@ -75,6 +75,8 @@ public class AgenticAuthoringTurnStreamService {
             new AgenticAuthoringRuntimeComponentGroundingService(objectMapper);
     private final AgenticAuthoringTurnStreamRequestNormalizer requestNormalizer =
             new AgenticAuthoringTurnStreamRequestNormalizer(objectMapper, runtimeComponentGroundingService);
+    private final AgenticAuthoringIngressRetentionPreflight ingressRetentionPreflight =
+            new AgenticAuthoringIngressRetentionPreflight();
     private final AgenticAuthoringStreamProgressMessageCatalog progressMessageCatalog =
             AgenticAuthoringStreamProgressMessageCatalog.INSTANCE;
 
@@ -166,18 +168,21 @@ public class AgenticAuthoringTurnStreamService {
             AiPrincipalContext principalContext) {
         request = requestNormalizer.withoutClientVerifiedDomainOperations(request);
         validate(request);
+        AgenticAuthoringIngressRetentionPreflight.PreflightDecision preflight =
+                ingressRetentionPreflight.evaluateOrThrow(request, principalContext);
         request = requestNormalizer.withGroundedRuntimeComponentContext(request);
         request = requestNormalizer.withRequestBaseUrl(request, baseUrl);
         UUID turnId = stableUuid("agentic-authoring-turn", request.clientTurnId());
         UUID requestedThreadId = requestedThreadId(request);
+        String safeThreadPrompt = preflight.threadTitleSeed();
         AiOrchestratorRequest threadRequest = AiOrchestratorRequest.builder()
                 .componentId(nonBlank(request.targetComponentId(), "praxis-dynamic-page-builder"))
                 .componentType("page-builder")
-                .userPrompt(request.userPrompt())
+                .userPrompt(safeThreadPrompt)
                 .sessionId(requestedThreadId)
                 .clientTurnId(turnId)
-                .currentState(request.currentPage())
-                .contextHints(request.contextHints())
+                .currentState(preflight.zeroRetention() ? null : request.currentPage())
+                .contextHints(preflight.zeroRetention() ? null : request.contextHints())
                 .mode(requestedThreadId == null ? "new" : "continue")
                 .build();
         AiThread thread = threadService.resolveThread(
@@ -185,7 +190,7 @@ public class AgenticAuthoringTurnStreamService {
                 principalContext.tenantId(),
                 principalContext.userId(),
                 principalContext.environment(),
-                request.userPrompt());
+                safeThreadPrompt);
         UUID threadId = thread.getThreadId();
         request = requestNormalizer.withCanonicalSessionId(request, threadId);
         AiTurnEventService.StreamStartMetadata existing = turnEventService.findStartMetadata(threadId, turnId)
@@ -205,13 +210,15 @@ public class AgenticAuthoringTurnStreamService {
 
         if (existing != null) {
             validateIdempotentRequest(existing.requestHash(), requestHash);
-            UUID observationId = captureObservation(
-                    threadRequest,
-                    principalContext,
-                    existing.streamId(),
-                    threadId,
-                    turnId,
-                    request.userPrompt());
+            UUID observationId = preflight.skipObservationCapture()
+                    ? null
+                    : captureObservation(
+                            threadRequest,
+                            principalContext,
+                            existing.streamId(),
+                            threadId,
+                            turnId,
+                            safeThreadPrompt);
             return new StartResult(startResponse(
                     existing.streamId(),
                     observationId,
@@ -225,13 +232,15 @@ public class AgenticAuthoringTurnStreamService {
         // Freshness is checked by appendStartEventIfAbsent under the same database
         // thread lock as result publication. Historical lookup above permits exact replay.
         UUID streamId = UUID.randomUUID();
-        UUID observationId = captureObservation(
-                threadRequest,
-                principalContext,
-                streamId,
-                threadId,
-                turnId,
-                request.userPrompt());
+        UUID observationId = preflight.skipObservationCapture()
+                ? null
+                : captureObservation(
+                        threadRequest,
+                        principalContext,
+                        streamId,
+                        threadId,
+                        turnId,
+                        safeThreadPrompt);
         Instant expiresAt = Instant.now().plusSeconds(Math.max(streamExpiresSeconds, 60L));
         boolean capacityReserved = false;
         try {
@@ -252,13 +261,15 @@ public class AgenticAuthoringTurnStreamService {
                 releaseCapacityPermit(streamId);
                 capacityReserved = false;
                 validateIdempotentRequest(requestNormalizer.requestHash(startEvent), requestHash);
-                UUID existingObservationId = captureObservation(
-                        threadRequest,
-                        principalContext,
-                        startEvent.getStreamId(),
-                        startEvent.getThreadId(),
-                        startEvent.getTurnId(),
-                        request.userPrompt());
+                UUID existingObservationId = preflight.skipObservationCapture()
+                        ? null
+                        : captureObservation(
+                                threadRequest,
+                                principalContext,
+                                startEvent.getStreamId(),
+                                startEvent.getThreadId(),
+                                startEvent.getTurnId(),
+                                safeThreadPrompt);
                 return new StartResult(startResponse(
                         startEvent.getStreamId(),
                         existingObservationId,

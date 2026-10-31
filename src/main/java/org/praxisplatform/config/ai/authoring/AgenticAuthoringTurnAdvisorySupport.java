@@ -82,7 +82,7 @@ final class AgenticAuthoringTurnAdvisorySupport {
             AgenticAuthoringResourceCandidatesResult resourceDiscovery,
             AgenticAuthoringResourceCandidatesResult businessCatalogDiscovery,
             String schemaBaseUrl) {
-        if (isPlatformGuidancePrompt(intentResolution == null ? "" : intentResolution.effectivePrompt())) {
+        if (isPlatformGuidanceIntent(intentResolution)) {
             return safeText(intentResolution == null ? "" : intentResolution.assistantMessage());
         }
         if (!isAdvisoryCatalogIntent(intentResolution)) {
@@ -91,17 +91,28 @@ final class AgenticAuthoringTurnAdvisorySupport {
                 return "";
             }
         }
-        String projectionMessage = consultativeProjectionAssistantMessage(
-                firstNonBlank(userPrompt, intentResolution == null ? "" : intentResolution.effectivePrompt()),
+        String effectiveUserPrompt = firstNonBlank(
+                userPrompt,
+                intentResolution == null ? "" : intentResolution.effectivePrompt());
+        String unsupportedDomainMessage = consultativeUnsupportedDomainMessage(
+                effectiveUserPrompt,
                 businessCatalogDiscovery,
                 resourceDiscovery);
-        if (!projectionMessage.isBlank()) {
-            return projectionMessage;
+        if (!unsupportedDomainMessage.isBlank()) {
+            return unsupportedDomainMessage;
         }
         List<AgenticAuthoringCandidate> candidates = catalogCandidates(
                 resourceDiscovery,
                 businessCatalogDiscovery,
                 intentResolution);
+        String projectionMessage = consultativeProjectionAssistantMessage(
+                effectiveUserPrompt,
+                businessCatalogDiscovery,
+                resourceDiscovery);
+        String llmCatalogMessage = resolvedLlmCatalogAdvisoryMessage(intentResolution, candidates);
+        if (!projectionMessage.isBlank()) {
+            return !llmCatalogMessage.isBlank() ? llmCatalogMessage : projectionMessage;
+        }
         if (candidates.isEmpty()) {
             return "Ainda nao encontrei fontes de dados governadas suficientes para responder com seguranca. "
                     + "Posso tentar de novo com um recorte de area, entidade ou processo mais especifico.";
@@ -126,6 +137,9 @@ final class AgenticAuthoringTurnAdvisorySupport {
             return "Encontrei dados em " + sources + ", mas ainda nao consegui confirmar os campos disponiveis. "
                     + "Por enquanto, consigo explicar as fontes disponiveis e recomendar telas em nivel de negocio; "
                     + "antes de materializar graficos, tabelas ou formularios, preciso validar os campos da fonte escolhida.";
+        }
+        if (!llmCatalogMessage.isBlank()) {
+            return llmCatalogMessage;
         }
         StringBuilder message = new StringBuilder();
         message.append("Encontrei dados governados em ").append(sources).append(". ");
@@ -188,33 +202,25 @@ final class AgenticAuthoringTurnAdvisorySupport {
                 || "api_catalog_followup".equals(changeKind));
     }
 
-    static boolean isPlatformGuidancePrompt(String prompt) {
-        String normalized = normalizeText(prompt);
-        if (normalized.isBlank()) {
+    static boolean isPlatformGuidanceIntent(AgenticAuthoringIntentResolutionResult intentResolution) {
+        if (intentResolution == null) {
             return false;
         }
-        boolean question = containsAny(normalized,
-                "o que posso", "o que consigo", "o que da para", "o que dá para",
-                "o que voce pode", "o que você pode", "como faco", "como faço",
-                "como criar", "como montar", "quais componentes", "que componentes",
-                "quais widgets", "que widgets", "quais telas", "que telas",
-                "quais paginas", "que paginas", "posso criar", "daria para criar",
-                "da para criar", "dá para criar", "posso montar", "posso fazer");
-        boolean platformSubject = containsAny(normalized,
-                "aqui", "praxis", "page builder", "builder", "assistente",
-                "componente", "componentes", "widget", "widgets",
-                "tela", "telas", "pagina", "paginas", "dashboard", "painel",
-                "formulario", "formulário", "tabela", "grafico", "gráfico",
-                "aba", "abas", "tabs", "stepper", "administrativo", "admin",
-                "livremente", "predefinido", "predefinidos", "pre definido", "pre definidos");
-        boolean dataCatalogSubject = containsAny(normalized,
-                "dados", "fonte", "fontes", "api", "apis", "schema", "schemas",
-                "campo", "campos", "recurso", "recursos", "entidade", "entidades");
-        boolean formPolicySubject = containsAny(normalized,
-                "formulario", "formulário", "livre", "livremente",
-                "predefinido", "predefinidos", "pre definido", "pre definidos",
-                "governado", "governada");
-        return question && platformSubject && (!dataCatalogSubject || formPolicySubject);
+        String operationKind = safeText(intentResolution.operationKind());
+        String artifactKind = safeText(intentResolution.artifactKind());
+        String changeKind = safeText(intentResolution.changeKind());
+        if (("explain".equals(operationKind) || "explore".equals(operationKind))
+                && "component".equals(artifactKind)
+                && ("answer_component_catalog_question".equals(changeKind)
+                        || "answer_component_capability_question".equals(changeKind)
+                        || "explain_capabilities".equals(changeKind)
+                        || "explain_authoring_options".equals(changeKind)
+                        || "explain_platform_capabilities".equals(changeKind))) {
+            return true;
+        }
+        JsonNode diagnostics = intentResolution.llmDiagnostics();
+        return diagnostics != null
+                && "platform_guidance".equals(safeText(diagnostics.path("semanticIntentClass").asText("")));
     }
 
     static boolean isUnresolvedAdvisoryIntent(AgenticAuthoringIntentResolutionResult intentResolution) {
@@ -252,18 +258,38 @@ final class AgenticAuthoringTurnAdvisorySupport {
             boolean canApply,
             String applyBlockReason) {
         String message = value == null ? "" : value.trim();
+        String responseLocale = request == null || request.contextHints() == null
+                ? ""
+                : request.contextHints().path("responseLocale").asText("");
+        boolean nonPortuguese = !responseLocale.isBlank()
+                && !responseLocale.toLowerCase(Locale.ROOT).startsWith("pt");
         if (!canApply) {
+            String sanitized = stripBlockedExecutionPromises(message);
+            boolean strippedFalsePromise = !sanitized.equals(message);
             if ("apply-target-missing".equals(applyBlockReason)) {
-                String responseLocale = request == null || request.contextHints() == null
-                        ? ""
-                        : request.contextHints().path("responseLocale").asText("");
-                String clarification = !responseLocale.isBlank()
-                                && !responseLocale.toLowerCase(Locale.ROOT).startsWith("pt")
+                String clarification = nonPortuguese
                         ? "The preview is ready for review, but it cannot be saved in this turn until the application target is identified."
                         : "A prévia está pronta para revisão, mas ainda não pode ser salva neste turno porque o destino de aplicação não foi identificado.";
-                return message.isBlank() ? clarification : message + "\n\n" + clarification;
+                return sanitized.isBlank() ? clarification : sanitized + "\n\n" + clarification;
             }
-            return message;
+            if ("local-component-patch-blocked-by-policy".equals(applyBlockReason)) {
+                String clarification = nonPortuguese
+                        ? "Structural layout or configuration changes cannot be applied while layout customization is disabled."
+                        : "Alterações estruturais de layout ou configuração não podem ser aplicadas enquanto o modo de edição de layout estiver desativado.";
+                return sanitized.isBlank() ? clarification : sanitized + "\n\n" + clarification;
+            }
+            String safeBlockReason = safeText(applyBlockReason);
+            boolean requiresBlockedClarification = strippedFalsePromise
+                    || (!safeBlockReason.isBlank()
+                            && !"preview-invalid".equals(safeBlockReason)
+                            && !"component-edit-no-op".equals(safeBlockReason));
+            if (requiresBlockedClarification && !hasExplicitBlockedOrReviewMeaning(sanitized)) {
+                String clarification = nonPortuguese
+                        ? "This proposal still requires review and cannot be applied automatically in this turn."
+                        : "Esta proposta ainda requer revisão e não pode ser aplicada automaticamente neste turno.";
+                return sanitized.isBlank() ? clarification : sanitized + "\n\n" + clarification;
+            }
+            return sanitized;
         }
         String normalized = Normalizer.normalize(message, Normalizer.Form.NFD)
                 .replaceAll("\\p{M}+", "")
@@ -273,18 +299,196 @@ final class AgenticAuthoringTurnAdvisorySupport {
         boolean reviewMeaningPresent = normalized.contains("previa")
                 || normalized.contains("pre visualizacao")
                 || normalized.contains("preview")
-                || normalized.contains("revis");
+                || normalized.contains("revis")
+                || normalized.contains("confer")
+                || normalized.contains("ajust")
+                || normalized.contains("avali")
+                || normalized.contains("salv")
+                || normalized.contains("save")
+                || normalized.contains("review");
         if (reviewMeaningPresent) {
             return message;
         }
-        String responseLocale = request == null || request.contextHints() == null
-                ? ""
-                : request.contextHints().path("responseLocale").asText("");
-        String guarantee = !responseLocale.isBlank()
-                        && !responseLocale.toLowerCase(Locale.ROOT).startsWith("pt")
+        String guarantee = nonPortuguese
                 ? "The preview is ready for review before saving."
                 : "A prévia está pronta para revisão antes de salvar.";
         return message.isBlank() ? guarantee : message + "\n\n" + guarantee;
+    }
+
+    private static String stripBlockedExecutionPromises(String message) {
+        if (message == null || message.isBlank()) {
+            return "";
+        }
+        String[] paragraphs = message.split("\\R+");
+        List<String> keptParagraphs = new ArrayList<>();
+        for (String paragraph : paragraphs) {
+            String trimmedParagraph = paragraph == null ? "" : paragraph.trim();
+            if (trimmedParagraph.isEmpty()) {
+                continue;
+            }
+            String[] sentences = trimmedParagraph.split("(?<=[.!?])\\s+");
+            List<String> keptSentences = new ArrayList<>();
+            for (String sentence : sentences) {
+                String trimmedSentence = sentence == null ? "" : sentence.trim();
+                if (!trimmedSentence.isEmpty() && !isFalseExecutionPromiseSentence(trimmedSentence)) {
+                    keptSentences.add(trimmedSentence);
+                }
+            }
+            if (!keptSentences.isEmpty()) {
+                keptParagraphs.add(String.join(" ", keptSentences));
+            }
+        }
+        return String.join("\n\n", keptParagraphs).trim();
+    }
+
+    private static boolean isFalseExecutionPromiseSentence(String sentence) {
+        String normalized = normalizeText(sentence).replaceAll("[^a-z0-9]+", " ").trim();
+        if (normalized.isEmpty()) {
+            return false;
+        }
+        if (containsAny(normalized,
+                "nao pode", "ainda nao", "nao vou", "nao foi possivel",
+                "cannot", "can t", "could not", "unable",
+                "bloquead", "blocked", "indisponivel", "unavailable",
+                "nenhuma alteracao", "nao fiz nenhuma alteracao")) {
+            return false;
+        }
+        if ("preview ready".equals(normalized)
+                || "previa pronta".equals(normalized)
+                || "pronto".equals(normalized)
+                || "feito".equals(normalized)
+                || "concluido".equals(normalized)
+                || "done".equals(normalized)
+                || "ready".equals(normalized)) {
+            return true;
+        }
+        return containsAny(normalized,
+                "pronta para revisao antes de salvar",
+                "ready for review before saving",
+                "revise antes de salvar",
+                "review before saving",
+                "revise o resultado e salve",
+                "revise a pre visualizacao e salve",
+                "review the result and save",
+                "vou preencher",
+                "preenchi",
+                "ja preenchi",
+                "campos preenchidos",
+                "formulario preenchido",
+                "dados preenchidos",
+                "valores preenchidos",
+                "i will fill",
+                "i filled",
+                "already filled",
+                "fields filled",
+                "form filled",
+                "ja apliquei",
+                "apliquei as",
+                "apliquei os",
+                "vou aplicar",
+                "atualizei os campos",
+                "campos atualizados",
+                "posso aplicar",
+                "deseja aplicar",
+                "quer que eu aplique",
+                "confirme para aplicar",
+                "confirme para preencher",
+                "pronto para aplicar",
+                "pronta para aplicar",
+                "pronto para salvar",
+                "pronta para salvar",
+                "can i apply",
+                "confirm to apply",
+                "ready to apply",
+                "ready to save");
+    }
+
+    private static boolean hasExplicitBlockedOrReviewMeaning(String message) {
+        String normalized = normalizeText(message).replaceAll("[^a-z0-9]+", " ").trim();
+        if (normalized.isEmpty()) {
+            return false;
+        }
+        return containsAny(normalized,
+                "nao pode ser salva",
+                "nao pode ser aplicada",
+                "nao vou materializar",
+                "nao vou aplicar",
+                "requer revisao",
+                "precisa de revisao",
+                "needs review",
+                "requires review",
+                "cannot be saved",
+                "cannot be applied",
+                "bloquead",
+                "blocked");
+    }
+
+    private String consultativeUnsupportedDomainMessage(
+            String userPrompt,
+            AgenticAuthoringResourceCandidatesResult businessCatalogDiscovery,
+            AgenticAuthoringResourceCandidatesResult resourceDiscovery) {
+        AgenticAuthoringConsultativeApiCatalogProjection projection =
+                businessCatalogDiscovery == null ? null : businessCatalogDiscovery.consultativeProjection();
+        if (projection == null || !projection.hasResources()) {
+            projection = resourceDiscovery == null ? null : resourceDiscovery.consultativeProjection();
+        }
+        if (projection == null || !projection.hasResources()) {
+            return "";
+        }
+        return safeText(AgenticAuthoringConsultativeGroundingAlignment.unsupportedDomainMessage(
+                userPrompt,
+                projection.resources()));
+    }
+
+    private String resolvedLlmCatalogAdvisoryMessage(
+            AgenticAuthoringIntentResolutionResult intentResolution,
+            List<AgenticAuthoringCandidate> candidates) {
+        if (intentResolution == null || !isLlmResolvedIntent(intentResolution)) {
+            return "";
+        }
+        boolean hasCandidateEvidence = intentResolution.selectedCandidate() != null
+                || (intentResolution.candidates() != null && !intentResolution.candidates().isEmpty());
+        if (!hasCandidateEvidence || candidates == null || candidates.isEmpty()) {
+            return "";
+        }
+        String llmMessage = safeText(intentResolution.assistantMessage());
+        String lower = llmMessage.toLowerCase(Locale.ROOT);
+        if (llmMessage.length() < 45
+                || lower.contains("/api")
+                || lower.contains("/schemas")) {
+            return "";
+        }
+        String normalized = normalizeText(llmMessage);
+        if (normalized.startsWith("vou ")
+                || normalized.startsWith("posso explicar os dados encontrados")
+                || normalized.startsWith("encontrei dados governados em")
+                || !mentionsAnyCandidateLabel(normalized, candidates)) {
+            return "";
+        }
+        return llmMessage;
+    }
+
+    private boolean mentionsAnyCandidateLabel(String normalizedMessage, List<AgenticAuthoringCandidate> candidates) {
+        if (normalizedMessage.isBlank() || candidates == null) {
+            return false;
+        }
+        for (AgenticAuthoringCandidate candidate : candidates) {
+            String label = normalizeText(businessResourceLabel(candidate));
+            if (!label.isBlank() && normalizedMessage.contains(label)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private boolean isLlmResolvedIntent(AgenticAuthoringIntentResolutionResult intentResolution) {
+        if (intentResolution == null || intentResolution.warnings() == null) {
+            return false;
+        }
+        List<String> warnings = intentResolution.warnings();
+        return warnings.contains("llm-semantic-orientation-used")
+                || warnings.contains("llm-fast-intent-resolution-used")
+                || warnings.contains("llm-intent-resolution-used");
     }
 
     private String consultativeProjectionAssistantMessage(
@@ -633,24 +837,13 @@ final class AgenticAuthoringTurnAdvisorySupport {
         if (state != null && state.structuralTarget() != null) {
             return true;
         }
-        String artifactKind = safeLower(intentResolution.artifactKind());
-        if ("form".equals(artifactKind)
+        String artifactKind = safeLower(intentResolution == null ? null : intentResolution.artifactKind());
+        return "form".equals(artifactKind)
                 || "table".equals(artifactKind)
                 || "dashboard".equals(artifactKind)
                 || "page".equals(artifactKind)
-                || "chart".equals(artifactKind)) {
-            return true;
-        }
-        String prompt = safeLower(request.userPrompt());
-        return prompt.contains("formulario")
-                || prompt.contains("formulário")
-                || prompt.contains("pagina")
-                || prompt.contains("página")
-                || prompt.contains("tabela")
-                || prompt.contains("dashboard")
-                || prompt.contains("painel")
-                || prompt.contains("campo")
-                || prompt.contains("widget");
+                || "chart".equals(artifactKind)
+                || "component".equals(artifactKind);
     }
 
     private static boolean contains(List<String> values, String expected) {

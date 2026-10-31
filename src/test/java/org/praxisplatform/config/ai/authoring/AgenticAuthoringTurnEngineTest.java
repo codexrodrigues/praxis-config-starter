@@ -443,6 +443,188 @@ class AgenticAuthoringTurnEngineTest {
     }
 
     @Test
+    void stripsFalseExecutionAndConfirmationPromisesWhenPreviewCannotBeApplied() {
+        AgenticAuthoringTurnStreamRequest ptRequest = previewMessageRequest("pt-BR");
+        AgenticAuthoringTurnStreamRequest enRequest = previewMessageRequest("en-US");
+
+        String sanitizedFillPromise = AgenticAuthoringTurnEngine.ensureReviewablePreviewMessage(
+                "Vou preencher os campos solicitados para você. Posso aplicar agora?",
+                ptRequest,
+                false,
+                "decision-review-required");
+        String sanitizedGroundedSavePromise = AgenticAuthoringTurnEngine.ensureReviewablePreviewMessage(
+                "Montei uma primeira versao com a fonte confirmada. Revise o resultado e salve quando estiver de acordo.",
+                ptRequest,
+                false,
+                "semantic-decision-review-required");
+        String sanitizedEnglishPromise = AgenticAuthoringTurnEngine.ensureReviewablePreviewMessage(
+                "Preview ready. I filled the fields for you. Can I apply now?",
+                enRequest,
+                false,
+                "decision-review-required");
+        String sanitizedStandaloneCompletion = AgenticAuthoringTurnEngine.ensureReviewablePreviewMessage(
+                "Pronto! Preenchi o formulário com exemplos.",
+                ptRequest,
+                false,
+                "preview-invalid");
+
+        assertThat(sanitizedFillPromise)
+                .doesNotContain("Vou preencher")
+                .doesNotContain("Posso aplicar")
+                .contains("não pode ser aplicada automaticamente neste turno");
+        assertThat(sanitizedGroundedSavePromise)
+                .contains("Montei uma primeira versao com a fonte confirmada.")
+                .doesNotContain("Revise o resultado e salve")
+                .contains("não pode ser aplicada automaticamente neste turno");
+        assertThat(sanitizedEnglishPromise)
+                .doesNotContain("Preview ready")
+                .doesNotContain("I filled the fields")
+                .doesNotContain("Can I apply")
+                .contains("cannot be applied automatically in this turn");
+        assertThat(sanitizedStandaloneCompletion)
+                .doesNotContain("Pronto!")
+                .doesNotContain("Preenchi o formulário")
+                .contains("não pode ser aplicada automaticamente neste turno");
+    }
+
+    @Test
+    void blocksLocalComponentPatchWhenRuntimeAuthoringPolicyForbidsLocalPatch() {
+        AgenticAuthoringTurnEngine engine = new AgenticAuthoringTurnEngine(
+                intentResolverService,
+                previewService,
+                objectMapper,
+                new AgenticAuthoringCurrentPageAnalyzer(objectMapper),
+                new AgenticAuthoringToolRegistry(
+                        new AgenticAuthoringResourceDiscoveryService(null, objectMapper)));
+        ObjectNode contextHints = objectMapper.createObjectNode();
+        contextHints.put("responseLocale", "pt-BR");
+        contextHints.putObject("runtimeAuthoringPolicy")
+                .put("mode", "create")
+                .put("enableCustomization", false)
+                .put("canApplyLocalPatch", false)
+                .put("canAssistRuntimeValues", true);
+        AgenticAuthoringTurnStreamRequest base = previewMessageRequest("pt-BR");
+        AgenticAuthoringTurnStreamRequest request = new AgenticAuthoringTurnStreamRequest(
+                base.userPrompt(),
+                base.targetApp(),
+                "praxis-dynamic-form",
+                base.currentRoute(),
+                base.currentPage(),
+                base.selectedWidgetKey(),
+                base.provider(),
+                base.model(),
+                base.apiKey(),
+                base.sessionId(),
+                base.clientTurnId(),
+                base.conversationMessages(),
+                base.pendingClarification(),
+                base.attachmentSummaries(),
+                contextHints,
+                base.componentCapabilities(),
+                base.activeSemanticDecision(),
+                base.diagnostics(),
+                base.runtimeComponentObservations(),
+                base.runtimeComponentObservationTrustBoundary());
+
+        ObjectNode compiled = objectMapper.createObjectNode();
+        compiled.put("profileId", "component-manifest-edit");
+        compiled.putObject("componentEdit")
+                .put("componentId", "praxis-dynamic-form")
+                .putObject("plan")
+                .put("schemaVersion", "praxis-component-edit-plan.v1")
+                .put("componentId", "praxis-dynamic-form");
+        compiled.putObject("patch").put("title", "Novo layout");
+        AgenticAuthoringPreviewResult preview = new AgenticAuthoringPreviewResult(
+                true,
+                List.of(),
+                List.of(),
+                objectMapper.createObjectNode(),
+                compiled,
+                null,
+                null,
+                "Pronto para aplicar o novo layout.");
+
+        String blockReason = ReflectionTestUtils.invokeMethod(
+                engine,
+                "terminalPreviewApplyBlockReason",
+                request,
+                preview,
+                AgenticAuthoringApplyTarget.Resolution.blocked("apply-target-missing"));
+        String message = AgenticAuthoringTurnEngine.ensureReviewablePreviewMessage(
+                preview.assistantMessage(),
+                request,
+                false,
+                blockReason);
+
+        assertThat(blockReason).isEqualTo("local-component-patch-blocked-by-policy");
+        assertThat(message)
+                .doesNotContain("Pronto para aplicar")
+                .contains("modo de edição de layout estiver desativado");
+
+        AgenticAuthoringQuickReply confirmReply = new AgenticAuthoringQuickReply(
+                "confirm-apply",
+                "confirm",
+                "Aplicar agora",
+                "Confirme para aplicar",
+                "Aplica o patch",
+                "check",
+                "primary",
+                objectMapper.createObjectNode());
+        AgenticAuthoringIntentResolutionResult modifyIntent = new AgenticAuthoringIntentResolutionResult(
+                true,
+                "modify",
+                "form",
+                "update_form_layout",
+                "component-edit",
+                "praxis-ui-angular",
+                "praxis-dynamic-form",
+                null,
+                null,
+                List.of(),
+                new AgenticAuthoringGateResult("eligible", "eligible", List.of()),
+                "Altere o layout",
+                "Vou alterar o layout.",
+                List.of(confirmReply),
+                List.of(),
+                List.of(),
+                List.of(),
+                objectMapper.createObjectNode());
+        List<AgenticAuthoringQuickReply> blockedByPolicyReplies = ReflectionTestUtils.invokeMethod(
+                engine,
+                "terminalQuickReplies",
+                request,
+                modifyIntent,
+                null,
+                preview,
+                false,
+                Map.of("terminalPreviewApplyBlockReason", "local-component-patch-blocked-by-policy"));
+        List<AgenticAuthoringQuickReply> invalidPreviewReplies = ReflectionTestUtils.invokeMethod(
+                engine,
+                "terminalQuickReplies",
+                request,
+                modifyIntent,
+                null,
+                new AgenticAuthoringPreviewResult(
+                        false,
+                        List.of("preview-invalid"),
+                        List.of(),
+                        objectMapper.createObjectNode(),
+                        objectMapper.createObjectNode(),
+                        null,
+                        null,
+                        "Preview invalid."),
+                false,
+                Map.of("terminalPreviewApplyBlockReason", "preview-invalid"));
+
+        assertThat(blockedByPolicyReplies)
+                .extracting(AgenticAuthoringQuickReply::id)
+                .doesNotContain("confirm-apply", "governed-review-revise");
+        assertThat(invalidPreviewReplies)
+                .extracting(AgenticAuthoringQuickReply::id)
+                .doesNotContain("confirm-apply", "governed-review-revise");
+    }
+
+    @Test
     void projectsApplicableLocalComponentEditWithoutPageBuilderPersistenceTarget() {
         AgenticAuthoringTurnEngine engine = new AgenticAuthoringTurnEngine(
                 intentResolverService,
@@ -2716,7 +2898,11 @@ class AgenticAuthoringTurnEngineTest {
                 null);
 
         Optional<AgenticAuthoringConsultativeAnswer> answer = service.answer(
-                request("quais componentes posso criar aqui e pra que serve cada um? nao cria nada ainda"),
+                requestWithResolvedIntent(
+                        "quais componentes posso criar aqui e pra que serve cada um? nao cria nada ainda",
+                        "explain",
+                        "component",
+                        "answer_component_catalog_question"),
                 new AgenticAuthoringComponentCapabilitiesService().listCapabilities(),
                 "tenant",
                 "user",
@@ -2745,7 +2931,11 @@ class AgenticAuthoringTurnEngineTest {
                 null);
 
         Optional<AgenticAuthoringConsultativeAnswer> answer = service.answer(
-                request("Como habilitar o botao para exportar as linhas selecionadas em uma tabela? Explique sem criar nada agora."),
+                requestWithResolvedIntent(
+                        "Como habilitar o botao para exportar as linhas selecionadas em uma tabela? Explique sem criar nada agora.",
+                        "explain",
+                        "component",
+                        "answer_component_capability_question"),
                 new AgenticAuthoringComponentCapabilitiesService().listCapabilities(),
                 "tenant",
                 "user",
@@ -8192,7 +8382,11 @@ class AgenticAuthoringTurnEngineTest {
                 null);
 
         Optional<AgenticAuthoringConsultativeAnswer> answer = service.answer(
-                request("Quais componentes posso criar aqui? Explique para que serve cada um e quando usar, sem criar nada agora."),
+                requestWithResolvedIntent(
+                        "Quais componentes posso criar aqui? Explique para que serve cada um e quando usar, sem criar nada agora.",
+                        "explain",
+                        "component",
+                        "answer_component_catalog_question"),
                 new AgenticAuthoringComponentCapabilitiesService().listCapabilities(),
                 "tenant",
                 "user",
@@ -8215,7 +8409,11 @@ class AgenticAuthoringTurnEngineTest {
                 null);
 
         Optional<AgenticAuthoringConsultativeAnswer> answer = service.answer(
-                request("Crie apenas um gráfico de barras simples de incidentes por severidade. Não crie tabela, filtros nem KPIs."),
+                requestWithResolvedIntent(
+                        "Crie apenas um gráfico de barras simples de incidentes por severidade. Não crie tabela, filtros nem KPIs.",
+                        "create",
+                        "chart",
+                        "create_chart"),
                 new AgenticAuthoringComponentCapabilitiesService().listCapabilities(),
                 "tenant",
                 "user",
@@ -8239,7 +8437,11 @@ class AgenticAuthoringTurnEngineTest {
                 null);
 
         Optional<AgenticAuthoringConsultativeAnswer> answer = service.answer(
-                request("Quero um painel com a visao geral sobre funcionarios."),
+                requestWithResolvedIntent(
+                        "Quero um painel com a visao geral sobre funcionarios.",
+                        "create",
+                        "dashboard",
+                        "create_dashboard"),
                 new AgenticAuthoringComponentCapabilitiesService().listCapabilities(),
                 "tenant",
                 "user",
@@ -8265,7 +8467,11 @@ class AgenticAuthoringTurnEngineTest {
                 projectionService);
 
         Optional<AgenticAuthoringConsultativeAnswer> answer = service.answer(
-                request("Grafico de barras de Indicadores Incidentes por Severidade. Apenas grafico, sem tabela, filtros ou KPIs."),
+                requestWithResolvedIntent(
+                        "Grafico de barras de Indicadores Incidentes por Severidade. Apenas grafico, sem tabela, filtros ou KPIs.",
+                        "create",
+                        "chart",
+                        "create_chart"),
                 new AgenticAuthoringComponentCapabilitiesService().listCapabilities(),
                 "tenant",
                 "user",
@@ -8430,7 +8636,11 @@ class AgenticAuthoringTurnEngineTest {
                 projectionService);
 
         Optional<AgenticAuthoringConsultativeAnswer> answer = service.answer(
-                request("Quais APIs e dados existem sobre folha de pagamento?"),
+                requestWithResolvedIntent(
+                        "Quais APIs e dados existem sobre folha de pagamento?",
+                        "explore",
+                        "api_catalog",
+                        "answer_api_catalog_question"),
                 new AgenticAuthoringComponentCapabilitiesService().listCapabilities(),
                 "tenant",
                 "user",
@@ -8495,7 +8705,11 @@ class AgenticAuthoringTurnEngineTest {
                 projectionService);
 
         Optional<AgenticAuthoringConsultativeAnswer> answer = service.answer(
-                request(userPrompt),
+                requestWithResolvedIntent(
+                        userPrompt,
+                        "explore",
+                        "api_catalog",
+                        "answer_api_catalog_question"),
                 new AgenticAuthoringComponentCapabilitiesService().listCapabilities(),
                 "tenant",
                 "user",
@@ -8565,7 +8779,11 @@ class AgenticAuthoringTurnEngineTest {
                 projectionService);
 
         Optional<AgenticAuthoringConsultativeAnswer> answer = service.answer(
-                request(userPrompt),
+                requestWithResolvedIntent(
+                        userPrompt,
+                        "explore",
+                        "api_catalog",
+                        "answer_api_catalog_question"),
                 new AgenticAuthoringComponentCapabilitiesService().listCapabilities(),
                 "tenant",
                 "user",
@@ -8623,7 +8841,11 @@ class AgenticAuthoringTurnEngineTest {
                 projectionService);
 
         Optional<AgenticAuthoringConsultativeAnswer> answer = service.answer(
-                request(userPrompt),
+                requestWithResolvedIntent(
+                        userPrompt,
+                        "explore",
+                        "api_catalog",
+                        "answer_api_catalog_question"),
                 new AgenticAuthoringComponentCapabilitiesService().listCapabilities(),
                 "tenant",
                 "user",
@@ -8680,7 +8902,11 @@ class AgenticAuthoringTurnEngineTest {
                 projectionService);
 
         Optional<AgenticAuthoringConsultativeAnswer> answer = service.answer(
-                request(userPrompt),
+                requestWithResolvedIntent(
+                        userPrompt,
+                        "explore",
+                        "api_catalog",
+                        "answer_api_catalog_question"),
                 new AgenticAuthoringComponentCapabilitiesService().listCapabilities(),
                 "tenant",
                 "user",
@@ -8728,7 +8954,10 @@ class AgenticAuthoringTurnEngineTest {
                 projectionService);
 
         Optional<AgenticAuthoringConsultativeAnswer> answer = service.answer(
-                requestWithRuntimeObservation(userPrompt, missionRuntimeObservation()),
+                requestWithRuntimeObservation(
+                        userPrompt,
+                        missionRuntimeObservation(),
+                        resolvedIntentHints("explore", "api_catalog", "answer_api_catalog_question")),
                 new AgenticAuthoringComponentCapabilitiesService().listCapabilities(),
                 "tenant",
                 "user",
@@ -8778,7 +9007,11 @@ class AgenticAuthoringTurnEngineTest {
                 projectionService);
 
         Optional<AgenticAuthoringConsultativeAnswer> answer = service.answer(
-                request("Quero um painel de vendas e boleto atrasado. Esse host tem esses dados?"),
+                requestWithResolvedIntent(
+                        "Quero um painel de vendas e boleto atrasado. Esse host tem esses dados?",
+                        "explore",
+                        "api_catalog",
+                        "answer_api_catalog_question"),
                 new AgenticAuthoringComponentCapabilitiesService().listCapabilities(),
                 "tenant",
                 "user",
@@ -8837,7 +9070,11 @@ class AgenticAuthoringTurnEngineTest {
                 projectionService);
 
         Optional<AgenticAuthoringConsultativeAnswer> answer = service.answer(
-                request(userPrompt),
+                requestWithResolvedIntent(
+                        userPrompt,
+                        "explore",
+                        "api_catalog",
+                        "answer_api_catalog_question"),
                 new AgenticAuthoringComponentCapabilitiesService().listCapabilities(),
                 "tenant",
                 "user",
@@ -8890,7 +9127,11 @@ class AgenticAuthoringTurnEngineTest {
                 projectionService);
 
         Optional<AgenticAuthoringConsultativeAnswer> answer = service.answer(
-                request(userPrompt),
+                requestWithResolvedIntent(
+                        userPrompt,
+                        "explore",
+                        "api_catalog",
+                        "answer_api_catalog_question"),
                 new AgenticAuthoringComponentCapabilitiesService().listCapabilities(),
                 "tenant",
                 "user",
@@ -8904,6 +9145,59 @@ class AgenticAuthoringTurnEngineTest {
     }
 
     @Test
+    void preservesLlmAuthoredDomainCatalogConsultativeMessageWhenGroundedInProjection() {
+        AiProviderManagementService providerManagementService = Mockito.mock(AiProviderManagementService.class);
+        AgenticAuthoringConsultativeApiCatalogProjectionService projectionService =
+                Mockito.mock(AgenticAuthoringConsultativeApiCatalogProjectionService.class);
+        String userPrompt = "Quais dados existem sobre cargos?";
+        when(projectionService.projectCompact(
+                eq(userPrompt),
+                eq("tenant"),
+                eq("local")))
+                .thenReturn(new AgenticAuthoringConsultativeApiCatalogProjection(
+                        userPrompt,
+                        "Encontrei uma fonte de dados confirmada para esse recorte: Cargos.",
+                        List.of(new AgenticAuthoringConsultativeApiCatalogProjection.Resource(
+                                "human-resources.cargos",
+                                "/api/human-resources/cargos",
+                                "Cargos",
+                                "operational",
+                                "",
+                                List.of(new AgenticAuthoringConsultativeApiCatalogProjection.Field(
+                                        "nome", "Nome", "string")),
+                                List.of(),
+                                List.of(new AgenticAuthoringConsultativeApiCatalogProjection.Endpoint(
+                                        "list", "GET", "/api/human-resources/cargos", "Listar cargos")),
+                                List.of("domain_catalog_context"))),
+                        List.of("domain-api-consultative-compact-projection-used")));
+        AgenticAuthoringConsultativeAnswerService service = new AgenticAuthoringConsultativeAnswerService(
+                providerManagementService,
+                objectMapper,
+                projectionService);
+        ObjectNode contextHints = objectMapper.createObjectNode();
+        contextHints.putObject("resolvedIntent")
+                .put("artifactKind", "api_catalog")
+                .put("changeKind", "answer_api_catalog_question")
+                .put("llmResolved", true)
+                .put(
+                        "assistantMessage",
+                        "No domínio de recursos humanos, você pode usar a fonte governada de Cargos para consultar nome, descrição e nível salarial.");
+
+        Optional<AgenticAuthoringConsultativeAnswer> answer = service.answer(
+                requestWithContextHints(userPrompt, contextHints),
+                new AgenticAuthoringComponentCapabilitiesService().listCapabilities(),
+                "tenant",
+                "user",
+                "local");
+
+        org.assertj.core.api.Assertions.assertThat(answer).isPresent();
+        org.assertj.core.api.Assertions.assertThat(answer.get().assistantMessage())
+                .startsWith("No domínio de recursos humanos, você pode usar a fonte governada de Cargos")
+                .doesNotStartWith("Encontrei uma fonte de dados confirmada");
+        verify(providerManagementService, never()).generateText(any(), any(), eq("tenant"), eq("user"), eq("local"));
+    }
+
+    @Test
     void explicitComponentCatalogQuestionUsesFastGroundedAnswerWithoutLlmCall() {
         AiProviderManagementService providerManagementService = Mockito.mock(AiProviderManagementService.class);
         AgenticAuthoringConsultativeAnswerService service = new AgenticAuthoringConsultativeAnswerService(
@@ -8912,7 +9206,11 @@ class AgenticAuthoringTurnEngineTest {
                 Mockito.mock(AgenticAuthoringConsultativeApiCatalogProjectionService.class));
 
         Optional<AgenticAuthoringConsultativeAnswer> answer = service.answer(
-                request("Quais componentes posso criar aqui e pra que serve cada um? Nao cria nada ainda."),
+                requestWithResolvedIntent(
+                        "Quais componentes posso criar aqui e pra que serve cada um? Nao cria nada ainda.",
+                        "explain",
+                        "component",
+                        "answer_component_catalog_question"),
                 new AgenticAuthoringComponentCapabilitiesService().listCapabilities(),
                 "tenant",
                 "user",
@@ -12984,6 +13282,10 @@ class AgenticAuthoringTurnEngineTest {
         org.assertj.core.api.Assertions.assertThat(phases(sink))
                 .containsSubsequence("tool.start", "tool.result", "consultative.grounded-clarification");
         JsonNode result = firstPayloadOfType(sink, "result");
+        org.assertj.core.api.Assertions.assertThat(result.path("assistantMessage").asText())
+                .startsWith("Qual recurso de negócio deve alimentar este painel?")
+                .containsIgnoringCase("funcionários, departamentos")
+                .doesNotContain("confirmação semântica da intenção falhou");
         org.assertj.core.api.Assertions.assertThat(result.path("quickReplies")).hasSize(2);
         org.assertj.core.api.Assertions.assertThat(result.path("decisionDiagnostics")
                         .path("resourceDiscoveryGroundedClarification").asBoolean())
@@ -13258,7 +13560,15 @@ class AgenticAuthoringTurnEngineTest {
                         "Preview applied to the page.",
                         List.of(),
                         List.of(),
-                        List.of("llm-intent-resolution-used"))));
+                        List.of("llm-intent-resolution-used"),
+                        null,
+                        null,
+                        false,
+                        "component_authoring",
+                        null,
+                        List.of(),
+                        true,
+                        null)));
         AgenticAuthoringIntentResolverService realIntentResolver = new AgenticAuthoringIntentResolverService(
                 objectMapper,
                 null,
@@ -13345,7 +13655,15 @@ class AgenticAuthoringTurnEngineTest {
                         "Vou montar uma página editorial/local com abas.",
                         List.of(),
                         List.of(),
-                        List.of("llm-intent-resolution-used"))));
+                        List.of("llm-intent-resolution-used"),
+                        null,
+                        null,
+                        false,
+                        "ui_composition",
+                        null,
+                        List.of(),
+                        true,
+                        null)));
         AgenticAuthoringIntentResolverService realIntentResolver = new AgenticAuthoringIntentResolverService(
                 objectMapper,
                 null,
@@ -13775,6 +14093,43 @@ class AgenticAuthoringTurnEngineTest {
                 null,
                 List.of(),
                 withApplyTarget(contextHints),
+                null);
+    }
+
+    private ObjectNode resolvedIntentHints(
+            String operationKind,
+            String artifactKind,
+            String changeKind) {
+        ObjectNode contextHints = objectMapper.createObjectNode();
+        contextHints.putObject("resolvedIntent")
+                .put("operationKind", operationKind)
+                .put("artifactKind", artifactKind)
+                .put("changeKind", changeKind)
+                .put("llmResolved", true);
+        return contextHints;
+    }
+
+    private AgenticAuthoringTurnStreamRequest requestWithResolvedIntent(
+            String userPrompt,
+            String operationKind,
+            String artifactKind,
+            String changeKind) {
+        return new AgenticAuthoringTurnStreamRequest(
+                userPrompt,
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                "/page-builder-ia",
+                objectMapper.createObjectNode(),
+                null,
+                "openai",
+                "gpt-test",
+                null,
+                "session-1",
+                "turn-client-1",
+                List.of(),
+                null,
+                List.of(),
+                withApplyTarget(resolvedIntentHints(operationKind, artifactKind, changeKind)),
                 null);
     }
 

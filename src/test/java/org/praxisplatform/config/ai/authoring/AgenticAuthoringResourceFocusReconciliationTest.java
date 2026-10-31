@@ -128,7 +128,7 @@ class AgenticAuthoringResourceFocusReconciliationTest {
                         "Governed resolution fixture.", List.of(), List.of(), List.of())));
         var resolver = new AgenticAuthoringIntentResolverService(mapper,
                 Mockito.mock(AgenticAuthoringApiMetadataCandidateCatalog.class), model, null,
-                AgenticAuthoringDomainCatalogHints.DEFAULT_SERVICE_KEY, null, false);
+                AgenticAuthoringDomainCatalogHints.DEFAULT_SERVICE_KEY, null);
         ObjectNode constraints = mapper.createObjectNode().put("appliesToDataSelection", false);
         constraints.putArray("filters");
         var orientation = new AgenticAuthoringPreIntentToolPlan(
@@ -419,7 +419,7 @@ class AgenticAuthoringResourceFocusReconciliationTest {
                     return documentary;
                 });
         var resolver = new AgenticAuthoringIntentResolverService(mapper, metadata, model, null,
-                AgenticAuthoringDomainCatalogHints.DEFAULT_SERVICE_KEY, enhancer, false);
+                AgenticAuthoringDomainCatalogHints.DEFAULT_SERVICE_KEY, enhancer);
         var request = request(focusIdentity, bindings, "Prepare the governed workspace.");
         ((ObjectNode) request.contextHints().path("resourceDiscovery")).put("artifactKind", "page");
         if (verifiedEnvelope) {

@@ -26,7 +26,699 @@ class AgenticAuthoringIntentResolverServiceTest {
 
     private final ObjectMapper objectMapper = new ObjectMapper();
     private final AgenticAuthoringIntentResolverService service =
-            new AgenticAuthoringIntentResolverService(objectMapper, quickstartCandidateCatalog());
+            newTestIntentResolver(quickstartCandidateCatalog());
+
+    private AgenticAuthoringIntentResolverService newTestIntentResolver(
+            AgenticAuthoringApiMetadataCandidateCatalog catalog) {
+        return new AgenticAuthoringIntentResolverService(
+                objectMapper,
+                catalog,
+                defaultTestLlmIntentResolver(),
+                new AgenticAuthoringComponentCapabilitiesService());
+    }
+
+    private AgenticAuthoringLlmIntentResolverService defaultTestLlmIntentResolver() {
+        AgenticAuthoringLlmIntentResolverService llm =
+                Mockito.mock(AgenticAuthoringLlmIntentResolverService.class);
+        Mockito.when(llm.resolve(
+                        Mockito.any(),
+                        Mockito.anyString(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.anyList(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.any()))
+                .thenAnswer(invocation -> {
+                    AgenticAuthoringIntentResolutionRequest req = invocation.getArgument(0);
+                    String effectivePrompt = invocation.getArgument(1, String.class);
+                    String raw = req != null && req.userPrompt() != null ? req.userPrompt().trim() : effectivePrompt;
+                    String lower = (raw == null ? "" : raw).toLowerCase();
+                    if ("pagamento".equals(lower)) {
+                        return Optional.of(new AgenticAuthoringLlmIntentResolution(
+                                false,
+                                "unknown",
+                                "unknown",
+                                "unknown",
+                                null,
+                                null,
+                                "unknown",
+                                "",
+                                List.of(),
+                                List.of(),
+                                List.of()));
+                    }
+                    if (lower.contains("quais campos existem no schema da api")) {
+                        String selectedResourcePath = lower.contains("recomendada")
+                                ? null
+                                : "/api/human-resources/folhas-pagamento";
+                        return Optional.of(new AgenticAuthoringLlmIntentResolution(
+                                true,
+                                "explore",
+                                "api_catalog",
+                                "answer_api_catalog_question",
+                                selectedResourcePath,
+                                "folha de pagamento",
+                                "none",
+                                "",
+                                List.of(),
+                                List.of(),
+                                List.of("llm-intent-resolution-used"),
+                                null,
+                                null,
+                                false,
+                                "api_catalog_guidance"));
+                    }
+                    if (lower.contains("quais apis")) {
+                        return Optional.of(new AgenticAuthoringLlmIntentResolution(
+                                true,
+                                "explore",
+                                "api_catalog",
+                                "answer_api_catalog_question",
+                                null,
+                                "folha de pagamento",
+                                "none",
+                                "",
+                                List.of(),
+                                List.of(),
+                                List.of("llm-intent-resolution-used"),
+                                null,
+                                null,
+                                false,
+                                "api_catalog_guidance"));
+                    }
+                    if (lower.contains("o que posso fazer aqui")
+                            || lower.contains("quais componentes podem ser criados")
+                            || lower.contains("como faco pra criar um painel administrativo")
+                            || lower.contains("posso criar um formulario livremente")) {
+                        return Optional.of(new AgenticAuthoringLlmIntentResolution(
+                                true,
+                                "explain",
+                                "component",
+                                "answer_component_catalog_question",
+                                null,
+                                null,
+                                "none",
+                                "",
+                                List.of(),
+                                List.of(),
+                                List.of("llm-intent-resolution-used"),
+                                null,
+                                null,
+                                false,
+                                "platform_guidance"));
+                    }
+                    if (lower.contains("como habilito em uma tabela o botao para exportar")) {
+                        return Optional.of(new AgenticAuthoringLlmIntentResolution(
+                                true,
+                                "explain",
+                                "component",
+                                "answer_component_capability_question",
+                                null,
+                                null,
+                                "none",
+                                "",
+                                List.of(),
+                                List.of(),
+                                List.of("llm-intent-resolution-used"),
+                                null,
+                                null,
+                                false,
+                                "platform_guidance"));
+                    }
+                    if (lower.contains("crie uma regra lgpd para cpf")
+                            || lower.contains("crie uma regra para fornecedor bloqueado")) {
+                        return Optional.of(new AgenticAuthoringLlmIntentResolution(
+                                true,
+                                "create",
+                                "form",
+                                "create_artifact",
+                                null,
+                                null,
+                                "none",
+                                "",
+                                List.of(),
+                                List.of(),
+                                List.of("llm-intent-resolution-used"),
+                                null,
+                                null,
+                                true,
+                                "governed_resource_authoring"));
+                    }
+                    if (lower.contains("existe alguma regra atribuida a tabela")
+                            || lower.contains("como a regra de validacao de cpf funciona")
+                            || lower.contains("quero saber se existe alguma regra que impede")) {
+                        return Optional.of(new AgenticAuthoringLlmIntentResolution(
+                                true,
+                                "explain",
+                                "component",
+                                "answer_component_capability_question",
+                                null,
+                                null,
+                                "none",
+                                "",
+                                List.of(),
+                                List.of(),
+                                List.of("llm-intent-resolution-used"),
+                                null,
+                                null,
+                                false,
+                                "platform_guidance"));
+                    }
+                    if (lower.contains("quero criar uma regra visual para destacar a linha")) {
+                        return Optional.of(new AgenticAuthoringLlmIntentResolution(
+                                true,
+                                "modify",
+                                "table",
+                                "conditional_styling",
+                                "/api/human-resources/funcionarios",
+                                null,
+                                "none",
+                                "",
+                                List.of(),
+                                List.of(),
+                                List.of("llm-intent-resolution-used"),
+                                null,
+                                null,
+                                false,
+                                "component_authoring"));
+                    }
+                    if (lower.contains("praxis tabs") && lower.contains("local/editorial")) {
+                        return Optional.of(new AgenticAuthoringLlmIntentResolution(
+                                true,
+                                "create",
+                                "page",
+                                "create_composition",
+                                null,
+                                null,
+                                "none",
+                                "",
+                                List.of(),
+                                List.of(),
+                                List.of("llm-intent-resolution-used"),
+                                null,
+                                null,
+                                false,
+                                "ui_composition",
+                                null,
+                                List.of(),
+                                true,
+                                null));
+                    }
+                    if (lower.contains("refine esta tabela local/editorial")) {
+                        boolean hasSelectedWidget = req != null
+                                && req.selectedWidgetKey() != null
+                                && !req.selectedWidgetKey().isBlank();
+                        return Optional.of(new AgenticAuthoringLlmIntentResolution(
+                                true,
+                                hasSelectedWidget ? "modify" : "create",
+                                "table",
+                                hasSelectedWidget ? "refine_composition" : "create_artifact",
+                                null,
+                                null,
+                                "refinement",
+                                "",
+                                List.of(),
+                                List.of(),
+                                List.of("llm-intent-resolution-used"),
+                                null,
+                                null,
+                                false,
+                                "component_authoring",
+                                null,
+                                List.of(),
+                                true,
+                                null));
+                    }
+                    if (lower.contains("remova o campo observacaointerna do formulario")) {
+                        return Optional.of(new AgenticAuthoringLlmIntentResolution(
+                                true,
+                                "remove",
+                                "form",
+                                "remove_field",
+                                "/api/human-resources/funcionarios",
+                                null,
+                                "none",
+                                "",
+                                List.of(),
+                                List.of(),
+                                List.of("llm-intent-resolution-used"),
+                                null,
+                                null,
+                                false,
+                                "component_authoring"));
+                    }
+                    if (lower.contains("renomeie o campo nome para nome completo")) {
+                        return Optional.of(new AgenticAuthoringLlmIntentResolution(
+                                true,
+                                "modify",
+                                "form",
+                                "rename_or_relabel",
+                                "/api/human-resources/funcionarios",
+                                null,
+                                "none",
+                                "",
+                                List.of(),
+                                List.of(),
+                                List.of("llm-intent-resolution-used"),
+                                null,
+                                null,
+                                false,
+                                "component_authoring"));
+                    }
+                    if (lower.startsWith("adicione o campo salario no formulario")
+                            || lower.startsWith("adicione exatamente um campo local")
+                            || lower.startsWith("adicione prioridade no formulario")) {
+                        return Optional.of(new AgenticAuthoringLlmIntentResolution(
+                                true,
+                                "modify",
+                                "form",
+                                "add_field",
+                                "/api/human-resources/funcionarios",
+                                null,
+                                "none",
+                                "",
+                                List.of(),
+                                List.of(),
+                                List.of("llm-intent-resolution-used"),
+                                null,
+                                null,
+                                false,
+                                "component_authoring"));
+                    }
+                    if (lower.startsWith("altere o titulo da tabela")) {
+                        return Optional.of(new AgenticAuthoringLlmIntentResolution(
+                                true,
+                                "modify",
+                                "table",
+                                "rename_or_relabel",
+                                "/api/human-resources/folhas-pagamento",
+                                null,
+                                "none",
+                                "",
+                                List.of(),
+                                List.of(),
+                                List.of("llm-intent-resolution-used"),
+                                null,
+                                null,
+                                false,
+                                "component_authoring"));
+                    }
+                    if (lower.startsWith("troque o grafico para linha")
+                            || lower.startsWith("altere o gráfico selecionado para linhas")) {
+                        return Optional.of(new AgenticAuthoringLlmIntentResolution(
+                                true,
+                                "modify",
+                                "chart",
+                                "set_chart_type",
+                                null,
+                                null,
+                                "none",
+                                "",
+                                List.of(),
+                                List.of(),
+                                List.of("llm-intent-resolution-used"),
+                                null,
+                                null,
+                                false,
+                                "component_authoring"));
+                    }
+                    if (lower.startsWith("no grafico selecionado, formate o eixo y")) {
+                        return Optional.of(new AgenticAuthoringLlmIntentResolution(
+                                true,
+                                "modify",
+                                "dashboard",
+                                "set_chart_value_format",
+                                "/api/human-resources/vw-analytics-folha-pagamento",
+                                null,
+                                "none",
+                                "",
+                                List.of(),
+                                List.of(),
+                                List.of("llm-intent-resolution-used"),
+                                null,
+                                null,
+                                false,
+                                "component_authoring"));
+                    }
+                    if (lower.startsWith("adicione um novo componente de resumo executivo")) {
+                        return Optional.of(new AgenticAuthoringLlmIntentResolution(
+                                true,
+                                "modify",
+                                "dashboard",
+                                "add_dashboard_widget",
+                                "/api/human-resources/vw-analytics-folha-pagamento",
+                                null,
+                                "none",
+                                "",
+                                List.of(),
+                                List.of(),
+                                List.of("llm-intent-resolution-used"),
+                                null,
+                                null,
+                                false,
+                                "ui_composition"));
+                    }
+                    if (lower.startsWith("gostei, mas prefiro gráficos")
+                            || lower.startsWith("mantém os dados, só muda a visualização para gráficos")) {
+                        List<String> preserve = lower.startsWith("mantém")
+                                ? List.of("resource", "source", "filters")
+                                : List.of("resource", "source");
+                        return Optional.of(new AgenticAuthoringLlmIntentResolution(
+                                true,
+                                "create",
+                                "dashboard",
+                                "create_artifact",
+                                null,
+                                null,
+                                "refinement",
+                                "",
+                                List.of(),
+                                List.of(),
+                                List.of("llm-intent-resolution-used"),
+                                null,
+                                null,
+                                false,
+                                "ui_composition",
+                                null,
+                                List.of(),
+                                false,
+                                new AgenticAuthoringSemanticRefinement(
+                                        AgenticAuthoringSemanticRefinement.SCHEMA_VERSION,
+                                        "visual_projection",
+                                        preserve,
+                                        java.util.Map.of("artifactKind", "dashboard", "visualIntent", "charts"),
+                                        java.util.Map.of(),
+                                        List.of("table"),
+                                        "Semantic refinement applies a governed diff to the active decision.",
+                                        0.90d)));
+                    }
+                    if (lower.startsWith("troca para tabela, mantendo a fonte")) {
+                        return Optional.of(new AgenticAuthoringLlmIntentResolution(
+                                true,
+                                "create",
+                                "table",
+                                "create_artifact",
+                                null,
+                                null,
+                                "refinement",
+                                "",
+                                List.of(),
+                                List.of(),
+                                List.of("llm-intent-resolution-used"),
+                                null,
+                                null,
+                                false,
+                                "component_authoring",
+                                null,
+                                List.of(),
+                                false,
+                                new AgenticAuthoringSemanticRefinement(
+                                        AgenticAuthoringSemanticRefinement.SCHEMA_VERSION,
+                                        "visual_projection",
+                                        List.of("resource", "source"),
+                                        java.util.Map.of("artifactKind", "table", "visualIntent", "table"),
+                                        java.util.Map.of(),
+                                        List.of("chart", "summary"),
+                                        "Semantic refinement applies a governed diff to the active decision.",
+                                        0.90d)));
+                    }
+                    if ("folha de pagamento".equals(lower)
+                            || "outro".equals(lower)
+                            || "cargo".equals(lower)
+                            || "por departamento".equals(lower)
+                            || lower.startsWith("quero visualizar a folha por departamento em um dashboard")
+                            || lower.contains("confirmed: criar dashboard com analytics folha pagamento")) {
+                        return Optional.of(new AgenticAuthoringLlmIntentResolution(
+                                true,
+                                "create",
+                                "dashboard",
+                                "create_artifact",
+                                null,
+                                "folha de pagamento",
+                                "clarification_answer",
+                                "",
+                                List.of(),
+                                List.of(),
+                                List.of("llm-intent-resolution-used"),
+                                null,
+                                null,
+                                false,
+                                "ui_composition"));
+                    }
+                    if ("pode fazer agora".equals(lower)) {
+                        boolean hasExplicitAnalyticsInHistory = req != null
+                                && req.conversationMessages() != null
+                                && req.conversationMessages().stream()
+                                        .anyMatch(m -> m.text() != null
+                                                && m.text().contains("/api/human-resources/vw-analytics-folha-pagamento"));
+                        return Optional.of(new AgenticAuthoringLlmIntentResolution(
+                                true,
+                                "create",
+                                "dashboard",
+                                "create_artifact",
+                                hasExplicitAnalyticsInHistory ? "/api/human-resources/vw-analytics-folha-pagamento" : null,
+                                null,
+                                "clarification_answer",
+                                "",
+                                List.of(),
+                                List.of(),
+                                List.of("llm-intent-resolution-used"),
+                                null,
+                                null,
+                                false,
+                                "ui_composition"));
+                    }
+                    if ("como visualizar a folha?".equals(lower)) {
+                        return Optional.of(new AgenticAuthoringLlmIntentResolution(
+                                true,
+                                "explore",
+                                "unknown",
+                                "unknown",
+                                null,
+                                null,
+                                "consultative_question",
+                                "",
+                                List.of(),
+                                List.of("Como deseja visualizar a folha?"),
+                                List.of("llm-intent-resolution-used")));
+                    }
+                    if (lower.startsWith("quero visualizar folhas de pagamento em uma tabela")) {
+                        return Optional.of(new AgenticAuthoringLlmIntentResolution(
+                                true,
+                                "explore",
+                                "table",
+                                "recommend_table_visualization",
+                                "/api/human-resources/folhas-pagamento",
+                                "folhas de pagamento",
+                                "none",
+                                "",
+                                List.of(),
+                                List.of(),
+                                List.of("llm-intent-resolution-used")));
+                    }
+                    if (lower.startsWith("preciso de um painel pra acompanhar pessoas da empresa")) {
+                        return Optional.of(new AgenticAuthoringLlmIntentResolution(
+                                true,
+                                "explore",
+                                "page",
+                                "unknown",
+                                null,
+                                "funcionarios",
+                                "none",
+                                "",
+                                List.of(),
+                                List.of(),
+                                List.of("llm-intent-resolution-used")));
+                    }
+                    if (lower.startsWith("quero entender quem recebe mais na empresa")
+                            || lower.startsWith("quais outras opcoes para dashboards de folha")
+                            || lower.startsWith("compare alternativas para acompanhar salarios")
+                            || lower.startsWith("estou revisando o catalogo de componentes do praxis ui")
+                            || lower.startsWith("considere as capacidades documentadas dos componentes")) {
+                        return Optional.of(new AgenticAuthoringLlmIntentResolution(
+                                true,
+                                "explore",
+                                "dashboard",
+                                "recommend_dashboard_visualization",
+                                "/api/human-resources/vw-analytics-folha-pagamento",
+                                "folha de pagamento",
+                                "none",
+                                "",
+                                List.of(),
+                                List.of(),
+                                List.of("llm-intent-resolution-used")));
+                    }
+                    if (lower.startsWith("agora organize essa tela em abas")
+                            || lower.startsWith("crie uma tela para empregados organizada em abas")) {
+                        return Optional.of(new AgenticAuthoringLlmIntentResolution(
+                                true,
+                                "create",
+                                "page",
+                                "create_tabbed_master_detail_form",
+                                "/api/human-resources/funcionarios",
+                                "funcionarios",
+                                "none",
+                                "",
+                                List.of(),
+                                List.of(),
+                                List.of("llm-intent-resolution-used")));
+                    }
+                    if (lower.startsWith("crie uma tela master-detail para procurar empregados")) {
+                        return Optional.of(new AgenticAuthoringLlmIntentResolution(
+                                true,
+                                "create",
+                                "page",
+                                "create_artifact",
+                                "/api/human-resources/funcionarios",
+                                null,
+                                "none",
+                                "",
+                                List.of(),
+                                List.of(),
+                                List.of("llm-intent-resolution-used")));
+                    }
+                    if (lower.startsWith("quero uma tela de perfil 360")
+                            || lower.startsWith("quero um perfil 360")) {
+                        return Optional.of(new AgenticAuthoringLlmIntentResolution(
+                                true,
+                                "create",
+                                "page",
+                                "create_artifact",
+                                null,
+                                "perfil 360 funcionario",
+                                "none",
+                                "",
+                                List.of(),
+                                List.of(),
+                                List.of("llm-intent-resolution-used")));
+                    }
+                    if (lower.startsWith("use um chart para criar drill down da folha")) {
+                        return Optional.of(new AgenticAuthoringLlmIntentResolution(
+                                true,
+                                "create",
+                                "dashboard",
+                                "create_chart_drilldown",
+                                "/api/human-resources/vw-analytics-folha-pagamento",
+                                "folha de pagamento",
+                                "none",
+                                "",
+                                List.of(),
+                                List.of(),
+                                List.of("llm-intent-resolution-used")));
+                    }
+                    if (lower.startsWith("quero uma tela pra ve os pagamento dos funcionario")) {
+                        return Optional.of(new AgenticAuthoringLlmIntentResolution(
+                                true,
+                                "create",
+                                "chart",
+                                "create_artifact",
+                                "/api/human-resources/vw-analytics-folha-pagamento",
+                                "folha pagamento",
+                                "none",
+                                "",
+                                List.of(),
+                                List.of(),
+                                List.of("llm-intent-resolution-used")));
+                    }
+                    if (lower.startsWith("crie um formulario didatico")
+                            || lower.startsWith("crie um formulario para registrar manutencoes preventivas")
+                            || lower.startsWith("preciso monta uma ficha pra cadastra funsionario")
+                            || lower.startsWith("crie um formulario de funcionarios")
+                            || lower.startsWith("adicione o campo salario no formulario de funcionarios")
+                            || lower.startsWith("crie um formulario simples pra salvar funcionario")) {
+                        return Optional.of(new AgenticAuthoringLlmIntentResolution(
+                                true,
+                                "create",
+                                "form",
+                                "create_artifact",
+                                null,
+                                null,
+                                "none",
+                                "",
+                                List.of(),
+                                List.of(),
+                                List.of("llm-intent-resolution-used")));
+                    }
+                    if (lower.startsWith("sou gerente de rh e preciso acompanhar as missoes")) {
+                        return Optional.of(new AgenticAuthoringLlmIntentResolution(
+                                true,
+                                "create",
+                                "table",
+                                "create_artifact",
+                                "/api/operations/missoes",
+                                "missoes",
+                                "none",
+                                "",
+                                List.of(),
+                                List.of(),
+                                List.of("llm-intent-resolution-used")));
+                    }
+                    if (lower.startsWith("crie uma tabela operacional de folhas de pagamento")
+                            || lower.startsWith("crie uma tabela de beneficios")
+                            || lower.startsWith("monte uma tabela de pessoas")) {
+                        return Optional.of(new AgenticAuthoringLlmIntentResolution(
+                                true,
+                                "create",
+                                "table",
+                                "create_artifact",
+                                null,
+                                null,
+                                "none",
+                                "",
+                                List.of(),
+                                List.of(),
+                                List.of("llm-intent-resolution-used")));
+                    }
+                    if (lower.startsWith("monte um dashboard de risco")
+                            || lower.startsWith("monte um dashboard de folha de pagamento por departamento")
+                            || lower.startsWith("monte um dashboard com ranking dos maiores valores da empresa")
+                            || lower.startsWith("crie apenas um grafico de barras simples")
+                            || lower.startsWith("crie apenas um grafico horizontal de folha de pagamento por departamento")
+                            || lower.startsWith("crie um dashboard")
+                            || lower.startsWith("crie o dashboard com ranking")
+                            || lower.startsWith("sim, crie um dashboard para visualizar informacoes sobre a folha de pagamento")
+                            || lower.startsWith("use /api/human-resources/vw-analytics-folha-pagamento para criar um dashboard")
+                            || lower.startsWith("use analytics folha pagamento as the data source.")
+                            || lower.startsWith("quero um dashboard para acompanhar fornecedores")
+                            || lower.startsWith("quero um dashboard analitico de funcionarios por departamento e cargo")
+                            || lower.startsWith("quero um dashboard analitico de folha de pagamento por departamento")
+                            || lower.startsWith("quero um painel analítico de folha de pagamento por departamento")
+                            || lower.startsWith("quero um painel 360 dos funcionarios com graficos por departamento e cargo")
+                            || lower.startsWith("preciso monitorar chamados e ocorrencias em atendimento")
+                            || lower.equals("gerar previa governada")
+                            || lower.startsWith("acrescente um filtro e uma tabela de detalhes abaixo do grafico")
+                            || lower.startsWith("ao selecionar uma categoria do grafico")
+                            || lower.equals("sim")) {
+                        return Optional.of(new AgenticAuthoringLlmIntentResolution(
+                                true,
+                                "create",
+                                "dashboard",
+                                "create_artifact",
+                                null,
+                                null,
+                                "none",
+                                "",
+                                List.of(),
+                                List.of(),
+                                List.of("llm-intent-resolution-used")));
+                    }
+                    return Optional.of(new AgenticAuthoringLlmIntentResolution(
+                            false,
+                            "unknown",
+                            "unknown",
+                            "unknown",
+                            null,
+                            null,
+                            "clarify",
+                            "Unmapped test fixture prompt in defaultTestLlmIntentResolver: " + raw,
+                            List.of(),
+                            List.of(),
+                            List.of("llm-intent-resolution-unmapped-test-fixture")));
+                });
+        return llm;
+    }
 
     private static final String PUBLIC_TABLE_INSTRUCTION =
             "Na tabela de funcionários existente, mostre, nesta ordem, as colunas com os títulos literais "
@@ -119,7 +811,7 @@ class AgenticAuthoringIntentResolverServiceTest {
                 .thenReturn(Optional.of(modelResult));
         var resolver = new AgenticAuthoringIntentResolverService(objectMapper, catalog, model,
                 new AgenticAuthoringComponentCapabilitiesService(),
-                AgenticAuthoringDomainCatalogHints.DEFAULT_SERVICE_KEY, null, false);
+                AgenticAuthoringDomainCatalogHints.DEFAULT_SERVICE_KEY, null);
         JsonNode page = objectMapper.readTree("""
                 {"version":"1.0.0","widgets":[{"key":"funcionarios-table","definition":{
                 "id":"praxis-table","inputs":{"resourcePath":"/api/human-resources/funcionarios",
@@ -230,7 +922,7 @@ class AgenticAuthoringIntentResolverServiceTest {
                         List.of("llm-intent-resolution-used"))));
         AgenticAuthoringIntentResolverService semanticOnlyService = new AgenticAuthoringIntentResolverService(
                 objectMapper, Mockito.mock(AgenticAuthoringApiMetadataCandidateCatalog.class), model, null,
-                AgenticAuthoringDomainCatalogHints.DEFAULT_SERVICE_KEY, null, false);
+                AgenticAuthoringDomainCatalogHints.DEFAULT_SERVICE_KEY, null);
         ObjectNode constraints = objectMapper.createObjectNode().put("appliesToDataSelection", false);
         constraints.putArray("filters");
         AgenticAuthoringPreIntentToolPlan orientation = new AgenticAuthoringPreIntentToolPlan(
@@ -739,10 +1431,9 @@ class AgenticAuthoringIntentResolverServiceTest {
 
     @Test
     void recoversGovernedRevisionRepliesWhenClarificationHasNoPresentationOptions() {
-        @SuppressWarnings("unchecked")
-        List<AgenticAuthoringQuickReply> replies = ReflectionTestUtils.invokeMethod(
-                service,
-                "ensureClarificationQuickReplies",
+        AgenticAuthoringIntentQuickReplySupport quickReplySupport =
+                (AgenticAuthoringIntentQuickReplySupport) ReflectionTestUtils.getField(service, "quickReplySupport");
+        List<AgenticAuthoringQuickReply> replies = quickReplySupport.ensureClarificationQuickReplies(
                 "Crie uma tela para funcionários",
                 true,
                 List.of());
@@ -1258,7 +1949,7 @@ class AgenticAuthoringIntentResolverServiceTest {
     @Test
     void genericStarterDoesNotInventQuickstartResourcesWithoutHostCatalog() {
         AgenticAuthoringIntentResolverService genericService =
-                new AgenticAuthoringIntentResolverService(objectMapper);
+                newTestIntentResolver(null);
 
         for (String prompt : List.of(
                 "Crie um formulario de funcionarios",
@@ -1379,7 +2070,7 @@ class AgenticAuthoringIntentResolverServiceTest {
                 new AgenticAuthoringIntentResolverService(
                         objectMapper,
                         quickstartCandidateCatalog(),
-                        null,
+                        defaultTestLlmIntentResolver(),
                         null,
                         "praxis-service",
                         enhancer);
@@ -1957,9 +2648,7 @@ class AgenticAuthoringIntentResolverServiceTest {
                         "Contas de clientes",
                         "Cadastro operacional de contas de clientes.")));
         AgenticAuthoringIntentResolverService metadataBackedService =
-                new AgenticAuthoringIntentResolverService(
-                        objectMapper,
-                        new AgenticAuthoringApiMetadataCandidateCatalog(repository));
+                newTestIntentResolver(new AgenticAuthoringApiMetadataCandidateCatalog(repository));
 
         AgenticAuthoringIntentResolutionResult result = metadataBackedService.resolve(new AgenticAuthoringIntentResolutionRequest(
                 "Monte um dashboard de risco com incidentes por gravidade",
@@ -2254,7 +2943,7 @@ class AgenticAuthoringIntentResolverServiceTest {
                         Mockito.any()))
                 .thenReturn(List.of(auxiliaryRelationshipCandidate, operationalRecord, analyticalProjection));
         AgenticAuthoringIntentResolverService resolver =
-                new AgenticAuthoringIntentResolverService(objectMapper, candidateCatalog);
+                newTestIntentResolver(candidateCatalog);
 
         AgenticAuthoringIntentResolutionResult result = resolver.resolve(new AgenticAuthoringIntentResolutionRequest(
                 "quero uma tela pra ve os pagamento dos funcionario, tipo um painel bonito",
@@ -2646,7 +3335,7 @@ class AgenticAuthoringIntentResolverServiceTest {
                         Mockito.any()))
                 .thenReturn(List.of(employeeSkillCandidate, employeeCollectionCandidate));
         AgenticAuthoringIntentResolverService serviceWithCatalog =
-                new AgenticAuthoringIntentResolverService(objectMapper, candidateCatalog);
+                newTestIntentResolver(candidateCatalog);
 
         AgenticAuthoringIntentResolutionResult result = serviceWithCatalog.resolve(new AgenticAuthoringIntentResolutionRequest(
                 "crie um formulario simples pra salvar funcionario",
@@ -4138,8 +4827,7 @@ class AgenticAuthoringIntentResolverServiceTest {
                 null,
                 new AgenticAuthoringComponentCapabilitiesService(),
                 AgenticAuthoringDomainCatalogHints.DEFAULT_SERVICE_KEY,
-                null,
-                false);
+                null);
 
         AgenticAuthoringIntentResolutionResult result = canonicalService.resolve(new AgenticAuthoringIntentResolutionRequest(
                 "crie uma tabela de funcionarios",
@@ -5809,7 +6497,9 @@ class AgenticAuthoringIntentResolverServiceTest {
 
     @Test
     void keepsDeterministicFallbackExplicitWhenLlmIntentResolutionIsUnavailable() {
-        AgenticAuthoringIntentResolutionResult result = service.resolve(new AgenticAuthoringIntentResolutionRequest(
+        AgenticAuthoringIntentResolverService serviceWithoutLlm =
+                new AgenticAuthoringIntentResolverService(objectMapper, quickstartCandidateCatalog(), null, null);
+        AgenticAuthoringIntentResolutionResult result = serviceWithoutLlm.resolve(new AgenticAuthoringIntentResolutionRequest(
                 "Crie um dashboard",
                 "praxis-ui-angular",
                 "praxis-dynamic-page-builder",
@@ -5821,8 +6511,12 @@ class AgenticAuthoringIntentResolverServiceTest {
                 null));
 
         assertThat(result.valid()).isFalse();
-        assertThat(result.failureCodes()).contains("resource-candidate-ambiguous");
-        assertThat(result.warnings()).contains("llm-intent-resolution-fallback-deterministic");
+        assertThat(result.operationKind()).isEqualTo("unknown");
+        assertThat(result.artifactKind()).isEqualTo("unknown");
+        assertThat(result.failureCodes()).contains("intent-operation-unknown", "intent-artifact-unknown");
+        assertThat(result.warnings())
+                .contains("semantic-intent-resolution-not-attempted")
+                .doesNotContain("llm-intent-resolution-fallback-deterministic", "keyword-fallback-applied");
     }
 
     @Test
@@ -6232,7 +6926,7 @@ class AgenticAuthoringIntentResolverServiceTest {
 
     @Test
     void resolvesCustomPayrollBreakdownAfterOtherClarification() {
-        AgenticAuthoringIntentResolverService genericService = new AgenticAuthoringIntentResolverService(objectMapper);
+        AgenticAuthoringIntentResolverService genericService = newTestIntentResolver(null);
         AgenticAuthoringIntentResolutionResult result = genericService.resolve(new AgenticAuthoringIntentResolutionRequest(
                 "cargo",
                 "praxis-ui-angular",
@@ -6271,7 +6965,7 @@ class AgenticAuthoringIntentResolverServiceTest {
 
     @Test
     void carriesAttachmentSummariesInPendingClarificationDiagnostics() {
-        AgenticAuthoringIntentResolverService genericService = new AgenticAuthoringIntentResolverService(objectMapper);
+        AgenticAuthoringIntentResolverService genericService = newTestIntentResolver(null);
         AgenticAuthoringIntentResolutionResult result = genericService.resolve(new AgenticAuthoringIntentResolutionRequest(
                 "pagamento",
                 "praxis-ui-angular",
@@ -6351,7 +7045,7 @@ class AgenticAuthoringIntentResolverServiceTest {
         assertThat(result.valid()).isFalse();
         assertThat(result.operationKind()).isEqualTo("unknown");
         assertThat(result.artifactKind()).isEqualTo("unknown");
-        assertThat(result.changeKind()).isEqualTo("unknown");
+        assertThat(result.changeKind()).isEqualTo("needs_clarification");
         assertThat(result.selectedCandidate()).isNull();
         assertThat(result.candidates()).isEmpty();
         assertThat(result.gate().status()).isEqualTo("clarification_required");
@@ -6361,8 +7055,8 @@ class AgenticAuthoringIntentResolverServiceTest {
                         "intent-artifact-unknown");
         assertThat(result.clarificationQuestions())
                 .contains(
-                        "O que voce quer fazer com esse tema: visualizar, criar, alterar ou abrir um detalhe?",
-                        "Voce quer criar ou alterar formulario, tabela, dashboard, stepper ou outro componente?");
+                        "O que você quer fazer com esse tema: visualizar, criar, alterar ou abrir um detalhe?",
+                        "Você quer criar ou alterar formulário, tabela, dashboard, stepper ou outro componente?");
         assertThat(result.clarificationQuestions()).noneMatch(question -> question.contains("/api/"));
     }
 
@@ -6391,7 +7085,7 @@ class AgenticAuthoringIntentResolverServiceTest {
                 .contains("Consigo montar essa tabela")
                 .contains("confirmar a fonte de negócio");
         assertThat(result.clarificationQuestions())
-                .containsExactly("Posso criar uma tabela usando o recurso de negocio selecionado?");
+                .containsExactly("Posso criar uma tabela usando o recurso de negócio selecionado?");
     }
 
     @Test
@@ -6778,7 +7472,7 @@ class AgenticAuthoringIntentResolverServiceTest {
         assertThat(result.selectedCandidate().resourcePath())
                 .isEqualTo("/api/risk-intelligence/vw-indicadores-incidentes");
         assertThat(result.selectedCandidate().evidence()).contains("current-page-target-resource");
-        assertThat(result.assistantMessage()).contains("Atualizei o grafico selecionado");
+        assertThat(result.assistantMessage()).contains("Atualizei o gráfico selecionado");
         assertThat(result.gate().status()).isEqualTo("eligible");
         assertThat(result.failureCodes()).isEmpty();
     }
@@ -6835,7 +7529,7 @@ class AgenticAuthoringIntentResolverServiceTest {
         assertThat(result.selectedCandidate().resourcePath())
                 .isEqualTo("/api/risk-intelligence/vw-indicadores-incidentes");
         assertThat(result.selectedCandidate().evidence()).contains("current-page-target-resource");
-        assertThat(result.assistantMessage()).contains("Atualizei o grafico");
+        assertThat(result.assistantMessage()).contains("Atualizei o gráfico");
     }
 
     @Test
@@ -6886,7 +7580,7 @@ class AgenticAuthoringIntentResolverServiceTest {
         assertThat(result.gate().status()).isEqualTo("eligible");
         assertThat(result.failureCodes()).isEmpty();
         assertThat(result.assistantMessage())
-                .contains("Atualizei o grafico selecionado")
+                .contains("Atualizei o gráfico selecionado")
                 .doesNotContain("Entendi o que voce quer criar", "fonte de negócio selecionada");
         Mockito.verifyNoInteractions(llmIntentResolver);
     }
@@ -7128,9 +7822,7 @@ class AgenticAuthoringIntentResolverServiceTest {
                         "{}",
                         null)));
         AgenticAuthoringIntentResolverService metadataBackedService =
-                new AgenticAuthoringIntentResolverService(
-                        objectMapper,
-                        new AgenticAuthoringApiMetadataCandidateCatalog(repository));
+                newTestIntentResolver(new AgenticAuthoringApiMetadataCandidateCatalog(repository));
 
         AgenticAuthoringIntentResolutionResult result = metadataBackedService.resolve(new AgenticAuthoringIntentResolutionRequest(
                 "Crie um dashboard de folha de pagamento",
@@ -7183,9 +7875,7 @@ class AgenticAuthoringIntentResolverServiceTest {
                         "{}",
                         null)));
         AgenticAuthoringIntentResolverService metadataBackedService =
-                new AgenticAuthoringIntentResolverService(
-                        objectMapper,
-                        new AgenticAuthoringApiMetadataCandidateCatalog(repository));
+                newTestIntentResolver(new AgenticAuthoringApiMetadataCandidateCatalog(repository));
 
         for (String prompt : List.of(
                 "Quais outras opcoes para dashboards de folha voce indica antes de criar?",
@@ -7580,7 +8270,7 @@ class AgenticAuthoringIntentResolverServiceTest {
                                 "api_metadata semantic retrieval",
                                 List.of("api-metadata", "semantic-retrieval"))));
         AgenticAuthoringIntentResolverService catalogService =
-                new AgenticAuthoringIntentResolverService(objectMapper, candidateCatalog);
+                newTestIntentResolver(candidateCatalog);
 
         AgenticAuthoringIntentResolutionResult result = catalogService.resolve(new AgenticAuthoringIntentResolutionRequest(
                 "Quais APIs estao relacionadas a folha de pagamento?",
@@ -7798,9 +8488,7 @@ class AgenticAuthoringIntentResolverServiceTest {
                         "{}",
                         null));
         Mockito.when(repository.findAllCandidateProjections()).thenReturn(projections(metadata));
-        return new AgenticAuthoringIntentResolverService(
-                objectMapper,
-                new AgenticAuthoringApiMetadataCandidateCatalog(repository));
+        return newTestIntentResolver(new AgenticAuthoringApiMetadataCandidateCatalog(repository));
     }
 
     @Test
@@ -7819,9 +8507,7 @@ class AgenticAuthoringIntentResolverServiceTest {
                 new ApiMetadata("/api/human-resources/folhas-pagamento", "GET", "folha,pagamento", "Folhas de pagamento", "Recurso operacional de folhas de pagamento", "listFolhasPagamento", null, null, "[]", "{}", null),
                 new ApiMetadata("/api/human-resources/vw-analytics-folha-pagamento", "GET", "analytics,folha,pagamento", "Analytics de folha de pagamento", "Visao analitica de folha de pagamento", "listVwAnalyticsFolhaPagamento", null, null, "[]", "{}", null)));
         AgenticAuthoringIntentResolverService metadataBackedService =
-                new AgenticAuthoringIntentResolverService(
-                        objectMapper,
-                        new AgenticAuthoringApiMetadataCandidateCatalog(repository));
+                newTestIntentResolver(new AgenticAuthoringApiMetadataCandidateCatalog(repository));
 
         AgenticAuthoringIntentResolutionResult result = metadataBackedService.resolve(new AgenticAuthoringIntentResolutionRequest(
                 "pagamento",
@@ -7890,9 +8576,7 @@ class AgenticAuthoringIntentResolverServiceTest {
                         "{}",
                         null)));
         AgenticAuthoringIntentResolverService metadataBackedService =
-                new AgenticAuthoringIntentResolverService(
-                        objectMapper,
-                        new AgenticAuthoringApiMetadataCandidateCatalog(repository));
+                newTestIntentResolver(new AgenticAuthoringApiMetadataCandidateCatalog(repository));
 
         AgenticAuthoringIntentResolutionResult result = metadataBackedService.resolve(new AgenticAuthoringIntentResolutionRequest(
                 "Crie um dashboard",
@@ -8298,9 +8982,7 @@ class AgenticAuthoringIntentResolverServiceTest {
                         "{}",
                         null)));
         AgenticAuthoringIntentResolverService metadataBackedService =
-                new AgenticAuthoringIntentResolverService(
-                        objectMapper,
-                        new AgenticAuthoringApiMetadataCandidateCatalog(repository));
+                newTestIntentResolver(new AgenticAuthoringApiMetadataCandidateCatalog(repository));
         ObjectNode contextHints = objectMapper.createObjectNode();
         contextHints.put("resourcePath", "/api/human-resources/vw-analytics-folha-pagamento");
         contextHints.put("submitUrl", "/api/human-resources/vw-analytics-folha-pagamento/stats/group-by");
@@ -8514,7 +9196,7 @@ class AgenticAuthoringIntentResolverServiceTest {
         assertThat(result.pendingClarification()).isNull();
         assertThat(result.quickReplies()).isEmpty();
         assertThat(result.warnings())
-                .contains("governed-resource-confirmation-deterministic", "keyword-fallback-applied")
+                .contains("governed-resource-confirmation-deterministic")
                 .doesNotContain("llm-intent-resolution-used");
         Mockito.verifyNoInteractions(llmIntentResolver);
     }
@@ -8599,7 +9281,7 @@ class AgenticAuthoringIntentResolverServiceTest {
         assertThat(result.pendingClarification()).isNull();
         assertThat(result.quickReplies()).isEmpty();
         assertThat(result.warnings())
-                .contains("governed-resource-confirmation-deterministic", "keyword-fallback-applied")
+                .contains("governed-resource-confirmation-deterministic")
                 .doesNotContain("llm-intent-resolution-used");
         Mockito.verifyNoInteractions(llmIntentResolver);
     }
@@ -8703,9 +9385,7 @@ class AgenticAuthoringIntentResolverServiceTest {
                         "{}",
                         null)));
         AgenticAuthoringIntentResolverService metadataBackedService =
-                new AgenticAuthoringIntentResolverService(
-                        objectMapper,
-                        new AgenticAuthoringApiMetadataCandidateCatalog(repository));
+                newTestIntentResolver(new AgenticAuthoringApiMetadataCandidateCatalog(repository));
 
         AgenticAuthoringIntentResolutionResult result = metadataBackedService.resolve(new AgenticAuthoringIntentResolutionRequest(
                 "Crie uma tabela de beneficios",
@@ -8784,9 +9464,7 @@ class AgenticAuthoringIntentResolverServiceTest {
                         "{}",
                         null)));
         AgenticAuthoringIntentResolverService metadataBackedService =
-                new AgenticAuthoringIntentResolverService(
-                        objectMapper,
-                        new AgenticAuthoringApiMetadataCandidateCatalog(repository));
+                newTestIntentResolver(new AgenticAuthoringApiMetadataCandidateCatalog(repository));
 
         AgenticAuthoringIntentResolutionResult result = metadataBackedService.resolve(new AgenticAuthoringIntentResolutionRequest(
                 "Crie um formulario didatico so com os campos realmente necessarios para abrir chamados para notebooks com a tela quebrada",
@@ -8842,9 +9520,7 @@ class AgenticAuthoringIntentResolverServiceTest {
                         "{}",
                         null)));
         AgenticAuthoringIntentResolverService metadataBackedService =
-                new AgenticAuthoringIntentResolverService(
-                        objectMapper,
-                        new AgenticAuthoringApiMetadataCandidateCatalog(repository));
+                newTestIntentResolver(new AgenticAuthoringApiMetadataCandidateCatalog(repository));
 
         AgenticAuthoringIntentResolutionResult result = metadataBackedService.resolve(new AgenticAuthoringIntentResolutionRequest(
                 "Crie um formulario didatico so com os campos realmente necessarios para cadastrar incidentes de missao operacionais. Use a fonte Incidentes de Missao.",
@@ -8897,9 +9573,7 @@ class AgenticAuthoringIntentResolverServiceTest {
                         "{}",
                         null)));
         AgenticAuthoringIntentResolverService metadataBackedService =
-                new AgenticAuthoringIntentResolverService(
-                        objectMapper,
-                        new AgenticAuthoringApiMetadataCandidateCatalog(repository));
+                newTestIntentResolver(new AgenticAuthoringApiMetadataCandidateCatalog(repository));
 
         AgenticAuthoringIntentResolutionResult result = metadataBackedService.resolve(new AgenticAuthoringIntentResolutionRequest(
                 "Crie um formulario didatico so com os campos realmente necessarios para abrir chamados para notebooks com a tela quebrada.",
@@ -8954,9 +9628,7 @@ class AgenticAuthoringIntentResolverServiceTest {
                         "{}",
                         null)));
         AgenticAuthoringIntentResolverService metadataBackedService =
-                new AgenticAuthoringIntentResolverService(
-                        objectMapper,
-                        new AgenticAuthoringApiMetadataCandidateCatalog(repository));
+                newTestIntentResolver(new AgenticAuthoringApiMetadataCandidateCatalog(repository));
 
         AgenticAuthoringIntentResolutionResult result = metadataBackedService.resolve(new AgenticAuthoringIntentResolutionRequest(
                 "Crie um formulario para registrar manutencoes preventivas",
@@ -9042,8 +9714,8 @@ class AgenticAuthoringIntentResolverServiceTest {
         assertThat(result.failureCodes()).contains("shared-rule-authoring-required");
         assertThat(result.assistantMessage())
                 .contains("regra compartilhada")
-                .contains("simulacao")
-                .contains("publicacao")
+                .contains("simulação")
+                .contains("publicação")
                 .contains("/api/praxis/config/domain-rules/intake")
                 .contains("/api/praxis/config/domain-rules/simulations")
                 .doesNotContain("/api/human-resources/funcionarios");
@@ -9129,7 +9801,15 @@ class AgenticAuthoringIntentResolverServiceTest {
                         "Preview applied to the page.",
                         List.of(),
                         List.of(),
-                        List.of("llm-intent-resolution-used"))));
+                        List.of("llm-intent-resolution-used"),
+                        null,
+                        null,
+                        false,
+                        "component_authoring",
+                        null,
+                        List.of(),
+                        true,
+                        null)));
         AgenticAuthoringIntentResolverService llmFirstService = new AgenticAuthoringIntentResolverService(
                 objectMapper,
                 quickstartCandidateCatalog(),
@@ -9203,8 +9883,8 @@ class AgenticAuthoringIntentResolverServiceTest {
 
         assertThat(result.valid()).isTrue();
         assertThat(result.operationKind()).isEqualTo("create");
-        assertThat(result.artifactKind()).isEqualTo("dashboard");
-        assertThat(result.changeKind()).isEqualTo("create_artifact");
+        assertThat(result.artifactKind()).isEqualTo("table");
+        assertThat(result.changeKind()).isEqualTo("create_table");
         assertThat(result.selectedCandidate()).isNotNull();
         assertThat(result.selectedCandidate().resourcePath()).contains("/api/human-resources/funcionarios");
     }
@@ -9518,7 +10198,15 @@ class AgenticAuthoringIntentResolverServiceTest {
                         "APIs relacionadas: POST /api/human-resources/base-acessos/options/filter.",
                         List.of(),
                         List.of(),
-                        List.of("llm-intent-resolution-used"))));
+                        List.of("llm-intent-resolution-used"),
+                        null,
+                        null,
+                        false,
+                        "component_authoring",
+                        null,
+                        List.of(),
+                        true,
+                        null)));
         AgenticAuthoringIntentResolverService llmFirstService = new AgenticAuthoringIntentResolverService(
                 objectMapper,
                 quickstartCandidateCatalog(),
@@ -9580,7 +10268,15 @@ class AgenticAuthoringIntentResolverServiceTest {
                                 "Buscar APIs",
                                 "Quais APIs disponiveis podem alimentar esta tela?")),
                         List.of(),
-                        List.of("llm-intent-resolution-used"))));
+                        List.of("llm-intent-resolution-used"),
+                        null,
+                        null,
+                        false,
+                        "component_authoring",
+                        null,
+                        List.of(),
+                        true,
+                        null)));
         AgenticAuthoringIntentResolverService llmFirstService = new AgenticAuthoringIntentResolverService(
                 objectMapper,
                 quickstartCandidateCatalog(),
@@ -9966,7 +10662,7 @@ class AgenticAuthoringIntentResolverServiceTest {
                         Mockito.any()))
                 .thenReturn(List.of(payroll, people));
         AgenticAuthoringIntentResolverService resolver =
-                new AgenticAuthoringIntentResolverService(objectMapper, candidateCatalog);
+                newTestIntentResolver(candidateCatalog);
 
         AgenticAuthoringIntentResolutionResult result = resolver.resolve(new AgenticAuthoringIntentResolutionRequest(
                 "monte uma tabela de pessoas",
@@ -10009,7 +10705,15 @@ class AgenticAuthoringIntentResolverServiceTest {
                         "",
                         List.of(),
                         List.of(),
-                        List.of("llm-intent-resolution-used"))));
+                        List.of("llm-intent-resolution-used"),
+                        null,
+                        null,
+                        false,
+                        "ui_composition",
+                        null,
+                        List.of(),
+                        true,
+                        null)));
         AgenticAuthoringIntentResolverService llmFirstService = new AgenticAuthoringIntentResolverService(
                 objectMapper,
                 quickstartCandidateCatalog(),
@@ -10072,8 +10776,8 @@ class AgenticAuthoringIntentResolverServiceTest {
         assertThat(result.failureCodes()).contains("shared-rule-authoring-required");
         assertThat(result.assistantMessage())
                 .contains("regra compartilhada")
-                .contains("simulacao")
-                .contains("publicacao")
+                .contains("simulação")
+                .contains("publicação")
                 .contains("/api/praxis/config/domain-rules/intake")
                 .contains("/api/praxis/config/domain-rules/simulations")
                 .doesNotContain("/api/procurement/suppliers");
@@ -10148,8 +10852,8 @@ class AgenticAuthoringIntentResolverServiceTest {
             assertThat(result.assistantMessage())
                     .as(routingCase.prompt())
                     .contains("regra compartilhada")
-                    .contains("simulacao")
-                    .contains("publicacao")
+                    .contains("simulação")
+                    .contains("publicação")
                     .contains("/api/praxis/config/domain-rules/intake")
                     .contains("/api/praxis/config/domain-rules/simulations");
             assertThat(result.selectedCandidate())
@@ -15387,9 +16091,7 @@ class AgenticAuthoringIntentResolverServiceTest {
                         "{}",
                         null)));
         AgenticAuthoringIntentResolverService metadataBackedService =
-                new AgenticAuthoringIntentResolverService(
-                        objectMapper,
-                        new AgenticAuthoringApiMetadataCandidateCatalog(repository));
+                newTestIntentResolver(new AgenticAuthoringApiMetadataCandidateCatalog(repository));
 
         AgenticAuthoringIntentResolutionResult result = metadataBackedService.resolve(new AgenticAuthoringIntentResolutionRequest(
                 "preciso monta uma ficha pra cadastra funsionario",
@@ -16848,5 +17550,100 @@ class AgenticAuthoringIntentResolverServiceTest {
                 "llm-intent-resolution-satisfied-by-pre-intent-governed-evidence",
                 "llm-pre-intent-resource-discovery-used");
         Mockito.verifyNoInteractions(llmIntentResolver);
+    }
+
+    @Test
+    void providerFailureOnMultiTurnRefinementRemainsFailClosedWithoutApplyingSessionMemory() {
+        AgenticAuthoringLlmIntentResolverService llmIntentResolver =
+                Mockito.mock(AgenticAuthoringLlmIntentResolverService.class);
+        Mockito.when(llmIntentResolver.resolve(
+                        Mockito.any(),
+                        Mockito.anyString(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.anyList(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.any()))
+                .thenReturn(Optional.of(new AgenticAuthoringLlmIntentResolution(
+                        false,
+                        "unknown",
+                        "unknown",
+                        "provider_error",
+                        null,
+                        null,
+                        "none",
+                        "O provedor de IA está temporariamente indisponível.",
+                        List.of(),
+                        List.of(),
+                        List.of(
+                                "llm-intent-provider-failure:quota_exhausted",
+                                "llm-intent-resolution-unavailable-clarification-required"))));
+        AgenticAuthoringIntentResolverService llmFirstService = new AgenticAuthoringIntentResolverService(
+                objectMapper,
+                quickstartCandidateCatalog(),
+                llmIntentResolver,
+                new AgenticAuthoringComponentCapabilitiesService());
+        AgenticAuthoringCandidate tableResource = new AgenticAuthoringCandidate(
+                "/api/human-resources/folhas-pagamento",
+                "post",
+                "/schemas/filtered?path=/api/human-resources/folhas-pagamento&operation=post&schemaType=response",
+                "/api/human-resources/folhas-pagamento",
+                "POST",
+                0.92,
+                "turn 1 selected payroll table resource",
+                List.of("api-metadata", "semantic-retrieval"));
+        AgenticAuthoringSemanticDecision previousDecision = AgenticAuthoringSemanticDecision.from(
+                "create",
+                "table",
+                "create_artifact",
+                tableResource,
+                List.of(tableResource),
+                null,
+                List.of(),
+                null,
+                null,
+                null,
+                "conversation-1",
+                "turn-1",
+                "Criar uma tabela de folhas de pagamento",
+                "Criar uma tabela de folhas de pagamento",
+                "Initial table decision.");
+
+        AgenticAuthoringIntentResolutionResult result = llmFirstService.resolve(new AgenticAuthoringIntentResolutionRequest(
+                "Gostei, mas prefiro gráficos mantendo a mesma fonte",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                "/page-builder-ia",
+                payrollTablePage(),
+                null,
+                "openai",
+                "gpt-test",
+                null,
+                "conversation-1",
+                "turn-2",
+                List.of(),
+                null,
+                List.of(),
+                null,
+                previousDecision));
+
+        assertThat(result.valid()).isFalse();
+        assertThat(result.operationKind()).isEqualTo("unknown");
+        assertThat(result.artifactKind()).isEqualTo("unknown");
+        assertThat(result.changeKind()).isEqualTo("provider_error");
+        assertThat(result.selectedCandidate()).isNull();
+        assertThat(result.semanticDecision().operationKind()).isEqualTo("unknown");
+        assertThat(result.semanticDecision().artifactKind()).isEqualTo("unknown");
+        assertThat(result.semanticDecision().changeKind()).isEqualTo("provider_error");
+        assertThat(result.semanticDecision().selectedResource()).isNull();
+        assertThat(result.semanticDecision().refinement()).isNull();
+        assertThat(result.warnings())
+                .contains("llm-intent-provider-failure:quota_exhausted")
+                .doesNotContain(
+                        "semantic-policy-refined-visual-projection",
+                        "semantic-decision-memory-refinement-applied",
+                        "semantic-refinement-applied");
     }
 }

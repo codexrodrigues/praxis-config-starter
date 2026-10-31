@@ -204,17 +204,14 @@ public class AgenticAuthoringAutoConfiguration {
             ObjectProvider<AgenticAuthoringLlmIntentResolverService> llmIntentResolverService,
             ObjectProvider<AgenticAuthoringDomainCatalogCandidateEnhancer> domainCatalogCandidateEnhancer,
             AgenticAuthoringComponentCapabilitiesService componentCapabilitiesService,
-            @Value("${praxis.domain-catalog.service-key:praxis-service}") String domainCatalogServiceKey,
-            @Value("${praxis.ai.authoring.legacy-keyword-fallback-enabled:false}")
-            boolean legacyKeywordFallbackEnabled) {
+            @Value("${praxis.domain-catalog.service-key:praxis-service}") String domainCatalogServiceKey) {
         return new AgenticAuthoringIntentResolverService(
                 objectMapper,
                 apiMetadataCandidateCatalog,
                 llmIntentResolverService.getIfAvailable(),
                 componentCapabilitiesService,
                 domainCatalogServiceKey,
-                domainCatalogCandidateEnhancer.getIfAvailable(),
-                legacyKeywordFallbackEnabled);
+                domainCatalogCandidateEnhancer.getIfAvailable());
     }
 
     @Bean

@@ -130,29 +130,27 @@ public class AgenticAuthoringConsultativeAnswerService {
             return governedDomainDiscovery;
         }
         boolean resolvedApiCatalogQuestion = isResolvedApiCatalogQuestion(request);
-        boolean hasResolvedIntentContext = hasResolvedIntentContext(request);
-        boolean domainAvailabilityQuestion = resolvedApiCatalogQuestion
-                || (!hasResolvedIntentContext && isDomainAvailabilityQuestion(request.userPrompt()));
+        boolean resolvedComponentCatalogQuestion = isResolvedComponentCatalogQuestion(request);
+        boolean resolvedMaterializationIntent = isResolvedMaterializationIntent(request);
         ObjectNode initialRuntimeContext = runtimeConsultableContext(request);
         boolean pendingRuntimeDisambiguationContext =
                 safePendingRuntimeRelatedSurfaceDisambiguationContext(request, initialRuntimeContext) != null;
         if (!pendingRuntimeDisambiguationContext
-                && !hasResolvedIntentContext
-                && !domainAvailabilityQuestion
-                && clearlyRequestsMaterialization(request.userPrompt())) {
+                && resolvedMaterializationIntent
+                && !resolvedApiCatalogQuestion
+                && !resolvedComponentCatalogQuestion) {
             return Optional.empty();
         }
-        boolean explicitNoMaterialization = explicitlyForbidsMaterialization(request.userPrompt());
         AgenticAuthoringConsultativeApiCatalogProjection projection = null;
         try {
-            if (!domainAvailabilityQuestion || pendingRuntimeDisambiguationContext) {
+            if (!resolvedApiCatalogQuestion || pendingRuntimeDisambiguationContext) {
                 Optional<AgenticAuthoringConsultativeAnswer> earlyRuntimeContextAnswer =
                         runtimeContextConsultativeAnswer(request, null, tenantId, userId, environment);
                 if (earlyRuntimeContextAnswer.isPresent()) {
                     return earlyRuntimeContextAnswer;
                 }
             }
-            if (domainAvailabilityQuestion) {
+            if (resolvedApiCatalogQuestion) {
                 projection = apiCatalogProjection(
                         request,
                         tenantId,
@@ -180,10 +178,15 @@ public class AgenticAuthoringConsultativeAnswerService {
                 }
                 if (shouldUseGroundedProjectionAnswer(projection)
                         || isServerIssuedQuickReplyContinuation(request)) {
+                    String resolvedLlmMessage = isServerIssuedQuickReplyContinuation(request)
+                            ? ""
+                            : resolvedLlmDomainCatalogAnswer(request, projection);
                     return Optional.of(new AgenticAuthoringConsultativeAnswer(
                             "domain_api",
                             changeKind("domain_api"),
-                            sanitizeUserFacingAnswer(projection.assistantMessage()),
+                            StringUtils.hasText(resolvedLlmMessage)
+                                    ? resolvedLlmMessage
+                                    : sanitizeUserFacingAnswer(projection.assistantMessage()),
                             projection,
                             warnings("domain_api", projection)));
                 }
@@ -219,8 +222,22 @@ public class AgenticAuthoringConsultativeAnswerService {
                         projection,
                         warnings("domain_api", projection)));
             }
-            if (explicitNoMaterialization) {
-                if (isComponentCatalogQuestion(request.userPrompt())) {
+            if (resolvedComponentCatalogQuestion) {
+                String resolvedChangeKind = value(
+                        request.contextHints().path("resolvedIntent").path("changeKind").asText(""));
+                String resolvedCategory = "answer_component_capability_question".equals(resolvedChangeKind)
+                        ? "component_capability"
+                        : "component_catalog";
+                String resolvedLlmMessage = resolvedLlmComponentCatalogAnswer(request);
+                if (StringUtils.hasText(resolvedLlmMessage)) {
+                    return Optional.of(new AgenticAuthoringConsultativeAnswer(
+                            resolvedCategory,
+                            changeKind(resolvedCategory),
+                            resolvedLlmMessage,
+                            null,
+                            warnings(resolvedCategory, null)));
+                }
+                if ("component_catalog".equals(resolvedCategory)) {
                     String message = componentCatalogFallbackMessage(componentCapabilities);
                     if (StringUtils.hasText(message)) {
                         return Optional.of(new AgenticAuthoringConsultativeAnswer(
@@ -231,64 +248,6 @@ public class AgenticAuthoringConsultativeAnswerService {
                                 warnings("component_catalog", null)));
                     }
                 }
-                String generated = providerManagementService.generateText(
-                        directAnswerPrompt(request, evidenceBundle(request, "auto", componentCapabilities, null)),
-                        AiCallConfig.agenticAuthoringBuilder()
-                                .provider(request.provider())
-                                .model(request.model())
-                                .apiKey(request.apiKey())
-                                .temperature(0.2d)
-                                .maxTokens(2400)
-                                .build(),
-                        tenantId,
-                        userId,
-                        environment);
-                ParsedConsultativeAnswer parsed = parseConsultativeAnswer(generated);
-                String category = category(parsed.category());
-                if ("domain_api".equals(category)) {
-                    projection = apiCatalogProjection(
-                            consultativeApiCatalogQuery(request),
-                            tenantId,
-                            environment);
-                    Optional<AgenticAuthoringConsultativeAnswer> runtimeContextAnswer =
-                            runtimeContextConsultativeAnswer(request, projection, tenantId, userId, environment);
-                    if (runtimeContextAnswer.isPresent()) {
-                        return runtimeContextAnswer;
-                    }
-                    if (projection != null && projection.hasResources()) {
-                        generated = providerManagementService.generateText(
-                                directAnswerPrompt(
-                                        request,
-                                        evidenceBundle(request, category, componentCapabilities, projection)),
-                                AiCallConfig.agenticAuthoringBuilder()
-                                        .provider(request.provider())
-                                        .model(request.model())
-                                        .apiKey(request.apiKey())
-                                        .temperature(0.2d)
-                                        .maxTokens(2400)
-                                        .build(),
-                                tenantId,
-                                userId,
-                                environment);
-                        parsed = parseConsultativeAnswer(generated);
-                        category = category(parsed.category());
-                    }
-                }
-                String fallback = fallbackMessage(category, projection, componentCapabilities);
-                String message = guardedDomainAnswer(
-                        request.userPrompt(),
-                        category,
-                        projection,
-                        safeAnswer(parsed.answer(), safeAnswer(generated, fallback)));
-                if (message.isBlank()) {
-                    return explicitNoMaterializationFallback(request.userPrompt(), componentCapabilities, projection);
-                }
-                return Optional.of(new AgenticAuthoringConsultativeAnswer(
-                        category,
-                        changeKind(category),
-                        message,
-                        projection,
-                        warnings(category, projection)));
             }
             String generated = providerManagementService.generateText(
                     answerPrompt(request, evidenceBundle(request, "auto", componentCapabilities, null)),
@@ -356,10 +315,10 @@ public class AgenticAuthoringConsultativeAnswerService {
                     projection,
                         warnings(category, projection)));
         } catch (RuntimeException ex) {
-            if (domainAvailabilityQuestion || explicitNoMaterialization) {
+            if (resolvedApiCatalogQuestion || resolvedComponentCatalogQuestion) {
                 log.warn("[AgenticAuthoring] Post-intent consultative answer failed; returning grounded no-materialization fallback. reason={}",
                         ex.getClass().getSimpleName());
-                if (explicitNoMaterialization) {
+                if (resolvedComponentCatalogQuestion) {
                     Optional<String> capabilityMessage = componentCapabilityFallbackMessage(
                             request.userPrompt(),
                             componentCapabilities);
@@ -6131,6 +6090,67 @@ public class AgenticAuthoringConsultativeAnswerService {
                 && projection.warnings().contains("domain-api-consultative-compact-projection-used");
     }
 
+    private String resolvedLlmDomainCatalogAnswer(
+            AgenticAuthoringTurnStreamRequest request,
+            AgenticAuthoringConsultativeApiCatalogProjection projection) {
+        if (request == null || request.contextHints() == null || projection == null || !projection.hasResources()) {
+            return "";
+        }
+        JsonNode resolvedIntent = request.contextHints().path("resolvedIntent");
+        if (!resolvedIntent.isObject() || !resolvedIntent.path("llmResolved").asBoolean(false)) {
+            return "";
+        }
+        String raw = value(resolvedIntent.path("assistantMessage").asText(""));
+        if (raw.length() < 45) {
+            return "";
+        }
+        String lower = raw.toLowerCase(Locale.ROOT);
+        if (lower.startsWith("vou ")
+                || lower.startsWith("use ")
+                || lower.startsWith("encontrei ")
+                || lower.contains("/api")
+                || lower.contains("/schemas")) {
+            return "";
+        }
+        String sanitized = sanitizeUserFacingAnswer(raw);
+        if (!mentionsAnyProjectedResource(sanitized, projection)) {
+            return "";
+        }
+        return sanitized;
+    }
+
+    private boolean mentionsAnyProjectedResource(
+            String message,
+            AgenticAuthoringConsultativeApiCatalogProjection projection) {
+        if (!StringUtils.hasText(message) || projection == null || projection.resources() == null) {
+            return false;
+        }
+        String normalizedMessage = normalizeForIntentConstraint(message);
+        for (AgenticAuthoringConsultativeApiCatalogProjection.Resource resource : projection.resources()) {
+            if (resource == null) {
+                continue;
+            }
+            String normalizedLabel = normalizeForIntentConstraint(resource.label());
+            if (!normalizedLabel.isBlank() && normalizedMessage.contains(normalizedLabel)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private String resolvedLlmComponentCatalogAnswer(AgenticAuthoringTurnStreamRequest request) {
+        if (request == null || request.contextHints() == null) {
+            return "";
+        }
+        JsonNode resolvedIntent = request.contextHints().path("resolvedIntent");
+        if (!resolvedIntent.isObject() || !resolvedIntent.path("llmResolved").asBoolean(false)) {
+            return "";
+        }
+        String raw = value(resolvedIntent.path("assistantMessage").asText(""));
+        String sanitized = sanitizeUserFacingAnswer(raw);
+        return StringUtils.hasText(sanitized) && explainsPlatformCapabilities(sanitized) ? sanitized : "";
+    }
+
     private String componentCatalogFallbackMessage(AgenticAuthoringComponentCapabilitiesResult componentCapabilities) {
         if (componentCapabilities == null || componentCapabilities.catalogs() == null
                 || componentCapabilities.catalogs().isEmpty()) {
@@ -6166,6 +6186,10 @@ public class AgenticAuthoringConsultativeAnswerService {
         if (!"platform_guidance".equals(category)) {
             return generatedMessage;
         }
+        String sanitizedGenerated = sanitizeUserFacingAnswer(generatedMessage);
+        if (StringUtils.hasText(sanitizedGenerated) && explainsPlatformCapabilities(sanitizedGenerated)) {
+            return sanitizedGenerated;
+        }
         String catalogMessage = componentCatalogFallbackMessage(componentCapabilities);
         if (!StringUtils.hasText(catalogMessage)) {
             return generatedMessage;
@@ -6178,6 +6202,36 @@ public class AgenticAuthoringConsultativeAnswerService {
 
                 %s
                 """.formatted(catalogMessage));
+    }
+
+    private boolean explainsPlatformCapabilities(String message) {
+        String normalized = normalizeForIntentConstraint(message);
+        if (normalized.length() < 80) {
+            return false;
+        }
+        int mentionedConcepts = 0;
+        if (containsAnyToken(normalized, "formulario", "formularios", "form", "forms")) {
+            mentionedConcepts++;
+        }
+        if (containsAnyToken(normalized, "tabela", "tabelas", "lista", "listas", "table", "tables", "list", "lists")) {
+            mentionedConcepts++;
+        }
+        if (containsAnyToken(normalized, "grafico", "graficos", "dashboard", "dashboards", "painel", "paineis", "chart", "charts")) {
+            mentionedConcepts++;
+        }
+        if (containsAnyToken(normalized, "filtro", "filtros", "aba", "abas", "filter", "filters", "tab", "tabs", "componente", "componentes", "widget", "widgets")) {
+            mentionedConcepts++;
+        }
+        if (mentionedConcepts >= 2) {
+            return true;
+        }
+        return mentionedConcepts >= 1
+                && containsAnyToken(
+                        normalized,
+                        "governad", "governado", "governada", "governados", "governadas", "governed",
+                        "schema", "schemas", "previa", "preview", "catalogo", "catalog",
+                        "capacidade", "capacidades", "capability", "capabilities",
+                        "preset", "presets", "predefinido", "predefinidos", "predefinida", "predefinidas");
     }
 
     private Optional<String> componentCapabilityFallbackMessage(
@@ -6479,201 +6533,19 @@ public class AgenticAuthoringConsultativeAnswerService {
         };
     }
 
-    private boolean explicitlyForbidsMaterialization(String prompt) {
-        String text = " " + normalizeForIntentConstraint(prompt) + " ";
-        return text.contains(" sem criar nada ")
-                || text.contains(" sem criar qualquer coisa ")
-                || text.contains(" sem montar nada ")
-                || text.contains(" sem montar qualquer coisa ")
-                || text.contains(" sem materializar nada ")
-                || text.contains(" sem materializar qualquer coisa ")
-                || text.contains(" sem pre visualizar ")
-                || text.contains(" sem pre visualizacao ")
-                || text.contains(" nao crie nada ")
-                || text.contains(" nao crie qualquer coisa ")
-                || text.contains(" nao cria nada ")
-                || text.contains(" nao cria qualquer coisa ")
-                || text.contains(" nao criar nada ")
-                || text.contains(" nao criar qualquer coisa ")
-                || text.contains(" nao monte nada ")
-                || text.contains(" nao monte qualquer coisa ")
-                || text.contains(" nao montar nada ")
-                || text.contains(" nao montar qualquer coisa ")
-                || text.contains(" nao materialize nada ")
-                || text.contains(" nao materialize qualquer coisa ")
-                || text.contains(" nao materializar nada ")
-                || text.contains(" nao materializar qualquer coisa ")
-                || text.contains(" nao gere previa ")
-                || text.contains(" nao gerar previa ")
-                || text.contains(" do not create anything ")
-                || text.contains(" do not create anything yet ")
-                || text.contains(" don't create anything ")
-                || text.contains(" don't create anything yet ")
-                || text.contains(" without creating anything ")
-                || text.contains(" no preview ");
-    }
-
-    private boolean clearlyRequestsMaterialization(String prompt) {
-        String text = normalizeForIntentConstraint(prompt);
-        if (text.isBlank() || startsLikeConsultativeQuestion(text)) {
-            return false;
-        }
-        return startsWithAny(text,
-                "crie ",
-                "criar ",
-                "monte ",
-                "montar ",
-                "gere ",
-                "gerar ",
-                "adicione ",
-                "adicionar ",
-                "inclua ",
-                "incluir ",
-                "remova ",
-                "remover ",
-                "altere ",
-                "alterar ",
-                "configure ",
-                "configurar ",
-                "habilite ",
-                "habilitar ",
-                "create ",
-                "build ",
-                "generate ",
-                "add ",
-                "remove ",
-                "update ",
-                "configure ",
-                "enable ")
-                || isArtifactSpecification(text)
-                || isImplicitMaterializationRequest(text);
-    }
-
-    private boolean isImplicitMaterializationRequest(String text) {
-        if (text == null || text.isBlank()) {
-            return false;
-        }
-        boolean exploratory = text.contains("quero saber ")
-                || text.contains("gostaria de saber ")
-                || text.contains("preciso saber ")
-                || text.contains("como criar ")
-                || text.contains("como crio ")
-                || text.contains("como montar ")
-                || text.contains("como faco ")
-                || text.contains("como fazer ")
-                || text.contains("posso criar ")
-                || text.contains("da para criar ")
-                || text.contains("daria para criar ")
-                || text.contains("quais dashboards ")
-                || text.contains("quais paineis ")
-                || text.contains("quais opcoes ")
-                || text.contains("what can i create ")
-                || text.contains("how to create ");
-        if (exploratory) {
-            return false;
-        }
-        boolean asksForOutcome = containsAnyToken(text,
-                "quero",
-                "preciso",
-                "gostaria",
-                "necessito",
-                "acompanhar",
-                "monitorar",
-                "controlar",
-                "visualizar",
-                "want",
-                "need");
-        boolean dashboardLike = containsAnyToken(text,
-                "dashboard",
-                "painel",
-                "overview",
-                "kpi",
-                "indicador",
-                "indicadores",
-                "resumo",
-                "sumario")
-                || text.contains("visao geral")
-                || text.contains("visao 360");
-        return asksForOutcome && dashboardLike;
-    }
-
-    private boolean isDomainAvailabilityQuestion(String prompt) {
-        String text = " " + normalizeForIntentConstraint(prompt) + " ";
-        boolean asksQuestion = text.contains(" ? ")
-                || startsLikeConsultativeQuestion(text.trim())
-                || text.contains(" da pra ")
-                || text.contains(" da para ")
-                || text.contains(" da p ")
-                || text.contains(" tem ")
-                || text.contains(" existe ")
-                || text.contains(" existem ")
-                || text.contains(" posso ");
-        if (!asksQuestion) {
-            return false;
-        }
-        boolean asksAvailability = text.contains(" tem esses dados ")
-                || text.contains(" tem estes dados ")
-                || text.contains(" tem esses dado ")
-                || text.contains(" tem dados ")
-                || text.contains(" esses dados ")
-                || text.contains(" estes dados ")
-                || text.contains(" nesse host ")
-                || text.contains(" neste host ")
-                || text.contains(" esse host ")
-                || text.contains(" este host ")
-                || text.contains(" da pra fazer ")
-                || text.contains(" da para fazer ")
-                || text.contains(" consigo fazer ")
-                || text.contains(" posso fazer ")
-                || text.contains(" posso criar ")
-                || text.contains(" que dados tem ")
-                || text.contains(" quais dados tem ")
-                || text.contains(" que dados existem ")
-                || text.contains(" quais dados existem ")
-                || text.contains(" que apis existem ")
-                || text.contains(" quais apis existem ")
-                || text.contains(" que apis e dados existem ")
-                || text.contains(" quais apis e dados existem ")
-                || text.contains(" que dados e apis existem ")
-                || text.contains(" quais dados e apis existem ")
-                || text.contains(" que recursos existem ")
-                || text.contains(" quais recursos existem ")
-                || text.contains(" dados que existem ")
-                || text.contains(" dados disponiveis ")
-                || text.contains(" dados disponíveis ")
-                || text.contains(" fontes de dados ")
-                || text.contains(" existe api ")
-                || text.contains(" existem api ")
-                || text.contains(" existe dados ")
-                || text.contains(" existem dados ");
-        if (!asksAvailability && asksWhichGovernedDataCanFeedAuthoring(text)) {
-            asksAvailability = true;
-        }
-        if (!asksAvailability) {
-            return false;
-        }
-        return text.contains(" dados ")
-                || text.contains(" dado ")
-                || text.contains(" api ")
-                || text.contains(" apis ")
-                || text.contains(" dominio ")
-                || text.contains(" domínio ")
-                || text.contains(" recurso ")
-                || text.contains(" recursos ")
-                || mentionsAuthorableArtifact(text);
-    }
-
-    boolean shouldPreferGovernedCatalogAvailabilityAnswer(AgenticAuthoringTurnStreamRequest request) {
-        if (request == null || clearlyRequestsMaterialization(request.userPrompt())) {
-            return false;
-        }
-        return isResolvedApiCatalogQuestion(request) || isDomainAvailabilityQuestion(request.userPrompt());
-    }
-
     private boolean hasResolvedIntentContext(AgenticAuthoringTurnStreamRequest request) {
         return request != null
                 && request.contextHints() != null
                 && request.contextHints().path("resolvedIntent").isObject();
+    }
+
+    private boolean isResolvedMaterializationIntent(AgenticAuthoringTurnStreamRequest request) {
+        if (!hasResolvedIntentContext(request)) {
+            return false;
+        }
+        JsonNode resolvedIntent = request.contextHints().path("resolvedIntent");
+        String operationKind = value(resolvedIntent.path("operationKind").asText(""));
+        return Set.of("create", "modify", "remove", "connect").contains(operationKind);
     }
 
     private boolean isResolvedApiCatalogQuestion(AgenticAuthoringTurnStreamRequest request) {
@@ -6681,140 +6553,34 @@ public class AgenticAuthoringConsultativeAnswerService {
             return false;
         }
         JsonNode resolvedIntent = request.contextHints().path("resolvedIntent");
+        String changeKind = value(resolvedIntent.path("changeKind").asText(""));
         return "api_catalog".equals(value(resolvedIntent.path("artifactKind").asText("")))
-                && "answer_api_catalog_question".equals(value(resolvedIntent.path("changeKind").asText("")));
+                && ("answer_api_catalog_question".equals(changeKind)
+                        || "answer_catalog_question".equals(changeKind)
+                        || "api_catalog_followup".equals(changeKind));
     }
 
-    private boolean asksWhichGovernedDataCanFeedAuthoring(String text) {
-        if (text == null || text.isBlank()) {
+    private boolean isResolvedComponentCatalogQuestion(AgenticAuthoringTurnStreamRequest request) {
+        if (!hasResolvedIntentContext(request)) {
             return false;
         }
-        boolean asksWhichData = text.contains(" quais dados ")
-                || text.contains(" que dados ")
-                || text.contains(" quais tipos de dados ")
-                || text.contains(" que tipos de dados ")
-                || text.contains(" com quais dados ")
-                || text.contains(" usando quais dados ");
-        if (!asksWhichData) {
-            return false;
-        }
-        boolean asksUseOrFit = text.contains(" posso usar ")
-                || text.contains(" posso utilizar ")
-                || text.contains(" posso aproveitar ")
-                || text.contains(" podem usar ")
-                || text.contains(" podem utilizar ")
-                || text.contains(" podem ter ")
-                || text.contains(" pode ter ")
-                || text.contains(" da para usar ")
-                || text.contains(" da pra usar ")
-                || text.contains(" consigo usar ")
-                || text.contains(" existem para ")
-                || text.contains(" tem para ");
-        return asksUseOrFit && mentionsAuthorableArtifact(text);
-    }
-
-    private boolean isComponentCatalogQuestion(String prompt) {
-        String text = " " + normalizeForIntentConstraint(prompt) + " ";
-        boolean asksAboutComponents = text.contains(" componente ")
-                || text.contains(" componentes ")
-                || text.contains(" widget ")
-                || text.contains(" widgets ")
-                || text.contains(" catalogo ")
-                || text.contains(" catálogo ");
-        boolean asksWhatCanCreate = text.contains(" quais ")
-                || text.contains(" que ")
-                || text.contains(" o que ")
-                || text.contains(" posso criar ")
-                || text.contains(" podem ser criados ")
-                || text.contains(" da pra criar ")
-                || text.contains(" da para criar ");
-        return asksAboutComponents && asksWhatCanCreate;
-    }
-
-    private boolean isArtifactSpecification(String text) {
-        return mentionsAuthorableArtifact(text)
-                && (mentionsDataBinding(text) || mentionsScopedArtifactConstraint(text));
-    }
-
-    private boolean mentionsAuthorableArtifact(String text) {
-        return containsAnyToken(text,
-                "grafico",
-                "graficos",
-                "chart",
-                "charts",
-                "tabela",
-                "table",
-                "formulario",
-                "form",
-                "dashboard",
-                "painel",
-                "kpi",
-                "indicador",
-                "aba",
-                "abas",
-                "tabs");
-    }
-
-    private boolean mentionsDataBinding(String text) {
-        return containsAnyToken(text,
-                "por",
-                "campo",
-                "fonte",
-                "dados",
-                "api",
-                "metric",
-                "metrica",
-                "dimension",
-                "dimensao",
-                "field",
-                "source");
-    }
-
-    private boolean mentionsScopedArtifactConstraint(String text) {
-        return containsAnyToken(text,
-                "apenas",
-                "somente",
-                "so",
-                "sem",
-                "without",
-                "nao",
-                "no");
+        JsonNode resolvedIntent = request.contextHints().path("resolvedIntent");
+        String operationKind = value(resolvedIntent.path("operationKind").asText(""));
+        String artifactKind = value(resolvedIntent.path("artifactKind").asText(""));
+        String changeKind = value(resolvedIntent.path("changeKind").asText(""));
+        return ("explain".equals(operationKind) || "explore".equals(operationKind))
+                && "component".equals(artifactKind)
+                && ("answer_component_catalog_question".equals(changeKind)
+                        || "answer_component_capability_question".equals(changeKind)
+                        || "explain_capabilities".equals(changeKind)
+                        || "explain_authoring_options".equals(changeKind)
+                        || "explain_platform_capabilities".equals(changeKind));
     }
 
     private boolean containsAnyToken(String text, String... tokens) {
         String padded = " " + text + " ";
         for (String token : tokens) {
             if (padded.contains(" " + token + " ")) {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    private boolean startsLikeConsultativeQuestion(String text) {
-        return startsWithAny(text,
-                "como ",
-                "quais ",
-                "qual ",
-                "o que ",
-                "que ",
-                "posso ",
-                "explique ",
-                "me explique ",
-                "antes de ",
-                "sem criar ",
-                "sem montar ",
-                "without creating ",
-                "what ",
-                "which ",
-                "how ",
-                "can i ",
-                "could i ");
-    }
-
-    private boolean startsWithAny(String value, String... prefixes) {
-        for (String prefix : prefixes) {
-            if (value.startsWith(prefix)) {
                 return true;
             }
         }

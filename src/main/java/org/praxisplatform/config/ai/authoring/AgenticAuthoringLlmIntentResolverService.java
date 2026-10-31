@@ -9,9 +9,11 @@ import java.io.InputStream;
 import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
@@ -408,7 +410,9 @@ public class AgenticAuthoringLlmIntentResolverService {
                 resolution.requiresGovernedAuthoring(),
                 resolution.semanticIntentClass(),
                 resolution.queryConstraints(),
-                providerInvocations == null ? List.of() : List.copyOf(providerInvocations));
+                providerInvocations == null ? List.of() : List.copyOf(providerInvocations),
+                resolution.localEditorialComposition(),
+                resolution.semanticRefinement());
     }
 
     private AgenticAuthoringLlmIntentResolution failedResolution(
@@ -550,10 +554,6 @@ public class AgenticAuthoringLlmIntentResolverService {
         JsonNode hints = request.contextHints();
         return hints.path("resourceDiscovery").isObject()
                 || hints.path("preIntentSemanticOrientation").isObject();
-    }
-
-    private List<String> unusedProviderFailureWarningsTail(Throwable error) { List<String> warnings = List.of();
-        return List.copyOf(warnings);
     }
 
     private Optional<AgenticAuthoringLlmIntentResolution> fastIntentResolution(
@@ -744,53 +744,7 @@ public class AgenticAuthoringLlmIntentResolverService {
     }
 
     private boolean hasBlockingActiveSemanticDecision(AgenticAuthoringIntentResolutionRequest request) {
-        AgenticAuthoringSemanticDecision decision = request == null ? null : request.activeSemanticDecision();
-        if (decision == null) {
-            return false;
-        }
-        String constraintSource = decision.constraints() == null
-                ? ""
-                : decision.constraints().path("source").asText("").trim();
-        if ("server-issued-quick-reply".equalsIgnoreCase(constraintSource)) {
-            return true;
-        }
-        String resourcePath = decision.selectedResource() == null
-                ? ""
-                : valueOrDefault(decision.selectedResource().resourcePath(), "").trim();
-        if (!StringUtils.hasText(resourcePath)) {
-            return false;
-        }
-        String operation = valueOrDefault(decision.operationKind(), "").trim().toLowerCase(Locale.ROOT);
-        String artifact = valueOrDefault(decision.artifactKind(), "").trim().toLowerCase(Locale.ROOT);
-        String change = valueOrDefault(decision.changeKind(), "").trim().toLowerCase(Locale.ROOT);
-        if ("explore".equals(operation)
-                || "explain".equals(operation)
-                || "api_catalog".equals(artifact)
-                || "unknown".equals(artifact)
-                || change.startsWith("answer_")
-                || "api_catalog_followup".equals(change)) {
-            return false;
-        }
-        String normalizedPrompt = AgenticAuthoringTextNormalizationSupport.normalize(
-                valueOrDefault(request.userPrompt(), ""));
-        if (normalizedPrompt.contains("mantem os dados")
-                || normalizedPrompt.contains("mantenha os dados")
-                || normalizedPrompt.contains("mantem a fonte")
-                || normalizedPrompt.contains("mantenha a fonte")
-                || normalizedPrompt.contains("mantem o recurso")
-                || normalizedPrompt.contains("mantenha o recurso")
-                || normalizedPrompt.contains("mesma fonte")
-                || normalizedPrompt.contains("mesmos dados")
-                || normalizedPrompt.contains("preserve a fonte")) {
-            return true;
-        }
-        return !(normalizedPrompt.contains("troca a fonte")
-                || normalizedPrompt.contains("troque a fonte")
-                || normalizedPrompt.contains("mude a fonte")
-                || normalizedPrompt.contains("outra fonte")
-                || normalizedPrompt.contains("nova fonte")
-                || normalizedPrompt.contains("fonte deve ser")
-                || normalizedPrompt.contains("fonte precisa ser"));
+        return AgenticAuthoringIntentCandidateScoringSupport.hasBlockingActiveSemanticDecision(request);
     }
 
     private String focusedResourceAuthoringPrompt(
@@ -874,7 +828,8 @@ public class AgenticAuthoringLlmIntentResolverService {
                 operation for visualization, never an unrelated create/POST operation.
 
                 For the resolved request use operationKind "create", artifactKind "table", changeKind "create_artifact",
-                semanticIntentClass "component_authoring", requiresGovernedAuthoring=false and followUpKind %s.
+                semanticIntentClass "component_authoring", requiresGovernedAuthoring=false,
+                localEditorialComposition=false, semanticRefinement=null and followUpKind %s.
                 Set visualizationDecision to a single table using primaryComponent "praxis-table", no axes, and
                 includeFilters=true. Do not invent fields, labels, option IDs, components or resources. If the governed
                 candidates do not establish the displayed entity unambiguously, return resolved=false with a natural,
@@ -950,7 +905,7 @@ public class AgenticAuthoringLlmIntentResolverService {
                 option grounding as not applicable; never select the sole candidate merely because it is the only one.
                 If materially ambiguous, return resolved=false with a natural clarification and do not materialize. This
                 stage confirms a local table filter field; it does not select option values yet and it is not shared-rule
-                authoring. Keep requiresGovernedAuthoring=false.
+                authoring. Keep requiresGovernedAuthoring=false and localEditorialComposition=false.
 
                 When liveOptionValueGrounding is present, reason semantically over all current candidates for the already
                 selected canonical field; the field-selection stage is already complete and must not be reopened. Reason
@@ -1080,7 +1035,7 @@ public class AgenticAuthoringLlmIntentResolverService {
                     null,
                     "none",
                     assistantMessage,
-                    List.of(),
+                    quickReplies(result.path("quickReplies")),
                     List.of(),
                     List.of("llm-compact-platform-guidance-confirmation-used"),
                     null,
@@ -1185,10 +1140,34 @@ public class AgenticAuthoringLlmIntentResolverService {
         properties.putObject("matchesSemanticScope").put("type", "boolean");
         stringEnum(properties, "semanticIntentClass", List.of("platform_guidance", "other"));
         properties.putObject("assistantMessage").put("type", "string");
+        ObjectNode reply = objectMapper.createObjectNode();
+        reply.put("type", "object");
+        ObjectNode replyProperties = reply.putObject("properties");
+        replyProperties.putObject("id").put("type", "string");
+        replyProperties.putObject("kind").put("type", "string");
+        replyProperties.putObject("label").put("type", "string");
+        replyProperties.putObject("prompt").put("type", "string");
+        nullableString(replyProperties, "description");
+        nullableString(replyProperties, "icon");
+        nullableString(replyProperties, "tone");
+        reply.putArray("required")
+                .add("id")
+                .add("kind")
+                .add("label")
+                .add("prompt")
+                .add("description")
+                .add("icon")
+                .add("tone");
+        reply.put("additionalProperties", false);
+        properties.putObject("quickReplies")
+                .put("type", "array")
+                .put("maxItems", 4)
+                .set("items", reply);
         root.putArray("required")
                 .add("matchesSemanticScope")
                 .add("semanticIntentClass")
-                .add("assistantMessage");
+                .add("assistantMessage")
+                .add("quickReplies");
         root.put("additionalProperties", false);
         return root.toString();
     }
@@ -1351,7 +1330,7 @@ public class AgenticAuthoringLlmIntentResolverService {
                     userId,
                     environment,
                     providerInvocations);
-            return toCompactTargetedComponentResolution(result, target, componentCapabilities);
+            return toCompactTargetedComponentResolution(request, result, target, componentCapabilities);
         } catch (RuntimeException ex) {
             log.debug(
                     "[AgenticAuthoringLlmIntentResolver] Compact targeted component intent failed closed; kind={} cause={}",
@@ -1428,7 +1407,7 @@ public class AgenticAuthoringLlmIntentResolverService {
                 || target == null
                 || !StringUtils.hasText(target.widgetKey())
                 || !StringUtils.hasText(target.componentId())
-                || !StringUtils.hasText(target.resourcePath())
+                || (!StringUtils.hasText(target.resourcePath()) && !hasRuntimeValueAssistanceContext(request))
                 || capabilities == null
                 || capabilities.isEmpty()) {
             return false;
@@ -1445,22 +1424,27 @@ public class AgenticAuthoringLlmIntentResolverService {
             AgenticAuthoringTarget target,
             AgenticAuthoringComponentCapabilitiesResult componentCapabilities,
             String effectivePrompt) {
-        if (target == null
-                || !StringUtils.hasText(target.componentId())
-                || componentCapabilities == null
-                || componentCapabilities.catalogs() == null) {
+        if (target == null || !StringUtils.hasText(target.componentId())) {
             return List.of();
         }
-        List<AgenticAuthoringComponentCapabilitiesResult.ComponentCapability> declaredCapabilities =
-                componentCapabilities.catalogs().stream()
-                .filter(Objects::nonNull)
-                .filter(catalog -> target.componentId().equals(catalog.componentId()))
-                .flatMap(catalog -> (catalog.capabilities() == null
-                        ? List.<AgenticAuthoringComponentCapabilitiesResult.ComponentCapability>of()
-                        : catalog.capabilities()).stream())
-                .filter(Objects::nonNull)
-                .filter(capability -> StringUtils.hasText(capability.changeKind()))
-                .toList();
+        List<AgenticAuthoringComponentCapabilitiesResult.ComponentCapability> declaredCapabilities = new ArrayList<>();
+        if (hasRuntimeValueAssistanceContext(request)) {
+            declaredCapabilities.add(runtimeFormValueCapability());
+        }
+        if (componentCapabilities != null && componentCapabilities.catalogs() != null) {
+            componentCapabilities.catalogs().stream()
+                    .filter(Objects::nonNull)
+                    .filter(catalog -> target.componentId().equals(catalog.componentId()))
+                    .flatMap(catalog -> (catalog.capabilities() == null
+                            ? List.<AgenticAuthoringComponentCapabilitiesResult.ComponentCapability>of()
+                            : catalog.capabilities()).stream())
+                    .filter(Objects::nonNull)
+                    .filter(capability -> StringUtils.hasText(capability.changeKind()))
+                    .forEach(declaredCapabilities::add);
+        }
+        if (declaredCapabilities.isEmpty()) {
+            return List.of();
+        }
         // The target component is already pinned by governed page context. The prior semantic
         // decision reserves one canonical candidate for genuine refinements; prompt similarity
         // ranks additional candidates inside that scope. Neither decides the current intent.
@@ -1536,6 +1520,9 @@ public class AgenticAuthoringLlmIntentResolverService {
         if (clientActions != null && clientActions.isArray()) {
             context.set("clientActions", clientActions.deepCopy());
         }
+        if (hasRuntimeValueAssistanceContext(request)) {
+            context.set("runtimeValueAssistance", request.contextHints().path("runtimeValueAssistance").deepCopy());
+        }
         ArrayNode governedCapabilities = context.putArray("governedCapabilities");
         for (AgenticAuthoringComponentCapabilitiesResult.ComponentCapability capability : capabilities) {
             ObjectNode capabilityNode = governedCapabilities.addObject();
@@ -1587,6 +1574,10 @@ public class AgenticAuthoringLlmIntentResolverService {
                 availability snapshot; never invent an action or reinterpret undo as a renderer/configuration edit.
                 Availability does not change the semantic intent: the runtime will explain when the declared action
                 cannot currently execute.
+                When runtimeValueAssistance is present and the user's primary meaning is to populate, fill or suggest
+                transient runtime field values for the current form instance (as opposed to modifying FormConfig layout,
+                sections, labels or structural field metadata), select operationKind="modify", artifactKind="form",
+                changeKind="fill_form_values" and requiresGovernedAuthoring=false.
                 When it matches, choose changeKind only by comparing the semantic effects and constraints of the
                 governed capabilities. Adding a new schema-backed item is different from formatting, moving,
                 renaming, hiding or changing an existing item. Preserve the current component unless the user asks
@@ -1670,6 +1661,7 @@ public class AgenticAuthoringLlmIntentResolverService {
     }
 
     private Optional<AgenticAuthoringLlmIntentResolution> toCompactTargetedComponentResolution(
+            AgenticAuthoringIntentResolutionRequest request,
             JsonNode result,
             AgenticAuthoringTarget target,
             AgenticAuthoringComponentCapabilitiesResult componentCapabilities) {
@@ -1717,9 +1709,13 @@ public class AgenticAuthoringLlmIntentResolverService {
         }
         boolean localUndo = "undo".equals(operationKind)
                 && "undo_last_local_change".equals(changeKind);
+        boolean runtimeFormFill = "modify".equals(operationKind)
+                && ("fill_form_values".equals(changeKind) || "runtime_form_values".equals(changeKind))
+                && hasRuntimeValueAssistanceContext(request);
         if (!StringUtils.hasText(artifactKind)
                 || "unknown".equals(artifactKind)
                 || (!localUndo
+                        && !runtimeFormFill
                         && !declaredChangeKind(target.componentId(), changeKind, componentCapabilities))) {
             return Optional.empty();
         }
@@ -1732,7 +1728,7 @@ public class AgenticAuthoringLlmIntentResolverService {
                 null,
                 valueOrDefault(nullableText(result, "followUpKind"), "refinement"),
                 conciseAssistantMessage(nullableText(result, "assistantMessage")),
-                List.of(),
+                quickReplies,
                 clarificationQuestions,
                 List.copyOf(warnings),
                 null,
@@ -1770,7 +1766,7 @@ public class AgenticAuthoringLlmIntentResolverService {
         if (!List.of("chart", "dashboard", "table", "page").contains(artifactKind)) {
             return "unsupported-artifact-kind";
         }
-        if (!StringUtils.hasText(resolution.selectedResourcePath())) {
+        if (!StringUtils.hasText(resolution.selectedResourcePath()) && !resolution.localEditorialComposition()) {
             return "missing-selected-resource";
         }
         if (List.of("chart", "dashboard").contains(artifactKind)) {
@@ -1835,6 +1831,24 @@ public class AgenticAuthoringLlmIntentResolverService {
         }
         return request.contextHints().path("liveOptionFieldGrounding").isObject()
                 || request.contextHints().path("liveOptionValueGrounding").isObject();
+    }
+
+    private boolean hasRuntimeValueAssistanceContext(AgenticAuthoringIntentResolutionRequest request) {
+        return request != null
+                && request.contextHints() != null
+                && request.contextHints().path("runtimeValueAssistance").isObject();
+    }
+
+    private AgenticAuthoringComponentCapabilitiesResult.ComponentCapability runtimeFormValueCapability() {
+        return new AgenticAuthoringComponentCapabilitiesResult.ComponentCapability(
+                "fill_form_values",
+                "fill_form_values",
+                List.of("fill", "populate", "preencher", "valores", "exemplo"),
+                List.of(),
+                List.of(new AgenticAuthoringComponentCapabilitiesResult.ComponentCapabilityExample(
+                        "Preencher este formulário com dados de exemplo válidos",
+                        "Propor valores transitórios revisáveis para os controles editáveis do formulário atual sem alterar o layout estrutural FormConfig.",
+                        List.of("runtimeValueProposal", "creationSchemaPOST"))));
     }
 
     private boolean isEmpty(List<?> items) {
@@ -1942,6 +1956,14 @@ public class AgenticAuthoringLlmIntentResolverService {
             return true;
         }
         if ("modify".equals(valueOrDefault(resolution.operationKind(), ""))) {
+            boolean runtimeFormFill = ("fill_form_values".equals(resolution.changeKind())
+                    || "runtime_form_values".equals(resolution.changeKind()))
+                    && target != null
+                    && StringUtils.hasText(target.widgetKey())
+                    && StringUtils.hasText(target.componentId());
+            if (runtimeFormFill) {
+                return true;
+            }
             return StringUtils.hasText(resolution.selectedResourcePath())
                     && hasTargetedComponentCapabilities(target, componentCapabilities)
                     && declaredChangeKind(
@@ -1956,7 +1978,7 @@ public class AgenticAuthoringLlmIntentResolverService {
         if (!List.of("chart", "dashboard", "table", "page").contains(artifactKind)) {
             return false;
         }
-        if (!StringUtils.hasText(resolution.selectedResourcePath())) {
+        if (!StringUtils.hasText(resolution.selectedResourcePath()) && !resolution.localEditorialComposition()) {
             return false;
         }
         AgenticAuthoringVisualizationDecision decision = resolution.visualizationDecision();
@@ -2000,6 +2022,7 @@ public class AgenticAuthoringLlmIntentResolverService {
             List<AgenticAuthoringCandidate> fastCandidates) {
         if (resolution == null
                 || fastConsultativeResolutionComplete(resolution)
+                || resolution.localEditorialComposition()
                 || StringUtils.hasText(resolution.selectedResourcePath())
                 || fastCandidates == null
                 || fastCandidates.isEmpty()) {
@@ -2027,7 +2050,9 @@ public class AgenticAuthoringLlmIntentResolverService {
                 resolution.requiresGovernedAuthoring(),
                 resolution.semanticIntentClass(),
                 resolution.queryConstraints(),
-                resolution.providerInvocations());
+                resolution.providerInvocations(),
+                resolution.localEditorialComposition(),
+                resolution.semanticRefinement());
     }
 
     private AgenticAuthoringLlmIntentResolution withFastIntentWarning(
@@ -2054,7 +2079,9 @@ public class AgenticAuthoringLlmIntentResolverService {
                 resolution.requiresGovernedAuthoring(),
                 resolution.semanticIntentClass(),
                 resolution.queryConstraints(),
-                resolution.providerInvocations());
+                resolution.providerInvocations(),
+                resolution.localEditorialComposition(),
+                resolution.semanticRefinement());
     }
 
     private AgenticAuthoringLlmIntentResolution withWarning(
@@ -2082,7 +2109,9 @@ public class AgenticAuthoringLlmIntentResolverService {
                 resolution.requiresGovernedAuthoring(),
                 resolution.semanticIntentClass(),
                 resolution.queryConstraints(),
-                resolution.providerInvocations());
+                resolution.providerInvocations(),
+                resolution.localEditorialComposition(),
+                resolution.semanticRefinement());
     }
 
     private String fastIntentPrompt(
@@ -2108,6 +2137,12 @@ public class AgenticAuthoringLlmIntentResolverService {
                 componentCapabilities,
                 governedDomainContext);
         context.set("governedDomainContext", contextBundle.path("governedDomainContext").deepCopy());
+        JsonNode candidateEligibility = contextBundle
+                .path("retrievalContext")
+                .path("candidateEligibility");
+        if (candidateEligibility.isObject()) {
+            context.set("candidateEligibility", candidateEligibility.deepCopy());
+        }
         JsonNode relatedResourceSurfaces = contextBundle
                 .path("retrievalContext")
                 .path("verifiedRelatedResourceSurfaces");
@@ -2373,9 +2408,11 @@ public class AgenticAuthoringLlmIntentResolverService {
                 - "Show a blocked-supplier badge in this local table" is local presentation: requiresGovernedAuthoring=false and may materialize a table edit.
                 - "Which governed supplier data can I use in a dashboard?" is a consultative catalog question: requiresGovernedAuthoring=false, operationKind "explore", artifactKind "api_catalog".
                 Never reinterpret a requested business rule as a dashboard or page merely because the selected resource exposes fields that could be visualized.
+                Set localEditorialComposition=true ONLY when the user explicitly requests a local/editorial UI or demo composition without backend API/resource/schema binding or business rules; keep it false for normal resource-backed authoring.
+                Populate semanticRefinement when refining an active semantic decision across turns (preserving resource/source while replacing artifactKind/visualIntent/chartType or adding filters/axes), otherwise set semanticRefinement to null.
                 If the requested source/component cannot be resolved with this compact evidence, set resolved=false and leave visualizationDecision null.
                 Keep assistantMessage short and natural in the user's language.
-                Always include quickReplies, clarificationQuestions, warnings, visualizationDecision, consultativeRetrievalPlan and queryConstraints fields.
+                Always include quickReplies, clarificationQuestions, warnings, visualizationDecision, consultativeRetrievalPlan, queryConstraints, localEditorialComposition and semanticRefinement fields.
 
                 Compact context:
                 %s
@@ -2664,6 +2701,11 @@ public class AgenticAuthoringLlmIntentResolverService {
         JsonNode queryConstraints = result.path("queryConstraints").isObject()
                 ? result.path("queryConstraints").deepCopy()
                 : null;
+        boolean localEditorialComposition = result.path("localEditorialComposition").asBoolean(false)
+                && !requiresGovernedAuthoring
+                && !StringUtils.hasText(selectedResourcePath);
+        AgenticAuthoringSemanticRefinement semanticRefinement =
+                semanticRefinement(result.path("semanticRefinement"));
         if ("platform_guidance".equals(semanticIntentClass)) {
             boolean tupleAlreadyConsistent = resolved
                     && "explain".equals(operationKind)
@@ -2689,6 +2731,8 @@ public class AgenticAuthoringLlmIntentResolverService {
             clarificationQuestions = List.of();
             visualizationDecision = null;
             requiresGovernedAuthoring = false;
+            localEditorialComposition = false;
+            semanticRefinement = null;
         } else if ("domain_decision_guidance".equals(semanticIntentClass)) {
             boolean tupleAlreadyConsistent = resolved
                     && "explain".equals(operationKind)
@@ -2714,6 +2758,8 @@ public class AgenticAuthoringLlmIntentResolverService {
             clarificationQuestions = List.of();
             visualizationDecision = null;
             requiresGovernedAuthoring = false;
+            localEditorialComposition = false;
+            semanticRefinement = null;
         } else if ("shared_rule_authoring".equals(semanticIntentClass)) {
             boolean tupleAlreadyConsistent = resolved
                     && ("create".equals(operationKind) || "modify".equals(operationKind))
@@ -2734,6 +2780,8 @@ public class AgenticAuthoringLlmIntentResolverService {
             changeKind = "route_shared_rule_authoring";
             visualizationDecision = null;
             requiresGovernedAuthoring = true;
+            localEditorialComposition = false;
+            semanticRefinement = null;
         } else if ("component_authoring".equals(semanticIntentClass)
                 && resolved
                 && "create".equals(operationKind)
@@ -2792,7 +2840,9 @@ public class AgenticAuthoringLlmIntentResolverService {
                 requiresGovernedAuthoring,
                 semanticIntentClass,
                 queryConstraints,
-                List.of()));
+                List.of(),
+                localEditorialComposition,
+                semanticRefinement));
     }
 
     private AgenticAuthoringVisualizationDecision normalizeVisualizationDecisionForArtifact(
@@ -2912,6 +2962,47 @@ public class AgenticAuthoringLlmIntentResolverService {
                 semanticQueries,
                 answerStrategy,
                 expectedEvidence);
+    }
+
+    private AgenticAuthoringSemanticRefinement semanticRefinement(JsonNode node) {
+        if (node == null || !node.isObject()) {
+            return null;
+        }
+        String refinementKind = text(node, "refinementKind");
+        if (refinementKind.isBlank() || "none".equalsIgnoreCase(refinementKind)) {
+            return null;
+        }
+        Map<String, String> replace = new LinkedHashMap<>();
+        JsonNode replaceNode = node.path("replace");
+        if (replaceNode.isObject()) {
+            replaceNode.fields().forEachRemaining(entry -> {
+                if (entry.getValue().isTextual() && !entry.getValue().asText().isBlank()) {
+                    replace.put(entry.getKey(), entry.getValue().asText().trim());
+                }
+            });
+        }
+        Map<String, List<String>> add = new LinkedHashMap<>();
+        JsonNode addNode = node.path("add");
+        if (addNode.isObject()) {
+            addNode.fields().forEachRemaining(entry -> {
+                List<String> values = strings(entry.getValue());
+                if (!values.isEmpty()) {
+                    add.put(entry.getKey(), values);
+                }
+            });
+        }
+        Double confidence = node.path("confidence").isNumber()
+                ? node.path("confidence").asDouble()
+                : 0.90d;
+        return new AgenticAuthoringSemanticRefinement(
+                valueOrDefault(nullableText(node, "schemaVersion"), AgenticAuthoringSemanticRefinement.SCHEMA_VERSION),
+                refinementKind,
+                strings(node.path("preserve")),
+                Map.copyOf(replace),
+                Map.copyOf(add),
+                strings(node.path("remove")),
+                valueOrDefault(nullableText(node, "rationale"), "Semantic refinement applies a governed diff to the active decision."),
+                confidence);
     }
 
     private AgenticAuthoringVisualizationDecision visualizationDecision(JsonNode node) {
@@ -3060,11 +3151,17 @@ public class AgenticAuthoringLlmIntentResolverService {
                 "unknown"));
         nullableString(properties, "assistantMessage");
         properties.putObject("requiresGovernedAuthoring").put("type", "boolean");
+        properties.putObject("localEditorialComposition")
+                .put("type", "boolean")
+                .put(
+                        "description",
+                        "True ONLY when the user explicitly requests a local/editorial UI or demo composition without backend API/resource/schema binding or business rules; false for normal resource-backed authoring.");
         arrayOfStrings(properties, "clarificationQuestions");
         arrayOfStrings(properties, "warnings");
         properties.set("visualizationDecision", visualizationDecisionSchema());
         properties.set("consultativeRetrievalPlan", consultativeRetrievalPlanSchema());
         properties.set("queryConstraints", queryConstraintsSchema());
+        properties.set("semanticRefinement", semanticRefinementSchema());
 
         ObjectNode reply = objectMapper.createObjectNode();
         reply.put("type", "object");
@@ -3105,14 +3202,67 @@ public class AgenticAuthoringLlmIntentResolverService {
                 .add("followUpKind")
                 .add("assistantMessage")
                 .add("requiresGovernedAuthoring")
+                .add("localEditorialComposition")
                 .add("visualizationDecision")
                 .add("consultativeRetrievalPlan")
                 .add("queryConstraints")
+                .add("semanticRefinement")
                 .add("quickReplies")
                 .add("clarificationQuestions")
                 .add("warnings");
         root.put("additionalProperties", false);
         return root.toString();
+    }
+
+    private ObjectNode semanticRefinementSchema() {
+        ObjectNode refinement = objectMapper.createObjectNode();
+        ArrayNode types = refinement.putArray("type");
+        types.add("object").add("null");
+        ObjectNode properties = refinement.putObject("properties");
+        properties.putObject("schemaVersion").put("type", "string");
+        stringEnum(properties, "refinementKind", List.of("visual_projection", "filtering", "data_source", "none"));
+        arrayOfStrings(properties, "preserve");
+
+        ObjectNode replace = properties.putObject("replace");
+        replace.put("type", "object");
+        ObjectNode replaceProps = replace.putObject("properties");
+        nullableString(replaceProps, "artifactKind");
+        nullableString(replaceProps, "visualIntent");
+        nullableString(replaceProps, "chartType");
+        nullableString(replaceProps, "source");
+        replace.putArray("required")
+                .add("artifactKind")
+                .add("visualIntent")
+                .add("chartType")
+                .add("source");
+        replace.put("additionalProperties", false);
+
+        ObjectNode add = properties.putObject("add");
+        add.put("type", "object");
+        ObjectNode addProps = add.putObject("properties");
+        arrayOfStrings(addProps, "filters");
+        arrayOfStrings(addProps, "axes");
+        add.putArray("required")
+                .add("filters")
+                .add("axes");
+        add.put("additionalProperties", false);
+
+        arrayOfStrings(properties, "remove");
+        properties.putObject("rationale").put("type", "string");
+        ArrayNode confidenceTypes = properties.putObject("confidence").putArray("type");
+        confidenceTypes.add("number").add("null");
+
+        refinement.putArray("required")
+                .add("schemaVersion")
+                .add("refinementKind")
+                .add("preserve")
+                .add("replace")
+                .add("add")
+                .add("remove")
+                .add("rationale")
+                .add("confidence");
+        refinement.put("additionalProperties", false);
+        return refinement;
     }
 
     private ObjectNode queryConstraintsSchema() {

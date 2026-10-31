@@ -41,11 +41,6 @@ public class AgenticAuthoringIntentResolverService {
     private final String domainCatalogServiceKey;
     private final AgenticAuthoringFormCapabilityCatalog formCapabilityCatalog = AgenticAuthoringFormCapabilityCatalog.INSTANCE;
     private final AgenticAuthoringChartCapabilityCatalog chartCapabilityCatalog = AgenticAuthoringChartCapabilityCatalog.INSTANCE;
-    private final AgenticAuthoringKeywordFallbackResolver keywordFallbackResolver =
-            new AgenticAuthoringKeywordFallbackResolver(
-                    formCapabilityCatalog,
-                    chartCapabilityCatalog);
-    private final boolean legacyKeywordFallbackEnabled;
     private final AgenticAuthoringConversationTurnOrchestrator conversationTurnOrchestrator =
             new AgenticAuthoringConversationTurnOrchestrator();
     private final AgenticAuthoringSemanticDecisionPolicy semanticDecisionPolicy =
@@ -104,24 +99,6 @@ public class AgenticAuthoringIntentResolverService {
             AgenticAuthoringComponentCapabilitiesService componentCapabilitiesService,
             String domainCatalogServiceKey,
             AgenticAuthoringDomainCatalogCandidateEnhancer domainCatalogCandidateEnhancer) {
-        this(
-                objectMapper,
-                apiMetadataCandidateCatalog,
-                llmIntentResolverService,
-                componentCapabilitiesService,
-                domainCatalogServiceKey,
-                domainCatalogCandidateEnhancer,
-                true);
-    }
-
-    public AgenticAuthoringIntentResolverService(
-            ObjectMapper objectMapper,
-            AgenticAuthoringApiMetadataCandidateCatalog apiMetadataCandidateCatalog,
-            AgenticAuthoringLlmIntentResolverService llmIntentResolverService,
-            AgenticAuthoringComponentCapabilitiesService componentCapabilitiesService,
-            String domainCatalogServiceKey,
-            AgenticAuthoringDomainCatalogCandidateEnhancer domainCatalogCandidateEnhancer,
-            boolean legacyKeywordFallbackEnabled) {
         this.objectMapper = Objects.requireNonNull(objectMapper, "objectMapper must not be null");
         this.currentPageAnalyzer = new AgenticAuthoringCurrentPageAnalyzer(objectMapper);
         this.eligibilityGate = new AgenticAuthoringCandidateEligibilityGate();
@@ -130,7 +107,6 @@ public class AgenticAuthoringIntentResolverService {
         this.componentCapabilitiesService = componentCapabilitiesService;
         this.domainCatalogServiceKey = domainCatalogServiceKey;
         this.domainCatalogCandidateEnhancer = domainCatalogCandidateEnhancer;
-        this.legacyKeywordFallbackEnabled = legacyKeywordFallbackEnabled;
         this.presentationAffordanceDiscoveryService =
                 AgenticAuthoringPresentationAffordanceDiscoveryService.defaultService(objectMapper);
         this.quickReplySupport = new AgenticAuthoringIntentQuickReplySupport(
@@ -191,10 +167,7 @@ public class AgenticAuthoringIntentResolverService {
         boolean governedResourceConfirmation = isGovernedResourceConfirmation(request, turn);
         boolean barePendingConfirmation = turn.answeredPendingClarification()
                 && isBareConfirmationPrompt(rawPrompt);
-        boolean consultativeDomainQuestion = isConsultativeDomainQuestion(rawPrompt);
-        boolean consultativePlatformCapabilityQuestion = isConsultativePlatformCapabilityQuestion(rawPrompt);
-        String effectivePrompt = (consultativeDomainQuestion
-                || (hasLlmIntentResolver && !governedResourceConfirmation && !barePendingConfirmation))
+        String effectivePrompt = (hasLlmIntentResolver && !governedResourceConfirmation && !barePendingConfirmation)
                 ? rawPrompt
                 : turn.effectivePrompt();
         String prompt = normalize(effectivePrompt);
@@ -204,18 +177,18 @@ public class AgenticAuthoringIntentResolverService {
         if (serverIssuedQuickReplyContinuation) {
             discoveryPrompt = governedContinuationDiscoveryPrompt(discoveryPrompt, activeDecision);
         }
-        AgenticAuthoringSemanticRefinement semanticRefinement = semanticRefinement(prompt, activeDecision, null);
-        boolean decisionMemoryRefinement = semanticRefinement.active();
         String effectiveSelectedWidgetKey = effectiveSelectedWidgetKey(request);
         JsonNode currentPageSummary = currentPageAnalyzer.summarize(request.currentPage(), effectiveSelectedWidgetKey);
         AgenticAuthoringTarget target = currentPageAnalyzer.resolveTarget(request.currentPage(), effectiveSelectedWidgetKey);
+        if (target == null) {
+            target = resolveStandaloneRuntimeFormValueTarget(request, effectiveSelectedWidgetKey);
+        }
         AgenticAuthoringTarget llmGroundingTarget = target == null
                 ? currentPageAnalyzer.resolveSoleComponentTarget(request.currentPage())
                 : target;
-        AgenticAuthoringKeywordFallbackResolution fallbackResolution = legacyKeywordFallback(prompt, currentPageSummary, target);
-        String operationKind = fallbackResolution.operationKind();
-        String artifactKind = fallbackResolution.artifactKind();
-        String changeKind = fallbackResolution.changeKind();
+        String operationKind = "unknown";
+        String artifactKind = "unknown";
+        String changeKind = "unknown";
         if (serverIssuedQuickReplyContinuation) {
             operationKind = valueOrUnknown(activeDecision.operationKind());
             artifactKind = valueOrUnknown(activeDecision.artifactKind());
@@ -226,16 +199,6 @@ public class AgenticAuthoringIntentResolverService {
             operationKind = contextualPreviewOperationKind(request);
             artifactKind = contextualPreviewArtifactKind(request, artifactKind);
             changeKind = valueOrDefault(jsonText(request.contextHints(), "changeKind"), changeKind);
-        }
-        if (!hasLlmIntentResolver && legacyKeywordFallbackEnabled && consultativePlatformCapabilityQuestion) {
-            operationKind = "explain";
-            artifactKind = "component";
-            changeKind = platformCapabilityChangeKind(prompt);
-        }
-        if (!hasLlmIntentResolver && legacyKeywordFallbackEnabled && consultativeDomainQuestion) {
-            operationKind = "explore";
-            artifactKind = "api_catalog";
-            changeKind = "answer_api_catalog_question";
         }
         boolean shouldResolveLlmIntent = hasLlmIntentResolver
                 && !governedResourceConfirmation
@@ -251,18 +214,32 @@ public class AgenticAuthoringIntentResolverService {
         }
         boolean hasExplicitSourceSelection =
                 !explicitResourcePath(prompt).isBlank() || isConfirmedDataSourceSelection(prompt);
+        String preLlmOperationKind = "unknown".equals(operationKind)
+                && ((semanticOrientation != null && "component_authoring".equals(valueOrDefault(semanticOrientation.semanticIntentClass(), "")))
+                || (hasMaterializableResourceDiscoveryContext(request) && hasLlmAuthoredMaterializableResourceFocus(request)))
+                ? "create"
+                : operationKind;
+        String preLlmArtifactKind = "unknown".equals(artifactKind)
+                ? (semanticOrientation != null
+                        && !valueOrDefault(semanticOrientation.artifactKind(), "").isBlank()
+                        && !"unknown".equals(semanticOrientation.artifactKind())
+                        ? semanticOrientation.artifactKind()
+                        : materializableResourceDiscoveryArtifactKind(request, artifactKind))
+                : artifactKind;
+        String preLlmChangeKind = "unknown".equals(changeKind) && "create".equals(preLlmOperationKind)
+                ? "create_artifact"
+                : changeKind;
         boolean conversationHistoryIsolatedForBlankCreate = shouldIsolateConversationHistoryForBlankCreate(
                 request,
-                operationKind,
-                artifactKind,
-                changeKind);
+                preLlmOperationKind,
+                preLlmArtifactKind,
+                preLlmChangeKind);
         AgenticAuthoringIntentResolutionRequest llmResolutionRequest = conversationHistoryIsolatedForBlankCreate
                 ? withoutConversationMessages(request)
                 : request;
         boolean deferPreLlmApiMetadataDiscovery = shouldResolveLlmIntent
                 && !hasExplicitSourceSelection
-                && !shouldProvidePreLlmApiMetadataDiscoveryContext(prompt)
-                && (consultativeDomainQuestion || consultativePlatformCapabilityQuestion || isQuestionLike(prompt));
+                && isQuestionLike(prompt);
         if (deterministicDashboardMaterialization || isExplicitDashboardMaterializationCommand(prompt)) {
             deferPreLlmApiMetadataDiscovery = false;
         }
@@ -385,8 +362,11 @@ public class AgenticAuthoringIntentResolverService {
                 candidates = withPriorityCandidate(candidates, compactTargetCandidate);
             }
         }
-        semanticRefinement = semanticRefinement(prompt, activeDecision, llmIntent);
-        decisionMemoryRefinement = semanticRefinement.active();
+        boolean primaryLlmIntentProviderFailure = isPrimaryLlmIntentProviderFailure(shouldResolveLlmIntent, llmIntent);
+        AgenticAuthoringSemanticRefinement semanticRefinement = primaryLlmIntentProviderFailure
+                ? AgenticAuthoringSemanticRefinement.none()
+                : semanticRefinement(prompt, activeDecision, llmIntent);
+        boolean decisionMemoryRefinement = semanticRefinement.active();
         JsonNode llmDiagnostics = llmDiagnostics(
                 llmResolutionRequest,
                 effectivePrompt,
@@ -407,31 +387,23 @@ public class AgenticAuthoringIntentResolverService {
         boolean llmTreatsPendingAsNewInstruction = turn.answeredPendingClarification()
                 && isLlmFollowUpKind(llmIntent, "new_instruction");
         boolean llmSecondPassUsed = false;
-        boolean primaryLlmIntentProviderFailure = isPrimaryLlmIntentProviderFailure(shouldResolveLlmIntent, llmIntent);
-        boolean deterministicFallbackApplied = legacyKeywordFallbackEnabled
-                && !shouldResolveLlmIntent
-                && !serverIssuedQuickReplyContinuation
-                || (legacyKeywordFallbackEnabled
-                && shouldResolveLlmIntent
-                && (llmIntent == null || (!llmIntent.resolved() && !primaryLlmIntentProviderFailure)));
         boolean semanticPolicyRefinedVisualProjection = false;
         boolean resourceDiscoveryAuthoringDriftNormalized = false;
         boolean resourceDiscoveryFocusSelectionApplied = false;
-        boolean visualProjectionRefinement = isVisualProjectionRefinementPrompt(prompt, turn, currentPageSummary);
-        boolean currentPageDrilldownRefinement =
-                isCurrentPageDrilldownRefinementPrompt(prompt, currentPageSummary);
+        boolean visualProjectionRefinement = !primaryLlmIntentProviderFailure
+                && isVisualProjectionRefinementPrompt(prompt, turn, currentPageSummary);
+        boolean currentPageDrilldownRefinement = !primaryLlmIntentProviderFailure
+                && isCurrentPageDrilldownRefinementPrompt(prompt, currentPageSummary);
         if (!semanticRefinement.active() && visualProjectionRefinement) {
-            semanticRefinement = visualProjectionRefinement(prompt);
+            semanticRefinement = visualProjectionRefinement(prompt, llmIntent);
         }
         if (llmTreatsPendingAsContinuation) {
             effectivePrompt = turn.effectivePrompt();
             prompt = normalize(effectivePrompt);
-            fallbackResolution = legacyKeywordFallback(prompt, currentPageSummary, target);
             if (llmIntent == null || !llmIntent.resolved()) {
-                operationKind = fallbackResolution.operationKind();
-                artifactKind = fallbackResolution.artifactKind();
-                changeKind = primaryLlmIntentProviderFailure ? "provider_error" : fallbackResolution.changeKind();
-                deterministicFallbackApplied = legacyKeywordFallbackEnabled;
+                operationKind = "unknown";
+                artifactKind = "unknown";
+                changeKind = primaryLlmIntentProviderFailure ? "provider_error" : "unknown";
             }
             candidates = usePreIntentResourceDiscoveryAsPrimaryEvidence && !contextHintCandidates(request).isEmpty()
                     ? contextHintCandidates(request)
@@ -447,12 +419,10 @@ public class AgenticAuthoringIntentResolverService {
         } else if (llmTreatsPendingAsNewInstruction) {
             effectivePrompt = rawPrompt;
             prompt = normalize(effectivePrompt);
-            fallbackResolution = legacyKeywordFallback(prompt, currentPageSummary, target);
             if (llmIntent == null || !llmIntent.resolved()) {
-                operationKind = fallbackResolution.operationKind();
-                artifactKind = fallbackResolution.artifactKind();
-                changeKind = primaryLlmIntentProviderFailure ? "provider_error" : fallbackResolution.changeKind();
-                deterministicFallbackApplied = legacyKeywordFallbackEnabled;
+                operationKind = "unknown";
+                artifactKind = "unknown";
+                changeKind = primaryLlmIntentProviderFailure ? "provider_error" : "unknown";
             }
             candidates = usePreIntentResourceDiscoveryAsPrimaryEvidence && !contextHintCandidates(request).isEmpty()
                     ? contextHintCandidates(request)
@@ -466,14 +436,6 @@ public class AgenticAuthoringIntentResolverService {
             }
             llmCandidateOptions = candidatesForLlmIntent(prompt, candidates);
         }
-        if (!primaryLlmIntentProviderFailure
-                && (llmIntent == null || !llmIntent.resolved())
-                && !hasLlmIntentResolver
-                && consultativeDomainQuestion) {
-            operationKind = "explore";
-            artifactKind = "api_catalog";
-            changeKind = "answer_api_catalog_question";
-        }
         boolean postIntentApiCatalogCandidateDiscoverySkipped = false;
         if (llmIntent != null && llmIntent.resolved()) {
             operationKind = valueOrUnknown(llmIntent.operationKind());
@@ -482,10 +444,10 @@ public class AgenticAuthoringIntentResolverService {
             boolean llmCandidateBundleHasExplicitSource = hasExplicitSourceCandidate(llmCandidateOptions);
             // Documentary refinement always runs; verified operations are preserved below only when
             // the server-reconstructed verification envelope proves them (never from candidate markers).
-            String llmResourceSearchQuery = llmCandidateBundleHasExplicitSource
-                    ? ""
-                    : consultativePlatformCapabilityQuestion
-                    && (!isDomainDataCatalogQuestion(prompt) || isConsultativeFormPolicyQuestion(prompt))
+            boolean llmPlatformGuidanceIntent = "platform_guidance".equals(llmIntent.semanticIntentClass())
+                    || ("component".equals(artifactKind)
+                            && ("explain".equals(operationKind) || "explore".equals(operationKind)));
+            String llmResourceSearchQuery = llmCandidateBundleHasExplicitSource || llmPlatformGuidanceIntent
                     ? ""
                     : consultativeResourceSearchQuery(llmIntent).trim();
             if (shouldSkipPostIntentApiCatalogCandidateDiscovery(
@@ -556,22 +518,51 @@ public class AgenticAuthoringIntentResolverService {
                         changeKind = valueOrUnknown(llmIntent.changeKind());
                     }
                 }
-            } else if (candidates.isEmpty() && !postIntentApiCatalogCandidateDiscoverySkipped) {
-                candidates = discoverCandidates(prompt, artifactKind, target, tenantId, environment);
+            } else if ((candidates.isEmpty()
+                    || (!"unknown".equals(artifactKind)
+                            && !artifactKind.equals(preLlmArtifactKind)
+                            && !usePreIntentResourceDiscoveryAsPrimaryEvidence
+                            && !selectedDomainDecisionFocus))
+                    && !postIntentApiCatalogCandidateDiscoverySkipped) {
+                List<AgenticAuthoringCandidate> discoveredForArtifact =
+                        discoverCandidates(prompt, artifactKind, target, tenantId, environment);
+                List<AgenticAuthoringCandidate> refinedCandidates = new ArrayList<>(
+                        discoveredForArtifact.isEmpty() ? candidates : discoveredForArtifact);
+                String llmSelectedPath = normalizePath(valueOrDefault(llmIntent.selectedResourcePath(), ""));
+                boolean retainGovernedCandidates = requiresGovernedAuthoring(llmIntent);
+                if (!discoveredForArtifact.isEmpty()
+                        && (retainGovernedCandidates || !llmSelectedPath.isBlank())) {
+                    Set<String> discoveredPaths = discoveredForArtifact.stream()
+                            .filter(Objects::nonNull)
+                            .map(candidate -> normalizePath(candidate.resourcePath()))
+                            .filter(path -> !path.isBlank())
+                            .collect(Collectors.toSet());
+                    candidates.stream()
+                            .filter(Objects::nonNull)
+                            .filter(candidate -> !discoveredPaths.contains(normalizePath(candidate.resourcePath())))
+                            .filter(candidate -> retainGovernedCandidates
+                                    || llmSelectedPath.equals(normalizePath(candidate.resourcePath())))
+                            .forEach(refinedCandidates::add);
+                }
+                refinedCandidates.addAll(contextHintCandidates(request));
+                candidates = deduplicateCandidates(refinedCandidates);
+                contextHintCandidate = contextHintCandidate(request, artifactKind, candidates, tenantId, environment);
+                if (contextHintCandidate != null) {
+                    candidates = withPriorityCandidate(candidates, contextHintCandidate);
+                }
+                llmCandidateOptions = candidatesForLlmIntent(prompt, candidates);
             }
         } else if (llmIntent != null) {
             if (primaryLlmIntentProviderFailure) {
                 operationKind = "unknown";
                 artifactKind = "unknown";
                 changeKind = "provider_error";
-                deterministicFallbackApplied = false;
             } else {
-                operationKind = fallbackResolution.operationKind();
-                artifactKind = fallbackResolution.artifactKind();
-                changeKind = fallbackResolution.changeKind();
-                deterministicFallbackApplied = legacyKeywordFallbackEnabled;
-                if (candidates.isEmpty()
-                        || isBroadArtifactDiscoveryOnly(candidates)) {
+                operationKind = "unknown";
+                artifactKind = "unknown";
+                changeKind = "unknown";
+                if (!usePreIntentResourceDiscoveryAsPrimaryEvidence
+                        && !selectedDomainDecisionFocus) {
                     candidates = discoverCandidates(prompt, artifactKind, target, tenantId, environment);
                     candidates = withContextHintCandidates(request, candidates);
                     contextHintCandidate = contextHintCandidate(request, artifactKind, candidates, tenantId, environment);
@@ -581,7 +572,6 @@ public class AgenticAuthoringIntentResolverService {
                 }
             }
         } else if (shouldResolveLlmIntent && !"unknown".equals(artifactKind)) {
-            deterministicFallbackApplied = legacyKeywordFallbackEnabled;
             if (candidates.isEmpty()
                     || isBroadArtifactDiscoveryOnly(candidates)) {
                 candidates = discoverCandidates(prompt, artifactKind, target, tenantId, environment);
@@ -596,7 +586,6 @@ public class AgenticAuthoringIntentResolverService {
             operationKind = contextualPreviewOperationKind(request);
             artifactKind = contextualPreviewArtifactKind(request, artifactKind);
             changeKind = valueOrDefault(jsonText(request.contextHints(), "changeKind"), changeKind);
-            deterministicFallbackApplied = false;
         }
         boolean llmRequiresGovernedAuthoring = requiresGovernedAuthoring(llmIntent);
         boolean explicitResourcePathSelectionEnabled = !explicitResourcePath(prompt).isBlank()
@@ -608,42 +597,56 @@ public class AgenticAuthoringIntentResolverService {
         if (explicitResourcePathCandidate != null) {
             candidates = withPriorityCandidate(candidates, explicitResourcePathCandidate);
         }
-        boolean explicitLocalUiComposition = isExplicitLocalUiCompositionPrompt(prompt);
-        boolean explicitLocalPageComposition = explicitLocalUiComposition
-                && isExplicitLocalPageCompositionPrompt(prompt);
+        boolean hasLlmSelectedGovernedResource = llmIntent != null
+                && llmIntent.resolved()
+                && !valueOrDefault(llmIntent.selectedResourcePath(), "").isBlank();
+        boolean explicitLocalUiComposition = !primaryLlmIntentProviderFailure
+                && !llmRequiresGovernedAuthoring
+                && !hasLlmSelectedGovernedResource
+                && llmIntent != null
+                && llmIntent.localEditorialComposition();
         boolean explicitLocalTargetedComposition = explicitLocalUiComposition
-                && (explicitLocalPageComposition || hasExplicitLocalComponentTarget(request, artifactKind));
+                && hasExplicitLocalComponentTarget(request, artifactKind);
+        boolean explicitLocalPageComposition = explicitLocalUiComposition
+                && !explicitLocalTargetedComposition
+                && ("page".equals(valueOrDefault(llmIntent.artifactKind(), ""))
+                        || "compose".equals(valueOrDefault(llmIntent.operationKind(), ""))
+                        || "api_catalog".equals(valueOrDefault(llmIntent.artifactKind(), "")));
+        explicitLocalTargetedComposition = explicitLocalUiComposition
+                && (explicitLocalPageComposition || explicitLocalTargetedComposition);
         if (explicitLocalPageComposition) {
             artifactKind = "page";
             if (!isMaterializablePageCompositionOperation(operationKind)) {
-                operationKind = materializablePageCompositionOperation(operationKind, prompt);
+                operationKind = materializablePageCompositionOperation(operationKind);
             }
-            changeKind = materializablePageCompositionChangeKind(changeKind, operationKind, prompt);
+            changeKind = materializablePageCompositionChangeKind(changeKind, operationKind, explicitLocalPageComposition);
         } else if (explicitLocalTargetedComposition) {
-            artifactKind = explicitLocalTargetedArtifactKind(request, prompt, artifactKind);
+            artifactKind = explicitLocalTargetedArtifactKind(request, artifactKind);
             if (!isMaterializablePageCompositionOperation(operationKind)) {
-                operationKind = materializablePageCompositionOperation(operationKind, prompt);
+                operationKind = materializablePageCompositionOperation(operationKind);
             }
-            changeKind = materializablePageCompositionChangeKind(changeKind, operationKind, prompt);
-        } else if (shouldPromoteTargetlessBusinessDashboardPrompt(prompt, operationKind, artifactKind, target)) {
+            changeKind = materializablePageCompositionChangeKind(changeKind, operationKind, false);
+        } else if (!primaryLlmIntentProviderFailure
+                && shouldPromoteTargetlessBusinessDashboardPrompt(prompt, operationKind, artifactKind, target)) {
             operationKind = "create";
             changeKind = businessDashboardCreationChangeKind(prompt);
         }
-        boolean dataSourceReplacementPrompt = isDataSourceReplacementPrompt(prompt)
-                && !isExplicitSourcePreservePrompt(prompt);
+        boolean dataSourceReplacementPrompt = isDataSourceRefinement(semanticRefinement);
         Optional<String> currentChartTypeModification = currentChartTypeModificationChangeKind(
                 prompt,
                 request.currentPage(),
                 dataSourceReplacementPrompt);
-        if ((legacyKeywordFallbackEnabled || (llmIntent != null && llmIntent.resolved()))
+        if (llmIntent != null
+                && llmIntent.resolved()
+                && !"modify".equals(valueOrDefault(llmIntent.operationKind(), ""))
                 && currentChartTypeModification.isPresent()) {
             operationKind = "modify";
             artifactKind = "chart";
             changeKind = currentChartTypeModification.get();
             target = currentPageAnalyzer.resolveFirstComponentTarget(request.currentPage(), "praxis-chart");
         }
-        AgenticAuthoringCandidate currentPageBoundCandidate = (visualProjectionRefinement
-                || currentPageDrilldownRefinement)
+        AgenticAuthoringCandidate currentPageBoundCandidate = !primaryLlmIntentProviderFailure
+                && (visualProjectionRefinement || currentPageDrilldownRefinement)
                 && !dataSourceReplacementPrompt
                 && !explicitLocalUiComposition
                 && !shouldDetachVisualProjectionFromCurrentResource(prompt, currentPageSummary, candidates)
@@ -670,9 +673,7 @@ public class AgenticAuthoringIntentResolverService {
             candidates = withPriorityCandidate(candidates, currentPageBoundCandidate);
             semanticPolicyRefinedVisualProjection = true;
         }
-        if (isDataSourceRefinement(semanticRefinement)
-                || ((legacyKeywordFallbackEnabled || (llmIntent != null && llmIntent.resolved()))
-                        && dataSourceReplacementPrompt)) {
+        if (!primaryLlmIntentProviderFailure && isDataSourceRefinement(semanticRefinement)) {
             operationKind = "create";
             artifactKind = refinementReplacement(semanticRefinement, "artifactKind", artifactKind);
             if ("unknown".equals(artifactKind)) {
@@ -728,19 +729,9 @@ public class AgenticAuthoringIntentResolverService {
         selectedCandidate = explicitLocalUiComposition || primaryLlmIntentProviderFailure
                 ? null
                 : selectContextHintCandidate(explicitResourcePathCandidate, candidates, selectedCandidate);
-        if (shouldSuppressWeakUnresolvedLlmSelection(
-                deterministicFallbackApplied,
-                llmIntent,
-                operationKind,
-                artifactKind,
-                selectedCandidate)) {
-            selectedCandidate = null;
-        }
         AgenticAuthoringSemanticDecisionPolicy.AgenticAuthoringSemanticDecision policyDecision =
                 semanticDecisionPolicy.apply(new AgenticAuthoringSemanticDecisionPolicy.Input(
                         prompt,
-                        rawPrompt,
-                        semanticRawPrompt(request, rawPrompt),
                         operationKind,
                         artifactKind,
                         changeKind,
@@ -770,7 +761,9 @@ public class AgenticAuthoringIntentResolverService {
                 changeKind = "create_artifact";
             }
         }
-        if ((legacyKeywordFallbackEnabled || (llmIntent != null && llmIntent.resolved()))
+        if (llmIntent != null
+                && llmIntent.resolved()
+                && !"modify".equals(valueOrDefault(llmIntent.operationKind(), ""))
                 && currentChartTypeModification.isPresent()) {
             operationKind = "modify";
             artifactKind = "chart";
@@ -779,11 +772,14 @@ public class AgenticAuthoringIntentResolverService {
                 && shouldExposeAsChartArtifact(prompt, operationKind, artifactKind, changeKind, llmIntent)) {
             artifactKind = "chart";
         }
-        AgenticAuthoringCandidate visualMaterializationCandidate = visualMaterializationCandidate(
-                prompt,
-                operationKind,
-                artifactKind,
-                candidates);
+        AgenticAuthoringCandidate visualMaterializationCandidate = !explicitLocalUiComposition
+                && !primaryLlmIntentProviderFailure
+                ? visualMaterializationCandidate(
+                        prompt,
+                        operationKind,
+                        artifactKind,
+                        candidates)
+                : null;
         if (visualMaterializationCandidate != null
                 && (selectedCandidate == null
                         || !promptMentionsSpecificCandidateToken(prompt, selectedCandidate)
@@ -793,11 +789,14 @@ public class AgenticAuthoringIntentResolverService {
             selectedCandidate = visualMaterializationCandidate;
             candidates = withPriorityCandidate(candidates, selectedCandidate);
         }
-        AgenticAuthoringCandidate analyticalRoleCandidate = analyticalRoleCandidateForComparisonPrompt(
-                prompt,
-                artifactKind,
-                selectedCandidate,
-                candidates);
+        AgenticAuthoringCandidate analyticalRoleCandidate = !explicitLocalUiComposition
+                && !primaryLlmIntentProviderFailure
+                ? analyticalRoleCandidateForComparisonPrompt(
+                        prompt,
+                        artifactKind,
+                        selectedCandidate,
+                        candidates)
+                : null;
         if (analyticalRoleCandidate != null && !sameCandidate(analyticalRoleCandidate, selectedCandidate)) {
             selectedCandidate = analyticalRoleCandidate;
             candidates = withPriorityCandidate(candidates, selectedCandidate);
@@ -820,7 +819,7 @@ public class AgenticAuthoringIntentResolverService {
             selectedCandidate = currentPageBoundCandidate;
             candidates = withPriorityCandidate(candidates, selectedCandidate);
         }
-        if (decisionMemoryRefinement) {
+        if (decisionMemoryRefinement && !primaryLlmIntentProviderFailure && !explicitLocalUiComposition) {
             String refinedArtifactKind = refinementReplacement(
                     semanticRefinement,
                     "artifactKind",
@@ -836,7 +835,7 @@ public class AgenticAuthoringIntentResolverService {
                 candidates = withPriorityCandidate(candidates, selectedCandidate);
             }
         }
-        if (serverIssuedQuickReplyContinuation) {
+        if (serverIssuedQuickReplyContinuation && !primaryLlmIntentProviderFailure) {
             operationKind = valueOrUnknown(activeDecision.operationKind());
             artifactKind = valueOrUnknown(activeDecision.artifactKind());
             changeKind = valueOrUnknown(activeDecision.changeKind());
@@ -871,7 +870,9 @@ public class AgenticAuthoringIntentResolverService {
                 operationKind,
                 artifactKind,
                 changeKind);
-        if ("praxis-chart".equals(valueOrDefault(target == null ? null : target.componentId(), ""))
+        if (!primaryLlmIntentProviderFailure
+                && !explicitLocalUiComposition
+                && "praxis-chart".equals(valueOrDefault(target == null ? null : target.componentId(), ""))
                 && chartCapabilityCatalog.resolveChangeKind(prompt)
                         .filter("set_chart_type"::equals)
                         .isPresent()) {
@@ -879,12 +880,14 @@ public class AgenticAuthoringIntentResolverService {
             artifactKind = "chart";
             changeKind = "set_chart_type";
         }
-        AgenticAuthoringCandidate currentComponentResourceCandidate = shouldPreserveCurrentComponentResource(
-                operationKind,
-                artifactKind,
-                changeKind,
-                target,
-                dataSourceReplacementPrompt)
+        AgenticAuthoringCandidate currentComponentResourceCandidate = !primaryLlmIntentProviderFailure
+                && !explicitLocalUiComposition
+                && shouldPreserveCurrentComponentResource(
+                        operationKind,
+                        artifactKind,
+                        changeKind,
+                        target,
+                        dataSourceReplacementPrompt)
                 ? targetCandidate(target)
                 : null;
         if (currentComponentResourceCandidate != null) {
@@ -900,6 +903,7 @@ public class AgenticAuthoringIntentResolverService {
             }
         }
         if (selectedCandidate == null
+                && !"api_catalog".equals(artifactKind)
                 && !explicitLocalUiComposition
                 && !primaryLlmIntentProviderFailure
                 && !unresolvedLlmWeakLexicalSelectionDeferred
@@ -942,11 +946,8 @@ public class AgenticAuthoringIntentResolverService {
                 resourceDiscoveryFocusSelectionApplied = true;
             }
         }
-        boolean isGoverned = deterministicFallbackApplied
-                ? isExplicitGovernedBusinessRulePrompt(prompt)
-                : llmRequiresGovernedAuthoring;
         if (!explicitLocalUiComposition
-                && isGoverned
+                && llmRequiresGovernedAuthoring
                 && candidates != null
                 && !candidates.isEmpty()) {
             AgenticAuthoringCandidate promptAlignedGovernedRuleCandidate =
@@ -960,7 +961,7 @@ public class AgenticAuthoringIntentResolverService {
                         candidates,
                         target,
                         operationKind,
-                        discoveryArtifactKindForPrompt(prompt, artifactKind),
+                        "unknown".equals(artifactKind) ? "form" : artifactKind,
                         prompt);
             }
             if (selectedCandidate == null) {
@@ -972,7 +973,8 @@ public class AgenticAuthoringIntentResolverService {
                 strongerGovernedOperationalCandidateForFinalSelection(prompt, artifactKind, selectedCandidate, candidates);
         if (!explicitLocalUiComposition
                 && !primaryLlmIntentProviderFailure
-                && !isExplicitGovernedBusinessRulePrompt(prompt)
+                && !llmRequiresGovernedAuthoring
+                && !"shared_rule_authoring".equals(requestedAuthoringFlow(request))
                 && finalGovernedOperationalCandidate != null
                 && selectedCandidate != null
                 && !sameCandidate(finalGovernedOperationalCandidate, selectedCandidate)
@@ -1110,25 +1112,6 @@ public class AgenticAuthoringIntentResolverService {
             llmResourceSelectionOverriddenByPromptAlignment = false;
             llmResourceSelectionOverriddenByGovernedRanking = true;
         }
-        if (!explicitLocalUiComposition
-                && !primaryLlmIntentProviderFailure
-                && deterministicFallbackApplied
-                && !"modify".equals(operationKind)
-                && selectedCandidate != null
-                && hasMaterializableResourceDiscoveryContext(request)
-                && hasBusinessDataAuthoringSignal(request, prompt)
-                && hasEvidence(selectedCandidate, "tool-search-api-resources")
-                && hasEvidence(selectedCandidate, "semantic-retrieval")
-                && hasTrustedSelectionEvidence(selectedCandidate)
-                && hasEvidence(selectedCandidate, SEMANTIC_ROLE_OPERATIONAL_RESOURCE)
-                && !isDerivedProjectionCandidate(selectedCandidate)
-                && semanticResourceNeed(prompt, materializableResourceDiscoveryArtifactKind(request, artifactKind))
-                == SemanticResourceNeed.GENERIC_OPERATIONAL) {
-            operationKind = "create";
-            artifactKind = materializableResourceDiscoveryArtifactKind(request, "page");
-            changeKind = "create_artifact";
-            resourceDiscoveryAuthoringDriftNormalized = true;
-        }
         boolean llmPlatformGuidance = llmIntent != null
                 && ("platform_guidance".equals(llmIntent.semanticIntentClass())
                         || (llmIntent.resolved()
@@ -1143,6 +1126,13 @@ public class AgenticAuthoringIntentResolverService {
         if (localHistoryUndo || llmOutOfScope) {
             selectedCandidate = null;
             candidates = List.of();
+        }
+        boolean runtimeFormValueFill = "modify".equals(operationKind)
+                && ("fill_form_values".equals(changeKind) || "runtime_form_values".equals(changeKind));
+        if (runtimeFormValueFill) {
+            AgenticAuthoringCandidate formTargetCandidate = targetCandidate(target);
+            selectedCandidate = formTargetCandidate;
+            candidates = formTargetCandidate == null ? List.of() : List.of(formTargetCandidate);
         }
         boolean platformGuidanceResourceCandidatesCleared = false;
         if (llmPlatformGuidance) {
@@ -1161,16 +1151,21 @@ public class AgenticAuthoringIntentResolverService {
             artifactKind = "unknown";
             changeKind = primaryLlmIntentProviderFailure ? "provider_error" : "needs_clarification";
             selectedCandidate = null;
-            deterministicFallbackApplied = false;
             resourceDiscoveryAuthoringDriftNormalized = false;
+            semanticRefinement = AgenticAuthoringSemanticRefinement.none();
+            decisionMemoryRefinement = false;
+            semanticPolicyRefinedVisualProjection = false;
         }
         // Validate the AI-authored focus only after canonical candidate reconciliation.
         // At this point the selection can include explicit source binding and governed
         // ranking evidence that is intentionally unavailable to the initial LLM call.
         // Applying this gate earlier would incorrectly retain a clarification state even
         // when a canonical candidate has subsequently been verified.
-        AgenticAuthoringCandidate verifiedResolvedCollection = verifiedCollectionForResolvedIntent(
-                request, llmIntent, artifactKind, candidates, tenantId, environment);
+        AgenticAuthoringCandidate verifiedResolvedCollection = !primaryLlmIntentProviderFailure
+                && !unresolvedPrimaryLlmIntent
+                ? verifiedCollectionForResolvedIntent(
+                        request, llmIntent, artifactKind, candidates, tenantId, environment)
+                : null;
         if (!explicitLocalUiComposition && verifiedResolvedCollection != null) {
             selectedCandidate = verifiedResolvedCollection;
         }
@@ -1190,7 +1185,6 @@ public class AgenticAuthoringIntentResolverService {
             artifactKind = "unknown";
             changeKind = "needs_clarification";
             selectedCandidate = null;
-            deterministicFallbackApplied = false;
         }
         changeKind = normalizeTargetlessCreationChangeKind(
                 operationKind,
@@ -1206,7 +1200,7 @@ public class AgenticAuthoringIntentResolverService {
                 candidates,
                 isManifestOwnedComponentOperation(request, changeKind, componentCapabilities));
         gate = withPromptSpecificGateMessages(gate, rawPrompt, prompt, operationKind, artifactKind, selectedCandidate, turn);
-        gate = withSharedRuleAuthoringGate(gate, request, prompt, selectedCandidate, llmRequiresGovernedAuthoring, operationKind, deterministicFallbackApplied);
+        gate = withSharedRuleAuthoringGate(gate, request, prompt, selectedCandidate, llmRequiresGovernedAuthoring, operationKind);
         gate = withExplicitLocalUiCompositionGate(gate, explicitLocalUiComposition, explicitLocalTargetedComposition);
         gate = withPrimaryLlmProviderFailureGate(gate, primaryLlmIntentProviderFailure);
         List<String> questions = clarificationQuestions(gate, operationKind, artifactKind, selectedCandidate, candidates);
@@ -1224,13 +1218,19 @@ public class AgenticAuthoringIntentResolverService {
                 gate,
                 answeredBareDomainClarification,
                 componentCapabilities);
-        if ((!hasGovernedClarificationGate(gate) || shouldUseLlmArtifactClarification(gate))
+        boolean llmAuthoredClarification = llmIntent != null
+                && !"route_required".equals(gate == null ? "" : gate.status())
+                && (!llmIntent.resolved()
+                        || (llmIntent.clarificationQuestions() != null && !llmIntent.clarificationQuestions().isEmpty())
+                        || unconfirmedAiAuthoredResourceSelection);
+        if ((!hasGovernedClarificationGate(gate) || shouldUseLlmArtifactClarification(gate) || llmAuthoredClarification)
                 && llmIntent != null
-                && (llmIntent.resolved() || unconfirmedAiAuthoredResourceSelection)
+                && (llmIntent.resolved() || llmAuthoredClarification)
                 && llmIntent.assistantMessage() != null
                 && !llmIntent.assistantMessage().isBlank()
                 && !shouldSuppressLlmAssistantMessageForExplicitLocalComposition(explicitLocalUiComposition, llmIntent)
                 && !shouldUseDeterministicCurrentComponentAssistantMessage(
+                        llmIntent,
                         operationKind,
                         artifactKind,
                         changeKind,
@@ -1244,7 +1244,7 @@ public class AgenticAuthoringIntentResolverService {
                     ? llmIntent.assistantMessage()
                     : "Não consegui confirmar a sua intenção com segurança agora. Confirme se você quer consultar dados disponíveis, criar uma tabela, montar um formulário ou gerar uma visualização.";
         }
-        if (isConsultativePlatformCapabilityQuestion(prompt)
+        if (llmPlatformGuidance
                 && shouldUsePlatformGuidanceMessage(prompt, assistantMessage)) {
             assistantMessage = platformCapabilityAssistantMessage(prompt, componentCapabilities);
         }
@@ -1299,9 +1299,7 @@ public class AgenticAuthoringIntentResolverService {
                 gate,
                 questions,
                 candidates,
-                answeredBareDomainClarification,
-                this::isConsultativePlatformCapabilityQuestion,
-                this::isApiCatalogCandidateChoicePrompt);
+                answeredBareDomainClarification);
         boolean llmAuthoredQuickRepliesUsed = quickReplySupport.shouldUseLlmAuthoredQuickReplies(
                 llmAuthoredQuickReplies,
                 gate,
@@ -1363,17 +1361,6 @@ public class AgenticAuthoringIntentResolverService {
             llmAuthoredQuickRepliesUsed = false;
             clarificationQuickRepliesRecovered = false;
         }
-        boolean governedDeterministicResolution = isGovernedDeterministicResolution(
-                deterministicFallbackApplied,
-                gate,
-                operationKind,
-                artifactKind,
-                changeKind,
-                selectedCandidate);
-        boolean keywordFallbackAppliedForGovernance =
-                deterministicFallbackApplied
-                        && !governedDeterministicResolution
-                        && !primaryLlmIntentProviderFailure;
         List<String> warnings = warnings(llmIntent);
         if (unresolvedPrimaryLlmIntent && llmIntent == null) {
             warnings = withoutWarnings(warnings, "semantic-intent-resolution-not-attempted");
@@ -1411,17 +1398,6 @@ public class AgenticAuthoringIntentResolverService {
         }
         if (llmSingleChartDecisionRejectedForOpenOperationalPrompt(prompt, llmIntent)) {
             warnings = withWarning(warnings, "llm-single-chart-decision-requires-explicit-analytical-intent");
-        }
-        if (keywordFallbackAppliedForGovernance) {
-            if (llmIntent == null) {
-                warnings = withWarning(warnings, "llm-intent-resolution-fallback-deterministic");
-            } else if (!llmIntent.resolved() && !isLlmProviderFailure(llmIntent)) {
-                warnings = withWarning(warnings, "llm-intent-resolution-unresolved-fallback-deterministic");
-            }
-            warnings = withWarning(warnings, "keyword-fallback-applied");
-            warnings = withWarning(warnings, "keyword-fallback-fail-safe-applied");
-        } else if (governedDeterministicResolution) {
-            warnings = withWarning(warnings, "governed-deterministic-resolution-applied");
         }
         if (governedResourceConfirmation) {
             warnings = withWarning(warnings, "governed-resource-confirmation-deterministic");
@@ -1541,7 +1517,7 @@ public class AgenticAuthoringIntentResolverService {
                 llmDiagnostics,
                 shouldResolveLlmIntent,
                 llmIntent,
-                keywordFallbackAppliedForGovernance,
+                false,
                 semanticPolicyRefinedVisualProjection,
                 selectedCandidate,
                 presentationCandidates);
@@ -1587,16 +1563,6 @@ public class AgenticAuthoringIntentResolverService {
                     .forEach(presentationCandidates::add);
         }
         return presentationCandidates;
-    }
-
-    private AgenticAuthoringKeywordFallbackResolution legacyKeywordFallback(
-            String prompt,
-            JsonNode currentPageSummary,
-            AgenticAuthoringTarget target) {
-        if (!legacyKeywordFallbackEnabled) {
-            return new AgenticAuthoringKeywordFallbackResolution("unknown", "unknown", "unknown");
-        }
-        return keywordFallbackResolver.resolve(prompt, currentPageSummary, target);
     }
 
     private AgenticAuthoringVisualizationDecision governedVisualizationDecision(
@@ -1733,10 +1699,16 @@ public class AgenticAuthoringIntentResolverService {
     }
 
     private boolean shouldUseDeterministicCurrentComponentAssistantMessage(
+            AgenticAuthoringLlmIntentResolution llmIntent,
             String operationKind,
             String artifactKind,
             String changeKind,
             AgenticAuthoringCandidate selectedCandidate) {
+        if (llmIntent != null
+                && llmIntent.resolved()
+                && "modify".equals(valueOrDefault(llmIntent.operationKind(), ""))) {
+            return false;
+        }
         return "modify".equals(valueOrDefault(operationKind, ""))
                 && "chart".equals(valueOrDefault(artifactKind, ""))
                 && "set_chart_type".equals(valueOrDefault(changeKind, ""))
@@ -1779,6 +1751,55 @@ public class AgenticAuthoringIntentResolverService {
             return "praxis-table";
         }
         return "";
+    }
+
+    private AgenticAuthoringTarget resolveStandaloneRuntimeFormValueTarget(
+            AgenticAuthoringIntentResolutionRequest request,
+            String effectiveSelectedWidgetKey) {
+        if (request == null || request.contextHints() == null) {
+            return null;
+        }
+        JsonNode rva = request.contextHints().path("runtimeValueAssistance");
+        if (rva == null || !rva.isObject()) {
+            return null;
+        }
+        JsonNode targetIdentity = rva.path("targetIdentity");
+        String componentId = firstNonBlank(
+                jsonText(targetIdentity, "componentId"),
+                request.targetComponentId(),
+                "praxis-dynamic-form");
+        String widgetKey = firstNonBlank(
+                effectiveSelectedWidgetKey,
+                jsonText(targetIdentity, "instanceId"),
+                jsonText(targetIdentity, "widgetKey"));
+        String resourcePath = firstNonBlank(
+                jsonText(targetIdentity, "resourcePath"),
+                jsonText(request.currentPage(), "resourcePath"),
+                jsonText(request.contextHints(), "resourcePath"));
+        if (componentId.isBlank() || (widgetKey.isBlank() && resourcePath.isBlank())) {
+            return null;
+        }
+        String schemaUrl = firstNonBlank(
+                jsonText(targetIdentity, "schemaUrl"),
+                jsonText(request.currentPage(), "schemaUrl"),
+                jsonText(request.contextHints(), "schemaUrl"));
+        String submitUrl = firstNonBlank(
+                jsonText(targetIdentity, "submitUrl"),
+                jsonText(request.currentPage(), "submitUrl"),
+                jsonText(request.contextHints(), "submitUrl"),
+                resourcePath);
+        String mode = jsonText(targetIdentity, "mode");
+        String submitMethod = firstNonBlank(
+                jsonText(targetIdentity, "submitMethod"),
+                jsonText(request.currentPage(), "submitMethod"),
+                "edit".equalsIgnoreCase(mode) ? "put" : "post");
+        return new AgenticAuthoringTarget(
+                widgetKey,
+                componentId,
+                resourcePath,
+                schemaUrl,
+                submitUrl,
+                submitMethod);
     }
 
     private AgenticAuthoringCandidate targetCandidate(AgenticAuthoringTarget target) {
@@ -1892,25 +1913,6 @@ public class AgenticAuthoringIntentResolverService {
         return titled.isEmpty() ? "Campo" : String.join(" ", titled);
     }
 
-    private boolean isDecisionMemoryRefinementPrompt(
-            String prompt,
-            AgenticAuthoringSemanticDecision activeDecision) {
-        if (activeDecision == null || activeDecision.selectedResource() == null) {
-            return false;
-        }
-        String normalized = normalize(prompt);
-        if (normalized.isBlank()) {
-            return false;
-        }
-        boolean refinementLanguage = containsAny(normalized,
-                "gostei", "prefiro", "melhor", "troca", "troque", "mude", "em vez",
-                "ao inves", "mantem", "mantenha", "preserve", "refina", "refine");
-        boolean visualLanguage = containsAny(normalized,
-                "grafico", "graficos", "chart", "charts", "dashboard", "painel",
-                "visual", "visualizacao", "indicador", "indicadores", "kpi", "kpis");
-        return refinementLanguage && visualLanguage;
-    }
-
     private boolean isServerIssuedQuickReplyContinuation(AgenticAuthoringSemanticDecision activeDecision) {
         return activeDecision != null
                 && activeDecision.constraints() != null
@@ -1997,6 +1999,9 @@ public class AgenticAuthoringIntentResolverService {
         if (activeDecision == null || activeDecision.selectedResource() == null) {
             return AgenticAuthoringSemanticRefinement.none();
         }
+        if (llmIntent != null && llmIntent.semanticRefinement() != null && llmIntent.semanticRefinement().active()) {
+            return llmIntent.semanticRefinement();
+        }
         boolean llmDataSelectionRefinement = isLlmDataSelectionRefinement(llmIntent);
         if (isResolvedComponentAuthoringIntent(llmIntent) && !llmDataSelectionRefinement) {
             return AgenticAuthoringSemanticRefinement.none();
@@ -2016,73 +2021,7 @@ public class AgenticAuthoringIntentResolverService {
                     "The AI-resolved follow-up changes the selected record subset while preserving the active governed resource.",
                     0.92d);
         }
-        String normalized = normalize(prompt);
-        String followUpKind = llmIntent == null ? "" : valueOrDefault(llmIntent.followUpKind(), "");
-        boolean refinementLanguage = containsAny(normalized,
-                "gostei", "prefiro", "melhor", "troca", "troque", "mude", "em vez",
-                "ao inves", "mantem", "mantenha", "preserve", "refina", "refine", "so muda");
-        boolean explicitPreserve = containsAny(normalized,
-                "mantem os dados", "mantenha os dados", "mantem a fonte", "mantenha a fonte",
-                "mantem o recurso", "mantenha o recurso", "mesma fonte", "mesmos dados", "preserve a fonte");
-        boolean chartRequested = containsAny(normalized,
-                "grafico", "graficos", "chart", "charts", "dashboard", "painel",
-                "visualizacao", "indicador", "indicadores", "kpi", "kpis", "pizza");
-        boolean tableRequested = containsAny(normalized,
-                "tabela", "table", "grid", "lista", "listagem");
-        boolean filterRequested = containsAny(normalized, "filtro", "filtrar", "status", "situacao");
-        if (isDataSourceReplacementPrompt(normalized) && !explicitPreserve) {
-            return new AgenticAuthoringSemanticRefinement(
-                    AgenticAuthoringSemanticRefinement.SCHEMA_VERSION,
-                    "data_source",
-                    List.of(),
-                    Map.of("source", normalized),
-                    Map.of(),
-                    List.of(),
-                    "Data-source refinement must be re-grounded by normal resource selection.",
-                    0.64d);
-        }
-        if (!refinementLanguage && !explicitPreserve) {
-            return AgenticAuthoringSemanticRefinement.none();
-        }
-        if (!chartRequested && !tableRequested && !filterRequested && !explicitPreserve) {
-            return AgenticAuthoringSemanticRefinement.none();
-        }
-        List<String> preserve = new ArrayList<>();
-        preserve.add("resource");
-        preserve.add("source");
-        if (explicitPreserve || filterRequested) {
-            preserve.add("filters");
-        }
-        Map<String, String> replace = new LinkedHashMap<>();
-        List<String> remove = new ArrayList<>();
-        if (tableRequested && !chartRequested) {
-            replace.put("artifactKind", "table");
-            replace.put("visualIntent", "table");
-            remove.add("chart");
-            remove.add("summary");
-        } else if (chartRequested) {
-            replace.put("artifactKind", "dashboard");
-            replace.put("visualIntent", "charts");
-            if (containsAny(normalized, "pizza", "pie")) {
-                replace.put("chartType", "pie");
-            }
-            remove.add("table");
-        }
-        Map<String, List<String>> add = new LinkedHashMap<>();
-        if (filterRequested) {
-            add.put("filters", containsAny(normalized, "status", "situacao")
-                    ? List.of("status")
-                    : List.of("requested-filter"));
-        }
-        return new AgenticAuthoringSemanticRefinement(
-                AgenticAuthoringSemanticRefinement.SCHEMA_VERSION,
-                filterRequested && !chartRequested && !tableRequested ? "filtering" : "visual_projection",
-                List.copyOf(preserve),
-                Map.copyOf(replace),
-                Map.copyOf(add),
-                List.copyOf(remove),
-                "Semantic refinement applies a governed diff to the active decision.",
-                explicitPreserve ? 0.90d : 0.86d);
+        return AgenticAuthoringSemanticRefinement.none();
     }
 
     private boolean isLlmDataSelectionRefinement(AgenticAuthoringLlmIntentResolution llmIntent) {
@@ -2134,7 +2073,12 @@ public class AgenticAuthoringIntentResolverService {
                 && selectedResourcePath.equals(targetResourcePath);
     }
 
-    private AgenticAuthoringSemanticRefinement visualProjectionRefinement(String prompt) {
+    private AgenticAuthoringSemanticRefinement visualProjectionRefinement(
+            String prompt,
+            AgenticAuthoringLlmIntentResolution llmIntent) {
+        if (llmIntent != null && llmIntent.semanticRefinement() != null && llmIntent.semanticRefinement().active()) {
+            return llmIntent.semanticRefinement();
+        }
         String normalized = normalize(prompt);
         Map<String, String> replace = new LinkedHashMap<>();
         List<String> remove = new ArrayList<>();
@@ -2263,23 +2207,8 @@ public class AgenticAuthoringIntentResolverService {
                 prompt, operationKind, artifactKind, candidates, contextHintCandidate);
     }
 
-    private String projectionRole(SemanticResourceNeed resourceNeed) {
-        return candidateScoringSupport.projectionRole(resourceNeed);
-    }
-
-    private int preLlmDashboardCandidateAlignmentScore(
-            String prompt,
-            String artifactKind,
-            AgenticAuthoringCandidate candidate) {
-        return candidateScoringSupport.preLlmDashboardCandidateAlignmentScore(prompt, artifactKind, candidate);
-    }
-
     private boolean promptMatchesCandidatePathIdentity(String prompt, AgenticAuthoringCandidate candidate) {
         return candidateScoringSupport.promptMatchesCandidatePathIdentity(prompt, candidate);
-    }
-
-    private boolean isStatsProjectionOperation(AgenticAuthoringCandidate candidate) {
-        return candidateScoringSupport.isStatsProjectionOperation(candidate);
     }
 
     private boolean isConcreteDashboardMaterializationPrompt(String prompt) {
@@ -2367,38 +2296,6 @@ public class AgenticAuthoringIntentResolverService {
         return contextCandidateSupport.hasResourceDiscoveryCandidate(request, candidate);
     }
 
-    private boolean isOpenBusinessSurfaceAuthoringPrompt(String prompt) {
-        String normalized = normalize(prompt);
-        boolean hasSurface = containsAny(normalized,
-                "tela",
-                "pagina",
-                "page",
-                "visao",
-                "visualizacao",
-                "view",
-                "painel",
-                "dashboard",
-                "tabela",
-                "lista",
-                "formulario");
-        boolean hasAuthoringIntent = containsAny(normalized,
-                "quero",
-                "queria",
-                "preciso",
-                "gostaria",
-                "crie",
-                "criar",
-                "monte",
-                "montar",
-                "gere",
-                "gerar");
-        return hasSurface && hasAuthoringIntent;
-    }
-
-    private boolean isBusinessDataAuthoringPrompt(String prompt) {
-        return contextCandidateSupport.isBusinessDataAuthoringPrompt(prompt);
-    }
-
     private boolean isExplicitDashboardMaterializationCommand(String prompt) {
         String normalized = normalize(prompt);
         if (!isConcreteDashboardMaterializationPrompt(normalized)) {
@@ -2425,27 +2322,6 @@ public class AgenticAuthoringIntentResolverService {
                 "construir",
                 "painel para",
                 "dashboard para");
-    }
-
-    private boolean shouldProvidePreLlmApiMetadataDiscoveryContext(String prompt) {
-        String normalized = normalize(prompt);
-        return isApiCatalogResourceListPrompt(normalized)
-                && containsAny(normalized,
-                "antes de criar",
-                "para criar",
-                "criar tabela",
-                "criar tabelas",
-                "criar formulario",
-                "criar formularios",
-                "criar formulário",
-                "criar formulários",
-                "criar dashboard",
-                "criar painel",
-                "criar grafico",
-                "criar graficos",
-                "criar gráfico",
-                "criar gráficos",
-                "criar indicadores");
     }
 
     private boolean isQuestionLike(String prompt) {
@@ -2600,6 +2476,13 @@ public class AgenticAuthoringIntentResolverService {
             return null;
         }
         trace.add("accepted:pre-intent-governed-evidence");
+        String preIntentAssistantMessage = semanticOrientation != null
+                && !valueOrDefault(semanticOrientation.assistantMessage(), "").isBlank()
+                ? semanticOrientation.assistantMessage()
+                : preIntentGovernedEvidenceAssistantMessage(artifactKind, focusedCandidate);
+        List<AgenticAuthoringQuickReply> preIntentQuickReplies = semanticOrientation == null
+                ? List.of()
+                : semanticOrientation.quickReplies();
         return new AgenticAuthoringLlmIntentResolution(
                 true,
                 "create",
@@ -2608,8 +2491,8 @@ public class AgenticAuthoringIntentResolverService {
                 focusedCandidate.resourcePath(),
                 null,
                 request.pendingClarification() != null ? "clarification_answer" : "none",
-                preIntentGovernedEvidenceAssistantMessage(artifactKind, focusedCandidate),
-                List.of(),
+                preIntentAssistantMessage,
+                preIntentQuickReplies,
                 List.of(),
                 List.of(
                         "llm-intent-resolution-satisfied-by-pre-intent-governed-evidence",
@@ -2632,27 +2515,6 @@ public class AgenticAuthoringIntentResolverService {
         return semanticOrientationReconciler.requiresAdditionalIntentResolution(semanticOrientation);
     }
 
-    private boolean requiresGovernedRelatedResourceTargetSelection(
-            AgenticAuthoringPreIntentToolPlan semanticOrientation) {
-        return semanticOrientationReconciler.requiresGovernedRelatedResourceTargetSelection(semanticOrientation);
-    }
-
-    private boolean hasPreIntentDataSelectionFilters(
-            AgenticAuthoringPreIntentToolPlan semanticOrientation) {
-        if (semanticOrientation == null || semanticOrientation.queryConstraints() == null) {
-            return false;
-        }
-        JsonNode constraints = semanticOrientation.queryConstraints();
-        return constraints.path("appliesToDataSelection").asBoolean(false)
-                && constraints.path("filters").isArray()
-                && !constraints.path("filters").isEmpty();
-    }
-
-    private boolean hasCompleteCompactResourceComposition(
-            AgenticAuthoringPreIntentToolPlan semanticOrientation) {
-        return semanticOrientationReconciler.hasCompleteCompactResourceComposition(semanticOrientation);
-    }
-
     private AgenticAuthoringLlmIntentResolution preIntentSemanticOrientationResolution(
             boolean shouldResolveLlmIntent,
             AgenticAuthoringIntentResolutionRequest request,
@@ -2671,20 +2533,6 @@ public class AgenticAuthoringIntentResolverService {
                 resolution,
                 semanticOrientation,
                 candidates);
-    }
-
-    private boolean preservesPreIntentQueryConstraints(JsonNode planned, JsonNode resolved) {
-        return semanticOrientationReconciler.preservesPreIntentQueryConstraints(planned, resolved);
-    }
-
-    private AgenticAuthoringVisualizationDecision reconcileConstrainedPrimaryComponent(
-            AgenticAuthoringLlmIntentResolution resolution,
-            AgenticAuthoringPreIntentToolPlan semanticOrientation) {
-        return semanticOrientationReconciler.reconcileConstrainedPrimaryComponent(resolution, semanticOrientation);
-    }
-
-    private boolean isCompatiblePrimaryComponent(String artifactKind, String primaryComponent) {
-        return semanticOrientationReconciler.isCompatiblePrimaryComponent(artifactKind, primaryComponent);
     }
 
     private AgenticAuthoringLlmIntentResolution failClosedForUnconfirmedAiAuthoredResourceSelection(
@@ -2736,7 +2584,9 @@ public class AgenticAuthoringIntentResolverService {
                 resolution.requiresGovernedAuthoring(),
                 resolution.semanticIntentClass(),
                 resolution.queryConstraints(),
-                resolution.providerInvocations());
+                resolution.providerInvocations(),
+                resolution.localEditorialComposition(),
+                resolution.semanticRefinement());
     }
 
     private boolean hasUnconfirmedAiAuthoredResourceFocus(
@@ -2866,7 +2716,9 @@ public class AgenticAuthoringIntentResolverService {
                 resolution.requiresGovernedAuthoring(),
                 resolution.semanticIntentClass(),
                 resolution.queryConstraints(),
-                resolution.providerInvocations());
+                resolution.providerInvocations(),
+                resolution.localEditorialComposition(),
+                resolution.semanticRefinement());
     }
 
     private AgenticAuthoringCandidate verifiedCollectionForResolvedIntent(
@@ -2933,16 +2785,6 @@ public class AgenticAuthoringIntentResolverService {
         return candidateDiscoveryTelemetrySupport.candidateEvidenceScope(candidate);
     }
 
-    private String constrainedOrientationArtifactKind(
-            AgenticAuthoringPreIntentToolPlan semanticOrientation,
-            AgenticAuthoringLlmIntentResolution resolution) {
-        return semanticOrientationReconciler.constrainedOrientationArtifactKind(semanticOrientation, resolution);
-    }
-
-    private boolean hasProgressiveGovernedDomainKnowledge(AgenticAuthoringIntentResolutionRequest request) {
-        return semanticOrientationReconciler.hasProgressiveGovernedDomainKnowledge(request);
-    }
-
     private AgenticAuthoringCandidate singleGovernedArtifactCandidate(
             AgenticAuthoringIntentResolutionRequest request,
             String artifactKind,
@@ -2956,10 +2798,6 @@ public class AgenticAuthoringIntentResolverService {
             AgenticAuthoringLlmIntentResolution resolution,
             AgenticAuthoringPreIntentToolPlan semanticOrientation) {
         return semanticOrientationReconciler.reconcilePreIntentWorkbenchOrientation(resolution, semanticOrientation);
-    }
-
-    private boolean isCanonicalCompactResourceCandidate(AgenticAuthoringCandidate candidate) {
-        return contextCandidateSupport.isCanonicalCompactResourceCandidate(candidate);
     }
 
     private boolean hasVerifiedOperationalBindingEvidence(AgenticAuthoringCandidate candidate) {
@@ -2998,11 +2836,6 @@ public class AgenticAuthoringIntentResolverService {
             List<AgenticAuthoringCandidate> candidates) {
         return contextCandidateSupport.semanticRetrievalOperationalLeadCandidate(
                 request, prompt, artifactKind, candidates);
-    }
-
-    private List<AgenticAuthoringCandidate> distinctGovernedOperationalCandidates(
-            List<AgenticAuthoringCandidate> candidates) {
-        return contextCandidateSupport.distinctGovernedOperationalCandidates(candidates);
     }
 
     private String preIntentGovernedEvidenceAssistantMessage(
@@ -3342,15 +3175,6 @@ public class AgenticAuthoringIntentResolverService {
                 request, llmIntent, candidates, selectedCandidate, artifactKind, prompt);
     }
 
-    private AgenticAuthoringCandidate strongerGovernedOperationalCandidateForLlmSelection(
-            String prompt,
-            String artifactKind,
-            AgenticAuthoringCandidate llmCandidate,
-            List<AgenticAuthoringCandidate> candidates) {
-        return contextCandidateSupport.strongerGovernedOperationalCandidateForLlmSelection(
-                prompt, artifactKind, llmCandidate, candidates);
-    }
-
     private AgenticAuthoringCandidate strongerGovernedOperationalCandidateForFinalSelection(
             String prompt,
             String artifactKind,
@@ -3378,18 +3202,6 @@ public class AgenticAuthoringIntentResolverService {
             List<AgenticAuthoringCandidate> candidates) {
         return contextCandidateSupport.domainDiscoveryScopedOperationalCandidateForResourceDiscovery(
                 request, prompt, artifactKind, selectedCandidate, candidates);
-    }
-
-    private AgenticAuthoringCandidate strongerDedicatedProjectionCandidateForSemanticNeed(
-            String prompt,
-            String artifactKind,
-            AgenticAuthoringCandidate selectedCandidate,
-            List<AgenticAuthoringCandidate> candidates) {
-        return projectionRoleResolutionSupport.strongerDedicatedProjectionCandidateForSemanticNeed(
-                prompt,
-                artifactKind,
-                selectedCandidate,
-                candidates);
     }
 
     private AgenticAuthoringCandidate strongerDedicatedProjectionCandidateForGovernedNeed(
@@ -3460,12 +3272,6 @@ public class AgenticAuthoringIntentResolverService {
                 candidates);
     }
 
-    private boolean isDomainDiscoveryScopedCandidate(
-            AgenticAuthoringIntentResolutionRequest request,
-            AgenticAuthoringCandidate candidate) {
-        return projectionRoleResolutionSupport.isDomainDiscoveryScopedCandidate(request, candidate);
-    }
-
     private AgenticAuthoringCandidate projectionResourceDiscoveryFocusedCandidate(
             AgenticAuthoringIntentResolutionRequest request,
             String prompt,
@@ -3478,16 +3284,6 @@ public class AgenticAuthoringIntentResolverService {
                 artifactKind,
                 selectedCandidate,
                 candidates);
-    }
-
-    private boolean isGroundedByResourceDiscoveryFocus(
-            AgenticAuthoringIntentResolutionRequest request,
-            AgenticAuthoringCandidate selectedCandidate,
-            List<AgenticAuthoringCandidate> rankedCandidates) {
-        return projectionRoleResolutionSupport.isGroundedByResourceDiscoveryFocus(
-                request,
-                selectedCandidate,
-                rankedCandidates);
     }
 
     private boolean shouldPreferResourceDiscoveryFocusedCandidate(
@@ -3542,47 +3338,9 @@ public class AgenticAuthoringIntentResolverService {
         return projectionRoleResolutionSupport.hasProjectionResourceDiscoveryFocus(request, artifactKind);
     }
 
-    private SemanticResourceNeed governedResourceDiscoveryNeed(
-            AgenticAuthoringIntentResolutionRequest request,
-            String prompt,
-            String artifactKind) {
-        return projectionRoleResolutionSupport.governedResourceDiscoveryNeed(request, prompt, artifactKind);
-    }
-
     private AgenticAuthoringResourceSearchFocus resourceDiscoverySearchFocus(
             AgenticAuthoringIntentResolutionRequest request) {
         return projectionRoleResolutionSupport.resourceDiscoverySearchFocus(request);
-    }
-
-    private int projectionResourceDiscoveryAlignmentScore(
-            AgenticAuthoringIntentResolutionRequest request,
-            AgenticAuthoringResourceSearchFocus focus,
-            AgenticAuthoringCandidate candidate) {
-        return projectionRoleResolutionSupport.projectionResourceDiscoveryAlignmentScore(request, focus, candidate);
-    }
-
-    private boolean hasPrimaryEntityProjectionScopeLead(
-            AgenticAuthoringResourceSearchFocus focus,
-            AgenticAuthoringCandidate focusedCandidate,
-            AgenticAuthoringCandidate selectedCandidate) {
-        return projectionRoleResolutionSupport.hasPrimaryEntityProjectionScopeLead(
-                focus,
-                focusedCandidate,
-                selectedCandidate);
-    }
-
-    private int resourceSearchFocusAlignmentScore(
-            AgenticAuthoringResourceSearchFocus focus,
-            AgenticAuthoringCandidate candidate) {
-        return projectionRoleResolutionSupport.resourceSearchFocusAlignmentScore(focus, candidate);
-    }
-
-    private boolean isDedicatedProjectionCandidate(AgenticAuthoringCandidate candidate, String projectionRole) {
-        return projectionRoleResolutionSupport.isDedicatedProjectionCandidate(candidate, projectionRole);
-    }
-
-    private boolean isMixedOperationalProjectionCandidate(AgenticAuthoringCandidate candidate, String projectionRole) {
-        return projectionRoleResolutionSupport.isMixedOperationalProjectionCandidate(candidate, projectionRole);
     }
 
     private boolean hasRoleProjectionMismatchForGenericOperation(AgenticAuthoringCandidate selectedCandidate) {
@@ -3593,12 +3351,6 @@ public class AgenticAuthoringIntentResolverService {
             String prompt,
             List<AgenticAuthoringCandidate> candidates) {
         return candidateScoringSupport.promptAlignedBusinessCandidate(prompt, candidates);
-    }
-
-    private AgenticAuthoringCandidate promptAlignedDirectSemanticCandidate(
-            String prompt,
-            List<AgenticAuthoringCandidate> candidates) {
-        return candidateScoringSupport.promptAlignedDirectSemanticCandidate(prompt, candidates);
     }
 
     private boolean sameCandidate(AgenticAuthoringCandidate left, AgenticAuthoringCandidate right) {
@@ -3674,19 +3426,6 @@ public class AgenticAuthoringIntentResolverService {
                 "drilldown")
                 ? "create_chart_drilldown"
                 : "create_artifact";
-    }
-
-    private boolean answeredResourceCandidateClarification(AgenticAuthoringConversationTurn turn) {
-        if (turn == null || !turn.answeredPendingClarification()) {
-            return false;
-        }
-        String text = normalize(String.join(" ",
-                valueOrDefault(turn.assistantMessage(), ""),
-                turn.questions() == null ? "" : String.join(" ", turn.questions())));
-        return text.contains("recurso de negocio")
-                || text.contains("fonte de dados")
-                || text.contains("alimentar esta tela")
-                || text.contains("api principal");
     }
 
     private boolean pendingClarificationMentionsDashboard(AgenticAuthoringConversationTurn turn) {
@@ -3885,10 +3624,6 @@ public class AgenticAuthoringIntentResolverService {
         return contextCandidateSupport.selectFormWriteCandidate(artifactKind, candidates, fallback, prompt);
     }
 
-    private boolean isCreateEndpointCandidate(AgenticAuthoringCandidate candidate) {
-        return contextCandidateSupport.isCreateEndpointCandidate(candidate);
-    }
-
     String semanticRawPrompt(AgenticAuthoringIntentResolutionRequest request, String rawPrompt) {
         List<AgenticAuthoringConversationMessage> messages =
                 request == null || request.conversationMessages() == null
@@ -3921,10 +3656,6 @@ public class AgenticAuthoringIntentResolverService {
         return value == null ? "" : value.trim().replaceAll("\\s+", " ");
     }
 
-    private boolean isWriteCandidate(AgenticAuthoringCandidate candidate) {
-        return contextCandidateSupport.isWriteCandidate(candidate);
-    }
-
     private List<String> warnings(AgenticAuthoringLlmIntentResolution llmIntent) {
         return candidateDiscoveryTelemetrySupport.warnings(llmIntent);
     }
@@ -3933,10 +3664,6 @@ public class AgenticAuthoringIntentResolverService {
             boolean shouldResolveLlmIntent,
             AgenticAuthoringLlmIntentResolution llmIntent) {
         return candidateDiscoveryTelemetrySupport.isPrimaryLlmIntentProviderFailure(shouldResolveLlmIntent, llmIntent);
-    }
-
-    private boolean isLlmProviderFailure(AgenticAuthoringLlmIntentResolution llmIntent) {
-        return candidateDiscoveryTelemetrySupport.isLlmProviderFailure(llmIntent);
     }
 
     private boolean hasLlmWarning(AgenticAuthoringLlmIntentResolution llmIntent, String warning) {
@@ -4005,27 +3732,6 @@ public class AgenticAuthoringIntentResolverService {
         return candidateDiscoveryTelemetrySupport.hasEvidence(candidate, evidence);
     }
 
-    private boolean isGovernedDeterministicResolution(
-            boolean deterministicFallbackApplied,
-            AgenticAuthoringGateResult gate,
-            String operationKind,
-            String artifactKind,
-            String changeKind,
-            AgenticAuthoringCandidate selectedCandidate) {
-        return candidateDiscoveryTelemetrySupport.isGovernedDeterministicResolution(
-                deterministicFallbackApplied, gate, operationKind, artifactKind, changeKind, selectedCandidate);
-    }
-
-    private boolean shouldSuppressWeakUnresolvedLlmSelection(
-            boolean deterministicFallbackApplied,
-            AgenticAuthoringLlmIntentResolution llmIntent,
-            String operationKind,
-            String artifactKind,
-            AgenticAuthoringCandidate selectedCandidate) {
-        return candidateDiscoveryTelemetrySupport.shouldSuppressWeakUnresolvedLlmSelection(
-                deterministicFallbackApplied, llmIntent, operationKind, artifactKind, selectedCandidate);
-    }
-
     private boolean shouldDeferWeakLexicalApiCatalogSelection(
             String operationKind,
             String artifactKind,
@@ -4061,10 +3767,6 @@ public class AgenticAuthoringIntentResolverService {
         return candidateDiscoveryTelemetrySupport.hasTrustedSelectionEvidence(candidate);
     }
 
-    private boolean hasStrongGroundingEvidence(AgenticAuthoringCandidate candidate) {
-        return candidateDiscoveryTelemetrySupport.hasStrongGroundingEvidence(candidate);
-    }
-
     private boolean isLlmFollowUpKind(AgenticAuthoringLlmIntentResolution llmIntent, String expected) {
         return candidateDiscoveryTelemetrySupport.isLlmFollowUpKind(llmIntent, expected);
     }
@@ -4080,20 +3782,8 @@ public class AgenticAuthoringIntentResolverService {
                 effectivePrompt, gate, assistantMessage, questions, clientTurnId, attachmentSummaries);
     }
 
-    private boolean isExplicitCreateConfirmation(String prompt) {
-        return candidateDiscoveryTelemetrySupport.isExplicitCreateConfirmation(prompt);
-    }
-
-    private boolean isConsultativePrompt(String prompt) {
-        return candidateDiscoveryTelemetrySupport.isConsultativePrompt(prompt);
-    }
-
-    private boolean isApiCatalogQuestion(String prompt) {
-        return candidateDiscoveryTelemetrySupport.isApiCatalogQuestion(prompt);
-    }
-
     private boolean isBareDomainPrompt(String prompt) {
-        return candidateDiscoveryTelemetrySupport.isBareDomainPrompt(prompt);
+        return AgenticAuthoringIntentCandidateScoringSupport.isBareDomainPrompt(prompt);
     }
 
     private List<AgenticAuthoringCandidate> discoverCandidates(
@@ -4141,10 +3831,6 @@ public class AgenticAuthoringIntentResolverService {
         return candidateDiscoveryTelemetrySupport.deduplicateCandidates(candidates);
     }
 
-    private String discoveryArtifactKindForPrompt(String prompt, String artifactKind) {
-        return candidateDiscoveryTelemetrySupport.discoveryArtifactKindForPrompt(prompt, artifactKind);
-    }
-
     private boolean hasExplicitSourceCandidate(List<AgenticAuthoringCandidate> candidates) {
         return candidateDiscoveryTelemetrySupport.hasExplicitSourceCandidate(candidates);
     }
@@ -4162,20 +3848,8 @@ public class AgenticAuthoringIntentResolverService {
         return candidateScoringSupport.rankCandidatesForDecision(candidates, artifactKind, prompt);
     }
 
-    private double semanticRoleFit(AgenticAuthoringCandidate candidate, SemanticResourceNeed resourceNeed) {
-        return candidateScoringSupport.semanticRoleFit(candidate, resourceNeed);
-    }
-
     private boolean isDerivedProjectionCandidate(AgenticAuthoringCandidate candidate) {
         return candidateScoringSupport.isDerivedProjectionCandidate(candidate);
-    }
-
-    private SemanticResourceNeed semanticResourceNeed(String prompt, String artifactKind) {
-        return candidateScoringSupport.semanticResourceNeed(prompt, artifactKind);
-    }
-
-    private int evidenceStrength(AgenticAuthoringCandidate candidate) {
-        return candidateScoringSupport.evidenceStrength(candidate);
     }
 
     private AgenticAuthoringCandidate selectCandidate(
@@ -4194,10 +3868,6 @@ public class AgenticAuthoringIntentResolverService {
             List<AgenticAuthoringCandidate> candidates) {
         return candidateScoringSupport.analyticalRoleCandidateForComparisonPrompt(
                 prompt, artifactKind, selectedCandidate, candidates);
-    }
-
-    private boolean isVisualMaterializationArtifact(String artifactKind) {
-        return candidateScoringSupport.isVisualMaterializationArtifact(artifactKind);
     }
 
     private boolean isMaterializablePageCompositionOperation(String operationId) {
@@ -4227,10 +3897,6 @@ public class AgenticAuthoringIntentResolverService {
         return candidateScoringSupport.isBroadAnalyticalCanvasPrompt(prompt);
     }
 
-    private boolean hasStrongPromptAlignment(String prompt, List<AgenticAuthoringCandidate> candidates) {
-        return candidateScoringSupport.hasStrongPromptAlignment(prompt, candidates);
-    }
-
     private boolean isDataSourceRefinement(AgenticAuthoringSemanticRefinement semanticRefinement) {
         return candidateScoringSupport.isDataSourceRefinement(semanticRefinement);
     }
@@ -4245,64 +3911,8 @@ public class AgenticAuthoringIntentResolverService {
         return candidateScoringSupport.promptAlignedGovernedRuleCandidate(prompt, candidates);
     }
 
-    private boolean canUsePromptAlignedCandidate(
-            AgenticAuthoringCandidate candidate,
-            List<AgenticAuthoringCandidate> candidates) {
-        return candidateScoringSupport.canUsePromptAlignedCandidate(candidate, candidates);
-    }
-
-    private int directPromptCandidateAlignmentScore(String prompt, AgenticAuthoringCandidate candidate) {
-        return candidateScoringSupport.directPromptCandidateAlignmentScore(prompt, candidate);
-    }
-
-    private boolean tokenMatchesCandidateText(String token, String candidateText) {
-        return candidateScoringSupport.tokenMatchesCandidateText(token, candidateText);
-    }
-
-    private int strongestPromptCandidateAlignmentScore(String prompt, List<AgenticAuthoringCandidate> candidates) {
-        return candidateScoringSupport.strongestPromptCandidateAlignmentScore(prompt, candidates);
-    }
-
-    private List<String> promptSpecificTokens(String prompt) {
-        return candidateScoringSupport.promptSpecificTokens(prompt);
-    }
-
-    private String candidateText(AgenticAuthoringCandidate candidate) {
-        return candidateScoringSupport.candidateText(candidate);
-    }
-
-    private AgenticAuthoringCandidate targetBoundCandidate(
-            AgenticAuthoringCandidate candidate,
-            AgenticAuthoringTarget target) {
-        return candidateScoringSupport.targetBoundCandidate(candidate, target);
-    }
-
-    private boolean isBroadApiCatalogResourceDiscoveryPrompt(String prompt) {
-        return candidateScoringSupport.isBroadApiCatalogResourceDiscoveryPrompt(prompt);
-    }
-
-    private boolean isSpecificApiCatalogAnswerPrompt(String prompt) {
-        return candidateScoringSupport.isSpecificApiCatalogAnswerPrompt(prompt);
-    }
-
-    private boolean isApiCatalogResourceListPrompt(String prompt) {
-        return candidateScoringSupport.isApiCatalogResourceListPrompt(prompt);
-    }
-
-    private boolean isApiCatalogCandidateChoicePrompt(String prompt) {
-        return candidateScoringSupport.isApiCatalogCandidateChoicePrompt(prompt);
-    }
-
     private boolean promptMentionsSpecificCandidateToken(String prompt, AgenticAuthoringCandidate candidate) {
         return candidateScoringSupport.promptMentionsSpecificCandidateToken(prompt, candidate);
-    }
-
-    private boolean isGenericAnalyticalCandidateToken(String token) {
-        return candidateScoringSupport.isGenericAnalyticalCandidateToken(token);
-    }
-
-    private List<String> candidatePathIdentityTokens(String normalizedPath) {
-        return candidateScoringSupport.candidatePathIdentityTokens(normalizedPath);
     }
 
     private boolean isBroadArtifactDiscoveryOnly(List<AgenticAuthoringCandidate> candidates) {
@@ -4311,14 +3921,6 @@ public class AgenticAuthoringIntentResolverService {
 
     private boolean shouldDetachCurrentTarget(String prompt, String artifactKind, AgenticAuthoringTarget target) {
         return candidateScoringSupport.shouldDetachCurrentTarget(prompt, artifactKind, target);
-    }
-
-    private boolean isDataSourceReplacementPrompt(String normalizedPrompt) {
-        return candidateScoringSupport.isDataSourceReplacementPrompt(normalizedPrompt);
-    }
-
-    private boolean isExplicitSourcePreservePrompt(String normalizedPrompt) {
-        return candidateScoringSupport.isExplicitSourcePreservePrompt(normalizedPrompt);
     }
 
     private boolean isAnalyticalComparisonPrompt(String prompt) {
@@ -4373,10 +3975,9 @@ public class AgenticAuthoringIntentResolverService {
             String prompt,
             AgenticAuthoringCandidate selectedCandidate,
             boolean llmRequiresGovernedAuthoring,
-            String operationKind,
-            boolean deterministicFallbackApplied) {
+            String operationKind) {
         return candidateScoringSupport.withSharedRuleAuthoringGate(
-                gate, request, prompt, selectedCandidate, llmRequiresGovernedAuthoring, operationKind, deterministicFallbackApplied);
+                gate, request, prompt, selectedCandidate, llmRequiresGovernedAuthoring, operationKind);
     }
 
     private AgenticAuthoringGateResult withExplicitLocalUiCompositionGate(
@@ -4408,47 +4009,24 @@ public class AgenticAuthoringIntentResolverService {
 
     private String explicitLocalTargetedArtifactKind(
             AgenticAuthoringIntentResolutionRequest request,
-            String prompt,
             String currentArtifactKind) {
-        return candidateScoringSupport.explicitLocalTargetedArtifactKind(request, prompt, currentArtifactKind);
-    }
-
-    private boolean requiresSharedRuleAuthoring(
-            AgenticAuthoringIntentResolutionRequest request,
-            String prompt,
-            AgenticAuthoringCandidate selectedCandidate,
-            boolean llmRequiresGovernedAuthoring,
-            String operationKind,
-            boolean deterministicFallbackApplied) {
-        return candidateScoringSupport.requiresSharedRuleAuthoring(
-                request, prompt, selectedCandidate, llmRequiresGovernedAuthoring, operationKind, deterministicFallbackApplied);
+        return candidateScoringSupport.explicitLocalTargetedArtifactKind(request, currentArtifactKind);
     }
 
     private boolean requiresGovernedAuthoring(AgenticAuthoringLlmIntentResolution llmIntent) {
         return candidateScoringSupport.requiresGovernedAuthoring(llmIntent);
     }
 
-    private boolean isExplicitGovernedBusinessRulePrompt(String prompt) {
-        return candidateScoringSupport.isExplicitGovernedBusinessRulePrompt(prompt);
-    }
-
-    private boolean isExplicitLocalUiCompositionPrompt(String prompt) {
-        return candidateScoringSupport.isExplicitLocalUiCompositionPrompt(prompt);
-    }
-
-    private boolean isExplicitLocalPageCompositionPrompt(String prompt) {
-        return candidateScoringSupport.isExplicitLocalPageCompositionPrompt(prompt);
-    }
-
-    private String materializablePageCompositionOperation(String fallbackOperationKind, String prompt) {
-        return candidateScoringSupport.materializablePageCompositionOperation(fallbackOperationKind, prompt);
+    private String materializablePageCompositionOperation(String fallbackOperationKind) {
+        return candidateScoringSupport.materializablePageCompositionOperation(fallbackOperationKind);
     }
 
     private String materializablePageCompositionChangeKind(
             String changeKind,
             String operationKind,
-            String prompt) {
-        return candidateScoringSupport.materializablePageCompositionChangeKind(changeKind, operationKind, prompt);
+            boolean explicitLocalPageComposition) {
+        return candidateScoringSupport.materializablePageCompositionChangeKind(
+                changeKind, operationKind, explicitLocalPageComposition);
     }
 
     private boolean shouldSuppressLlmAssistantMessageForExplicitLocalComposition(
@@ -4474,34 +4052,6 @@ public class AgenticAuthoringIntentResolverService {
             List<AgenticAuthoringCandidate> candidates) {
         return apiCatalogGuidanceSupport.clarificationQuestions(
                 gate, operationKind, artifactKind, selectedCandidate, candidates);
-    }
-
-    private boolean isConsultativeCatalogQuestion(String prompt) {
-        return apiCatalogGuidanceSupport.isConsultativeCatalogQuestion(prompt);
-    }
-
-    private boolean isConsultativeDomainQuestion(String prompt) {
-        return apiCatalogGuidanceSupport.isConsultativeDomainQuestion(prompt);
-    }
-
-    private boolean isDomainDataCatalogQuestion(String prompt) {
-        return apiCatalogGuidanceSupport.isDomainDataCatalogQuestion(prompt);
-    }
-
-    private boolean isConsultativeFormPolicyQuestion(String prompt) {
-        return apiCatalogGuidanceSupport.isConsultativeFormPolicyQuestion(prompt);
-    }
-
-    private boolean isConsultativePlatformCapabilityQuestion(String prompt) {
-        return apiCatalogGuidanceSupport.isConsultativePlatformCapabilityQuestion(prompt);
-    }
-
-    private String platformCapabilityChangeKind(String prompt) {
-        return apiCatalogGuidanceSupport.platformCapabilityChangeKind(prompt);
-    }
-
-    private boolean isConsultativeGovernanceQuestion(String prompt) {
-        return apiCatalogGuidanceSupport.isConsultativeGovernanceQuestion(prompt);
     }
 
     private String assistantMessage(
@@ -4605,36 +4155,8 @@ public class AgenticAuthoringIntentResolverService {
         return apiCatalogGuidanceSupport.apiCatalogAssistantMessage(prompt, selectedCandidate, candidates);
     }
 
-    private String apiCatalogResourceListAssistantMessage(List<AgenticAuthoringCandidate> candidates) {
-        return apiCatalogGuidanceSupport.apiCatalogResourceListAssistantMessage(candidates);
-    }
-
-    private boolean isApiOperationCatalogQuestion(String prompt) {
-        return apiCatalogGuidanceSupport.isApiOperationCatalogQuestion(prompt);
-    }
-
-    private String ambiguousResourceAssistantMessage(String artifactKind, List<AgenticAuthoringCandidate> candidates) {
-        return quickReplySupport.ambiguousResourceAssistantMessage(artifactKind, candidates);
-    }
-
-    private String missingResourceAssistantMessage(String artifactKind) {
-        return quickReplySupport.missingResourceAssistantMessage(artifactKind);
-    }
-
-    private List<AgenticAuthoringQuickReply> ensureClarificationQuickReplies(
-            String effectivePrompt,
-            boolean clarificationRequired,
-            List<AgenticAuthoringQuickReply> quickReplies) {
-        return quickReplySupport.ensureClarificationQuickReplies(
-                effectivePrompt, clarificationRequired, quickReplies);
-    }
-
     private boolean isApiCatalogQuestion(String operationKind, String artifactKind, String changeKind) {
         return quickReplySupport.isApiCatalogQuestion(operationKind, artifactKind, changeKind);
-    }
-
-    private String candidateLabel(AgenticAuthoringCandidate candidate) {
-        return quickReplySupport.candidateLabel(candidate);
     }
 
     private String sanitizePresentationText(
@@ -4646,14 +4168,6 @@ public class AgenticAuthoringIntentResolverService {
 
     private String requestedAuthoringFlow(AgenticAuthoringIntentResolutionRequest request) {
         return quickReplySupport.requestedAuthoringFlow(request);
-    }
-
-    private String formatCandidateOptions(List<AgenticAuthoringCandidate> candidates) {
-        return quickReplySupport.formatCandidateOptions(candidates);
-    }
-
-    private String humanJoin(List<String> values) {
-        return AgenticAuthoringTextNormalizationSupport.humanJoin(values);
     }
 
     private boolean containsAny(String value, String... tokens) {

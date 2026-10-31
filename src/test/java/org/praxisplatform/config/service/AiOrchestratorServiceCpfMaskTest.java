@@ -871,32 +871,6 @@ class AiOrchestratorServiceCpfMaskTest {
   }
 
   @Test
-  void isConsultativeTableGuidanceQuestionDetectsGuidanceRequestWithoutTreatingCommandsAsQuestions() {
-    Boolean guidance =
-        (Boolean)
-            ReflectionTestUtils.invokeMethod(
-                service,
-                "isConsultativeTableGuidanceQuestion",
-                "Como eu posso formatar uma data dentro da tabela dinamica? Qual voce recomenda?");
-    Boolean optionsGuidance =
-        (Boolean)
-            ReflectionTestUtils.invokeMethod(
-                service,
-                "isConsultativeTableGuidanceQuestion",
-                "Quais formatos de data voce recomenda para a coluna Data de Admissao? Mostre as opcoes para eu escolher.");
-    Boolean command =
-        (Boolean)
-            ReflectionTestUtils.invokeMethod(
-                service,
-                "isConsultativeTableGuidanceQuestion",
-                "formate a coluna admissao como data por extenso");
-
-    assertThat(guidance).isTrue();
-    assertThat(optionsGuidance).isTrue();
-    assertThat(command).isFalse();
-  }
-
-  @Test
   void inferFormatFromPromptUsesPortugueseBooleanYesNoCustomOption() throws Exception {
     List<?> options =
         List.of(
@@ -1104,56 +1078,6 @@ class AiOrchestratorServiceCpfMaskTest {
     assertThat(normalized.at("/operations/0/input/format").asText()).isEqualTo("000.000.000-00");
     assertThat(warnings)
         .contains("component-edit-plan-operation-id-normalized:set_column_format:column.format.set");
-  }
-
-  @Test
-  void computedCreationIntentIgnoresCpfMaskFormattingPrompt() throws Exception {
-    ObjectMapper mapper = new ObjectMapper();
-    AiIntentClassification intent =
-        AiIntentClassification.builder()
-            .intent("add_column_computed")
-            .category("format")
-            .targetField("cpf")
-            .needsClarification(true)
-            .build();
-    AiOrchestratorRequest request =
-        AiOrchestratorRequest.builder()
-            .componentId("praxis-table")
-            .componentType("table")
-            .userPrompt("Formate o campo CPF usando a mascara brasileira 000.000.000-00.")
-            .schemaFields(
-                mapper.readTree(
-                    """
-                    [
-                      { "name": "cpf", "type": "string" },
-                      { "name": "dataAdmissao", "type": "string", "format": "date" }
-                    ]
-                    """))
-            .build();
-    JsonNode currentState =
-        mapper.readTree(
-            """
-            {
-              "columns": [
-                { "field": "cpf", "header": "CPF", "type": "string" },
-                { "field": "dataAdmissao", "header": "Admissão", "type": "date" }
-              ]
-            }
-            """);
-
-    AiOrchestratorResponse response =
-        ReflectionTestUtils.invokeMethod(
-            service,
-            "handleComputedCreationIntent",
-            intent,
-            request,
-            currentState,
-            new ArrayList<String>(),
-            List.of(),
-            List.of(),
-            mapper.createObjectNode());
-
-    assertThat(response).isNull();
   }
 
   @Test

@@ -21,8 +21,50 @@ public record AgenticAuthoringLlmIntentResolution(
         boolean requiresGovernedAuthoring,
         String semanticIntentClass,
         JsonNode queryConstraints,
-        List<AiProviderInvocationTelemetry> providerInvocations
+        List<AiProviderInvocationTelemetry> providerInvocations,
+        boolean localEditorialComposition,
+        AgenticAuthoringSemanticRefinement semanticRefinement
 ) {
+    public AgenticAuthoringLlmIntentResolution(
+            boolean resolved,
+            String operationKind,
+            String artifactKind,
+            String changeKind,
+            String selectedResourcePath,
+            String resourceSearchQuery,
+            String followUpKind,
+            String assistantMessage,
+            List<AgenticAuthoringQuickReply> quickReplies,
+            List<String> clarificationQuestions,
+            List<String> warnings,
+            AgenticAuthoringConsultativeRetrievalPlan consultativeRetrievalPlan,
+            AgenticAuthoringVisualizationDecision visualizationDecision,
+            boolean requiresGovernedAuthoring,
+            String semanticIntentClass,
+            JsonNode queryConstraints,
+            List<AiProviderInvocationTelemetry> providerInvocations) {
+        this(
+                resolved,
+                operationKind,
+                artifactKind,
+                changeKind,
+                selectedResourcePath,
+                resourceSearchQuery,
+                followUpKind,
+                assistantMessage,
+                quickReplies,
+                clarificationQuestions,
+                warnings,
+                consultativeRetrievalPlan,
+                visualizationDecision,
+                requiresGovernedAuthoring,
+                semanticIntentClass,
+                queryConstraints,
+                providerInvocations,
+                false,
+                null);
+    }
+
     public AgenticAuthoringLlmIntentResolution(
             boolean resolved,
             String operationKind,

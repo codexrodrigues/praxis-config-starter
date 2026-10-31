@@ -40,6 +40,8 @@ import org.praxisplatform.config.ai.authoring.AgenticAuthoringGateResult;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringGenericUiCompositionPlanProvider;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringIntentResolutionResult;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringIntentResolverService;
+import org.praxisplatform.config.ai.authoring.AgenticAuthoringLlmIntentResolution;
+import org.praxisplatform.config.ai.authoring.AgenticAuthoringLlmIntentResolverService;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringPatchCompilerService;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringPlanRequest;
 import org.praxisplatform.config.ai.authoring.AgenticAuthoringPlanResult;
@@ -66,7 +68,8 @@ class AgenticAuthoringPagePreviewHttpTest {
 
     private final ObjectMapper objectMapper = new ObjectMapper();
 
-    private AgenticAuthoringIntentResolverService quickstartIntentResolver() {
+    private AgenticAuthoringIntentResolverService quickstartIntentResolver(
+            AgenticAuthoringLlmIntentResolution llmResolution) {
         ApiMetadataRepository repository = mock(ApiMetadataRepository.class);
         when(repository.findAllCandidateProjections()).thenReturn(projections(
                 new ApiMetadata(
@@ -93,9 +96,24 @@ class AgenticAuthoringPagePreviewHttpTest {
                         "[]",
                         "{}",
                         null)));
+        AgenticAuthoringLlmIntentResolverService llmIntentResolver =
+                mock(AgenticAuthoringLlmIntentResolverService.class);
+        when(llmIntentResolver.resolve(
+                any(),
+                any(),
+                any(),
+                any(),
+                any(),
+                any(),
+                any(),
+                any(),
+                any()))
+                .thenReturn(Optional.of(llmResolution));
         return new AgenticAuthoringIntentResolverService(
                 objectMapper,
-                new AgenticAuthoringApiMetadataCandidateCatalog(repository));
+                new AgenticAuthoringApiMetadataCandidateCatalog(repository),
+                llmIntentResolver,
+                new AgenticAuthoringComponentCapabilitiesService());
     }
 
     private List<ApiMetadataCandidateProjection> projections(ApiMetadata... metadata) {
@@ -503,7 +521,22 @@ class AgenticAuthoringPagePreviewHttpTest {
         MockMvc mockMvc = MockMvcBuilders.standaloneSetup(new AgenticAuthoringController(
                 mock(AgenticAuthoringDryRunService.class),
                 mock(AgenticAuthoringArtifactSource.class),
-                quickstartIntentResolver(),
+                quickstartIntentResolver(new AgenticAuthoringLlmIntentResolution(
+                        true,
+                        "create",
+                        "dashboard",
+                        "create_artifact",
+                        "/api/human-resources/vw-analytics-folha-pagamento",
+                        null,
+                        "clarification_answer",
+                        "Vou criar o dashboard com a fonte de folha de pagamento.",
+                        List.of(),
+                        List.of(),
+                        List.of(),
+                        null,
+                        null,
+                        false,
+                        "component_authoring")),
                 mock(AgenticAuthoringPlanService.class),
                 mock(AgenticAuthoringPatchCompilerService.class),
                 mock(AgenticAuthoringPreviewService.class),
@@ -550,10 +583,42 @@ class AgenticAuthoringPagePreviewHttpTest {
 
     @Test
     void intentResolutionCarriesAttachmentSummariesInPendingClarificationDiagnosticsOverHttp() throws Exception {
+        AgenticAuthoringLlmIntentResolverService llmIntentResolver =
+                mock(AgenticAuthoringLlmIntentResolverService.class);
+        when(llmIntentResolver.resolve(
+                any(),
+                any(),
+                any(),
+                any(),
+                any(),
+                any(),
+                any(),
+                any(),
+                any()))
+                .thenReturn(Optional.of(new AgenticAuthoringLlmIntentResolution(
+                        true,
+                        "create",
+                        "dashboard",
+                        "create_artifact",
+                        null,
+                        null,
+                        "none",
+                        "Qual recurso de negócio deve alimentar este dashboard?",
+                        List.of(),
+                        List.of("Qual recurso de negócio deve alimentar este dashboard?"),
+                        List.of(),
+                        null,
+                        null,
+                        false,
+                        "component_authoring")));
         MockMvc mockMvc = MockMvcBuilders.standaloneSetup(new AgenticAuthoringController(
                 mock(AgenticAuthoringDryRunService.class),
                 mock(AgenticAuthoringArtifactSource.class),
-                new AgenticAuthoringIntentResolverService(objectMapper),
+                new AgenticAuthoringIntentResolverService(
+                        objectMapper,
+                        null,
+                        llmIntentResolver,
+                        new AgenticAuthoringComponentCapabilitiesService()),
                 mock(AgenticAuthoringPlanService.class),
                 mock(AgenticAuthoringPatchCompilerService.class),
                 mock(AgenticAuthoringPreviewService.class),
@@ -600,7 +665,22 @@ class AgenticAuthoringPagePreviewHttpTest {
         MockMvc mockMvc = MockMvcBuilders.standaloneSetup(new AgenticAuthoringController(
                 mock(AgenticAuthoringDryRunService.class),
                 mock(AgenticAuthoringArtifactSource.class),
-                quickstartIntentResolver(),
+                quickstartIntentResolver(new AgenticAuthoringLlmIntentResolution(
+                        true,
+                        "create",
+                        "dashboard",
+                        "create_artifact",
+                        "/api/human-resources/vw-analytics-folha-pagamento",
+                        null,
+                        "clarification_answer",
+                        "Vou criar o dashboard com a fonte de folha de pagamento.",
+                        List.of(),
+                        List.of(),
+                        List.of(),
+                        null,
+                        null,
+                        false,
+                        "component_authoring")),
                 mock(AgenticAuthoringPlanService.class),
                 mock(AgenticAuthoringPatchCompilerService.class),
                 mock(AgenticAuthoringPreviewService.class),
@@ -655,7 +735,22 @@ class AgenticAuthoringPagePreviewHttpTest {
         MockMvc mockMvc = MockMvcBuilders.standaloneSetup(new AgenticAuthoringController(
                 mock(AgenticAuthoringDryRunService.class),
                 mock(AgenticAuthoringArtifactSource.class),
-                quickstartIntentResolver(),
+                quickstartIntentResolver(new AgenticAuthoringLlmIntentResolution(
+                        true,
+                        "explore",
+                        "dashboard",
+                        "recommend_dashboard_visualization",
+                        "/api/human-resources/vw-analytics-folha-pagamento",
+                        null,
+                        "none",
+                        "Recomendo iniciar com um painel analítico conectado a esta fonte de negócio.",
+                        List.of(),
+                        List.of("Posso criar um dashboard usando o recurso de negocio selecionado?"),
+                        List.of(),
+                        null,
+                        null,
+                        false,
+                        "component_authoring")),
                 mock(AgenticAuthoringPlanService.class),
                 mock(AgenticAuthoringPatchCompilerService.class),
                 mock(AgenticAuthoringPreviewService.class),

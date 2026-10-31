@@ -112,7 +112,7 @@ public class AgenticAuthoringPreviewMessageSynthesizerService {
             String tenantId,
             String userId,
             String environment) {
-        boolean localEditorialComposition = isLocalEditorialComposition(request, intentResolution, warnings);
+        boolean localEditorialComposition = isLocalEditorialComposition(intentResolution, warnings);
         String fallback = value(fallbackMessage);
         if (localEditorialComposition && fallback.isBlank()) {
             fallback = localEditorialPreviewMessage(valid);
@@ -250,7 +250,7 @@ public class AgenticAuthoringPreviewMessageSynthesizerService {
         root.put("previewValid", valid);
         root.put("hasValidationDetails", (failureCodes != null && !failureCodes.isEmpty())
                 || (warnings != null && !warnings.isEmpty()));
-        root.put("localEditorialComposition", isLocalEditorialComposition(request, intentResolution, warnings));
+        root.put("localEditorialComposition", isLocalEditorialComposition(intentResolution, warnings));
         if (intentResolution != null) {
             root.put("operationKind", value(intentResolution.operationKind()));
             root.put("artifactKind", value(intentResolution.artifactKind()));
@@ -285,9 +285,12 @@ public class AgenticAuthoringPreviewMessageSynthesizerService {
             return sanitizeTechnicalLanguage(value(fallback), intentResolution);
         }
         String sourceLabel = selectedResourceLabel(intentResolution);
+        String authoredLead = authoredIntentPreviewLead(intentResolution);
         if (isChartSurfaceOpenModification(intentResolution, warnings)) {
             StringBuilder message = new StringBuilder(
-                    "Configurei o grafico para abrir os detalhes da categoria selecionada em um modal.");
+                    !authoredLead.isBlank()
+                            ? authoredLead
+                            : "Configurei o grafico para abrir os detalhes da categoria selecionada em um modal.");
             if (!sourceLabel.isBlank()) {
                 message.append("\n\n- Mantive a fonte governada: ").append(sourceLabel).append(".");
             }
@@ -296,11 +299,16 @@ public class AgenticAuthoringPreviewMessageSynthesizerService {
             return sanitizeTechnicalLanguage(message.toString(), intentResolution);
         }
         String chartType = chartTypeLabel(chartType(uiCompositionPlan));
-        StringBuilder message = new StringBuilder("Atualizei o grafico selecionado");
-        if (!chartType.isBlank()) {
-            message.append(" para ").append(chartType);
+        StringBuilder message = new StringBuilder();
+        if (!authoredLead.isBlank()) {
+            message.append(authoredLead);
+        } else {
+            message.append("Atualizei o grafico selecionado");
+            if (!chartType.isBlank()) {
+                message.append(" para ").append(chartType);
+            }
+            message.append(".");
         }
-        message.append(".");
         if (!sourceLabel.isBlank()) {
             message.append("\n\n- Mantive a fonte governada: ").append(sourceLabel).append(".");
         }
@@ -486,7 +494,11 @@ public class AgenticAuthoringPreviewMessageSynthesizerService {
         }
         String sourceLabel = selectedResourceLabel(intentResolution);
         String axisLabel = singleChartAxisLabel(uiCompositionPlan);
-        StringBuilder message = new StringBuilder("Criei uma pre-visualizacao com um grafico simples.");
+        String authoredLead = authoredIntentPreviewLead(intentResolution);
+        StringBuilder message = new StringBuilder(
+                !authoredLead.isBlank()
+                        ? authoredLead
+                        : "Criei uma pre-visualizacao com um grafico simples.");
         if (!sourceLabel.isBlank()) {
             message.append("\n\n- Fonte governada: ").append(sourceLabel).append(".");
         }
@@ -552,7 +564,7 @@ public class AgenticAuthoringPreviewMessageSynthesizerService {
         if (!valid
                 || intentResolution == null
                 || intentResolution.selectedCandidate() == null
-                || isLocalEditorialComposition(request, intentResolution, warnings)
+                || isLocalEditorialComposition(intentResolution, warnings)
                 || (failureCodes != null && !failureCodes.isEmpty())
                 || !hasGovernedResolvedCandidate(intentResolution, warnings)) {
             return "";
@@ -567,11 +579,21 @@ public class AgenticAuthoringPreviewMessageSynthesizerService {
         }
         String goal = authoringGoal(request, intentResolution);
         String analyticalAxes = materializedAnalyticalAxesSummary(uiCompositionPlan);
-        StringBuilder message = new StringBuilder("Montei uma pre-visualizacao governada");
-        if (!goal.isBlank()) {
-            message.append(" para ").append(stripTrailingSentencePunctuation(lowercaseFirst(goal)));
+        StringBuilder message = new StringBuilder();
+        String authoredLead = authoredIntentPreviewLead(intentResolution);
+        if (!authoredLead.isBlank()) {
+            if (authoredLead.contains("\n- ")) {
+                return AgenticAuthoringPresentationText.assistantReply(
+                        sanitizeTechnicalLanguage(authoredLead, intentResolution));
+            }
+            message.append(authoredLead);
+        } else {
+            message.append("Montei uma pre-visualizacao governada");
+            if (!goal.isBlank()) {
+                message.append(" para ").append(stripTrailingSentencePunctuation(lowercaseFirst(goal)));
+            }
+            message.append(".");
         }
-        message.append(".");
         message.append("\n\n- Fonte governada: ").append(sourceLabel).append(".");
         message.append("\n- Materializacao: ").append(componentSummary).append(".");
         if (!analyticalAxes.isBlank()) {
@@ -580,6 +602,37 @@ public class AgenticAuthoringPreviewMessageSynthesizerService {
         message.append("\n- Validacao: usei a decisao semantica e os campos confirmados disponiveis.");
         message.append("\n- Proximo passo: revise a pre-visualizacao, peça ajustes ou salve quando estiver ok.");
         return AgenticAuthoringPresentationText.assistantReply(sanitizeTechnicalLanguage(message.toString(), intentResolution));
+    }
+
+    private String authoredIntentPreviewLead(AgenticAuthoringIntentResolutionResult intentResolution) {
+        if (intentResolution == null || intentResolution.assistantMessage() == null) {
+            return "";
+        }
+        String raw = value(intentResolution.assistantMessage());
+        if (raw.length() < 40 || raw.length() > 360 || raw.contains("?")) {
+            return "";
+        }
+        String lower = raw.toLowerCase(Locale.ROOT);
+        if (lower.startsWith("vou ")
+                || lower.startsWith("use ")
+                || lower.startsWith("posso explicar")
+                || lower.startsWith("qual ")
+                || lower.startsWith("quais ")
+                || lower.startsWith("preciso confirmar")
+                || lower.startsWith("ainda nao")
+                || lower.startsWith("ainda não")
+                || lower.startsWith("encontrei dados")
+                || lower.startsWith("montei uma pre-visualizacao")
+                || lower.startsWith("montei uma pré-visualização")
+                || lower.contains("ja apliquei")
+                || lower.contains("já apliquei")
+                || lower.contains("preenchi")
+                || lower.contains("salvei")
+                || lower.contains("/api")
+                || lower.contains("/schemas")) {
+            return "";
+        }
+        return raw;
     }
 
     private String materializedAnalyticalAxesSummary(JsonNode uiCompositionPlan) {
@@ -903,32 +956,11 @@ public class AgenticAuthoringPreviewMessageSynthesizerService {
     }
 
     private boolean isLocalEditorialComposition(
-            AgenticAuthoringPlanRequest request,
             AgenticAuthoringIntentResolutionResult intentResolution,
             List<String> warnings) {
-        if (containsWarning(warnings, "explicit-local-ui-composition-resource-selection-bypassed")
+        return containsWarning(warnings, "explicit-local-ui-composition-resource-selection-bypassed")
                 || containsWarning(intentResolution == null ? null : intentResolution.warnings(),
-                "explicit-local-ui-composition-resource-selection-bypassed")) {
-            return true;
-        }
-        if (intentResolution != null && intentResolution.selectedCandidate() != null) {
-            return false;
-        }
-        String prompt = value(request == null ? null : request.userPrompt()).toLowerCase(Locale.ROOT);
-        return (prompt.contains("conteudo local")
-                || prompt.contains("conteúdo local")
-                || prompt.contains("conteudo editorial")
-                || prompt.contains("conteúdo editorial")
-                || prompt.contains("local/editorial")
-                || prompt.contains("demonstracao")
-                || prompt.contains("demonstração"))
-                && (prompt.contains("pagina")
-                || prompt.contains("página")
-                || prompt.contains("tabs")
-                || prompt.contains("formulario")
-                || prompt.contains("formulário")
-                || prompt.contains("lista")
-                || prompt.contains("cards"));
+                "explicit-local-ui-composition-resource-selection-bypassed");
     }
 
     private boolean containsWarning(List<String> warnings, String value) {

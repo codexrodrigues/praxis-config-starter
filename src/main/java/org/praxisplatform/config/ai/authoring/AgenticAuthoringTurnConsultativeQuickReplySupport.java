@@ -228,6 +228,20 @@ final class AgenticAuthoringTurnConsultativeQuickReplySupport {
             AgenticAuthoringTurnStreamRequest request,
             JsonNode presentableCandidates,
             AgenticAuthoringConsultativeApiCatalogProjection projection) {
+        return groundedResourceDiscoveryClarificationMessage(
+                request,
+                null,
+                presentableCandidates,
+                projection,
+                true);
+    }
+
+    String groundedResourceDiscoveryClarificationMessage(
+            AgenticAuthoringTurnStreamRequest request,
+            AgenticAuthoringIntentResolutionResult intentResolution,
+            JsonNode presentableCandidates,
+            AgenticAuthoringConsultativeApiCatalogProjection projection,
+            boolean providerFailure) {
         if (presentableCandidates == null || !presentableCandidates.isArray() || presentableCandidates.isEmpty()) {
             String domainContext = domainDiscoveryContextSentence(request);
             return "A busca governada retornou candidatos preliminares, mas ainda sem evidência forte suficiente para eu destacar uma fonte. "
@@ -247,6 +261,23 @@ final class AgenticAuthoringTurnConsultativeQuickReplySupport {
         String candidateText = labels.isEmpty()
                 ? "fontes governadas compatíveis"
                 : String.join(", ", labels);
+        if (!providerFailure && intentResolution != null && StringUtils.hasText(intentResolution.assistantMessage())) {
+            String authored = intentResolution.assistantMessage().trim();
+            if (!authored.contains("/api") && !authored.contains("/schemas")) {
+                String lowerAuthored = authored.toLowerCase(Locale.ROOT);
+                boolean mentionsCandidate = labels.stream()
+                        .map(label -> label == null ? "" : label.toLowerCase(Locale.ROOT))
+                        .filter(StringUtils::hasText)
+                        .anyMatch(lowerAuthored::contains);
+                return mentionsCandidate || labels.isEmpty()
+                        ? authored
+                        : authored + " Fontes governadas disponíveis: " + candidateText + ".";
+            }
+        }
+        if (!providerFailure) {
+            return "Encontrei candidatos governados para continuar: " + candidateText + ". "
+                    + "Confirme uma fonte ou peça os campos confirmados para eu seguir com segurança.";
+        }
         return "Encontrei candidatos governados para continuar: " + candidateText + "."
                 + " Como a confirmação semântica da intenção falhou nesta tentativa, não vou materializar a tela automaticamente. "
                 + "Confirme uma fonte ou peça os campos confirmados para eu seguir com segurança.";

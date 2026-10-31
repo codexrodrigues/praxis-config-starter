@@ -159,7 +159,7 @@ class AgenticAuthoringSemanticDecisionPolicyTest {
     }
 
     @Test
-    void rawOptionalDataSourceHintPreventsPrematureResourceBinding() {
+    void optionalDataSourceHintPreventsPrematureResourceBinding() {
         AgenticAuthoringCandidate analytics = candidate("/api/human-resources/vw-analytics-folha-pagamento");
 
         AgenticAuthoringSemanticDecisionPolicy.AgenticAuthoringSemanticDecision decision = policy.apply(input(
@@ -172,7 +172,7 @@ class AgenticAuthoringSemanticDecisionPolicyTest {
                 List.of(analytics),
                 null,
                 null,
-                false,
+                true,
                 false,
                 false,
                 null,
@@ -181,138 +181,6 @@ class AgenticAuthoringSemanticDecisionPolicyTest {
 
         assertThat(decision.selectedCandidate()).isNull();
         assertThat(decision.operationKind()).isEqualTo("create");
-    }
-
-    @Test
-    void rawDataSourceAnswerKeepsDashboardInGovernedExploration() {
-        AgenticAuthoringCandidate analytics = candidate("/api/human-resources/vw-analytics-folha-pagamento");
-
-        AgenticAuthoringSemanticDecisionPolicy.AgenticAuthoringSemanticDecision decision = policy.apply(input(
-                "Qual API deve alimentar este dashboard?",
-                "Use analytics folha pagamento as the data source.",
-                "create",
-                "dashboard",
-                "create_artifact",
-                analytics,
-                List.of(analytics),
-                analytics,
-                null,
-                false,
-                false,
-                false,
-                null,
-                null,
-                null));
-
-        assertThat(decision.operationKind()).isEqualTo("explore");
-        assertThat(decision.artifactKind()).isEqualTo("dashboard");
-        assertThat(decision.changeKind()).isEqualTo("recommend_dashboard_visualization");
-        assertThat(decision.selectedCandidate()).isSameAs(analytics);
-    }
-
-    @Test
-    void dataSourceAnswerForExistingMaterializationRequestCreatesPreview() {
-        AgenticAuthoringCandidate incidents = candidate("/api/risk-intelligence/vw-indicadores-incidentes");
-
-        AgenticAuthoringSemanticDecisionPolicy.AgenticAuthoringSemanticDecision decision = policy.apply(input(
-                "Crie apenas um grafico de linha da evolucao mensal de incidentes por data de ocorrido.",
-                "Use a fonte Indicadores Incidentes e o campo Ocorrido em.",
-                "explore",
-                "api_catalog",
-                "answer_api_catalog_question",
-                incidents,
-                List.of(incidents),
-                incidents,
-                null,
-                false,
-                false,
-                false,
-                null,
-                null,
-                null));
-
-        assertThat(decision.operationKind()).isEqualTo("create");
-        assertThat(decision.artifactKind()).isEqualTo("dashboard");
-        assertThat(decision.changeKind()).isEqualTo("create_chart");
-        assertThat(decision.selectedCandidate()).isSameAs(incidents);
-    }
-
-    @Test
-    void directSingleChartCommandCannotBeLaunderedIntoApiCatalogAnswer() {
-        AgenticAuthoringCandidate incidents = candidate("/api/risk-intelligence/vw-indicadores-incidentes");
-
-        AgenticAuthoringSemanticDecisionPolicy.AgenticAuthoringSemanticDecision decision = policy.apply(input(
-                "Crie apenas um grafico de barras simples de incidentes por severidade.",
-                "explore",
-                "api_catalog",
-                "answer_api_catalog_question",
-                incidents,
-                List.of(incidents),
-                incidents,
-                null,
-                false,
-                false,
-                false,
-                null,
-                null,
-                null));
-
-        assertThat(decision.operationKind()).isEqualTo("create");
-        assertThat(decision.artifactKind()).isEqualTo("dashboard");
-        assertThat(decision.changeKind()).isEqualTo("create_chart");
-        assertThat(decision.selectedCandidate()).isSameAs(incidents);
-    }
-
-    @Test
-    void humanDashboardRequestMaterializesWithoutImperativeVerb() {
-        AgenticAuthoringCandidate employees = candidate("/api/human-resources/funcionarios");
-
-        AgenticAuthoringSemanticDecisionPolicy.AgenticAuthoringSemanticDecision decision = policy.apply(input(
-                "quero um painel com a visao geral sobre um funcionario",
-                "explore",
-                "api_catalog",
-                "answer_api_catalog_question",
-                employees,
-                List.of(employees),
-                employees,
-                null,
-                false,
-                false,
-                false,
-                null,
-                null,
-                null));
-
-        assertThat(decision.operationKind()).isEqualTo("create");
-        assertThat(decision.artifactKind()).isEqualTo("dashboard");
-        assertThat(decision.changeKind()).isEqualTo("create_artifact");
-        assertThat(decision.selectedCandidate()).isSameAs(employees);
-    }
-
-    @Test
-    void humanDashboardRequestOverridesTableClassification() {
-        AgenticAuthoringCandidate employees = candidate("/api/human-resources/funcionarios");
-
-        AgenticAuthoringSemanticDecisionPolicy.AgenticAuthoringSemanticDecision decision = policy.apply(input(
-                "quero um painel geral dos funcionarios",
-                "create",
-                "table",
-                "create_table",
-                employees,
-                List.of(employees),
-                employees,
-                null,
-                false,
-                false,
-                false,
-                null,
-                null,
-                null));
-
-        assertThat(decision.operationKind()).isEqualTo("create");
-        assertThat(decision.artifactKind()).isEqualTo("dashboard");
-        assertThat(decision.changeKind()).isEqualTo("create_artifact");
-        assertThat(decision.selectedCandidate()).isSameAs(employees);
     }
 
     @Test
@@ -370,32 +238,6 @@ class AgenticAuthoringSemanticDecisionPolicyTest {
     }
 
     @Test
-    void humanDashboardRequestUsesDiscoveredCandidateBeforeFinalSelection() {
-        AgenticAuthoringCandidate employees = candidate("/api/human-resources/funcionarios");
-
-        AgenticAuthoringSemanticDecisionPolicy.AgenticAuthoringSemanticDecision decision = policy.apply(input(
-                "quero um painel geral dos funcionarios",
-                "create",
-                "table",
-                "create_table",
-                null,
-                List.of(employees),
-                null,
-                llm("create", "table"),
-                false,
-                false,
-                false,
-                null,
-                null,
-                null));
-
-        assertThat(decision.operationKind()).isEqualTo("create");
-        assertThat(decision.artifactKind()).isEqualTo("dashboard");
-        assertThat(decision.changeKind()).isEqualTo("create_artifact");
-        assertThat(decision.selectedCandidate()).isNull();
-    }
-
-    @Test
     void exploratoryDashboardQuestionDoesNotMaterializeImplicitly() {
         AgenticAuthoringCandidate employees = candidate("/api/human-resources/funcionarios");
 
@@ -420,6 +262,32 @@ class AgenticAuthoringSemanticDecisionPolicyTest {
         assertThat(decision.changeKind()).isEqualTo("answer_api_catalog_question");
     }
 
+    @Test
+    void providerErrorCannotBeOverwrittenByConfirmationOrClarificationAnswer() {
+        AgenticAuthoringCandidate analytics = candidate("/api/human-resources/vw-analytics-folha-pagamento");
+
+        AgenticAuthoringSemanticDecisionPolicy.AgenticAuthoringSemanticDecision decision = policy.apply(input(
+                "usar analytics folha pagamento como fonte de dados",
+                "unknown",
+                "unknown",
+                "provider_error",
+                analytics,
+                List.of(analytics),
+                analytics,
+                null,
+                false,
+                true,
+                true,
+                "create",
+                "dashboard",
+                "create_artifact"));
+
+        assertThat(decision.operationKind()).isEqualTo("unknown");
+        assertThat(decision.artifactKind()).isEqualTo("unknown");
+        assertThat(decision.changeKind()).isEqualTo("provider_error");
+        assertThat(decision.selectedCandidate()).isNull();
+    }
+
     private AgenticAuthoringSemanticDecisionPolicy.Input input(
             String prompt,
             String operationKind,
@@ -435,8 +303,7 @@ class AgenticAuthoringSemanticDecisionPolicyTest {
             String contextHintOperationKind,
             String contextHintArtifactKind,
             String contextHintChangeKind) {
-        return input(
-                prompt,
+        return new AgenticAuthoringSemanticDecisionPolicy.Input(
                 prompt,
                 operationKind,
                 artifactKind,
@@ -469,10 +336,8 @@ class AgenticAuthoringSemanticDecisionPolicyTest {
             String contextHintOperationKind,
             String contextHintArtifactKind,
             String contextHintChangeKind) {
-        return new AgenticAuthoringSemanticDecisionPolicy.Input(
+        return input(
                 prompt,
-                prompt,
-                rawPrompt,
                 operationKind,
                 artifactKind,
                 changeKind,

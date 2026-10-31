@@ -258,10 +258,63 @@ export interface AiSelectedDomainDecisionRefContract {
 export interface AgenticAuthoringClientActionContract {
   schemaVersion: 'praxis-agentic-authoring-client-action.v1';
   id: string;
-  kind: 'local-undo';
+  kind: 'local-undo' | 'runtime-form-value-apply' | 'runtime-form-value-undo';
   capabilityRef: string;
   available: boolean;
   targetComponentId?: string | null;
+}
+
+export interface AgenticAuthoringRuntimeFormValueTargetIdentityContract {
+  componentId: string;
+  instanceId: string;
+  formId?: string | null;
+  resourcePath?: string | null;
+  mode: 'create' | 'edit' | 'view';
+  entityId?: string | number | null;
+  schemaHash?: string | null;
+  valueRevision: number;
+}
+
+export interface AgenticAuthoringRuntimeFormFieldAssignmentContract {
+  fieldPath: string;
+  label?: string | null;
+  proposedValue?: AiJsonValue;
+  previousValueSummary?: string | null;
+  provenance: 'synthetic-example' | 'user-prompt' | 'authorized-option-source' | 'schema-default';
+  syntheticData: boolean;
+  optionLabel?: string | null;
+  optionSourceKey?: string | null;
+  status: 'proposed' | 'applied' | 'preserved' | 'rejected';
+  reasonCode?: string | null;
+  reasonMessage?: string | null;
+}
+
+export interface AgenticAuthoringRuntimeFormValueProposalContract {
+  schemaVersion: 'praxis-runtime-form-value-proposal.v1';
+  proposalId: string;
+  targetIdentity: AgenticAuthoringRuntimeFormValueTargetIdentityContract;
+  applyMode: 'empty-only' | 'selected-fields';
+  retentionPolicy: 'standard' | 'zero';
+  syntheticExampleNotice?: string | null;
+  grounding?: AiJsonObject | null;
+  assignments: AgenticAuthoringRuntimeFormFieldAssignmentContract[];
+  rejectedFields: AgenticAuthoringRuntimeFormFieldAssignmentContract[];
+  warnings?: string[];
+  [key: string]: AiJsonValue | AgenticAuthoringRuntimeFormValueTargetIdentityContract | AgenticAuthoringRuntimeFormFieldAssignmentContract[] | undefined;
+}
+
+export interface AgenticAuthoringRuntimeValueAssistanceHintContract {
+  enabled?: boolean;
+  targetIdentity?: AgenticAuthoringRuntimeFormValueTargetIdentityContract | null;
+  retentionPolicy?: 'standard' | 'zero' | null;
+  processingAllowed?: boolean | null;
+  allowDurableThreadStorage?: boolean | null;
+  autoSaveEnabled?: boolean | null;
+  hasPendingReactiveDeterminations?: boolean | null;
+  hasPendingAsyncValidators?: boolean | null;
+  reactiveDeterminationTargets?: string[] | null;
+  governedSchema?: AiJsonObject | null;
+  [key: string]: AiJsonValue | AgenticAuthoringRuntimeFormValueTargetIdentityContract | undefined;
 }
 
 export interface AgenticAuthoringTurnStreamContextHintsContract {
@@ -269,7 +322,8 @@ export interface AgenticAuthoringTurnStreamContextHintsContract {
   selectedDomainDecisionRef?: AiSelectedDomainDecisionRefContract;
   agenticApplyTarget?: AgenticAuthoringApplyTargetContract;
   clientActions?: AgenticAuthoringClientActionContract[];
-  [key: string]: AiJsonValue | AiDomainCatalogContextHintContract | AiSelectedDomainDecisionRefContract | AgenticAuthoringApplyTargetContract | AgenticAuthoringClientActionContract[] | undefined;
+  runtimeValueAssistance?: AgenticAuthoringRuntimeValueAssistanceHintContract | null;
+  [key: string]: AiJsonValue | AiDomainCatalogContextHintContract | AiSelectedDomainDecisionRefContract | AgenticAuthoringApplyTargetContract | AgenticAuthoringClientActionContract[] | AgenticAuthoringRuntimeValueAssistanceHintContract | undefined;
 }
 
 export interface AiSchemaContextContract {
@@ -757,6 +811,7 @@ export interface AgenticAuthoringDecisionDiagnosticsContract {
 export interface AgenticAuthoringTurnResultPayloadContract {
   intentResolution?: AgenticAuthoringIntentResolutionResultContract | null;
   preview?: AgenticAuthoringPreviewResultContract | null;
+  runtimeValueProposal?: AgenticAuthoringRuntimeFormValueProposalContract | null;
   assistantMessage?: string | null;
   assistantContent?: AiJsonObject | null;
   quickReplies?: AgenticAuthoringQuickReplyContract[];
@@ -766,7 +821,7 @@ export interface AgenticAuthoringTurnResultPayloadContract {
   decisionDiagnostics?: AgenticAuthoringDecisionDiagnosticsContract | null;
   evidenceBundle?: AiJsonObject | null;
   toolLoopTrace?: AiJsonObject[] | null;
-  [key: string]: AiJsonValue | AgenticAuthoringIntentResolutionResultContract | AgenticAuthoringPreviewResultContract | AgenticAuthoringQuickReplyContract[] | AgenticAuthoringApplyTargetContract | AgenticAuthoringClientActionContract | AgenticAuthoringDecisionDiagnosticsContract | AiJsonObject[] | undefined;
+  [key: string]: AiJsonValue | AgenticAuthoringIntentResolutionResultContract | AgenticAuthoringPreviewResultContract | AgenticAuthoringRuntimeFormValueProposalContract | AgenticAuthoringQuickReplyContract[] | AgenticAuthoringApplyTargetContract | AgenticAuthoringClientActionContract | AgenticAuthoringDecisionDiagnosticsContract | AiJsonObject[] | undefined;
 }
 
 export interface AgenticAuthoringPreviewResultContract {
@@ -774,9 +829,10 @@ export interface AgenticAuthoringPreviewResultContract {
   warnings?: string[];
   minimalFormPlan?: AiJsonObject | null;
   compiledFormPatch?: AiJsonObject | null;
+  runtimeValueProposal?: AgenticAuthoringRuntimeFormValueProposalContract | null;
   uiCompositionPlan?: AiJsonObject | null;
   diagnostics?: AiJsonObject | null;
-  [key: string]: AiJsonValue | undefined;
+  [key: string]: AiJsonValue | AgenticAuthoringRuntimeFormValueProposalContract | undefined;
 }
 
 export interface AgenticAuthoringApplyRequestContract {

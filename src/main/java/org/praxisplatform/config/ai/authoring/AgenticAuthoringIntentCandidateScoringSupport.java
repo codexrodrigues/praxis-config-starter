@@ -202,10 +202,6 @@ final class AgenticAuthoringIntentCandidateScoringSupport {
         return false;
     }
 
-    boolean hasVerifiedStatsCapabilitiesOrProjection(AgenticAuthoringCandidate candidate) {
-        return hasEvidence(candidate, "stats-capabilities-verified") || isStatsProjectionOperation(candidate);
-    }
-
     boolean isStatsProjectionOperation(AgenticAuthoringCandidate candidate) {
         if (candidate == null) {
             return false;
@@ -496,6 +492,11 @@ final class AgenticAuthoringIntentCandidateScoringSupport {
                 && strongestPromptCandidateAlignmentScore(prompt, candidates) < 6) {
             return null;
         }
+        if ("api_catalog".equals(artifactKind)
+                && "explore".equals(operationKind)
+                && candidates.size() > 1) {
+            return null;
+        }
         AgenticAuthoringCandidate visualProjectionCandidate = visualMaterializationCandidate(
                 prompt,
                 operationKind,
@@ -523,17 +524,6 @@ final class AgenticAuthoringIntentCandidateScoringSupport {
         }
         if (isBroadArtifactDiscoveryOnly(candidates)) {
             return null;
-        }
-        if ("api_catalog".equals(artifactKind)
-                && "explore".equals(operationKind)
-                && isBroadApiCatalogResourceDiscoveryPrompt(prompt)) {
-            return null;
-        }
-        if ("api_catalog".equals(artifactKind)
-                && "explore".equals(operationKind)
-                && isSpecificApiCatalogAnswerPrompt(prompt)
-                && !candidates.isEmpty()) {
-            return candidates.get(0);
         }
         if (candidates.stream().allMatch(candidate ->
                 isWeakLexicalCandidate(candidate) && !hasTrustedSelectionEvidence(candidate))) {
@@ -870,9 +860,10 @@ final class AgenticAuthoringIntentCandidateScoringSupport {
         return Set.of(
                 "uma", "um", "de", "do", "da", "dos", "das", "para", "por", "com",
                 "quero", "preciso", "gostaria", "tipo", "bonito", "ver", "ve",
-                "crie", "criar", "monte", "montar", "gere", "gerar",
-                "tela", "pagina", "page", "tabela", "table", "lista", "listagem", "dashboard", "painel",
-                "grafico", "graficos", "campos", "colunas", "somente", "apenas",
+                "crie", "criar", "monte", "montar", "gere", "gerar", "usar", "use", "mostrar", "mostre",
+                "tela", "pagina", "page", "tabela", "tabelas", "table", "lista", "listagem", "dashboard", "painel",
+                "grafico", "graficos", "campos", "colunas", "filtro", "filtros", "detalhe", "detalhes",
+                "widget", "widgets", "outro", "outra", "abaixo", "acima", "somente", "apenas",
                 "regra", "regras", "poder", "posso", "pode", "podem", "ser")
                 .contains(valueOrDefault(token, ""));
     }
@@ -920,13 +911,6 @@ final class AgenticAuthoringIntentCandidateScoringSupport {
         return term.endsWith("s") && term.length() > 4 && token.equals(term.substring(0, term.length() - 1));
     }
 
-    String candidateText(AgenticAuthoringCandidate candidate) {
-        return normalize(String.join(" ",
-                valueOrDefault(candidate.resourcePath(), ""),
-                valueOrDefault(candidate.submitUrl(), ""),
-                valueOrDefault(candidate.reason(), "")));
-    }
-
     AgenticAuthoringCandidate targetBoundCandidate(
             AgenticAuthoringCandidate candidate,
             AgenticAuthoringTarget target) {
@@ -967,96 +951,6 @@ final class AgenticAuthoringIntentCandidateScoringSupport {
             return true;
         }
         return false;
-    }
-
-    boolean isBroadApiCatalogResourceDiscoveryPrompt(String prompt) {
-        String normalized = normalize(prompt);
-        if (containsAny(normalized,
-                "schema",
-                "campos",
-                "filtros",
-                "actions",
-                "acoes",
-                "ações",
-                "permite criar",
-                "permite editar",
-                "permite excluir",
-                "qual endpoint devo usar",
-                "qual api devo usar",
-                "recomendacao",
-                "recomendação")) {
-            return false;
-        }
-        return containsAny(normalized,
-                "quais apis",
-                "quais dados",
-                "quais recursos",
-                "dados disponiveis",
-                "dados disponíveis",
-                "recursos disponiveis",
-                "recursos disponíveis",
-                "fontes candidatas",
-                "areas de dados",
-                "áreas de dados",
-                "para criar graficos",
-                "para criar gráficos",
-                "para indicadores");
-    }
-
-    boolean isSpecificApiCatalogAnswerPrompt(String prompt) {
-        String normalized = normalize(prompt);
-        return containsAny(normalized,
-                "schema",
-                "campos",
-                "filtros",
-                "actions",
-                "acoes",
-                "ações",
-                "permite criar",
-                "permite editar",
-                "permite excluir",
-                "qual endpoint devo usar",
-                "qual api devo usar",
-                "recomendacao",
-                "recomendação");
-    }
-
-    boolean isApiCatalogResourceListPrompt(String prompt) {
-        String normalized = normalize(prompt);
-        return containsAny(normalized,
-                "quais dados",
-                "que dados",
-                "dados existem",
-                "dados que existem",
-                "dados existentes",
-                "dados disponiveis",
-                "dados disponíveis",
-                "o que posso consultar",
-                "posso consultar",
-                "que telas recomenda",
-                "quais telas recomenda",
-                "telas recomenda criar",
-                "quais apis",
-                "quais api",
-                "apis de",
-                "api de",
-                "quais recursos",
-                "recursos disponiveis",
-                "recursos disponíveis",
-                "fontes candidatas");
-    }
-
-    boolean isApiCatalogCandidateChoicePrompt(String prompt) {
-        String normalized = normalize(prompt);
-        return containsAny(normalized,
-                "quais apis",
-                "quais api",
-                "apis de",
-                "api de",
-                "quais recursos",
-                "recursos disponiveis",
-                "recursos disponíveis",
-                "fontes candidatas");
     }
 
     boolean isBroadAnalyticalCanvasPrompt(String prompt) {
@@ -1287,12 +1181,11 @@ final class AgenticAuthoringIntentCandidateScoringSupport {
             String prompt,
             AgenticAuthoringCandidate selectedCandidate,
             boolean llmRequiresGovernedAuthoring,
-            String operationKind,
-            boolean deterministicFallbackApplied) {
+            String operationKind) {
         if (gate == null) {
             return null;
         }
-        if (!requiresSharedRuleAuthoring(request, prompt, selectedCandidate, llmRequiresGovernedAuthoring, operationKind, deterministicFallbackApplied)) {
+        if (!requiresSharedRuleAuthoring(request, prompt, selectedCandidate, llmRequiresGovernedAuthoring, operationKind)) {
             return gate;
         }
         List<String> messages = new ArrayList<>(gate.messages());
@@ -1373,10 +1266,22 @@ final class AgenticAuthoringIntentCandidateScoringSupport {
                         && "praxis-page-builder".equals(catalogComponentId));
     }
 
+    boolean isRuntimeFormValueAssistanceOperation(
+            AgenticAuthoringIntentResolutionRequest request,
+            String changeKind) {
+        return request != null
+                && ("fill_form_values".equals(changeKind) || "runtime_form_values".equals(changeKind))
+                && request.contextHints() != null
+                && request.contextHints().path("runtimeValueAssistance").isObject();
+    }
+
     boolean isManifestOwnedComponentOperation(
             AgenticAuthoringIntentResolutionRequest request,
             String changeKind,
             AgenticAuthoringComponentCapabilitiesResult componentCapabilities) {
+        if (isRuntimeFormValueAssistanceOperation(request, changeKind)) {
+            return true;
+        }
         if (request == null
                 || request.targetComponentId() == null
                 || request.targetComponentId().isBlank()
@@ -1399,20 +1304,15 @@ final class AgenticAuthoringIntentCandidateScoringSupport {
 
     String explicitLocalTargetedArtifactKind(
             AgenticAuthoringIntentResolutionRequest request,
-            String prompt,
             String currentArtifactKind) {
-        String normalizedComponent = normalize(valueOrDefault(request.targetComponentId(), ""));
-        String normalizedPrompt = normalize(prompt);
-        if (containsAny(normalizedComponent, "table", "tabela")
-                || containsAny(normalizedPrompt, "tabela", "table", "crud", "coluna", "colunas")) {
+        String normalizedComponent = normalize(valueOrDefault(request == null ? null : request.targetComponentId(), ""));
+        if (containsAny(normalizedComponent, "table", "tabela", "crud")) {
             return "table";
         }
-        if (containsAny(normalizedComponent, "form", "formulario")
-                || containsAny(normalizedPrompt, "formulario", "form", "campo", "campos")) {
+        if (containsAny(normalizedComponent, "form", "formulario")) {
             return "form";
         }
-        if (containsAny(normalizedComponent, "list", "lista")
-                || containsAny(normalizedPrompt, "lista", "list", "cards")) {
+        if (containsAny(normalizedComponent, "list", "lista")) {
             return "list";
         }
         if ("form".equals(currentArtifactKind)
@@ -1429,162 +1329,31 @@ final class AgenticAuthoringIntentCandidateScoringSupport {
             String prompt,
             AgenticAuthoringCandidate selectedCandidate,
             boolean llmRequiresGovernedAuthoring,
-            String operationKind,
-            boolean deterministicFallbackApplied) {
+            String operationKind) {
         if ("explore".equals(operationKind) || "explain".equals(operationKind) || "unknown".equals(operationKind)) {
             return false;
         }
         String requestedFlow = quickReplySupport.requestedAuthoringFlow(request);
-        if ("shared_rule_authoring".equals(requestedFlow) && !isExplicitLocalUiCompositionPrompt(prompt)) {
+        if ("shared_rule_authoring".equals(requestedFlow)) {
             return selectedCandidate != null;
         }
-        boolean requiresAuthoring = deterministicFallbackApplied
-                ? (llmRequiresGovernedAuthoring || isExplicitGovernedBusinessRulePrompt(prompt))
-                : llmRequiresGovernedAuthoring;
-        return selectedCandidate != null && requiresAuthoring;
+        return selectedCandidate != null && llmRequiresGovernedAuthoring;
     }
 
     boolean requiresGovernedAuthoring(AgenticAuthoringLlmIntentResolution llmIntent) {
         return llmIntent != null && llmIntent.requiresGovernedAuthoring();
     }
 
-    boolean isExplicitGovernedBusinessRulePrompt(String prompt) {
-        String normalized = normalize(prompt);
-        if (normalized.isBlank() || isExplicitLocalUiCompositionPrompt(prompt)) {
-            return false;
-        }
-        boolean isQuestion = normalized.endsWith("?")
-                || normalized.matches("^(por\\s+favor\\s*,?\\s*|gostaria\\s+de\\s+(saber|entender|verificar)\\s+(se\\s+)?|(quero|preciso)\\s+saber\\s+(se\\s+)?|me\\s+diga\\s+(se\\s+)?|(voce\\s+)?sabe\\s+se\\s+|saber\\s+se\\s+)?(como|por\\s+que|porque|existe|existem|ha|há|tem|quais|qual|o\\s+que)\\b.*");
-        if (isQuestion) {
-            return false;
-        }
-        boolean isVisualRequest = containsAny(normalized,
-                "regra visual", "regras visuais",
-                "formatacao visual", "destaque visual",
-                "estilo visual", "estilos visuais",
-                "cor de fundo", "cor da linha", "cores das linhas",
-                "pintar a linha", "pintar as linhas", "pintar de",
-                "destacar a linha", "destacar as linhas",
-                "estilo", "estilos", "css");
-        if (isVisualRequest) {
-            return false;
-        }
-        boolean ruleAuthoring = containsAny(normalized,
-                "regra", "regras",
-                "politica", "policy",
-                "validacao", "validar", "valide",
-                "aprovacao", "aprovar",
-                "governada", "governado", "governanca", "governance",
-                "compliance", "lgpd", "gdpr",
-                "elegibilidade", "eligibility");
-        boolean businessConstraint = containsAny(normalized,
-                "nao pode", "nao deve", "impedir", "impeca",
-                "bloqueado", "bloqueada", "blocked",
-                "inativo", "inactive",
-                "obrigatorio", "obrigatoria", "obrigatorios", "obrigatorias",
-                "exigir", "exija", "require",
-                "antes de salvar", "antes de seguir",
-                "selecionado", "selecionada", "selecionavel", "selecionavel",
-                "mascarar", "mascare", "dados sensiveis", "privacidade");
-        return ruleAuthoring && businessConstraint;
-    }
-
-    boolean isExplicitLocalUiCompositionPrompt(String prompt) {
-        String normalized = normalize(prompt);
-        if (normalized.isBlank()) {
-            return false;
-        }
-        boolean localDemoIntent = containsAny(normalized,
-                "conteudo local",
-                "conteudo editorial",
-                "editorial local",
-                "local/editorial",
-                "dados locais",
-                "local data",
-                "demo",
-                "demonstracao",
-                "demonstracao",
-                "exemplo",
-                "exemplos",
-                "sem dependencia de api",
-                "sem api real",
-                "sem schema externo",
-                "sem conectar dados",
-                "sem conectar api",
-                "sem conectar api real",
-                "nao conecte api",
-                "nao conecte api real",
-                "nao conectar api",
-                "nao conectar api real",
-                "nao use api real",
-                "nao usar api real",
-                "nao descubra fonte",
-                "nao descubra fonte de dados",
-                "nao descobrir fonte",
-                "nao descobrir fonte de dados",
-                "sem regra de negocio",
-                "sem criar regra",
-                "sem criar regra de negocio",
-                "without business rule",
-                "without creating business rule");
-        boolean uiCompositionIntent = containsAny(normalized,
-                "pagina",
-                "page",
-                "aba",
-                "abas",
-                "tab",
-                "tabs",
-                "formulario",
-                "form",
-                "lista",
-                "list",
-                "cards",
-                "dashboard",
-                "widget",
-                "componente",
-                "component",
-                "tabela",
-                "table",
-                "crud",
-                "coluna",
-                "colunas",
-                "column",
-                "columns",
-                "acao",
-                "acoes",
-                "action",
-                "actions");
-        return localDemoIntent && uiCompositionIntent;
-    }
-
-    boolean isExplicitLocalPageCompositionPrompt(String prompt) {
-        String normalized = normalize(prompt);
-        if (normalized.isBlank()) {
-            return false;
-        }
-        boolean tabbedWorkspaceIntent = containsAny(normalized, "pagina", "page", "aba", "abas", "tab", "tabs")
-                && containsAny(normalized, "crud", "registros", "formulario", "form", "relacionamento", "relacionamentos",
-                "comentario", "comentarios", "lista", "list", "cards");
-        boolean refinementIntent = containsAny(normalized,
-                "refine", "refinar", "adicione", "adicionar", "inclua", "incluir",
-                "ajuste", "ajustar", "preencha", "preencher", "complete", "completar",
-                "corrija", "corrigir", "preserve", "preservar", "manter", "mantendo", "continue");
-        return tabbedWorkspaceIntent && (refinementIntent || containsAny(normalized, "pagina", "page"));
-    }
-
     boolean isMaterializablePageCompositionOperation(String operationKind) {
         return "create".equals(operationKind) || "modify".equals(operationKind) || "remove".equals(operationKind);
     }
 
-    String materializablePageCompositionOperation(String fallbackOperationKind, String prompt) {
-        String normalized = normalize(prompt);
-        if (containsAny(normalized, "refine", "refinar", "adicione", "adicionar", "inclua", "incluir",
-                "ajuste", "ajustar", "preencha", "preencher", "complete", "completar",
-                "corrija", "corrigir", "preserve", "preservar", "manter", "mantendo", "continue")) {
-            return "modify";
-        }
+    String materializablePageCompositionOperation(String fallbackOperationKind) {
         if (isMaterializablePageCompositionOperation(fallbackOperationKind)) {
             return fallbackOperationKind;
+        }
+        if ("compose".equals(fallbackOperationKind) || "explore".equals(fallbackOperationKind)) {
+            return "modify";
         }
         return "create";
     }
@@ -1592,12 +1361,11 @@ final class AgenticAuthoringIntentCandidateScoringSupport {
     String materializablePageCompositionChangeKind(
             String changeKind,
             String operationKind,
-            String prompt) {
+            boolean explicitLocalPageComposition) {
         if ("answer_api_catalog_question".equals(changeKind)) {
             return "create".equals(operationKind) ? "create_artifact" : "unknown";
         }
-        if ("unknown".equals(changeKind) && "create".equals(operationKind)
-                && isExplicitLocalPageCompositionPrompt(prompt)) {
+        if ("unknown".equals(changeKind) && "create".equals(operationKind) && explicitLocalPageComposition) {
             return "create_artifact";
         }
         return changeKind;
@@ -1795,8 +1563,11 @@ final class AgenticAuthoringIntentCandidateScoringSupport {
         return true;
     }
 
-    boolean hasBlockingActiveSemanticDecision(AgenticAuthoringIntentResolutionRequest request) {
-        AgenticAuthoringSemanticDecision decision = request == null ? null : request.activeSemanticDecision();
+    static boolean hasBlockingActiveSemanticDecision(AgenticAuthoringIntentResolutionRequest request) {
+        return hasBlockingActiveSemanticDecision(request == null ? null : request.activeSemanticDecision());
+    }
+
+    static boolean hasBlockingActiveSemanticDecision(AgenticAuthoringSemanticDecision decision) {
         if (decision == null) {
             return false;
         }
@@ -1808,14 +1579,22 @@ final class AgenticAuthoringIntentCandidateScoringSupport {
         }
         String resourcePath = decision.selectedResource() == null
                 ? ""
-                : valueOrDefault(decision.selectedResource().resourcePath(), "").trim();
+                : AgenticAuthoringTextNormalizationSupport.valueOrDefault(
+                        decision.selectedResource().resourcePath(),
+                        "").trim();
         if (resourcePath.isBlank()) {
             return false;
         }
-        String operation = valueOrDefault(decision.operationKind(), "").trim().toLowerCase(Locale.ROOT);
-        String artifact = valueOrDefault(decision.artifactKind(), "").trim().toLowerCase(Locale.ROOT);
-        String change = valueOrDefault(decision.changeKind(), "").trim().toLowerCase(Locale.ROOT);
-        if ("explore".equals(operation)
+        String operation = AgenticAuthoringTextNormalizationSupport.valueOrDefault(decision.operationKind(), "")
+                .trim()
+                .toLowerCase(Locale.ROOT);
+        String artifact = AgenticAuthoringTextNormalizationSupport.valueOrDefault(decision.artifactKind(), "")
+                .trim()
+                .toLowerCase(Locale.ROOT);
+        String change = AgenticAuthoringTextNormalizationSupport.valueOrDefault(decision.changeKind(), "")
+                .trim()
+                .toLowerCase(Locale.ROOT);
+        return !("explore".equals(operation)
                 || "explain".equals(operation)
                 || "unknown".equals(operation)
                 || "api_catalog".equals(artifact)
@@ -1824,11 +1603,7 @@ final class AgenticAuthoringIntentCandidateScoringSupport {
                 || change.startsWith("answer_")
                 || change.startsWith("recommend_")
                 || "needs_clarification".equals(change)
-                || "api_catalog_followup".equals(change)) {
-            return false;
-        }
-        String normalizedPrompt = normalize(valueOrDefault(request.userPrompt(), ""));
-        return !(isDataSourceReplacementPrompt(normalizedPrompt) && !isExplicitSourcePreservePrompt(normalizedPrompt));
+                || "api_catalog_followup".equals(change));
     }
 
     AgenticAuthoringIntentResolutionRequest withoutConversationMessages(
@@ -2012,9 +1787,12 @@ final class AgenticAuthoringIntentCandidateScoringSupport {
         return normalizePath(value.replaceAll("[.,;:!?]+$", ""));
     }
 
-    boolean isBareDomainPrompt(String prompt) {
-        String normalized = normalize(prompt);
-        if (normalized.isBlank() || !explicitResourcePath(normalized).isBlank()) {
+    static boolean isBareDomainPrompt(String prompt) {
+        if (prompt == null || prompt.isBlank()) {
+            return false;
+        }
+        String normalized = AgenticAuthoringTextNormalizationSupport.normalize(prompt);
+        if (normalized.isBlank() || normalized.contains("/api/") || normalized.startsWith("api/")) {
             return false;
         }
         String[] tokens = normalized.replaceAll("[^a-z0-9]+", " ").trim().split("\\s+");
