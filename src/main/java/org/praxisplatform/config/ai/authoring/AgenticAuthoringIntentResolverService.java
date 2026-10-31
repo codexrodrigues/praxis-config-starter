@@ -286,7 +286,9 @@ public class AgenticAuthoringIntentResolverService {
         if (!selectedDomainDecisionFocus
                 && usePreIntentResourceDiscoveryAsPrimaryEvidence
                 && candidates.isEmpty()) {
-            candidates = shouldResolveLlmIntent
+            candidates = usePreIntentResourceDiscoveryAsPrimaryEvidence && !contextHintCandidates(request).isEmpty()
+                    ? contextHintCandidates(request)
+                    : shouldResolveLlmIntent
                     ? deferPreLlmApiMetadataDiscovery
                             ? discoverPreLlmContextCandidates(discoveryPrompt, artifactKind, target)
                             : discoverInitialCandidates(discoveryPrompt, artifactKind, target, tenantId, environment)
@@ -430,7 +432,9 @@ public class AgenticAuthoringIntentResolverService {
                 changeKind = primaryLlmIntentProviderFailure ? "provider_error" : fallbackResolution.changeKind();
                 deterministicFallbackApplied = legacyKeywordFallbackEnabled;
             }
-            candidates = shouldResolveLlmIntent
+            candidates = usePreIntentResourceDiscoveryAsPrimaryEvidence && !contextHintCandidates(request).isEmpty()
+                    ? contextHintCandidates(request)
+                    : shouldResolveLlmIntent
                     ? discoverInitialCandidates(prompt, artifactKind, target, tenantId, environment)
                     : discoverCandidates(prompt, artifactKind, target, tenantId, environment);
             candidates = withContextHintCandidates(request, candidates);
@@ -449,7 +453,9 @@ public class AgenticAuthoringIntentResolverService {
                 changeKind = primaryLlmIntentProviderFailure ? "provider_error" : fallbackResolution.changeKind();
                 deterministicFallbackApplied = legacyKeywordFallbackEnabled;
             }
-            candidates = shouldResolveLlmIntent
+            candidates = usePreIntentResourceDiscoveryAsPrimaryEvidence && !contextHintCandidates(request).isEmpty()
+                    ? contextHintCandidates(request)
+                    : shouldResolveLlmIntent
                     ? discoverInitialCandidates(prompt, artifactKind, target, tenantId, environment)
                     : discoverCandidates(prompt, artifactKind, target, tenantId, environment);
             candidates = withContextHintCandidates(request, candidates);
@@ -1129,6 +1135,14 @@ public class AgenticAuthoringIntentResolverService {
                                 && "component".equals(artifactKind)
                                 && ("answer_component_catalog_question".equals(changeKind)
                                         || "answer_component_capability_question".equals(changeKind))));
+        boolean localHistoryUndo = "undo".equals(operationKind)
+                && "undo_last_local_change".equals(changeKind);
+        boolean llmOutOfScope = llmIntent != null
+                && "out_of_scope".equals(llmIntent.semanticIntentClass());
+        if (localHistoryUndo || llmOutOfScope) {
+            selectedCandidate = null;
+            candidates = List.of();
+        }
         boolean platformGuidanceResourceCandidatesCleared = false;
         if (llmPlatformGuidance) {
             platformGuidanceResourceCandidatesCleared = selectedCandidate != null

@@ -64,7 +64,8 @@ Behavior rules:
 - Deterministic backend gates will validate the selected resource, operation, schema, action, and final patch.
 
 When pendingClarification is present, classify the current user turn with followUpKind:
-- clarification_answer when rawUserPrompt answers, selects, or confirms the pending question.
+- clarification_answer when rawUserPrompt answers, selects, or confirms the pending question. When pendingClarification.sourcePrompt requested a concrete artifact (such as a table, form, chart, or dashboard) without naming its business subject and rawUserPrompt supplies that business subject, combine the pending artifact/operation from sourcePrompt with the answered business subject, select the matching resource from candidateResources, and set resolved=true.
+- If the user requests raw SQL execution, direct database/production record deletion or mutation, or destructive infrastructure operations outside governed Praxis capabilities, classify the turn as semanticIntentClass "out_of_scope", resolved=false, without "action" quickReplies, and explain conversationally what governed alternatives exist.
 - new_instruction when rawUserPrompt changes the task or asks for a different artifact/resource.
 - refinement when rawUserPrompt keeps the same task but adds constraints or formatting details.
 - api_catalog_followup when rawUserPrompt asks about endpoints, schemas, actions, filters, or API choices.

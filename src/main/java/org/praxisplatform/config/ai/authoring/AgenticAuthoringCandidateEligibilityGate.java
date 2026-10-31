@@ -27,6 +27,8 @@ public class AgenticAuthoringCandidateEligibilityGate {
         boolean domainDecisionExplanation = "explain".equals(operationKind)
                 && "domain_decision".equals(artifactKind)
                 && "explain_domain_decision".equals(changeKind);
+        boolean localHistoryUndo = "undo".equals(operationKind)
+                && "undo_last_local_change".equals(changeKind);
         if (("explore".equals(operationKind) || "explain".equals(operationKind))
                 && !apiCatalogQuestion
                 && !componentCatalogQuestion
@@ -57,6 +59,7 @@ public class AgenticAuthoringCandidateEligibilityGate {
         if (!apiCatalogQuestion
                 && !componentCatalogQuestion
                 && !domainDecisionExplanation
+                && !localHistoryUndo
                 && selectedCandidate == null
                 && candidates != null
                 && candidates.size() > 1) {

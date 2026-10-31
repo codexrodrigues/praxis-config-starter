@@ -204,12 +204,19 @@ final class AgenticAuthoringIntentQuickReplySupport {
             return List.of();
         }
         boolean blockedGate = gate != null && "blocked".equals(gate.status());
+        boolean outOfScope = "out_of_scope".equals(llmIntent.semanticIntentClass());
+        boolean suppressActionQuickReplies = outOfScope || !llmIntent.resolved();
         ObjectNode selectedCandidateHints = selectedCandidate == null || blockedGate
                 ? null
                 : dashboardContextHints("", selectedCandidate);
         return llmIntent.quickReplies().stream()
                 .filter(Objects::nonNull)
                 .filter(this::isUsableLlmQuickReply)
+                .filter(reply -> !outOfScope
+                        || (!"action".equalsIgnoreCase(reply.kind()) && !"resource".equalsIgnoreCase(reply.kind())))
+                .filter(reply -> !suppressActionQuickReplies
+                        || !"action".equalsIgnoreCase(reply.kind())
+                        || (reply.contextHints() != null && reply.contextHints().path("tool").isTextual()))
                 .map(reply -> enrichLlmQuickReply(reply, selectedCandidateHints))
                 .limit(4)
                 .toList();

@@ -16663,4 +16663,87 @@ class AgenticAuthoringIntentResolverServiceTest {
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessage("userPrompt must not be blank.");
     }
+
+    @Test
+    void localHistoryUndoIsEligibleWithoutAmbiguousResourceCandidateFailure() {
+        AgenticAuthoringCandidateEligibilityGate eligibilityGate = new AgenticAuthoringCandidateEligibilityGate();
+        AgenticAuthoringCandidate candidateA = new AgenticAuthoringCandidate(
+                "/api/human-resources/funcionarios",
+                "filter",
+                "/schemas/filtered?path=/api/human-resources/funcionarios/filter",
+                "/api/human-resources/funcionarios/filter",
+                "POST",
+                0.91d,
+                "Funcionários",
+                List.of("api-metadata"));
+        AgenticAuthoringCandidate candidateB = new AgenticAuthoringCandidate(
+                "/api/human-resources/departamentos",
+                "filter",
+                "/schemas/filtered?path=/api/human-resources/departamentos/filter",
+                "/api/human-resources/departamentos/filter",
+                "POST",
+                0.88d,
+                "Departamentos",
+                List.of("api-metadata"));
+
+        AgenticAuthoringGateResult gateResult = eligibilityGate.evaluate(
+                "undo",
+                "chart",
+                "undo_last_local_change",
+                new AgenticAuthoringTarget("chart-1", "praxis-chart", "/api/human-resources/funcionarios", "", "", ""),
+                null,
+                List.of(candidateA, candidateB),
+                false);
+
+        assertThat(gateResult.status()).isEqualTo("eligible");
+        assertThat(gateResult.messages()).isEmpty();
+    }
+
+    @Test
+    void suppressesUngroundedActionQuickRepliesWhenIntentIsUnresolvedOrOutOfScope() {
+        AgenticAuthoringIntentQuickReplySupport support = new AgenticAuthoringIntentQuickReplySupport(
+                objectMapper,
+                "praxis-api-quickstart",
+                new AgenticAuthoringPresentationAffordanceDiscoveryService(List.of()));
+        AgenticAuthoringQuickReply destructiveActionReply = new AgenticAuthoringQuickReply(
+                "confirm-delete",
+                "action",
+                "Confirmar exclusão",
+                "Confirmo que desejo apagar os registros.",
+                "Executa a exclusão solicitada.",
+                "delete_forever",
+                "warn",
+                null);
+        AgenticAuthoringQuickReply safeAlternativeReply = new AgenticAuthoringQuickReply(
+                "create-audit-table",
+                "suggestion",
+                "Criar tabela de auditoria",
+                "Crie uma tabela para consultar os registros com filtro.",
+                "Alternativa governada somente leitura.",
+                "table_chart",
+                "primary",
+                null);
+        AgenticAuthoringLlmIntentResolution unresolvedOutOfScope = new AgenticAuthoringLlmIntentResolution(
+                false,
+                "unknown",
+                "unknown",
+                "needs_clarification",
+                null,
+                null,
+                "none",
+                "Não posso executar comandos SQL diretos ou exclusões em massa fora das ações governadas.",
+                List.of(destructiveActionReply, safeAlternativeReply),
+                List.of(),
+                List.of(),
+                null,
+                null,
+                false,
+                "out_of_scope");
+
+        List<AgenticAuthoringQuickReply> replies = support.governedLlmQuickReplies(unresolvedOutOfScope, null, null);
+
+        assertThat(replies)
+                .extracting(AgenticAuthoringQuickReply::id)
+                .containsExactly("create-audit-table");
+    }
 }

@@ -1706,7 +1706,11 @@ public class AgenticAuthoringTurnEngine {
                 : request.contextHints().path("resourceDiscovery");
         JsonNode candidates = resourceDiscovery.path("candidates");
         if (!candidates.isArray() || candidates.isEmpty()) {
-            candidates = consultativeQuickReplySupport.intentResolutionCandidateNodes(intentResolution);
+            candidates = contains(
+                            intentResolution == null ? null : intentResolution.warnings(),
+                            "llm-intent-resolution-unresolved-clarification-required")
+                    ? objectMapper.missingNode()
+                    : consultativeQuickReplySupport.intentResolutionCandidateNodes(intentResolution);
         }
         if (!candidates.isArray() || candidates.isEmpty()) {
             return null;

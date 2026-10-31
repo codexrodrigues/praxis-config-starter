@@ -1841,6 +1841,98 @@ class AgenticAuthoringLlmPreIntentToolPlanningServiceTest {
                 .contains("use the selected parent entity as primaryBusinessEntity and put child records in supportingConcepts");
     }
 
+    @Test
+    void plansGovernedResourceDiscoveryWhenPendingClarificationHasNoExplicitSelectionHint() throws Exception {
+        when(providerManagementService.generateJson(
+                any(),
+                any(),
+                any(),
+                eq("tenant"),
+                eq("user"),
+                eq("local"))).thenReturn(objectMapper.readTree("""
+                {
+                  "schemaVersion": "praxis-agentic-authoring-pre-intent-tool-plan.v3",
+                  "semanticIntentClass": "authoring_or_other",
+                  "assistantMessage": "",
+                  "shouldRetrieveGovernedResources": true,
+                  "requiresFullIntentResolution": false,
+                  "artifactKind": "table",
+                  "primaryComponent": "praxis-table",
+                  "layoutKind": "single-table",
+                  "retrievalQuery": "funcionarios",
+                  "resourceSearchFocus": {
+                    "primaryBusinessEntity": "human-resources.funcionarios",
+                    "supportingConcepts": [],
+                    "desiredSurface": "table",
+                    "uncertainty": "",
+                    "rationale": "Combina a tabela pendente com o assunto respondido."
+                  },
+                  "reason": "O turno responde o assunto que faltava para a tabela pendente."
+                }
+                """));
+        AgenticAuthoringLlmPreIntentToolPlanningService service =
+                new AgenticAuthoringLlmPreIntentToolPlanningService(providerManagementService, objectMapper, 7);
+        AgenticAuthoringPendingClarification pending = new AgenticAuthoringPendingClarification(
+                "Crie uma tabela",
+                List.of("Sobre qual assunto do domínio você quer criar essa tabela?"),
+                "Para criar a tabela, preciso saber qual assunto de negócio você quer visualizar.",
+                "turn-1",
+                null);
+        AgenticAuthoringTurnStreamRequest openClarificationRequest = new AgenticAuthoringTurnStreamRequest(
+                "Quero dos funcionarios.",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                "/decision-playground",
+                objectMapper.createObjectNode(),
+                null,
+                "openai",
+                "gpt-test",
+                "test-key",
+                "session-1",
+                "turn-client-2",
+                List.of(),
+                pending,
+                List.of(),
+                objectMapper.createObjectNode(),
+                null);
+
+        AgenticAuthoringPreIntentToolPlanningResult planned = service.plan(
+                openClarificationRequest,
+                new AiPrincipalContext("tenant", "user", "local", true));
+
+        assertThat(planned.planned()).isTrue();
+        assertThat(planned.plan().artifactKind()).isEqualTo("table");
+        assertThat(planned.plan().toolCalls()).singleElement().satisfies(call ->
+                assertThat(call.name()).isEqualTo(AgenticAuthoringToolRegistry.SEARCH_API_RESOURCES));
+
+        ObjectNode explicitSelectionHints = objectMapper.createObjectNode()
+                .put("resourcePath", "/api/human-resources/funcionarios");
+        AgenticAuthoringTurnStreamRequest explicitSelectionRequest = new AgenticAuthoringTurnStreamRequest(
+                "Usar Funcionários",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                "/decision-playground",
+                objectMapper.createObjectNode(),
+                null,
+                "openai",
+                "gpt-test",
+                "test-key",
+                "session-1",
+                "turn-client-3",
+                List.of(),
+                pending,
+                List.of(),
+                explicitSelectionHints,
+                null);
+
+        AgenticAuthoringPreIntentToolPlanningResult skipped = service.plan(
+                explicitSelectionRequest,
+                new AiPrincipalContext("tenant", "user", "local", true));
+
+        assertThat(skipped.planned()).isFalse();
+        assertThat(skipped.skipReason()).isEqualTo("pending-clarification-present");
+    }
+
     private AgenticAuthoringTurnStreamRequest request(
             String prompt,
             JsonNode currentPage,

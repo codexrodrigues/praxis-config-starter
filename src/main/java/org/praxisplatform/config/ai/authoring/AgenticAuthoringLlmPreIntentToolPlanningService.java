@@ -228,7 +228,7 @@ public class AgenticAuthoringLlmPreIntentToolPlanningService implements AgenticA
         if (!StringUtils.hasText(request.userPrompt())) {
             return AgenticAuthoringPreIntentToolPlanningResult.skipped("user-prompt-empty");
         }
-        if (request.pendingClarification() != null) {
+        if (hasBlockingPendingClarification(request)) {
             return AgenticAuthoringPreIntentToolPlanningResult.skipped("pending-clarification-present");
         }
         if (hasBlockingActiveSemanticDecision(request)) {
@@ -441,6 +441,22 @@ public class AgenticAuthoringLlmPreIntentToolPlanningService implements AgenticA
         long requiredNanos = TimeUnit.SECONDS.toNanos(MIN_RETRY_BUDGET_SECONDS)
                 + TimeUnit.MILLISECONDS.toNanos(providerRetryDelayMs);
         return deadlineNanos - System.nanoTime() >= requiredNanos;
+    }
+
+    private boolean hasBlockingPendingClarification(AgenticAuthoringTurnStreamRequest request) {
+        if (request == null || request.pendingClarification() == null) {
+            return false;
+        }
+        JsonNode hints = request.contextHints();
+        if (hints == null || !hints.isObject()) {
+            return false;
+        }
+        return StringUtils.hasText(hints.path("resourcePath").asText(""))
+                || StringUtils.hasText(hints.path("submitUrl").asText(""))
+                || StringUtils.hasText(hints.path("schemaUrl").asText(""))
+                || hints.path("optionSelected").asBoolean(false)
+                || hints.path("runtimeRelatedSurfaceDisambiguationSelection").isObject()
+                || hints.path("selectedDomainDecisionRef").isObject();
     }
 
     private boolean hasBlockingActiveSemanticDecision(AgenticAuthoringTurnStreamRequest request) {
@@ -822,11 +838,12 @@ public class AgenticAuthoringLlmPreIntentToolPlanningService implements AgenticA
                 not yet concrete artifact authoring. A question such as "sobre quais assuntos posso criar
                 tabelas ou dashboards para obter informações visuais?" is domain discovery: the user is asking for the
                 available business subjects, not yet commanding creation of either artifact. The same remains true with
-                grammar errors, omitted words, or without the literal word "available". This discovery must happen before capability, concept,
+                grammar errors, omitted words, or without "available". This discovery must happen before capability, concept,
                 binding or API-resource discovery.
 
                 Set semanticIntentClass=authoring_or_other when the user requests creation, editing, removal,
                 inspection, a concrete domain artifact, or another intent that needs the complete governed resolver.
+                If pendingClarification is present, combine sourcePrompt's pending artifact with userPrompt when answering it.
                 %s
                 A request to show records on an empty canvas is UI authoring even without a component name.
                 Preserve its constraints for schema-grounded materialization.
