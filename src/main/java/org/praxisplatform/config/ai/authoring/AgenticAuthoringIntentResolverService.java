@@ -270,7 +270,8 @@ public class AgenticAuthoringIntentResolverService {
                 shouldUsePreIntentResourceDiscoveryAsPrimaryEvidence(
                         shouldResolveLlmIntent,
                         request,
-                        target);
+                        target,
+                        semanticOrientation);
         boolean selectedDomainDecisionFocus = hasSelectedDomainDecisionFocus(request);
         List<AgenticAuthoringCandidate> candidates = selectedDomainDecisionFocus
                 ? List.of()
@@ -2293,17 +2294,39 @@ public class AgenticAuthoringIntentResolverService {
         return candidateScoringSupport.hasBlockingActiveSemanticDecision(request);
     }
 
+    private boolean hasBlockingPendingClarification(
+            AgenticAuthoringIntentResolutionRequest request,
+            AgenticAuthoringPreIntentToolPlan semanticOrientation) {
+        if (request == null || request.pendingClarification() == null) {
+            return false;
+        }
+        JsonNode hints = request.contextHints();
+        boolean hasExplicitSelectionHint = hints != null
+                && hints.isObject()
+                && (!jsonText(hints, "resourcePath").isBlank()
+                        || !jsonText(hints.path("domainCatalog"), "resourceKey").isBlank()
+                        || !jsonText(hints, "source").isBlank()
+                        || !jsonText(hints, "kind").isBlank());
+        if (hasExplicitSelectionHint) {
+            return true;
+        }
+        boolean hasCurrentTurnPreIntentOrientation = semanticOrientation != null
+                || (hints != null && hints.path("preIntentSemanticOrientation").isObject());
+        return !hasCurrentTurnPreIntentOrientation;
+    }
+
     private boolean shouldUsePreIntentResourceDiscoveryAsPrimaryEvidence(
             boolean shouldResolveLlmIntent,
             AgenticAuthoringIntentResolutionRequest request,
-            AgenticAuthoringTarget target) {
+            AgenticAuthoringTarget target,
+            AgenticAuthoringPreIntentToolPlan semanticOrientation) {
         boolean detachTargetForReplacement = shouldDetachCurrentTarget(
                 normalize(request == null ? "" : valueOrDefault(request.userPrompt(), "")),
                 materializableResourceDiscoveryArtifactKind(request, "unknown"),
                 target);
         if (!shouldResolveLlmIntent
                 || request == null
-                || request.pendingClarification() != null
+                || hasBlockingPendingClarification(request, semanticOrientation)
                 || hasBlockingActiveSemanticDecision(request)
                 || !hasMaterializableResourceDiscoveryContext(request)
                 || !hasLlmAuthoredMaterializableResourceFocus(request)
@@ -2488,7 +2511,7 @@ public class AgenticAuthoringIntentResolverService {
             trace.add("skipped:request-missing");
             return null;
         }
-        if (request.pendingClarification() != null) {
+        if (hasBlockingPendingClarification(request, semanticOrientation)) {
             trace.add("skipped:pending-clarification");
             return null;
         }
@@ -2584,7 +2607,7 @@ public class AgenticAuthoringIntentResolverService {
                 "create_artifact",
                 focusedCandidate.resourcePath(),
                 null,
-                "none",
+                request.pendingClarification() != null ? "clarification_answer" : "none",
                 preIntentGovernedEvidenceAssistantMessage(artifactKind, focusedCandidate),
                 List.of(),
                 List.of(),

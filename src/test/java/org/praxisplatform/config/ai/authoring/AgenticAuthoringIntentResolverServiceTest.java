@@ -16746,4 +16746,107 @@ class AgenticAuthoringIntentResolverServiceTest {
                 .extracting(AgenticAuthoringQuickReply::id)
                 .containsExactly("create-audit-table");
     }
+
+    @Test
+    void canonicalSingleTableResolvesPendingClarificationWithPreIntentGovernedResourceWithoutFullProviderPass() {
+        AgenticAuthoringApiMetadataCandidateCatalog candidateCatalog =
+                Mockito.mock(AgenticAuthoringApiMetadataCandidateCatalog.class);
+        AgenticAuthoringLlmIntentResolverService llmIntentResolver =
+                Mockito.mock(AgenticAuthoringLlmIntentResolverService.class);
+        AgenticAuthoringCandidate vacationCandidate = withEvidence(
+                withEvidence(
+                        withEvidence(
+                                withEvidence(candidateWithEvidence(
+                                        "/api/human-resources/ferias-afastamentos",
+                                        0.96d,
+                                        List.of("ferias", "afastamentos", "descanso remunerado", "vigencia")),
+                                        "tool-search-api-resources"),
+                                "semantic-role:operational-resource"),
+                        "domain-binding"),
+                "schema-grounding-verified");
+        vacationCandidate = withEvidence(vacationCandidate, "resource-capabilities-verified");
+        Mockito.when(candidateCatalog.discover(
+                        Mockito.anyString(),
+                        Mockito.anyString(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.any()))
+                .thenReturn(List.of(vacationCandidate));
+        AgenticAuthoringIntentResolverService resolver = new AgenticAuthoringIntentResolverService(
+                objectMapper,
+                candidateCatalog,
+                llmIntentResolver,
+                null);
+        ObjectNode constraints = objectMapper.createObjectNode();
+        constraints.put("appliesToDataSelection", false);
+        constraints.putArray("filters");
+        AgenticAuthoringPreIntentToolPlan orientation = new AgenticAuthoringPreIntentToolPlan(
+                "praxis-agentic-authoring-pre-intent-tool-plan.v3",
+                "O pedido complementa a solicitação pendente de montar uma tabela com Ferias Afastamentos.",
+                List.of(),
+                "authoring_or_other",
+                "",
+                false,
+                constraints,
+                "table",
+                "praxis-table",
+                "single-table");
+        ObjectNode contextHints = resourceDiscoveryContext(
+                "table",
+                List.of(vacationCandidate),
+                new AgenticAuthoringResourceSearchFocus(
+                        "human-resources.ferias-afastamentos",
+                        List.of("pessoas em período de descanso remunerado", "vigência do período"),
+                        "Tabela de registros de pessoas em período de descanso remunerado",
+                        "",
+                        "Tabela para consultar pessoas em período de descanso remunerado."));
+        AgenticAuthoringIntentResolutionRequest request = new AgenticAuthoringIntentResolutionRequest(
+                "Com as pessoas que estão em período de descanso remunerado",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                "/laboratorio",
+                objectMapper.createObjectNode(),
+                null,
+                "openai",
+                "gpt-5.4-nano",
+                null,
+                "session-pending-table",
+                "turn-pending-table-2",
+                List.of(
+                        new AgenticAuthoringConversationMessage("msg-1", "user", "Monte uma tabela", null),
+                        new AgenticAuthoringConversationMessage(
+                                "msg-2",
+                                "assistant",
+                                "O domínio ou recurso que a tabela deve representar não foi informado.",
+                                null)),
+                new AgenticAuthoringPendingClarification(
+                        "Monte uma tabela",
+                        List.of("O domínio ou recurso que a tabela deve representar não foi informado."),
+                        "Informe qual tema ou fonte de dados a tabela deve exibir.",
+                        "turn-pending-table-1",
+                        null),
+                List.of(),
+                contextHints,
+                null);
+
+        AgenticAuthoringIntentResolutionResult result = resolver.resolve(
+                request,
+                "tenant",
+                "user",
+                "local",
+                orientation);
+
+        assertThat(result.valid()).isTrue();
+        assertThat(result.operationKind()).isEqualTo("create");
+        assertThat(result.artifactKind()).isEqualTo("table");
+        assertThat(result.changeKind()).isEqualTo("create_artifact");
+        assertThat(result.selectedCandidate()).isEqualTo(vacationCandidate);
+        assertThat(result.pendingClarification()).isNull();
+        assertThat(result.visualizationDecision().layoutKind()).isEqualTo("single-table");
+        assertThat(result.visualizationDecision().primaryComponent()).isEqualTo("praxis-table");
+        assertThat(result.warnings()).contains(
+                "llm-intent-resolution-satisfied-by-pre-intent-governed-evidence",
+                "llm-pre-intent-resource-discovery-used");
+        Mockito.verifyNoInteractions(llmIntentResolver);
+    }
 }
