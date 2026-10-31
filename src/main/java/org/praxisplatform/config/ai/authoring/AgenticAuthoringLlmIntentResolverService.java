@@ -692,7 +692,7 @@ public class AgenticAuthoringLlmIntentResolverService {
             AgenticAuthoringIntentResolutionRequest request,
             List<AgenticAuthoringCandidate> candidateOptions) {
         if (request == null
-                || request.pendingClarification() != null
+                || hasBlockingPendingClarification(request)
                 || hasBlockingActiveSemanticDecision(request)
                 || request.contextHints() == null
                 || candidateOptions == null
@@ -715,6 +715,32 @@ public class AgenticAuthoringLlmIntentResolverService {
                 && "authoring_or_other".equals(semanticOrientation.path("semanticIntentClass").asText(""))
                 && singleTableVisualization
                 && (filters.isArray() || filters.isMissingNode() || filters.isNull());
+    }
+
+    private boolean hasBlockingPendingClarification(AgenticAuthoringIntentResolutionRequest request) {
+        if (request == null || request.pendingClarification() == null) {
+            return false;
+        }
+        if (hasExplicitPendingClarificationSelectionContext(request.contextHints())) {
+            return true;
+        }
+        return !hasPreIntentResourceOrOrientationGrounding(request);
+    }
+
+    private boolean hasExplicitPendingClarificationSelectionContext(JsonNode hints) {
+        if (hints == null || !hints.isObject()) {
+            return false;
+        }
+        return StringUtils.hasText(nullableText(hints, "resourcePath"))
+                || StringUtils.hasText(nullableText(hints, "submitUrl"))
+                || StringUtils.hasText(nullableText(hints, "schemaUrl"))
+                || StringUtils.hasText(nullableText(hints, "optionSelected"))
+                || StringUtils.hasText(nullableText(hints, "runtimeRelatedSurfaceDisambiguationSelection"))
+                || StringUtils.hasText(nullableText(hints, "selectedDomainDecisionRef"))
+                || StringUtils.hasText(nullableText(hints.path("domainCatalog"), "resourceKey"))
+                || "quick-reply".equalsIgnoreCase(nullableText(hints, "source"))
+                || "server-issued-quick-reply".equalsIgnoreCase(nullableText(hints, "source"))
+                || StringUtils.hasText(nullableText(hints, "kind"));
     }
 
     private boolean hasBlockingActiveSemanticDecision(AgenticAuthoringIntentResolutionRequest request) {
@@ -816,6 +842,18 @@ public class AgenticAuthoringLlmIntentResolverService {
             page.put("componentCount", currentPageSummary.path("componentCount").asInt(0));
             page.put("isEmpty", currentPageSummary.path("componentCount").asInt(0) == 0);
         }
+        if (request.pendingClarification() != null) {
+            ObjectNode pending = context.putObject("pendingClarification");
+            pending.put("sourcePrompt", valueOrDefault(request.pendingClarification().sourcePrompt(), ""));
+            ArrayNode questions = pending.putArray("questions");
+            for (String question : request.pendingClarification().questions() == null
+                    ? List.<String>of()
+                    : request.pendingClarification().questions()) {
+                if (StringUtils.hasText(question)) {
+                    questions.add(question);
+                }
+            }
+        }
         context.put("responseLocale", nullableText(request.contextHints(), "responseLocale"));
         return """
                 You are resolving one focused, LLM-planned Praxis table-authoring request.
@@ -836,7 +874,7 @@ public class AgenticAuthoringLlmIntentResolverService {
                 operation for visualization, never an unrelated create/POST operation.
 
                 For the resolved request use operationKind "create", artifactKind "table", changeKind "create_artifact",
-                semanticIntentClass "component_authoring", requiresGovernedAuthoring=false and followUpKind "none".
+                semanticIntentClass "component_authoring", requiresGovernedAuthoring=false and followUpKind %s.
                 Set visualizationDecision to a single table using primaryComponent "praxis-table", no axes, and
                 includeFilters=true. Do not invent fields, labels, option IDs, components or resources. If the governed
                 candidates do not establish the displayed entity unambiguously, return resolved=false with a natural,
@@ -844,7 +882,11 @@ public class AgenticAuthoringLlmIntentResolverService {
 
                 Answer in responseLocale when present; otherwise use the user's language.
                 Focused context JSON: %s
-                """.formatted(context.toString());
+                """.formatted(
+                        request.pendingClarification() != null
+                                ? "\"clarification_answer\" when userPrompt answers pendingClarification (combine pendingClarification.sourcePrompt with userPrompt to understand the full table request)"
+                                : "\"none\"",
+                        context.toString());
     }
 
     private String liveOptionRefinementPrompt(
@@ -1753,15 +1795,17 @@ public class AgenticAuthoringLlmIntentResolverService {
             List<AgenticAuthoringCandidate> candidateOptions,
             AgenticAuthoringComponentCapabilitiesResult componentCapabilities) {
         if (request == null
-                || request.pendingClarification() != null
+                || hasBlockingPendingClarification(request)
                 || forceFullIntentResolution(request)) {
             return false;
         }
         boolean liveOptionRefinement = hasLiveOptionRefinementContext(request);
 
+        boolean focusedResourceAuthoring = shouldUseFocusedResourceAuthoringPrompt(request, candidateOptions);
         boolean targetedComponentEdit = hasTargetedComponentCapabilities(target, componentCapabilities);
         if (!targetedComponentEdit
                 && !liveOptionRefinement
+                && !focusedResourceAuthoring
                 && (request.activeSemanticDecision() != null
                 || hasConversationHistoryBeyondCurrentPrompt(request, effectivePrompt))) {
             return false;

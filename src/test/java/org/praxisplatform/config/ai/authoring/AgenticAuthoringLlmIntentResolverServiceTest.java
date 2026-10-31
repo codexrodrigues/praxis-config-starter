@@ -4408,6 +4408,149 @@ class AgenticAuthoringLlmIntentResolverServiceTest {
         Mockito.verifyNoInteractions(domainCatalogPromptContextService);
     }
 
+    @Test
+    void focusedResourceAuthoringPromptResolvesPendingClarificationFollowUpWithoutFullIntentPass() throws Exception {
+        DomainCatalogPromptContextService domainCatalogPromptContextService =
+                Mockito.mock(DomainCatalogPromptContextService.class);
+        ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
+        when(providerManagementService.generateJson(
+                promptCaptor.capture(),
+                any(AiJsonSchema.class),
+                any(AiCallConfig.class),
+                eq("tenant"),
+                eq("user"),
+                eq("local"))).thenReturn(objectMapper.readTree("""
+                {
+                  "resolved": true,
+                  "semanticIntentClass": "component_authoring",
+                  "operationKind": "create",
+                  "artifactKind": "table",
+                  "changeKind": "create_artifact",
+                  "selectedResourcePath": "/api/human-resources/ferias-afastamentos",
+                  "resourceSearchQuery": null,
+                  "followUpKind": "clarification_answer",
+                  "requiresGovernedAuthoring": false,
+                  "assistantMessage": "Vou preparar a tabela de períodos de descanso remunerado.",
+                  "visualizationDecision": {
+                    "schemaVersion": "praxis-agentic-authoring-visualization-decision.v1",
+                    "intent": "paid-rest-period-table",
+                    "layoutKind": "single_table",
+                    "primaryComponent": "praxis-table",
+                    "primaryComponentId": "praxis-table",
+                    "axes": [],
+                    "includeSummary": false,
+                    "includeDetailTable": true,
+                    "excludedComponentIds": [],
+                    "includeFilters": true,
+                    "includeKpis": false,
+                    "provenance": "llm-planned-focused-resource"
+                  },
+                  "queryConstraints": {
+                    "appliesToDataSelection": false,
+                    "filters": []
+                  },
+                  "consultativeRetrievalPlan": null,
+                  "quickReplies": [],
+                  "clarificationQuestions": [],
+                  "warnings": []
+                }
+                """));
+
+        ObjectNode contextHints = objectMapper.createObjectNode();
+        ObjectNode resourceDiscovery = contextHints.putObject("resourceDiscovery");
+        resourceDiscovery.put("artifactKind", "table");
+        ObjectNode discoveredCandidate = resourceDiscovery.putArray("candidates").addObject();
+        discoveredCandidate.put("resourcePath", "/api/human-resources/ferias-afastamentos");
+        discoveredCandidate.put("operation", "post");
+        discoveredCandidate.put("submitUrl", "/api/human-resources/ferias-afastamentos/filter");
+        discoveredCandidate.put("submitMethod", "post");
+        discoveredCandidate.put("reason", "Fonte governada que exibe períodos de férias e descanso remunerado.");
+        discoveredCandidate.putArray("evidence")
+                .add("tool-search-api-resources")
+                .add("domain-catalog-context");
+        ObjectNode orientation = contextHints.putObject("preIntentSemanticOrientation");
+        orientation.put("schemaVersion", "praxis-agentic-authoring-pre-intent-orientation-context.v2");
+        orientation.put("semanticIntentClass", "authoring_or_other");
+        orientation.put("artifactKind", "table");
+        orientation.put("requiresFullIntentResolution", true);
+        orientation.put("source", "llm_pre_intent_tool_plan");
+        orientation.set("queryConstraints", objectMapper.readTree("""
+                {"appliesToDataSelection":false,"filters":[]}
+                """));
+
+        AgenticAuthoringIntentResolutionRequest request = new AgenticAuthoringIntentResolutionRequest(
+                "Com as pessoas que estão em período de descanso remunerado",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                "/laboratorio",
+                objectMapper.createObjectNode(),
+                null,
+                "openai",
+                "gpt-5-mini",
+                "test-key",
+                "session-clarification-followup",
+                "turn-2",
+                List.of(
+                        new AgenticAuthoringConversationMessage("m1", "user", "Monte uma tabela", null),
+                        new AgenticAuthoringConversationMessage("m2", "assistant", "Com quais dados?", null),
+                        new AgenticAuthoringConversationMessage("m3", "user", "Com as pessoas que estão em período de descanso remunerado", null)),
+                new AgenticAuthoringPendingClarification(
+                        "Monte uma tabela",
+                        List.of("Com quais dados você gostaria de montar a tabela?"),
+                        "Opções encontradas: folhas pagamento; historicos salariais; departamentos; eventos folha",
+                        "turn-1",
+                        null),
+                List.of(),
+                contextHints,
+                new AgenticAuthoringSemanticDecision(
+                        "decision-1",
+                        "turn-1",
+                        "unknown",
+                        "unknown",
+                        "needs_clarification",
+                        null,
+                        null,
+                        null,
+                        false,
+                        null,
+                        null,
+                        null));
+
+        AgenticAuthoringLlmIntentResolution result = new AgenticAuthoringLlmIntentResolverService(
+                        providerManagementService,
+                        objectMapper,
+                        domainCatalogPromptContextService)
+                .resolve(
+                        request,
+                        request.userPrompt(),
+                        objectMapper.createObjectNode(),
+                        null,
+                        List.of(new AgenticAuthoringCandidate(
+                                "/api/human-resources/ferias-afastamentos",
+                                "post",
+                                "",
+                                "/api/human-resources/ferias-afastamentos/filter",
+                                "post",
+                                0.96d,
+                                "Fonte governada que exibe períodos de férias e descanso remunerado.",
+                                List.of("tool-search-api-resources", "domain-catalog-context"))),
+                        componentCapabilities(),
+                        "tenant",
+                        "user",
+                        "local")
+                .orElseThrow();
+
+        assertThat(promptCaptor.getValue())
+                .contains("praxis-agentic-authoring-focused-resource-context.v1")
+                .contains("pendingClarification")
+                .contains("/api/human-resources/ferias-afastamentos")
+                .doesNotContain("folhas pagamento");
+        assertThat(result.resolved()).isTrue();
+        assertThat(result.followUpKind()).isEqualTo("clarification_answer");
+        assertThat(result.selectedResourcePath()).isEqualTo("/api/human-resources/ferias-afastamentos");
+        Mockito.verifyNoInteractions(domainCatalogPromptContextService);
+    }
+
     private AgenticAuthoringCandidate weakCandidate(String resourcePath) {
         return new AgenticAuthoringCandidate(
                 resourcePath,
