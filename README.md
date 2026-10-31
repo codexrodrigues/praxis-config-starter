@@ -6,9 +6,11 @@
 ![PostgreSQL](https://img.shields.io/badge/PostgreSQL-pgvector-blue)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 
-`praxis-config-starter` is the canonical configuration boundary for Praxis Platform Spring Boot hosts.
+`praxis-config-starter` is the canonical configuration, semantic decision, and AI-governance control plane for **Praxis Platform** Spring Boot hosts.
 
-It owns persistence and runtime semantics for:
+**Praxis** is a **semantically oriented platform for AI-native enterprise applications**, where **resources, rules, actions, data, and policies are described once** and can be operated across **traditional interfaces, generative interfaces, AI agents, and integrations** — building applications that are, by definition, readable and operable by AI rather than bolting AI onto the side of the application.
+
+Within that platform architecture, `praxis-config-starter` owns persistence and runtime semantics for:
 
 - `ui_user_config`: tenant, user, environment, version, ETag, executable JSON configuration state,
   and an optional server-attested semantic authoring source aligned to that same revision.

@@ -7,7 +7,7 @@ Escopo e Heranca
 - Nao editar por padrao: `target/`, `logs/`, artefatos em `artifacts/`, outputs de apidoc e arquivos gerados por build, salvo quando a tarefa for explicitamente sobre output gerado.
 
 Premissa Local
-- Neste starter, assumir como direcao preferencial que o Praxis e uma plataforma de decisoes semanticas authoradas por IA.
+- Neste starter, assumir como direcao preferencial que o Praxis e uma plataforma semanticamente orientada para aplicacoes corporativas AI-native, em que recursos, regras, acoes, dados e politicas sao descritos uma vez e operados por interfaces tradicionais, interfaces generativas, agentes de IA e integracoes — construindo aplicacoes que, por definicao, ja sejam legiveis e operaveis por IA.
 - Sempre que uma necessidade de authoring, explainability, preview, governance ou runtime decision surgir, preferir modelar o problema como decisao canônica governada em `/api/praxis/config/**`, e nao como patch solto, editor local ou mero artefato de componente.
 
 Inventario Local de Aderencia Antes de Novo Contrato

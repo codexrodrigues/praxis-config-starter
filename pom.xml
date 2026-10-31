@@ -17,7 +17,7 @@
     <packaging>jar</packaging>
 
     <name>Praxis Config Starter</name>
-    <description>Persistent configuration service for dynamic UI components</description>
+    <description>Spring Boot starter for the Praxis semantic AI-native enterprise platform: governed semantic decisions, domain rules, AI authoring context, and runtime configuration persistence.</description>
     <url>https://github.com/codexrodrigues/praxis-config-starter</url>
     <licenses>
         <license>
