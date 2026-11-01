@@ -103,7 +103,7 @@ public final class AiPromptTemplates {
 	7. Quando houver runtimeState.selection ou consultativeContext.selectedRecordsContext e o usuário pedir para listar, resumir, comparar, explicar ou responder sobre os registros selecionados, escolha o modo consultivo.
 	8. Quando houver registros selecionados e o usuário pedir para usar esses registros como base para filtros avançados, exportação, busca de registros semelhantes ou outra operação real da tabela, escolha o modo runtime quando ele existir no contrato e houver operação declarada aplicável. Se runtime não existir mas houver modo aplicável equivalente, use esse modo declarado. Se faltar campo, escopo ou formato, escolha o modo consultivo/clarificativo apropriado pelo contrato e peça a decisão humana.
 	9. Quando o pedido for imperativo e pedir uma mudança visual, estrutural ou comportamental concreta no componente, escolha edição mesmo que faltem detalhes opcionais como cor, estilo, tooltip, formato ou mapeamento completo; o fluxo de edição pode inferir defaults governados, pedir clarificação ou preparar revisão aplicável.
-	10. Não responda que falta catálogo de operações quando o contrato declarativo de autoria do turno contém responseModes e authoringManifest/componentEditPlan; use esse contrato como catálogo governado para decidir o modo.
+10. Não responda que falta catálogo de operações quando o contrato declarativo de autoria do turno contém responseModes e authoringManifest/componentEditPlan; use esse contrato como catálogo governado para decidir o modo.
 	11. Retorne APENAS JSON válido, sem markdown.
 
 	SCHEMA:
@@ -195,8 +195,8 @@ public final class AiPromptTemplates {
 	7.3. Se METADADOS.contextHints.tableConversationMemory.lastComponentEditDecision existir, trate-o como memória semântica do último alvo/ajuste aprovado pelo usuário. Em pedidos de continuação sem alvo explícito, preserve targetField a partir de lastTarget.field quando a nova intenção for refinar esse alvo. Não reinterprete refinamentos visuais de uma coluna como ajuste global de tabela, a menos que o usuário cite explicitamente a tabela inteira, densidade, linhas ou layout global.
 	8. Se o pedido for sobre inputs/outputs (ex: resourcePath, mode, schemaSource), use scope="component".
 	9. Se o pedido for sobre config (ex: columns, rules, fieldMetadata, layout), use scope="config".
-	10. Se o pedido afetar ambos, use scope="mixed".
-	10.1. Se o componente for agregador (ex.: CRUD combina tabela + formulário), siga o contrato do componente interno (TableConfig/FormConfig) para regras de colunas/renderers.
+10. Se o pedido afetar ambos, use scope="mixed".
+10.1. Se o componente for agregador (ex.: CRUD combina tabela + formulário), siga o contrato do componente interno (TableConfig/FormConfig) para regras de colunas/renderers.
 	11. Só marque needsClarification=true quando faltar dado ESSENCIAL OU quando o protocolo de intenção indicar ambiguidade entre formatar e criar coluna:
 	   - add_column_computed: faltar newField OU baseFields[0] OU baseFields fora das colunas disponíveis.
 	   - custom_expression: faltar expression.
@@ -511,18 +511,18 @@ REGRAS:
 7. NAO invente resourcePath, endpoint, schema ou dados externos. Use apenas o contexto fornecido.
 8. PADRÃO PRAXIS: Para listagem, use POST {resource}/filter. resourcePath é SEMPRE a base (sem /filter).
 9. Não gere operação que reduza proteções de acessibilidade, segurança, governança ou compatibilidade. Para acessibilidade, operações podem ativar proteções como highContrast/reduceMotion, mas não devem desabilitar proteções existentes.
-	10. Se o pedido delegar ao assistente a escolha de um alvo essencial ("o melhor", "o certo", "o que fizer sentido") e o catálogo não determinar uma única opção canônica, preencha "ambiguities" em vez de escolher defaults.
-	10.1. Se CONTEXTO ADICIONAL contiver tableConversationMemory.lastComponentEditDecision, use essa memória como alvo semântico preferencial para continuações humanas sem alvo explícito. Quando lastTarget.kind="column", refinamentos como tamanho/largura/visual devem manter target=lastTarget.field e escolher uma operação de coluna compatível. Não escolha operações globais como appearance.density.set salvo quando o usuário mencionar explicitamente tabela inteira, densidade, compactação geral, linhas ou layout global.
-	10.2. Para pedidos de rótulo/exibição de valores booleanos ou códigos discretos, prefira column.valueMapping.set. Preserve os rótulos solicitados pelo usuário literalmente; não abrevie "Sim" para "S", "Não" para "N", nem substitua rótulos por formatos booleanos genéricos quando o pedido for mostrar textos específicos.
-	10.3. Para continuações visuais sobre chips/badges já criados, mantenha a coluna do último ajuste. Só use column.conditionalRenderer.add por valor quando a política visual estiver explicitamente authorada no turno ou vier de semântica categórica governada no contexto; caso contrário, preserve uma materialização neutra e solicite a decisão canônica de cor, severidade, ícone ou tooltip por valor.
-	10.4. Quando o catalogo declarar table.filter.apply e o usuario pedir para filtrar/aplicar/buscar registros agora a partir das linhas selecionadas, prefira table.filter.apply em vez de configurar advancedFilters. Use selectedRecordsContext.sampleRows e filterFieldCatalog para montar params.criteria com campos canonicos e valores ja presentes.
-	10.5. Quando o catalogo declarar table.export.run e o usuario pedir exportacao agora, prefira table.export.run em vez de configurar toolbar/exportacao. Para linhas selecionadas use params.scope="selected"; se faltar formato, preencha ambiguities ou value=null conforme o schema.
+10. Se o pedido delegar ao assistente a escolha de um alvo essencial ("o melhor", "o certo", "o que fizer sentido") e o catálogo não determinar uma única opção canônica, preencha "ambiguities" em vez de escolher defaults.
+10.1. Se CONTEXTO ADICIONAL contiver tableConversationMemory.lastComponentEditDecision, use essa memória como alvo semântico preferencial para continuações humanas sem alvo explícito. Quando lastTarget.kind="column", refinamentos como tamanho/largura/visual devem manter target=lastTarget.field e escolher uma operação de coluna compatível. Não escolha operações globais como appearance.density.set salvo quando o usuário mencionar explicitamente tabela inteira, densidade, compactação geral, linhas ou layout global.
+10.2. Para pedidos de rótulo/exibição de valores booleanos ou códigos discretos, prefira column.valueMapping.set. Preserve os rótulos solicitados pelo usuário literalmente; não abrevie "Sim" para "S", "Não" para "N", nem substitua rótulos por formatos booleanos genéricos quando o pedido for mostrar textos específicos.
+10.3. Para continuações visuais sobre chips/badges já criados, mantenha a coluna do último ajuste. Só use column.conditionalRenderer.add por valor quando a política visual estiver explicitamente authorada no turno ou vier de semântica categórica governada no contexto; caso contrário, preserve uma materialização neutra e solicite a decisão canônica de cor, severidade, ícone ou tooltip por valor.
+10.4. Quando o catalogo declarar table.filter.apply e o usuario pedir para filtrar/aplicar/buscar registros agora a partir das linhas selecionadas, prefira table.filter.apply em vez de configurar advancedFilters. Use selectedRecordsContext.sampleRows e filterFieldCatalog para montar params.criteria com campos canonicos e valores ja presentes.
+10.5. Quando o catalogo declarar table.export.run e o usuario pedir exportacao agora, prefira table.export.run em vez de configurar toolbar/exportacao. Para linhas selecionadas use params.scope="selected"; se faltar formato, preencha ambiguities ou value=null conforme o schema.
 10.5.1. Quando o catalogo declarar dynamicPage.surface.open e o usuario pedir para abrir, mostrar ou consultar uma superficie relacionada ao registro selecionado, use recordSurfaces.surfaces como catalogo canonico e gere params.surfaceId com um id listado. Se recordSurfaces ja contiver a superficie relacionada, nao responda contextRequest=50.
 10.6. Para regras visuais condicionais, trate pedidos humanos como "borda discreta", "fundo suave", "cor laranja", "texto em negrito", "opacidade" ou "dica/tooltip" como especificacao suficiente de estilo quando a coluna e a condicao estiverem resolvidas. Nao peça "border style", "border location" ou detalhe visual equivalente se o authoringManifest nao marcar esse input como obrigatorio; use defaults canonicos discretos e preencha params.style/params.tooltip em JSON.
 10.7. Para condicoes por ano em colunas de data ja existentes, nao invente campos derivados como dataAdmissaoYear/anoAdmissao salvo se eles existirem no schema ou em computed. Use a coluna real de data com Json Logic canonico, por exemplo {"startsWith":[{"var":"dataAdmissao"},"2022"]} quando o valor serializado usar ISO yyyy-MM-dd, ou uma condicao equivalente declarada no catalogo.
 10.8. Use o pedido atual como a unica instrucao nova. Use o contexto conversacional somente para resolver continuacoes curtas, pronomes, alvo visual/coluna omitidos e referencias a escolhas numeradas oferecidas pelo assistente. Se o pedido atual for "1", "2", "primeira opcao" ou equivalente, resolva semanticamente contra a ultima lista/opcao do assistente antes de considerar significados operacionais genericos como pagina, linha, valor de filtro ou tamanho de pagina.
 11. Se faltar contexto que o backend pode fornecer, responda com "contextRequest" usando os codigos:
-	   10 descricao do componente; 20 assinatura; 30 campos do schema; 40 exemplo de dados; 50 endpoints; 60 estado atual.
+   10 descricao do componente; 20 assinatura; 30 campos do schema; 40 exemplo de dados; 50 endpoints; 60 estado atual.
 12. Retorne APENAS um objeto JSON valido (sem markdown).
 
 SCHEMA DE RESPOSTA (JSON):
@@ -532,7 +532,9 @@ SCHEMA DE RESPOSTA (JSON):
   ],
   "ambiguities": [
     { "alias": "string", "candidates": ["string"], "reason": "string" }
-  ]
+  ],
+  "contextRequest": [],
+  "message": "string"
 }
 """;
 
@@ -575,7 +577,9 @@ SCHEMA DE RESPOSTA (JSON):
   ],
   "ambiguities": [
     { "alias": "string", "candidates": ["string"], "reason": "string" }
-  ]
+  ],
+  "contextRequest": [],
+  "message": "string"
 }
 """;
 

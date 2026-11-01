@@ -1132,7 +1132,27 @@ final class AgenticAuthoringIntentContextCandidateSupport {
         }
         String normalizedResourcePath = normalizePath(contextHintCandidate.resourcePath());
         String normalizedSubmitUrl = normalizePath(contextHintCandidate.submitUrl());
-        return (candidates == null ? List.<AgenticAuthoringCandidate>of() : candidates).stream()
+        if (fallback != null
+                && normalizedResourcePath.equals(normalizePath(fallback.resourcePath()))
+                && normalizedSubmitUrl.equals(normalizePath(fallback.submitUrl()))) {
+            return fallback;
+        }
+        List<AgenticAuthoringCandidate> safeCandidates = candidates == null ? List.of() : candidates;
+        if (!normalizedSubmitUrl.isBlank()) {
+            Optional<AgenticAuthoringCandidate> exactSubmitMatch = safeCandidates.stream()
+                    .filter(Objects::nonNull)
+                    .filter(candidate -> normalizedResourcePath.equals(normalizePath(candidate.resourcePath()))
+                            && normalizedSubmitUrl.equals(normalizePath(candidate.submitUrl())))
+                    .findFirst();
+            if (exactSubmitMatch.isPresent()) {
+                return exactSubmitMatch.get();
+            }
+            if (normalizedResourcePath.equals(normalizedSubmitUrl)) {
+                return contextHintCandidate;
+            }
+        }
+        return safeCandidates.stream()
+                .filter(Objects::nonNull)
                 .filter(candidate -> normalizedResourcePath.equals(normalizePath(candidate.resourcePath()))
                         || normalizedSubmitUrl.equals(normalizePath(candidate.submitUrl())))
                 .findFirst()
@@ -1549,12 +1569,33 @@ final class AgenticAuthoringIntentContextCandidateSupport {
         String submitUrl = explicitSubmitUrl(prompt, resourcePath);
         List<AgenticAuthoringCandidate> usableCandidates = candidates == null ? List.of() : candidates;
         String normalizedResourcePath = normalizePath(resourcePath);
+        boolean formCreate = "form".equals(artifactKind) && submitUrl.isBlank();
         Optional<AgenticAuthoringCandidate> existing = usableCandidates.stream()
                 .filter(Objects::nonNull)
                 .filter(candidate -> normalizedResourcePath.equals(normalizePath(candidate.resourcePath())))
+                .sorted((left, right) -> Boolean.compare(
+                        formCreate && isCreateEndpointCandidate(right),
+                        formCreate && isCreateEndpointCandidate(left)))
                 .findFirst();
         if (existing.isPresent()) {
             AgenticAuthoringCandidate candidate = existing.get();
+            if (formCreate && !isCreateEndpointCandidate(candidate)) {
+                String createSchemaUrl = canonicalContextSchemaUrl("", normalizedResourcePath, "post");
+                return new AgenticAuthoringCandidate(
+                        normalizedResourcePath,
+                        "post",
+                        createSchemaUrl,
+                        normalizedResourcePath,
+                        "post",
+                        Math.max(candidate.score(), 0.99d),
+                        candidate.reason(),
+                        Stream.concat(
+                                        candidate.evidence().stream(),
+                                        Stream.of("explicit-resource-path"))
+                                .distinct()
+                                .toList(),
+                        candidate.evidenceBundle());
+            }
             if (submitUrl.isBlank() || normalizePath(submitUrl).equals(normalizePath(candidate.submitUrl()))) {
                 return new AgenticAuthoringCandidate(
                         candidate.resourcePath(),
@@ -1650,6 +1691,19 @@ final class AgenticAuthoringIntentContextCandidateSupport {
         if (candidateScoringSupport.isBroadArtifactDiscoveryOnly(candidates)) {
             return fallback;
         }
+        if (fallback != null && isDefaultedCollectionFilterCandidateForForm(fallback, prompt)) {
+            String normalizedResourcePath = normalizePath(fallback.resourcePath());
+            return new AgenticAuthoringCandidate(
+                    normalizedResourcePath,
+                    "post",
+                    canonicalContextSchemaUrl("", normalizedResourcePath, "post"),
+                    normalizedResourcePath,
+                    "post",
+                    fallback.score(),
+                    fallback.reason(),
+                    fallback.evidence(),
+                    fallback.evidenceBundle());
+        }
         Optional<AgenticAuthoringCandidate> createEndpointCandidate = candidates.stream()
                 .filter(Objects::nonNull)
                 .filter(this::isCreateEndpointCandidate)
@@ -1685,6 +1739,21 @@ final class AgenticAuthoringIntentContextCandidateSupport {
                 && "post".equalsIgnoreCase(submitMethod)
                 && !resourcePath.isBlank()
                 && resourcePath.equals(submitUrl);
+    }
+
+    private boolean isDefaultedCollectionFilterCandidateForForm(
+            AgenticAuthoringCandidate candidate,
+            String prompt) {
+        if (candidate == null || candidateScoringSupport.isDerivedProjectionCandidate(candidate)) {
+            return false;
+        }
+        String resourcePath = normalizePath(candidate.resourcePath());
+        String submitUrl = normalizePath(valueOrDefault(candidate.submitUrl(), ""));
+        return !resourcePath.isBlank()
+                && (resourcePath + "/filter/cursor").equals(submitUrl)
+                && "post".equalsIgnoreCase(valueOrDefault(candidate.operation(), "post"))
+                && hasEvidence(candidate, "tool-search-api-resources")
+                && explicitSubmitUrl(prompt, resourcePath).isBlank();
     }
 
     boolean isWriteCandidate(AgenticAuthoringCandidate candidate) {

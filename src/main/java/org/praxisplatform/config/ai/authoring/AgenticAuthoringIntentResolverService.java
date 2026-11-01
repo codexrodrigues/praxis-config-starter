@@ -2599,6 +2599,10 @@ public class AgenticAuthoringIntentResolverService {
         if (candidate == null) {
             return true;
         }
+        if (hasEvidence(candidate, "explicit-resource-path")
+                || matchesExplicitPromptResourcePath(request, candidate)) {
+            return false;
+        }
         if (isCanonicalResourceIdentity(focus.primaryBusinessEntity())) {
             if (!canonicalResourceIdentityMatchesCandidate(
                     focus.primaryBusinessEntity(), candidate)) {
@@ -2655,6 +2659,17 @@ public class AgenticAuthoringIntentResolverService {
         return focus != null
                 && (!focus.uncertainty().isBlank()
                         || isCanonicalResourceIdentity(focus.primaryBusinessEntity()));
+    }
+
+    private boolean matchesExplicitPromptResourcePath(
+            AgenticAuthoringIntentResolutionRequest request,
+            AgenticAuthoringCandidate candidate) {
+        if (request == null || candidate == null) {
+            return false;
+        }
+        String explicitPath = explicitResourcePath(request.userPrompt());
+        return !explicitPath.isBlank()
+                && normalizePath(explicitPath).equals(normalizePath(candidate.resourcePath()));
     }
 
     private boolean isCanonicalResourceIdentity(String primaryBusinessEntity) {

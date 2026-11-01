@@ -1358,7 +1358,8 @@ public class AgenticAuthoringLlmIntentResolverService {
                 return invokeJson(
                         "targeted_component_intent",
                         compactTargetedComponentIntentPrompt(request, effectivePrompt, target, capabilities),
-                        AiJsonSchema.ofSchema(compactTargetedComponentIntentSchema(capabilities)),
+                        AiJsonSchema.ofSchema(compactTargetedComponentIntentSchema(
+                                capabilities, hasRuntimeValueAssistanceContext(request))),
                         AiCallConfig.agenticAuthoringBuilder()
                                 .provider(request.provider())
                                 .model(request.model())
@@ -1577,7 +1578,10 @@ public class AgenticAuthoringLlmIntentResolverService {
                 When runtimeValueAssistance is present and the user's primary meaning is to populate, fill or suggest
                 transient runtime field values for the current form instance (as opposed to modifying FormConfig layout,
                 sections, labels or structural field metadata), select operationKind="modify", artifactKind="form",
-                changeKind="fill_form_values" and requiresGovernedAuthoring=false.
+                changeKind="fill_form_values" and requiresGovernedAuthoring=false. When changeKind="fill_form_values"
+                and userPrompt explicitly states specific field values to fill, extract each requested field and value
+                into runtimeValueAssignments with syntheticData=false; leave runtimeValueAssignments empty [] when the
+                user only asks for generic example filling without specific values.
                 When it matches, choose changeKind only by comparing the semantic effects and constraints of the
                 governed capabilities. Adding a new schema-backed item is different from formatting, moving,
                 renaming, hiding or changing an existing item. Preserve the current component unless the user asks
@@ -1598,6 +1602,12 @@ public class AgenticAuthoringLlmIntentResolverService {
 
     private String compactTargetedComponentIntentSchema(
             List<AgenticAuthoringComponentCapabilitiesResult.ComponentCapability> capabilities) {
+        return compactTargetedComponentIntentSchema(capabilities, false);
+    }
+
+    private String compactTargetedComponentIntentSchema(
+            List<AgenticAuthoringComponentCapabilitiesResult.ComponentCapability> capabilities,
+            boolean includeRuntimeValueAssignments) {
         ObjectNode root = objectMapper.createObjectNode();
         root.put("type", "object");
         ObjectNode properties = root.putObject("properties");
@@ -1616,7 +1626,11 @@ public class AgenticAuthoringLlmIntentResolverService {
         changeKinds.add("unknown");
         stringEnum(properties, "changeKind", List.copyOf(changeKinds));
         stringEnum(properties, "followUpKind", List.of("refinement", "new_instruction", "unknown"));
-        properties.putObject("requiresGovernedAuthoring").put("type", "boolean");
+        properties.putObject("requiresGovernedAuthoring")
+                .put("type", "boolean")
+                .put(
+                        "description",
+                        "True ONLY when semanticIntentClass is shared_rule_authoring (reusable backend domain rule authoring); must be false for component_authoring, form/table/dashboard/page creation, and consultative answers.");
         nullableString(properties, "assistantMessage");
         arrayOfStrings(properties, "clarificationQuestions");
         arrayOfStrings(properties, "warnings");
@@ -1644,7 +1658,7 @@ public class AgenticAuthoringLlmIntentResolverService {
                 .put("minItems", 2)
                 .put("maxItems", 4)
                 .set("items", reply);
-        root.putArray("required")
+        ArrayNode required = root.putArray("required")
                 .add("matchesSelectedComponentScope")
                 .add("semanticIntentClass")
                 .add("operationKind")
@@ -1656,6 +1670,31 @@ public class AgenticAuthoringLlmIntentResolverService {
                 .add("clarificationQuestions")
                 .add("warnings")
                 .add("quickReplies");
+        if (includeRuntimeValueAssignments) {
+            ObjectNode assignment = objectMapper.createObjectNode();
+            assignment.put("type", "object");
+            ObjectNode assignmentProps = assignment.putObject("properties");
+            assignmentProps.putObject("fieldPath").put("type", "string");
+            ObjectNode proposedValue = assignmentProps.putObject("proposedValue");
+            ArrayNode proposedValueTypes = proposedValue.putArray("anyOf");
+            proposedValueTypes.addObject().put("type", "string");
+            proposedValueTypes.addObject().put("type", "number");
+            proposedValueTypes.addObject().put("type", "boolean");
+            proposedValueTypes.addObject().put("type", "null");
+            assignmentProps.putObject("syntheticData").put("type", "boolean");
+            assignment.putArray("required")
+                    .add("fieldPath")
+                    .add("proposedValue")
+                    .add("syntheticData");
+            assignment.put("additionalProperties", false);
+            properties.putObject("runtimeValueAssignments")
+                    .put("type", "array")
+                    .put(
+                            "description",
+                            "Explicit field value assignments stated by the user when changeKind is fill_form_values; empty [] otherwise.")
+                    .set("items", assignment);
+            required.add("runtimeValueAssignments");
+        }
         root.put("additionalProperties", false);
         return root.toString();
     }
@@ -1719,6 +1758,31 @@ public class AgenticAuthoringLlmIntentResolverService {
                         && !declaredChangeKind(target.componentId(), changeKind, componentCapabilities))) {
             return Optional.empty();
         }
+        JsonNode queryConstraints = null;
+        if (runtimeFormFill
+                && result.path("runtimeValueAssignments").isArray()
+                && !result.path("runtimeValueAssignments").isEmpty()) {
+            ObjectNode constraintsNode = objectMapper.createObjectNode();
+            ArrayNode assignmentsNode = constraintsNode.putArray("runtimeValueAssignments");
+            for (JsonNode item : result.path("runtimeValueAssignments")) {
+                if (item == null || !item.isObject()) {
+                    continue;
+                }
+                String fieldPath = item.path("fieldPath").asText("").trim();
+                if (!StringUtils.hasText(fieldPath)) {
+                    continue;
+                }
+                boolean syntheticData = item.path("syntheticData").asBoolean(false);
+                ObjectNode normalizedItem = assignmentsNode.addObject();
+                normalizedItem.put("fieldPath", fieldPath);
+                normalizedItem.set("proposedValue", item.get("proposedValue"));
+                normalizedItem.put("provenance", syntheticData ? "synthetic-example" : "user-prompt");
+                normalizedItem.put("syntheticData", syntheticData);
+            }
+            if (!assignmentsNode.isEmpty()) {
+                queryConstraints = constraintsNode;
+            }
+        }
         return Optional.of(new AgenticAuthoringLlmIntentResolution(
                 true,
                 operationKind,
@@ -1734,7 +1798,11 @@ public class AgenticAuthoringLlmIntentResolverService {
                 null,
                 null,
                 false,
-                "component_authoring"));
+                "component_authoring",
+                queryConstraints,
+                List.of(),
+                false,
+                null));
     }
 
     private String boundedText(String value, int maxChars) {
@@ -2782,20 +2850,30 @@ public class AgenticAuthoringLlmIntentResolverService {
             requiresGovernedAuthoring = true;
             localEditorialComposition = false;
             semanticRefinement = null;
-        } else if ("component_authoring".equals(semanticIntentClass)
-                && resolved
-                && "create".equals(operationKind)
-                && !"unknown".equals(artifactKind)
-                && ("materialize".equals(changeKind)
-                        || "materialize_component".equals(changeKind)
-                        || "author_component".equals(changeKind))
-                && ("none".equals(followUpKind) || "new_instruction".equals(followUpKind))) {
-            ArrayList<String> normalizedWarnings = new ArrayList<>(warnings);
-            if (!normalizedWarnings.contains("llm-semantic-intent-tuple-normalized")) {
-                normalizedWarnings.add("llm-semantic-intent-tuple-normalized");
+        } else if ("component_authoring".equals(semanticIntentClass)) {
+            boolean genericCreationVerb = resolved
+                    && "create".equals(operationKind)
+                    && !"unknown".equals(artifactKind)
+                    && ("materialize".equals(changeKind)
+                            || "materialize_component".equals(changeKind)
+                            || "author_component".equals(changeKind))
+                    && ("none".equals(followUpKind) || "new_instruction".equals(followUpKind));
+            boolean spuriousGovernedFlag = requiresGovernedAuthoring
+                    && !"route_shared_rule_authoring".equals(changeKind)
+                    && !"domain_decision".equals(artifactKind);
+            if (genericCreationVerb || spuriousGovernedFlag) {
+                ArrayList<String> normalizedWarnings = new ArrayList<>(warnings);
+                if (!normalizedWarnings.contains("llm-semantic-intent-tuple-normalized")) {
+                    normalizedWarnings.add("llm-semantic-intent-tuple-normalized");
+                }
+                warnings = List.copyOf(normalizedWarnings);
+                if (genericCreationVerb) {
+                    changeKind = "create_artifact";
+                }
+                if (spuriousGovernedFlag) {
+                    requiresGovernedAuthoring = false;
+                }
             }
-            warnings = List.copyOf(normalizedWarnings);
-            changeKind = "create_artifact";
         }
         AgenticAuthoringVisualizationDecision normalizedVisualizationDecision =
                 normalizeVisualizationDecisionForArtifact(
@@ -3150,7 +3228,11 @@ public class AgenticAuthoringLlmIntentResolverService {
                 "none",
                 "unknown"));
         nullableString(properties, "assistantMessage");
-        properties.putObject("requiresGovernedAuthoring").put("type", "boolean");
+        properties.putObject("requiresGovernedAuthoring")
+                .put("type", "boolean")
+                .put(
+                        "description",
+                        "True ONLY when semanticIntentClass is shared_rule_authoring (reusable backend domain rule authoring); must be false for component_authoring, form/table/dashboard/page creation, and consultative answers.");
         properties.putObject("localEditorialComposition")
                 .put("type", "boolean")
                 .put(

@@ -79,6 +79,9 @@ public class AiInteractionLogger {
                     .append(error.getClass().getSimpleName())
                     .append(": ")
                     .append(redact(error.getMessage()));
+            if (error.getCause() != null && error.getCause().getMessage() != null && !error.getCause().getMessage().isBlank()) {
+                sb.append(" (cause=").append(redact(error.getCause().getMessage())).append(")");
+            }
         }
         LOG.info(sb.toString());
     }

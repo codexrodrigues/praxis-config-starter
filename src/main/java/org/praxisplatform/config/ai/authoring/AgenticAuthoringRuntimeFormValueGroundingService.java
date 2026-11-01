@@ -705,10 +705,11 @@ public final class AgenticAuthoringRuntimeFormValueGroundingService {
                 if (item == null || !item.isObject()) {
                     continue;
                 }
-                String fieldPath = item.path("fieldPath").asText(item.path("field").asText("")).trim();
-                if (!StringUtils.hasText(fieldPath)) {
+                String rawFieldPath = item.path("fieldPath").asText(item.path("field").asText("")).trim();
+                if (!StringUtils.hasText(rawFieldPath)) {
                     continue;
                 }
+                String fieldPath = resolveCanonicalCreationFieldPath(rawFieldPath, properties);
                 JsonNode proposedValue = item.has("proposedValue")
                         ? item.get("proposedValue")
                         : item.get("value");
@@ -767,6 +768,39 @@ public final class AgenticAuthoringRuntimeFormValueGroundingService {
             }
         }
         return list;
+    }
+
+    private String resolveCanonicalCreationFieldPath(String candidateFieldPath, JsonNode properties) {
+        if (!StringUtils.hasText(candidateFieldPath) || properties == null || !properties.isObject()) {
+            return candidateFieldPath;
+        }
+        if (properties.has(candidateFieldPath)) {
+            return candidateFieldPath;
+        }
+        String normalizedCandidate = AgenticAuthoringTextNormalizationSupport.normalize(candidateFieldPath)
+                .replaceAll("[^a-z0-9]+", "");
+        if (normalizedCandidate.isBlank()) {
+            return candidateFieldPath;
+        }
+        String matchedKey = null;
+        Iterator<Map.Entry<String, JsonNode>> iterator = properties.fields();
+        while (iterator.hasNext()) {
+            Map.Entry<String, JsonNode> entry = iterator.next();
+            String key = entry.getKey();
+            String normalizedKey = AgenticAuthoringTextNormalizationSupport.normalize(key)
+                    .replaceAll("[^a-z0-9]+", "");
+            String label = entry.getValue().path("x-ui").path("label").asText("");
+            String normalizedLabel = AgenticAuthoringTextNormalizationSupport.normalize(label)
+                    .replaceAll("[^a-z0-9]+", "");
+            if (normalizedCandidate.equals(normalizedKey)
+                    || (!normalizedLabel.isBlank() && normalizedCandidate.equals(normalizedLabel))) {
+                if (matchedKey != null && !matchedKey.equals(key)) {
+                    return candidateFieldPath;
+                }
+                matchedKey = key;
+            }
+        }
+        return matchedKey != null ? matchedKey : candidateFieldPath;
     }
 
     private CandidateAssignment synthesizeAuthorizedLookupCandidate(
