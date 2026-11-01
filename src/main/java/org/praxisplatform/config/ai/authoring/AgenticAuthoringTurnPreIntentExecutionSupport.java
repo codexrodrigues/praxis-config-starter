@@ -335,12 +335,14 @@ final class AgenticAuthoringTurnPreIntentExecutionSupport {
                 && semanticDecision.visualizationDecision() != null
                         ? semanticDecision.visualizationDecision()
                         : intentResolution.visualizationDecision();
-        return visualizationDecision != null
-                && ("resource-master-detail".equals(safeText(visualizationDecision.layoutKind()))
+        if (visualizationDecision == null) {
+            return intentResolution.valid() && "page".equals(safeText(intentResolution.artifactKind()));
+        }
+        return "resource-master-detail".equals(safeText(visualizationDecision.layoutKind()))
                 || "parent-child-related-resource".equals(safeText(visualizationDecision.layoutKind()))
                 || "approval-workbench".equals(safeText(visualizationDecision.layoutKind()))
                 || "resource-action-workbench".equals(safeText(visualizationDecision.layoutKind()))
-                || "workflow-action-workbench".equals(safeText(visualizationDecision.layoutKind())));
+                || "workflow-action-workbench".equals(safeText(visualizationDecision.layoutKind()));
     }
 
     AgenticAuthoringIntentResolutionResult composePlannedDashboardWithChartDecision(

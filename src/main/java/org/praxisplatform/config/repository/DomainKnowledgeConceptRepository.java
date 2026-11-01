@@ -21,9 +21,18 @@ public interface DomainKnowledgeConceptRepository extends JpaRepository<DomainKn
             String environment,
             List<String> conceptKeys);
 
+    /**
+     * Hydrates only the source release identity ({@code id}, {@code releaseKey}) without loading
+     * {@code DomainCatalogRelease.rawPayload}.
+     */
     @Query("""
-        select c from DomainKnowledgeConcept c
-        left join fetch c.sourceRelease
+        select new org.praxisplatform.config.domain.DomainKnowledgeConcept(
+          c.id, c.tenantId, c.environment, c.conceptKey, c.contextKey, c.resourceKey,
+          c.nodeType, c.label, c.description, c.locale, c.semanticOwner, c.steward,
+          c.lifecycle, c.curationStatus, c.aiVisibility, c.dataCategory, c.classification,
+          c.complianceTags, sr.id, sr.releaseKey, c.payload, c.createdAt, c.updatedAt)
+        from DomainKnowledgeConcept c
+        left join c.sourceRelease sr
         where c.tenantId = :tenantId
           and c.environment = :environment
           and c.conceptKey in :conceptKeys
@@ -33,9 +42,18 @@ public interface DomainKnowledgeConceptRepository extends JpaRepository<DomainKn
             @Param("environment") String environment,
             @Param("conceptKeys") List<String> conceptKeys);
 
+    /**
+     * Hydrates only the source release identity ({@code id}, {@code releaseKey}) without loading
+     * {@code DomainCatalogRelease.rawPayload}.
+     */
     @Query("""
-        select c from DomainKnowledgeConcept c
-        left join fetch c.sourceRelease
+        select new org.praxisplatform.config.domain.DomainKnowledgeConcept(
+          c.id, c.tenantId, c.environment, c.conceptKey, c.contextKey, c.resourceKey,
+          c.nodeType, c.label, c.description, c.locale, c.semanticOwner, c.steward,
+          c.lifecycle, c.curationStatus, c.aiVisibility, c.dataCategory, c.classification,
+          c.complianceTags, sr.id, sr.releaseKey, c.payload, c.createdAt, c.updatedAt)
+        from DomainKnowledgeConcept c
+        left join c.sourceRelease sr
         where c.tenantId = :tenantId
           and c.environment = :environment
           and c.lifecycle = 'active'
@@ -47,9 +65,19 @@ public interface DomainKnowledgeConceptRepository extends JpaRepository<DomainKn
             @Param("tenantId") String tenantId,
             @Param("environment") String environment);
 
+    /**
+     * Runtime discovery projection for governed Project Knowledge candidates. Joins only the
+     * release identity ({@code id}, {@code releaseKey}) and never initializes
+     * {@code DomainCatalogRelease.rawPayload}.
+     */
     @Query("""
-        select c from DomainKnowledgeConcept c
-        left join fetch c.sourceRelease
+        select new org.praxisplatform.config.domain.DomainKnowledgeConcept(
+          c.id, c.tenantId, c.environment, c.conceptKey, c.contextKey, c.resourceKey,
+          c.nodeType, c.label, c.description, c.locale, c.semanticOwner, c.steward,
+          c.lifecycle, c.curationStatus, c.aiVisibility, c.dataCategory, c.classification,
+          c.complianceTags, sr.id, sr.releaseKey, c.payload, c.createdAt, c.updatedAt)
+        from DomainKnowledgeConcept c
+        left join c.sourceRelease sr
         where c.tenantId = :tenantId
           and c.environment = :environment
           and c.lifecycle = 'active'

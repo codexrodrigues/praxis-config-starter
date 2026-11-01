@@ -571,12 +571,14 @@ final class AgenticAuthoringCandidateDiscoveryTelemetrySupport {
             if (hasExplicitSourceCandidate(candidates)) {
                 return groundCandidates(prompt, explicitSourceDiscoveryScope(candidates), tenantId, environment);
             }
-            candidates.addAll(apiMetadataCandidateCatalog.discover(
-                    "",
-                    initialPromptDiscoveryArtifactKind,
-                    tenantId,
-                    environment,
-                    null));
+            if (!"page".equals(initialPromptDiscoveryArtifactKind)) {
+                candidates.addAll(apiMetadataCandidateCatalog.discover(
+                        "",
+                        initialPromptDiscoveryArtifactKind,
+                        tenantId,
+                        environment,
+                        null));
+            }
         }
         return groundCandidates(prompt, deduplicateCandidates(candidates), tenantId, environment);
     }

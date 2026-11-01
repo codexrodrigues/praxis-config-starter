@@ -44,9 +44,18 @@ public interface DomainKnowledgeEvidenceRepository extends JpaRepository<DomainK
             List<String> evidenceKeys,
             String status);
 
+    /**
+     * Hydrates only the source release identity ({@code id}, {@code releaseKey}) without loading
+     * {@code DomainCatalogRelease.rawPayload}.
+     */
     @Query("""
-        select e from DomainKnowledgeEvidence e
-        left join fetch e.sourceRelease
+        select new org.praxisplatform.config.domain.DomainKnowledgeEvidence(
+          e.id, e.tenantId, e.environment, e.evidenceKey, e.subjectType, e.subjectId,
+          e.evidenceType, sr.id, sr.releaseKey, e.sourceUri, e.sourcePointer, e.status,
+          e.supersededByEvidenceId, e.revertedByChangeSetId, e.revertedAt, e.revertReason,
+          e.confidence, e.payload, e.createdAt)
+        from DomainKnowledgeEvidence e
+        left join e.sourceRelease sr
         where e.tenantId = :tenantId
           and e.environment = :environment
           and e.subjectType = 'concept'

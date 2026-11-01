@@ -104,7 +104,18 @@ final class AgenticAuthoringChartInteractionProjectionReconciler {
             ObjectNode plan,
             String chartKey,
             ChartInteractionProjection projection) {
-        JsonNode bindings = plan.path("bindings");
+        boolean changed = reconcileChartInteractionBindingArray(plan.path("bindings"), chartKey, projection);
+        changed = reconcileChartInteractionBindingArray(
+                plan.path("composition").path("links"),
+                chartKey,
+                projection) || changed;
+        return changed;
+    }
+
+    private boolean reconcileChartInteractionBindingArray(
+            JsonNode bindings,
+            String chartKey,
+            ChartInteractionProjection projection) {
         if (!bindings.isArray()) {
             return false;
         }

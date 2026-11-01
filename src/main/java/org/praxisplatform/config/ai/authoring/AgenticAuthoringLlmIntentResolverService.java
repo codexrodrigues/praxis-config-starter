@@ -162,20 +162,6 @@ public class AgenticAuthoringLlmIntentResolverService {
             return Optional.of(failedResolutionForFailureKind(preIntentTerminalFailureKind, request));
         }
         boolean liveOptionRefinement = hasLiveOptionRefinementContext(request);
-
-        // Resource, field and current candidates are already governed before this terminal
-        // classifier runs. Rebuilding the broader domain/RAG prompt here is both redundant and
-        boolean focusedResourceAuthoring = shouldUseFocusedResourceAuthoringPrompt(
-                request,
-                fastIntentCandidateOptions(usableCandidates));
-        // expensive, and the focused live-option prompt deliberately does not consume it.
-        String governedDomainContext = (liveOptionRefinement || focusedResourceAuthoring)
-                ? ""
-                : governedDomainContext(
-                        request,
-                        effectivePrompt,
-                        tenantId,
-                        environment);
         try {
             Optional<AgenticAuthoringLlmIntentResolution> declaredClientActionIntent =
                     compactDeclaredClientActionIntent(
@@ -188,19 +174,31 @@ public class AgenticAuthoringLlmIntentResolverService {
             if (declaredClientActionIntent.isPresent()) {
                 return declaredClientActionIntent.map(value -> withProviderInvocations(value, providerInvocations));
             }
-            Optional<AgenticAuthoringLlmIntentResolution> platformGuidanceConfirmation =
-                    compactPlatformGuidanceConfirmation(
-                            request,
-                            effectivePrompt,
-                            target,
-                            componentCapabilities,
-                            governedDomainContext,
-                            tenantId,
-                            userId,
-                            environment,
-                            providerInvocations);
-            if (platformGuidanceConfirmation.isPresent()) {
-                return platformGuidanceConfirmation.map(value -> withProviderInvocations(value, providerInvocations));
+            if (hasPriorPlatformGuidanceSemanticScope(request)) {
+                boolean focusedResourceAuthoringForGuidance = shouldUseFocusedResourceAuthoringPrompt(
+                        request,
+                        fastIntentCandidateOptions(usableCandidates));
+                String platformGuidanceDomainContext = (liveOptionRefinement || focusedResourceAuthoringForGuidance)
+                        ? ""
+                        : governedDomainContext(
+                                request,
+                                effectivePrompt,
+                                tenantId,
+                                environment);
+                Optional<AgenticAuthoringLlmIntentResolution> platformGuidanceConfirmation =
+                        compactPlatformGuidanceConfirmation(
+                                request,
+                                effectivePrompt,
+                                target,
+                                componentCapabilities,
+                                platformGuidanceDomainContext,
+                                tenantId,
+                                userId,
+                                environment,
+                                providerInvocations);
+                if (platformGuidanceConfirmation.isPresent()) {
+                    return platformGuidanceConfirmation.map(value -> withProviderInvocations(value, providerInvocations));
+                }
             }
             Optional<AgenticAuthoringLlmIntentResolution> targetedComponentIntent =
                     compactTargetedComponentIntent(
@@ -215,6 +213,19 @@ public class AgenticAuthoringLlmIntentResolverService {
             if (targetedComponentIntent.isPresent()) {
                 return targetedComponentIntent.map(value -> withProviderInvocations(value, providerInvocations));
             }
+            // Resource, field and current candidates are already governed before this terminal
+            // classifier runs. Rebuilding the broader domain/RAG prompt here is both redundant and
+            // expensive, and the focused live-option prompt deliberately does not consume it.
+            boolean focusedResourceAuthoring = shouldUseFocusedResourceAuthoringPrompt(
+                    request,
+                    fastIntentCandidateOptions(usableCandidates));
+            String governedDomainContext = (liveOptionRefinement || focusedResourceAuthoring)
+                    ? ""
+                    : governedDomainContext(
+                            request,
+                            effectivePrompt,
+                            tenantId,
+                            environment);
             Optional<AgenticAuthoringLlmIntentResolution> fastResolution = fastIntentResolution(
                     request,
                     effectivePrompt,

@@ -239,7 +239,14 @@ public class AgenticAuthoringIntentResolverService {
                 : request;
         boolean deferPreLlmApiMetadataDiscovery = shouldResolveLlmIntent
                 && !hasExplicitSourceSelection
-                && isQuestionLike(prompt);
+                && (isQuestionLike(prompt)
+                        || (request.pendingClarification() == null
+                                && !hasMaterializableResourceDiscoveryContext(request)
+                                && target != null
+                                && !valueOrDefault(target.widgetKey(), "").isBlank()
+                                && !valueOrDefault(target.componentId(), "").isBlank()
+                                && !valueOrDefault(target.resourcePath(), "").isBlank()
+                                && !shouldDetachCurrentTarget(discoveryPrompt, artifactKind, target)));
         if (deterministicDashboardMaterialization || isExplicitDashboardMaterializationCommand(prompt)) {
             deferPreLlmApiMetadataDiscovery = false;
         }
@@ -278,6 +285,9 @@ public class AgenticAuthoringIntentResolverService {
             candidates = deduplicateCandidates(dashboardCandidates);
         }
         candidates = withContextHintCandidates(request, candidates);
+        if (serverIssuedQuickReplyContinuation) {
+            candidates = filterPinnedContinuationCandidates(activeDecision, candidates);
+        }
         AgenticAuthoringCandidate contextHintCandidate = contextHintCandidate(
                 request,
                 artifactKind,
@@ -411,6 +421,9 @@ public class AgenticAuthoringIntentResolverService {
                     ? discoverInitialCandidates(prompt, artifactKind, target, tenantId, environment)
                     : discoverCandidates(prompt, artifactKind, target, tenantId, environment);
             candidates = withContextHintCandidates(request, candidates);
+        if (serverIssuedQuickReplyContinuation) {
+            candidates = filterPinnedContinuationCandidates(activeDecision, candidates);
+        }
             contextHintCandidate = contextHintCandidate(request, artifactKind, candidates, tenantId, environment);
             if (contextHintCandidate != null) {
                 candidates = withPriorityCandidate(candidates, contextHintCandidate);
@@ -430,6 +443,9 @@ public class AgenticAuthoringIntentResolverService {
                     ? discoverInitialCandidates(prompt, artifactKind, target, tenantId, environment)
                     : discoverCandidates(prompt, artifactKind, target, tenantId, environment);
             candidates = withContextHintCandidates(request, candidates);
+        if (serverIssuedQuickReplyContinuation) {
+            candidates = filterPinnedContinuationCandidates(activeDecision, candidates);
+        }
             contextHintCandidate = contextHintCandidate(request, artifactKind, candidates, tenantId, environment);
             if (contextHintCandidate != null) {
                 candidates = withPriorityCandidate(candidates, contextHintCandidate);
@@ -520,12 +536,14 @@ public class AgenticAuthoringIntentResolverService {
                 }
             } else if ((candidates.isEmpty()
                     || (!"unknown".equals(artifactKind)
-                            && !artifactKind.equals(preLlmArtifactKind)
+                            && (deferPreLlmApiMetadataDiscovery || !artifactKind.equals(preLlmArtifactKind))
                             && !usePreIntentResourceDiscoveryAsPrimaryEvidence
-                            && !selectedDomainDecisionFocus))
+                            && !selectedDomainDecisionFocus
+                            && !isResolvedComponentAuthoringIntent(llmIntent)))
                     && !postIntentApiCatalogCandidateDiscoverySkipped) {
-                List<AgenticAuthoringCandidate> discoveredForArtifact =
-                        discoverCandidates(prompt, artifactKind, target, tenantId, environment);
+                List<AgenticAuthoringCandidate> discoveredForArtifact = serverIssuedQuickReplyContinuation
+                        ? discoverResolvedContinuationCandidates(activeDecision, artifactKind, tenantId, environment)
+                        : discoverCandidates(prompt, artifactKind, target, tenantId, environment);
                 List<AgenticAuthoringCandidate> refinedCandidates = new ArrayList<>(
                         discoveredForArtifact.isEmpty() ? candidates : discoveredForArtifact);
                 String llmSelectedPath = normalizePath(valueOrDefault(llmIntent.selectedResourcePath(), ""));
@@ -546,6 +564,9 @@ public class AgenticAuthoringIntentResolverService {
                 }
                 refinedCandidates.addAll(contextHintCandidates(request));
                 candidates = deduplicateCandidates(refinedCandidates);
+                if (serverIssuedQuickReplyContinuation) {
+                    candidates = filterPinnedContinuationCandidates(activeDecision, candidates);
+                }
                 contextHintCandidate = contextHintCandidate(request, artifactKind, candidates, tenantId, environment);
                 if (contextHintCandidate != null) {
                     candidates = withPriorityCandidate(candidates, contextHintCandidate);
@@ -565,6 +586,9 @@ public class AgenticAuthoringIntentResolverService {
                         && !selectedDomainDecisionFocus) {
                     candidates = discoverCandidates(prompt, artifactKind, target, tenantId, environment);
                     candidates = withContextHintCandidates(request, candidates);
+        if (serverIssuedQuickReplyContinuation) {
+            candidates = filterPinnedContinuationCandidates(activeDecision, candidates);
+        }
                     contextHintCandidate = contextHintCandidate(request, artifactKind, candidates, tenantId, environment);
                     if (contextHintCandidate != null) {
                         candidates = withPriorityCandidate(candidates, contextHintCandidate);
@@ -576,6 +600,9 @@ public class AgenticAuthoringIntentResolverService {
                     || isBroadArtifactDiscoveryOnly(candidates)) {
                 candidates = discoverCandidates(prompt, artifactKind, target, tenantId, environment);
                 candidates = withContextHintCandidates(request, candidates);
+        if (serverIssuedQuickReplyContinuation) {
+            candidates = filterPinnedContinuationCandidates(activeDecision, candidates);
+        }
                 contextHintCandidate = contextHintCandidate(request, artifactKind, candidates, tenantId, environment);
                 if (contextHintCandidate != null) {
                     candidates = withPriorityCandidate(candidates, contextHintCandidate);
@@ -1513,6 +1540,7 @@ public class AgenticAuthoringIntentResolverService {
             semanticDecision = semanticDecision.withConstraints(
                     resolvedQuickReplyContinuationConstraints(activeDecision));
         }
+        quickReplies = quickReplySupport.withIssuingDecision(quickReplies, semanticDecision);
         llmDiagnostics = withResolutionTelemetry(
                 llmDiagnostics,
                 shouldResolveLlmIntent,
@@ -1765,13 +1793,17 @@ public class AgenticAuthoringIntentResolverService {
         }
         JsonNode targetIdentity = rva.path("targetIdentity");
         String componentId = firstNonBlank(
-                jsonText(targetIdentity, "componentId"),
+                jsonText(request.contextHints().path("authoringContract"), "componentId"),
+                jsonText(request.contextHints().path("authoringManifestRef"), "componentId"),
                 request.targetComponentId(),
+                jsonText(targetIdentity, "componentId"),
                 "praxis-dynamic-form");
         String widgetKey = firstNonBlank(
                 effectiveSelectedWidgetKey,
                 jsonText(targetIdentity, "instanceId"),
-                jsonText(targetIdentity, "widgetKey"));
+                jsonText(targetIdentity, "widgetKey"),
+                jsonText(targetIdentity, "componentId"),
+                jsonText(request.currentPage(), "formId"));
         String resourcePath = firstNonBlank(
                 jsonText(targetIdentity, "resourcePath"),
                 jsonText(request.currentPage(), "resourcePath"),
@@ -1951,15 +1983,25 @@ public class AgenticAuthoringIntentResolverService {
                 || activeDecision.constraints() == null) {
             return List.of();
         }
-        String resourcePath = activeDecision.constraints().path("resourcePath").asText("").trim();
+        String resourcePath = pinnedContinuationResourcePath(activeDecision);
         if (!resourcePath.isBlank()) {
             // Intent and resource scope were already selected by a server-issued
             // semantic decision. Exact matching only grounds that canonical
             // candidate again; it never routes the user's text or trusts a label.
-            return apiMetadataCandidateCatalog.discover(resourcePath, artifactKind, tenantId, environment, null)
+            String resolvedResourcePath = resourcePath;
+            List<AgenticAuthoringCandidate> discovered = apiMetadataCandidateCatalog
+                    .discover(resolvedResourcePath, artifactKind, tenantId, environment, null)
                     .stream().filter(Objects::nonNull)
-                    .filter(candidate -> resourcePath.equals(candidate.resourcePath()))
+                    .filter(candidate -> resolvedResourcePath.equals(candidate.resourcePath()))
                     .toList();
+            if (!discovered.isEmpty()) {
+                return discovered;
+            }
+            AgenticAuthoringCandidate preserved = activeDecisionCandidate(activeDecision, artifactKind);
+            if (preserved != null && resolvedResourcePath.equals(preserved.resourcePath())) {
+                return List.of(preserved);
+            }
+            return List.of();
         }
         List<String> conceptKeys = new ArrayList<>();
         JsonNode concepts = activeDecision.constraints().path("conceptKeys");
@@ -1976,6 +2018,33 @@ public class AgenticAuthoringIntentResolverService {
                 artifactKind,
                 tenantId,
                 environment);
+    }
+
+    private String pinnedContinuationResourcePath(AgenticAuthoringSemanticDecision activeDecision) {
+        if (activeDecision == null) {
+            return "";
+        }
+        String resourcePath = activeDecision.constraints() == null
+                ? ""
+                : activeDecision.constraints().path("resourcePath").asText("").trim();
+        if (resourcePath.isBlank() && activeDecision.selectedResource() != null) {
+            resourcePath = valueOrDefault(activeDecision.selectedResource().resourcePath(), "").trim();
+        }
+        return resourcePath;
+    }
+
+    private List<AgenticAuthoringCandidate> filterPinnedContinuationCandidates(
+            AgenticAuthoringSemanticDecision activeDecision,
+            List<AgenticAuthoringCandidate> candidates) {
+        String pinnedResourcePath = pinnedContinuationResourcePath(activeDecision);
+        if (pinnedResourcePath.isBlank() || candidates == null || candidates.isEmpty()) {
+            return candidates == null ? List.of() : candidates;
+        }
+        List<AgenticAuthoringCandidate> matching = candidates.stream()
+                .filter(Objects::nonNull)
+                .filter(candidate -> pinnedResourcePath.equals(candidate.resourcePath()))
+                .toList();
+        return matching.isEmpty() ? candidates : matching;
     }
 
     private ObjectNode resolvedQuickReplyContinuationConstraints(

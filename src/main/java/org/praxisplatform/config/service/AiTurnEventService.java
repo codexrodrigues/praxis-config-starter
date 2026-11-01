@@ -358,14 +358,15 @@ public class AiTurnEventService {
             return;
         }
         String decisionId = payload.path("activeSemanticDecisionId").asText("");
-        var latest = findLatestSemanticDecision(threadId, principalContext).orElse(null);
+        List<AiTurnEvent> resultEvents = turnEventRepository.findResultEventsByThreadIdOrderByNewest(threadId);
+        var latest = findLatestSemanticDecision(resultEvents, principalContext).orElse(null);
         if (latest == null && decisionId.isBlank()) {
             return;
         }
         if (latest != null && latest.decisionId().equals(decisionId)) {
             return;
         }
-        var decision = findPersistedSemanticDecision(threadId, decisionId, principalContext).orElse(null);
+        var decision = findPersistedSemanticDecision(resultEvents, decisionId, principalContext).orElse(null);
         if (latest != null && decision != null
                 && decision.constraints() != null
                 && "server-issued-quick-reply".equals(decision.constraints().path("source").asText())
@@ -476,7 +477,18 @@ public class AiTurnEventService {
         if (threadId == null || principalContext == null) {
             return Optional.empty();
         }
-        return turnEventRepository.findResultEventsByThreadIdOrderByNewest(threadId).stream()
+        return findLatestSemanticDecision(
+                turnEventRepository.findResultEventsByThreadIdOrderByNewest(threadId),
+                principalContext);
+    }
+
+    private Optional<AgenticAuthoringSemanticDecision> findLatestSemanticDecision(
+            List<AiTurnEvent> resultEvents,
+            AiPrincipalContext principalContext) {
+        if (resultEvents == null || principalContext == null) {
+            return Optional.empty();
+        }
+        return resultEvents.stream()
                 .filter(event -> isOwnedByPrincipal(event, principalContext))
                 .map(event -> parsePayload(event.getPayload())
                         .path("intentResolution")
@@ -495,6 +507,14 @@ public class AiTurnEventService {
                 .map(PersistedSemanticDecisionContext::decision);
     }
 
+    private Optional<AgenticAuthoringSemanticDecision> findPersistedSemanticDecision(
+            List<AiTurnEvent> resultEvents,
+            String decisionId,
+            AiPrincipalContext principalContext) {
+        return findPersistedSemanticDecisionContext(resultEvents, decisionId, principalContext)
+                .map(PersistedSemanticDecisionContext::decision);
+    }
+
     @Transactional(transactionManager = ConfigTransactionManagerNames.CONFIG, readOnly = true)
     public Optional<PersistedSemanticDecisionContext> findPersistedSemanticDecisionContext(
             UUID threadId,
@@ -503,7 +523,20 @@ public class AiTurnEventService {
         if (threadId == null || decisionId == null || decisionId.isBlank() || principalContext == null) {
             return Optional.empty();
         }
-        return turnEventRepository.findResultEventsByThreadIdOrderByNewest(threadId).stream()
+        return findPersistedSemanticDecisionContext(
+                turnEventRepository.findResultEventsByThreadIdOrderByNewest(threadId),
+                decisionId,
+                principalContext);
+    }
+
+    private Optional<PersistedSemanticDecisionContext> findPersistedSemanticDecisionContext(
+            List<AiTurnEvent> resultEvents,
+            String decisionId,
+            AiPrincipalContext principalContext) {
+        if (resultEvents == null || decisionId == null || decisionId.isBlank() || principalContext == null) {
+            return Optional.empty();
+        }
+        return resultEvents.stream()
                 .filter(event -> isOwnedByPrincipal(event, principalContext))
                 .map(event -> persistedSemanticDecisionContext(parsePayload(event.getPayload()), decisionId))
                 .flatMap(Optional::stream)
@@ -519,7 +552,7 @@ public class AiTurnEventService {
                 JsonNode decision = reply.path("semanticDecision");
                 Optional<AgenticAuthoringSemanticDecision> matched = semanticDecision(decision, decisionId);
                 if (matched.isPresent()) {
-                    ArrayNode issuedCandidateApis = issuedCandidateApis(payload);
+                    ArrayNode issuedCandidateApis = issuedCandidateApis(payload, matched.get());
                     return Optional.of(new PersistedSemanticDecisionContext(
                             matched.get(),
                             issuedCandidateApis));
@@ -534,7 +567,10 @@ public class AiTurnEventService {
                         objectMapper.createArrayNode()));
     }
 
-    private ArrayNode issuedCandidateApis(JsonNode payload) {
+    private ArrayNode issuedCandidateApis(
+            JsonNode payload,
+            AgenticAuthoringSemanticDecision decision) {
+        String pinnedResourcePath = pinnedDecisionResourcePath(decision);
         ArrayNode candidates = objectMapper.createArrayNode();
         java.util.Set<String> resourcePaths = new java.util.LinkedHashSet<>();
         JsonNode persistedCandidates = payload == null
@@ -542,8 +578,11 @@ public class AiTurnEventService {
                 : payload.path("intentResolution").path("apiCatalogAnswer").path("candidateApis");
         if (persistedCandidates != null && persistedCandidates.isArray()) {
             for (JsonNode candidate : persistedCandidates) {
-                candidates.add(candidate.deepCopy());
                 String resourcePath = candidate.path("resourcePath").asText("").trim();
+                if (!pinnedResourcePath.isBlank() && !pinnedResourcePath.equals(resourcePath)) {
+                    continue;
+                }
+                candidates.add(candidate.deepCopy());
                 if (!resourcePath.isBlank()) {
                     resourcePaths.add(resourcePath);
                 }
@@ -568,6 +607,9 @@ public class AiTurnEventService {
                     continue;
                 }
                 String resourcePath = "/api/" + parts[2].replace('.', '/');
+                if (!pinnedResourcePath.isBlank() && !pinnedResourcePath.equals(resourcePath)) {
+                    continue;
+                }
                 if (!resourcePaths.add(resourcePath)) {
                     continue;
                 }
@@ -581,6 +623,22 @@ public class AiTurnEventService {
             }
         }
         return candidates;
+    }
+
+    private String pinnedDecisionResourcePath(AgenticAuthoringSemanticDecision decision) {
+        if (decision == null) {
+            return "";
+        }
+        if (decision.constraints() != null) {
+            String constraintPath = decision.constraints().path("resourcePath").asText("").trim();
+            if (!constraintPath.isBlank()) {
+                return constraintPath;
+            }
+        }
+        if (decision.selectedResource() != null && decision.selectedResource().resourcePath() != null) {
+            return decision.selectedResource().resourcePath().trim();
+        }
+        return "";
     }
 
     private Optional<AgenticAuthoringSemanticDecision> semanticDecision(JsonNode node, String decisionId) {

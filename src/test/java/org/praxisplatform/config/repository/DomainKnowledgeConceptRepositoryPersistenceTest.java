@@ -98,7 +98,9 @@ class DomainKnowledgeConceptRepositoryPersistenceTest {
                     assertThat(concept.getCurationStatus()).isEqualTo("approved");
                     assertThat(concept.getAiVisibility()).isIn("allow", "mask", "summarize_only");
                     assertThat(concept.getSourceRelease()).isNotNull();
+                    assertThat(concept.getSourceRelease().getId()).isEqualTo(release.getId());
                     assertThat(concept.getSourceRelease().getReleaseKey()).isEqualTo("quickstart:human-resources:2026-04-30");
+                    assertThat(concept.getSourceRelease().getRawPayload()).isNull();
                 });
     }
 

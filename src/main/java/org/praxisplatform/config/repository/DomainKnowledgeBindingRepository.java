@@ -16,10 +16,22 @@ public interface DomainKnowledgeBindingRepository extends JpaRepository<DomainKn
             String environment,
             String resourceKey);
 
+    /**
+     * Runtime discovery projection for governed operational bindings. Joins only the release
+     * identities ({@code id}, {@code releaseKey}) and never initializes
+     * {@code DomainCatalogRelease.rawPayload}.
+     */
     @Query("""
-        select b from DomainKnowledgeBinding b
-        join fetch b.concept c
-        left join fetch b.sourceRelease
+        select new org.praxisplatform.config.domain.DomainKnowledgeBinding(
+          b.id, b.tenantId, b.environment,
+          c.id, c.tenantId, c.environment, c.conceptKey, c.contextKey, c.resourceKey,
+          c.nodeType, c.lifecycle, c.curationStatus, c.aiVisibility, csr.id, csr.releaseKey,
+          b.bindingType, b.bindingKey, b.resourceKey, b.apiPath, b.apiMethod, b.schemaPointer,
+          sr.id, sr.releaseKey, b.confidence, b.curationStatus, b.payload, b.createdAt, b.updatedAt)
+        from DomainKnowledgeBinding b
+        join b.concept c
+        left join c.sourceRelease csr
+        left join b.sourceRelease sr
         where b.tenantId = :tenantId
           and b.environment = :environment
           and b.resourceKey = :resourceKey

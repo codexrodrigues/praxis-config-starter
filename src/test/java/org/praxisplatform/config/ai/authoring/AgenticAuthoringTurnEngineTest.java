@@ -9373,7 +9373,13 @@ class AgenticAuthoringTurnEngineTest {
         JsonNode result = objectMapper.valueToTree(sink.payloads.get(sink.payloads.size() - 1));
         org.assertj.core.api.Assertions.assertThat(result.path("quickReplies"))
                 .extracting(reply -> reply.path("id").asText())
-                .containsExactly("governed-review-revise");
+                .containsExactly(
+                        "chart-change-line",
+                        "chart-change-donut",
+                        "chart-add-detail-table",
+                        "chart-add-detail-modal",
+                        "table-export-selected-rows",
+                        "governed-review-revise");
     }
 
     @Test
@@ -9405,7 +9411,7 @@ class AgenticAuthoringTurnEngineTest {
         JsonNode result = objectMapper.valueToTree(sink.payloads.get(sink.payloads.size() - 1));
         org.assertj.core.api.Assertions.assertThat(result.path("quickReplies"))
                 .extracting(reply -> reply.path("id").asText())
-                .containsExactly("governed-review-revise");
+                .containsExactly("table-export-selected-rows", "governed-review-revise");
     }
 
     @Test
@@ -15854,6 +15860,56 @@ class AgenticAuthoringTurnEngineTest {
             }
         }
         return objectMapper.missingNode();
+    }
+
+    @Test
+    void exposesContextualDashboardQuickRepliesFromCanonicalRegistryManifestCapabilities() {
+        AgenticAuthoringTurnDecisionProjectionSupport projectionSupport =
+                new AgenticAuthoringTurnDecisionProjectionSupport(
+                        objectMapper,
+                        new AgenticAuthoringTurnAdvisorySupport(null));
+        AgenticAuthoringComponentCapabilitiesResult canonicalCapabilities =
+                new AgenticAuthoringComponentCapabilitiesService().listCapabilities();
+        ObjectNode previewPage = objectMapper.createObjectNode();
+        ArrayNode widgets = previewPage.putArray("widgets");
+        widgets.addObject()
+                .put("key", "funcionarios-chart-Departamento")
+                .put("componentId", "praxis-chart")
+                .putObject("definition")
+                .put("id", "praxis-chart");
+        widgets.addObject()
+                .put("key", "funcionarios-table")
+                .put("componentId", "praxis-table")
+                .putObject("definition")
+                .put("id", "praxis-table");
+        ObjectNode compiledPatch = objectMapper.createObjectNode();
+        compiledPatch.putObject("patch").set("page", previewPage);
+        AgenticAuthoringPreviewResult preview = new AgenticAuthoringPreviewResult(
+                true,
+                List.of(),
+                List.of(),
+                previewPage,
+                compiledPatch);
+
+        List<AgenticAuthoringQuickReply> replies = projectionSupport.terminalQuickReplies(
+                null,
+                fastGovernedTableModificationIntent(),
+                null,
+                preview,
+                true,
+                Map.of(),
+                canonicalCapabilities);
+
+        assertThat(replies)
+                .extracting(AgenticAuthoringQuickReply::id)
+                .contains("chart-change-line", "chart-add-detail-modal", "table-export-selected-rows");
+        assertThat(replies)
+                .filteredOn(reply -> "chart-change-line".equals(reply.id()))
+                .singleElement()
+                .satisfies(reply -> {
+                    assertThat(reply.contextHints().has("previewPage")).isFalse();
+                    assertThat(reply.contextHints().has("targetWidgetSnapshot")).isFalse();
+                });
     }
 
     private static final class CapturingSink implements AgenticAuthoringTurnEventSink {

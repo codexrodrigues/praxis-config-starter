@@ -27,6 +27,7 @@ import java.util.regex.Pattern;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
+import org.springframework.ai.document.MetadataMode;
 import org.springframework.ai.embedding.EmbeddingRequest;
 import org.springframework.ai.embedding.EmbeddingResponse;
 import org.springframework.ai.google.genai.text.GoogleGenAiTextEmbeddingModel;
@@ -38,7 +39,10 @@ import org.springframework.ai.retry.NonTransientAiException;
 import org.springframework.ai.retry.TransientAiException;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.client.SimpleClientHttpRequestFactory;
+import org.springframework.retry.support.RetryTemplate;
 import org.springframework.stereotype.Service;
+import org.springframework.web.client.RestClient;
 
 /**
  * Faixa canonica de geracao de embeddings usada pelos servicos de ingestao, busca semantica e
@@ -412,8 +416,13 @@ public class EmbeddingService {
             try {
                 return call.execute();
             } catch (Exception failure) {
+                if (findCause(failure, InterruptedException.class) != null) {
+                    Thread.currentThread().interrupt();
+                }
                 AiProviderCallException classified = classifyEmbeddingFailure(providerName, failure);
-                if (attempt >= maxAttempts || !isRetryableEmbeddingFailure(classified)) {
+                if (attempt >= maxAttempts
+                        || Thread.currentThread().isInterrupted()
+                        || !isRetryableEmbeddingFailure(classified)) {
                     throw classified;
                 }
                 long delayMs = retryDelayMs(attempt, classified);
@@ -689,21 +698,30 @@ public class EmbeddingService {
     private OpenAiEmbeddingModel resolveOpenAiClient(EmbeddingCallConfig override, String apiKey) {
         String overrideKey = override != null ? trimToNull(override.apiKey()) : null;
         if (overrideKey != null && !overrideKey.equals(apiKey)) {
-            OpenAiApi api = OpenAiApi.builder()
-                    .apiKey(overrideKey)
-                    .baseUrl(resolveBaseUrl(openaiBaseUrl))
-                    .build();
-            return new OpenAiEmbeddingModel(api);
+            return createBoundedOpenAiEmbeddingModel(overrideKey);
         }
         OpenAiEmbeddingModel client = openAiEmbeddingClientProvider.getIfAvailable();
         if (client != null) {
             return client;
         }
+        return createBoundedOpenAiEmbeddingModel(apiKey);
+    }
+
+    private OpenAiEmbeddingModel createBoundedOpenAiEmbeddingModel(String resolvedApiKey) {
+        Duration timeout = Duration.ofSeconds(Math.max(1, timeoutSeconds));
+        SimpleClientHttpRequestFactory requestFactory = new SimpleClientHttpRequestFactory();
+        requestFactory.setConnectTimeout(timeout);
+        requestFactory.setReadTimeout(timeout);
         OpenAiApi api = OpenAiApi.builder()
-                .apiKey(apiKey)
+                .apiKey(resolvedApiKey)
                 .baseUrl(resolveBaseUrl(openaiBaseUrl))
+                .restClientBuilder(RestClient.builder().requestFactory(requestFactory))
                 .build();
-        return new OpenAiEmbeddingModel(api);
+        return new OpenAiEmbeddingModel(
+                api,
+                MetadataMode.EMBED,
+                OpenAiEmbeddingOptions.builder().build(),
+                RetryTemplate.builder().maxAttempts(1).build());
     }
 
     private List<Float> embedWithGoogleGenAiRest(

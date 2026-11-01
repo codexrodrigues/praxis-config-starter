@@ -79,6 +79,49 @@ public class DomainKnowledgeEvidence {
   @Column(name = "created_at", nullable = false)
   private Instant createdAt;
 
+  public DomainKnowledgeEvidence(
+      UUID id,
+      String tenantId,
+      String environment,
+      String evidenceKey,
+      String subjectType,
+      UUID subjectId,
+      String evidenceType,
+      UUID sourceReleaseId,
+      String sourceReleaseKey,
+      String sourceUri,
+      String sourcePointer,
+      String status,
+      UUID supersededByEvidenceId,
+      UUID revertedByChangeSetId,
+      Instant revertedAt,
+      String revertReason,
+      Double confidence,
+      String payload,
+      Instant createdAt) {
+    this(
+        id,
+        tenantId,
+        environment,
+        evidenceKey,
+        subjectType,
+        subjectId,
+        evidenceType,
+        sourceReleaseId == null && sourceReleaseKey == null
+            ? null
+            : DomainCatalogRelease.builder().id(sourceReleaseId).releaseKey(sourceReleaseKey).build(),
+        sourceUri,
+        sourcePointer,
+        status,
+        supersededByEvidenceId,
+        revertedByChangeSetId,
+        revertedAt,
+        revertReason,
+        confidence,
+        payload,
+        createdAt);
+  }
+
   @PrePersist
   public void onInsert() {
     if (id == null) {

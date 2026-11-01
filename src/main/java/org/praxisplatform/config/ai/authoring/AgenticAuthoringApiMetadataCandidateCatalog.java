@@ -991,6 +991,14 @@ public class AgenticAuthoringApiMetadataCandidateCatalog {
                 || hasLlmAuthoredResourceFocus(normalize(valueOrEmpty(normalizedPrompt)))) {
             score += semanticRoleScoreAdjustment(semanticRole, resourceNeed);
         }
+        score += dashboardOperationScoreAdjustment(
+                artifactKind,
+                normalize(result.getPath()),
+                meaningfulTokens(normalizedPrompt));
+        if (("table".equals(artifactKind) || "page".equals(artifactKind))
+                && normalize(result.getPath()).contains("/stats/")) {
+            score -= 0.12d;
+        }
         score += derivedProjectionScoreAdjustment(resourcePath, submitUrl, normalizedPrompt, artifactKind);
         score = Math.max(0.45d, Math.min(0.99d, score));
         List<String> evidence = new ArrayList<>(List.of(
@@ -1664,6 +1672,9 @@ public class AgenticAuthoringApiMetadataCandidateCatalog {
             if (path.endsWith("/filter") || path.endsWith("/filter/cursor")) {
                 adjustment += 0.18d;
             }
+            if (path.contains("/stats/") || path.endsWith("/all") || path.endsWith("/by-ids") || path.contains("/{")) {
+                adjustment -= 0.12d;
+            }
         }
         if ("form".equals(artifactKind)) {
             if (path.endsWith("/filter") || path.endsWith("/filter/cursor")
@@ -1867,6 +1878,10 @@ public class AgenticAuthoringApiMetadataCandidateCatalog {
         if (("table".equals(artifactKind) || "page".equals(artifactKind) || "unknown".equals(artifactKind))
                 && normalized.endsWith("/filter")) {
             return normalized + "/cursor";
+        }
+        if (("table".equals(artifactKind) || "page".equals(artifactKind) || "unknown".equals(artifactKind))
+                && normalized.contains("/stats/")) {
+            return baseResourcePath(normalized) + "/filter/cursor";
         }
         if (("dashboard".equals(artifactKind) || "chart".equals(artifactKind))
                 && !isKnownCollectionOperation(normalized)

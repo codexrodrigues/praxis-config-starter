@@ -468,6 +468,7 @@ final class AgenticAuthoringTurnConsultativeQuickReplySupport {
         constraints.put("source", "server-issued-quick-reply");
         constraints.put("quickReplyId", quickReplyId);
         constraints.put("continuationOf", "resource_discovery");
+        putText(constraints, "resourcePath", selectedCandidate.resourcePath());
         constraints.putArray("conceptKeys");
         AgenticAuthoringSemanticDecision decision = AgenticAuthoringSemanticDecision.from(
                         operationKind,
@@ -572,9 +573,11 @@ final class AgenticAuthoringTurnConsultativeQuickReplySupport {
         }
         AgenticAuthoringConsultativeApiCatalogProjection projection = answer.apiCatalogProjection();
         if (projection == null || !projection.hasResources()) {
-            return intentResolution != null && intentResolution.quickReplies() != null
-                    ? intentResolution.quickReplies()
-                    : List.of();
+            return withIssuingDecision(
+                    intentResolution != null && intentResolution.quickReplies() != null
+                            ? intentResolution.quickReplies()
+                            : List.of(),
+                    intentResolution == null ? null : intentResolution.semanticDecision());
         }
         List<AgenticAuthoringQuickReply> replies = new ArrayList<>();
         AgenticAuthoringConsultativeApiCatalogProjection.Resource primary = firstResource(projection.resources());

@@ -496,12 +496,29 @@ public class AgenticAuthoringResourceDiscoveryService {
         return false;
     }
 
+    private boolean hasSupportedComparisonOperation(ResourceCapabilitiesFetchResult result) {
+        if (result == null || !result.isSuccess()) {
+            return false;
+        }
+        JsonNode root = result.getCapabilities();
+        if (root != null && root.path("data").isObject()) {
+            root = root.path("data");
+        }
+        JsonNode statsComparison = root == null ? null : root.path("operations").path("statsComparison");
+        return statsComparison != null
+                && statsComparison.path("supported").asBoolean(false)
+                && statsComparison.path("availability").path("allowed").asBoolean(false);
+    }
+
     private AgenticAuthoringCandidate withVerifiedStatsEvidence(
             AgenticAuthoringCandidate candidate,
             ResourceCapabilitiesFetchResult result,
             AiPrincipalContext principalContext) {
         boolean promoteGroupByEndpoint = hasGroupByEligibleStatsField(result)
-                && (candidate.submitUrl() == null || !candidate.submitUrl().contains("/stats/"));
+                && (candidate.submitUrl() == null
+                        || !candidate.submitUrl().contains("/stats/")
+                        || (candidate.submitUrl().endsWith("/stats/comparison")
+                                && !hasSupportedComparisonOperation(result)));
         String submitUrl = promoteGroupByEndpoint
                 ? candidate.resourcePath() + "/stats/group-by"
                 : candidate.submitUrl();

@@ -75,6 +75,76 @@ public class DomainKnowledgeBinding {
   @Column(name = "updated_at", nullable = false)
   private Instant updatedAt;
 
+  public DomainKnowledgeBinding(
+      UUID id,
+      String tenantId,
+      String environment,
+      UUID conceptId,
+      String conceptTenantId,
+      String conceptEnvironment,
+      String conceptKey,
+      String conceptContextKey,
+      String conceptResourceKey,
+      String conceptNodeType,
+      String conceptLifecycle,
+      String conceptCurationStatus,
+      String conceptAiVisibility,
+      UUID conceptSourceReleaseId,
+      String conceptSourceReleaseKey,
+      String bindingType,
+      String bindingKey,
+      String resourceKey,
+      String apiPath,
+      String apiMethod,
+      String schemaPointer,
+      UUID sourceReleaseId,
+      String sourceReleaseKey,
+      Double confidence,
+      String curationStatus,
+      String payload,
+      Instant createdAt,
+      Instant updatedAt) {
+    this(
+        id,
+        tenantId,
+        environment,
+        conceptId == null && conceptKey == null
+            ? null
+            : DomainKnowledgeConcept.builder()
+                .id(conceptId)
+                .tenantId(conceptTenantId)
+                .environment(conceptEnvironment)
+                .conceptKey(conceptKey)
+                .contextKey(conceptContextKey)
+                .resourceKey(conceptResourceKey)
+                .nodeType(conceptNodeType)
+                .lifecycle(conceptLifecycle)
+                .curationStatus(conceptCurationStatus)
+                .aiVisibility(conceptAiVisibility)
+                .sourceRelease(
+                    conceptSourceReleaseId == null && conceptSourceReleaseKey == null
+                        ? null
+                        : DomainCatalogRelease.builder()
+                            .id(conceptSourceReleaseId)
+                            .releaseKey(conceptSourceReleaseKey)
+                            .build())
+                .build(),
+        bindingType,
+        bindingKey,
+        resourceKey,
+        apiPath,
+        apiMethod,
+        schemaPointer,
+        sourceReleaseId == null && sourceReleaseKey == null
+            ? null
+            : DomainCatalogRelease.builder().id(sourceReleaseId).releaseKey(sourceReleaseKey).build(),
+        confidence,
+        curationStatus,
+        payload,
+        createdAt,
+        updatedAt);
+  }
+
   @PrePersist
   public void onInsert() {
     Instant now = Instant.now();

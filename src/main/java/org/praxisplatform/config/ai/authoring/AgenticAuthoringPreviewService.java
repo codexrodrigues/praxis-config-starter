@@ -773,20 +773,32 @@ public class AgenticAuthoringPreviewService {
         AgenticAuthoringIntentResolutionResult intent = request.intentResolution();
         AgenticAuthoringTarget target = intent == null ? null : intent.target();
         String widgetKey = target == null ? "" : value(target.widgetKey()).trim();
-        String componentId = target == null ? "" : value(target.componentId()).trim();
-        if (widgetKey.isBlank() || componentId.isBlank()) {
+        String intentTargetComponentId = intent == null ? "" : value(intent.targetComponentId()).trim();
+        String componentId = target != null && !value(target.componentId()).trim().isBlank()
+                ? value(target.componentId()).trim()
+                : intentTargetComponentId;
+        if (componentId.isBlank()) {
             return request;
         }
         JsonNode widget = selectedComponentWidget(request.currentPage(), widgetKey);
-        if (widget.isMissingNode()
-                || !componentId.equals(widget.path("definition").path("id").asText("").trim())) {
+        boolean widgetMatches = !widgetKey.isBlank()
+                && !widget.isMissingNode()
+                && componentId.equals(widget.path("definition").path("id").asText("").trim());
+        boolean standaloneComponentMatches = request.currentPage() != null
+                && request.currentPage().isObject()
+                && !request.currentPage().path("widgets").isArray()
+                && !intentTargetComponentId.isBlank()
+                && componentId.equals(intentTargetComponentId);
+        if (!widgetMatches && !standaloneComponentMatches) {
             return request;
         }
 
         ObjectNode contextHints = existingHints != null && existingHints.isObject()
                 ? existingHints.deepCopy()
                 : objectMapper.createObjectNode();
-        contextHints.put("selectedWidgetKey", widgetKey);
+        if (!widgetKey.isBlank()) {
+            contextHints.put("selectedWidgetKey", widgetKey);
+        }
         contextHints.put("selectedComponentId", componentId);
         contextHints.putObject("authoringManifestRef")
                 .put("componentId", componentId)
@@ -842,6 +854,7 @@ public class AgenticAuthoringPreviewService {
             case "table.columns.reorder" -> "a reordenação das colunas";
             case "table.sort.set" -> "o ajuste da ordenação da tabela";
             case "table.filter.add", "table.filters.set" -> "o ajuste dos filtros da tabela";
+            case "rule.visualblockguidance.add" -> "a regra de orientação visual em formRules";
             default -> operationId.contains(".")
                     ? "os ajustes solicitados no componente"
                     : operationId;
@@ -2533,6 +2546,10 @@ public class AgenticAuthoringPreviewService {
             return Optional.empty();
         }
         SchemaFieldDescriptor probe = chartInteractionFilterProbe(semanticAxis);
+        addNonBlank(axisFields, semanticAxis.path("filterField").asText(""));
+        preferredFilterInputField(probe, filterFields)
+                .map(SchemaFieldDescriptor::name)
+                .ifPresent(name -> addNonBlank(axisFields, name));
         if (target == null && timeseries) {
             target = preferredTemporalRangeFilterField(probe, filterFields).orElse(null);
             if (target == null) {

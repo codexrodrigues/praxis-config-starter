@@ -7,6 +7,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import org.praxisplatform.config.service.AiProviderInvocationTelemetry;
@@ -222,7 +223,12 @@ final class AgenticAuthoringTurnDecisionProjectionSupport {
                 ? null
                 : intentResolution.selectedCandidate();
         List<AgenticAuthoringQuickReply> replies = new ArrayList<>();
-        if (hasChart && supportsCapability(capabilities, "praxis-chart", "set_chart_type")) {
+        if (hasChart && supportsCapability(
+                capabilities,
+                "praxis-chart",
+                "set_chart_type",
+                "chart.type.set",
+                "praxis-chart.type.set@0.1.0")) {
             replies.add(contextualQuickReply(
                     "chart-change-line",
                     "Trocar para linhas",
@@ -252,7 +258,12 @@ final class AgenticAuthoringTurnDecisionProjectionSupport {
                     request,
                     intentResolution == null ? null : intentResolution.semanticDecision()));
         }
-        if (hasChart && supportsCapability(capabilities, "praxis-chart", "enable_chart_drilldown")) {
+        if (hasChart && supportsCapability(
+                capabilities,
+                "praxis-chart",
+                "enable_chart_drilldown",
+                "drilldown.configure",
+                "praxis-chart.drilldown.enable@0.1.0")) {
             replies.add(contextualQuickReply(
                     "chart-add-detail-table",
                     "Detalhes em tabela",
@@ -287,7 +298,13 @@ final class AgenticAuthoringTurnDecisionProjectionSupport {
                     request,
                     intentResolution == null ? null : intentResolution.semanticDecision()));
         }
-        if (hasTable && supportsCapability(capabilities, "praxis-table", "configure_export")) {
+        if (hasTable && supportsCapability(
+                capabilities,
+                "praxis-table",
+                "configure_export",
+                "export.configure",
+                "export.enabled.set",
+                "praxis-table.export.selected-rows@0.1.0")) {
             replies.add(contextualQuickReply(
                     "table-export-selected-rows",
                     "Exportar selecionadas",
@@ -370,17 +387,11 @@ final class AgenticAuthoringTurnDecisionProjectionSupport {
         if (selectedCandidate != null && StringUtils.hasText(selectedCandidate.resourcePath())) {
             hints.put("resourcePath", selectedCandidate.resourcePath());
             hints.put("submitUrl", firstNonBlank(selectedCandidate.submitUrl(), selectedCandidate.resourcePath()));
-            hints.put("operation", firstNonBlank(selectedCandidate.operation(), selectedCandidate.submitMethod(), "get"));
-            hints.put("submitMethod", firstNonBlank(selectedCandidate.submitMethod(), selectedCandidate.operation(), "get"));
+            hints.put("operation", firstNonBlank(selectedCandidate.operation(), selectedCandidate.submitMethod(), "get").toLowerCase(Locale.ROOT));
+            hints.put("submitMethod", firstNonBlank(selectedCandidate.submitMethod(), selectedCandidate.operation(), "get").toLowerCase(Locale.ROOT));
             if (StringUtils.hasText(selectedCandidate.schemaUrl())) {
                 hints.put("schemaUrl", selectedCandidate.schemaUrl());
             }
-        }
-        if (previewPage != null && previewPage.isObject()) {
-            hints.set("previewPage", previewPage.deepCopy());
-        }
-        if (targetWidgetSnapshot != null && targetWidgetSnapshot.isObject()) {
-            hints.set("targetWidgetSnapshot", targetWidgetSnapshot.deepCopy());
         }
         if (extraContextHints != null && extraContextHints.isObject()) {
             extraContextHints.fields().forEachRemaining(entry -> hints.set(entry.getKey(), entry.getValue().deepCopy()));
@@ -512,15 +523,28 @@ final class AgenticAuthoringTurnDecisionProjectionSupport {
     private boolean supportsCapability(
             AgenticAuthoringComponentCapabilitiesResult capabilities,
             String componentId,
-            String changeKind) {
-        return capabilities != null
-                && capabilities.catalogs() != null
-                && capabilities.catalogs().stream()
+            String... capabilityKeys) {
+        if (capabilities == null
+                || capabilities.catalogs() == null
+                || !StringUtils.hasText(componentId)
+                || capabilityKeys == null
+                || capabilityKeys.length == 0) {
+            return false;
+        }
+        java.util.Set<String> accepted = java.util.Arrays.stream(capabilityKeys)
+                .filter(StringUtils::hasText)
+                .collect(java.util.stream.Collectors.toSet());
+        if (accepted.isEmpty()) {
+            return false;
+        }
+        return capabilities.catalogs().stream()
                 .filter(catalog -> componentId.equals(catalog.componentId()))
                 .flatMap(catalog -> catalog.capabilities() == null
                         ? java.util.stream.Stream.empty()
                         : catalog.capabilities().stream())
-                .anyMatch(capability -> changeKind.equals(capability.changeKind()));
+                .anyMatch(capability -> capability != null
+                        && (accepted.contains(capability.changeKind())
+                                || accepted.contains(capability.id())));
     }
 
     private String previewComponentWidgetKey(AgenticAuthoringPreviewResult preview, String componentId) {

@@ -567,7 +567,7 @@ public final class AgenticAuthoringValidatorRegistry {
                 case "lazy-content-compatible", "nested-widget-contract-delegated" -> validateWidgetEventDelegated(operationId, planOperation, failures);
                 case "field-is-local" -> validateResolvedFieldIsLocal(componentId, operation, planOperation, config, failures);
                 case "field-exists-in-layout" -> validateFormFieldExistsInLayout(componentId, operation, planOperation, config, failures);
-                case "visual-block-exists" -> validateResolvedTarget(componentId, operation, planOperation, config, validatorId, failures);
+                case "visual-block-exists" -> validateFormVisualBlockExists(componentId, operation, planOperation, config, failures);
                 case "visual-block-id-unique" -> validateFormVisualBlockIdUnique(operationId, planOperation, config, failures);
                 case "layout-target-exists" -> validateFormLayoutTargetExists(operationId, planOperation, config, failures);
                 case "rich-content-document-valid" -> validateFormRichContentDocument(operationId, planOperation, failures);
@@ -1395,6 +1395,31 @@ public final class AgenticAuthoringValidatorRegistry {
             failures.add("validator field-exists-in-layout failed for " + text(operation, "operationId")
                     + ": field is not referenced in layout " + fieldName);
         }
+    }
+
+    private void validateFormVisualBlockExists(
+            String componentId,
+            JsonNode operation,
+            JsonNode planOperation,
+            JsonNode config,
+            List<String> failures) {
+        JsonNode targets = planOperation.path("input").path("targets");
+        if (targets.isArray()) {
+            String operationId = text(operation, "operationId");
+            if (targets.isEmpty()) {
+                failures.add("validator visual-block-exists failed for " + operationId + ": targets must not be empty");
+                return;
+            }
+            for (JsonNode targetNode : targets) {
+                String targetId = targetNode.asText("").trim();
+                if (targetId.isBlank() || !formLayoutContainsVisualBlock(config, targetId)) {
+                    failures.add("validator visual-block-exists failed for " + operationId
+                            + ": visual block not found " + targetId);
+                }
+            }
+            return;
+        }
+        validateResolvedTarget(componentId, operation, planOperation, config, "visual-block-exists", failures);
     }
 
     private void validateFormVisualBlockIdUnique(

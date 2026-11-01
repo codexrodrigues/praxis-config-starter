@@ -123,6 +123,9 @@ final class AgenticAuthoringIntentCandidateScoringSupport {
             }
         }
         score = Math.max(score, candidatePathDomainTokenScore(prompt, candidate));
+        if (score <= 0 && !promptMatchesCandidatePathIdentity(prompt, candidate)) {
+            return 0;
+        }
         if (isVisualMaterializationArtifact(artifactKind) && termListMatchesToken(evidenceTerms, artifactKind)) {
             score += 2;
         }
@@ -944,7 +947,7 @@ final class AgenticAuthoringIntentCandidateScoringSupport {
         if (isBareDomainPrompt(normalized)) {
             return true;
         }
-        if ("dashboard".equals(artifactKind)
+        if (("dashboard".equals(artifactKind) || "page".equals(artifactKind))
                 && containsAny(normalized, "dashboard", "painel", "grafico", "graficos")
                 && candidates.size() > 1
                 && candidates.stream().noneMatch(candidate -> promptMentionsSpecificCandidateToken(prompt, candidate))) {

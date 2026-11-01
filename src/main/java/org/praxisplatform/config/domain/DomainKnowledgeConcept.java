@@ -97,6 +97,57 @@ public class DomainKnowledgeConcept {
   @Column(name = "updated_at", nullable = false)
   private Instant updatedAt;
 
+  public DomainKnowledgeConcept(
+      UUID id,
+      String tenantId,
+      String environment,
+      String conceptKey,
+      String contextKey,
+      String resourceKey,
+      String nodeType,
+      String label,
+      String description,
+      String locale,
+      String semanticOwner,
+      String steward,
+      String lifecycle,
+      String curationStatus,
+      String aiVisibility,
+      String dataCategory,
+      String classification,
+      String complianceTags,
+      UUID sourceReleaseId,
+      String sourceReleaseKey,
+      String payload,
+      Instant createdAt,
+      Instant updatedAt) {
+    this(
+        id,
+        tenantId,
+        environment,
+        conceptKey,
+        contextKey,
+        resourceKey,
+        nodeType,
+        label,
+        description,
+        locale,
+        semanticOwner,
+        steward,
+        lifecycle,
+        curationStatus,
+        aiVisibility,
+        dataCategory,
+        classification,
+        complianceTags,
+        sourceReleaseId == null && sourceReleaseKey == null
+            ? null
+            : DomainCatalogRelease.builder().id(sourceReleaseId).releaseKey(sourceReleaseKey).build(),
+        payload,
+        createdAt,
+        updatedAt);
+  }
+
   @PrePersist
   public void onInsert() {
     Instant now = Instant.now();

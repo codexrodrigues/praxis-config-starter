@@ -805,6 +805,42 @@ final class AgenticAuthoringIntentQuickReplySupport {
                                 "Revisar")));
     }
 
+    List<AgenticAuthoringQuickReply> withIssuingDecision(
+            List<AgenticAuthoringQuickReply> replies,
+            AgenticAuthoringSemanticDecision issuingDecision) {
+        if (replies == null || replies.isEmpty()
+                || issuingDecision == null
+                || issuingDecision.decisionId() == null
+                || issuingDecision.decisionId().isBlank()) {
+            return replies;
+        }
+        List<AgenticAuthoringQuickReply> bound = new ArrayList<>(replies.size());
+        for (AgenticAuthoringQuickReply reply : replies) {
+            JsonNode decisionNode = reply == null ? null : reply.semanticDecision();
+            if (decisionNode == null
+                    || !decisionNode.isObject()
+                    || !"server-issued-quick-reply".equals(
+                            decisionNode.path("constraints").path("source").asText(""))) {
+                bound.add(reply);
+                continue;
+            }
+            AgenticAuthoringSemanticDecision decision =
+                    objectMapper.convertValue(decisionNode, AgenticAuthoringSemanticDecision.class);
+            bound.add(new AgenticAuthoringQuickReply(
+                    reply.id(),
+                    reply.kind(),
+                    reply.label(),
+                    reply.prompt(),
+                    reply.description(),
+                    reply.icon(),
+                    reply.tone(),
+                    reply.contextHints(),
+                    objectMapper.valueToTree(decision.withIssuingDecision(issuingDecision.decisionId())),
+                    reply.value()));
+        }
+        return List.copyOf(bound);
+    }
+
     List<AgenticAuthoringQuickReply> withPlatformQuickReplySemanticDecisions(
             AgenticAuthoringIntentResolutionRequest request,
             List<AgenticAuthoringQuickReply> quickReplies) {
