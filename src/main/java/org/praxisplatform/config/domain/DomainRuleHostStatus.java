@@ -30,6 +30,9 @@ public class DomainRuleHostStatus {
   @Column(name = "rule_set_key", nullable = false, length = 512)
   private String ruleSetKey;
 
+  @Column(name = "operation_key", nullable = false, length = 512)
+  private String operationKey;
+
   @Column(name = "host_actor_ref", nullable = false, length = 255)
   private String hostActorRef;
 

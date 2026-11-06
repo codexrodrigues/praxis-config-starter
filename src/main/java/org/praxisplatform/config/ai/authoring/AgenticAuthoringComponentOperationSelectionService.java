@@ -60,8 +60,27 @@ public class AgenticAuthoringComponentOperationSelectionService {
             String tenantId,
             String userId,
             String environment) throws Exception {
+        return select(request, componentId, currentConfig, null, manifest, tenantId, userId, environment);
+    }
+
+    public Selection select(
+            AgenticAuthoringPlanRequest request,
+            String componentId,
+            JsonNode currentConfig,
+            JsonNode validationContext,
+            JsonNode manifest,
+            String tenantId,
+            String userId,
+            String environment) throws Exception {
         Set<String> declaredOperationIds = new LinkedHashSet<>();
         manifest.path("operations").forEach(operation -> declaredOperationIds.add(operation.path("operationId").asText("")));
+        AgenticAuthoringValidatorRegistry.ResolvedClientSurfaceCapabilities surfaceCapabilities =
+                resolveSurfaceCapabilities(validationContext, currentConfig);
+        if ("praxis-rich-content".equals(componentId)
+                && surfaceCapabilities != null
+                && (surfaceCapabilities.forbidEmbeddedActions() || !surfaceCapabilities.isNodeTypeAllowed("link"))) {
+            declaredOperationIds.remove("link.add");
+        }
         if (declaredOperationIds.isEmpty()) {
             return Selection.clarify("component-authoring-manifest-operations-unavailable");
         }
@@ -70,7 +89,7 @@ public class AgenticAuthoringComponentOperationSelectionService {
         List<String> semanticContinuityOperationIds =
                 semanticContinuityOperationIds(request, manifest, declaredOperationIds);
         JsonNode response = providerManagementService.generateJson(
-                prompt(request, componentId, currentConfig, manifest, candidateOperationIds),
+                prompt(request, componentId, currentConfig, validationContext, manifest, candidateOperationIds),
                 AiJsonSchema.ofSchema(schema(componentId, candidateOperationIds)),
                 AiCallConfig.agenticAuthoringBuilder()
                         .provider(request.provider()).model(request.model()).apiKey(request.apiKey())
@@ -149,10 +168,20 @@ public class AgenticAuthoringComponentOperationSelectionService {
         return new Selection(true, List.copyOf(ids), "", response.deepCopy());
     }
 
+    private AgenticAuthoringValidatorRegistry.ResolvedClientSurfaceCapabilities resolveSurfaceCapabilities(
+            JsonNode validationContext, JsonNode currentConfig) {
+        AgenticAuthoringValidatorRegistry.ResolvedClientSurfaceCapabilities resolved =
+                AgenticAuthoringValidatorRegistry.resolveClientSurfaceCapabilities(validationContext);
+        return resolved != null
+                ? resolved
+                : AgenticAuthoringValidatorRegistry.resolveClientSurfaceCapabilities(currentConfig);
+    }
+
     private String prompt(
             AgenticAuthoringPlanRequest request,
             String componentId,
             JsonNode config,
+            JsonNode validationContext,
             JsonNode manifest,
             Set<String> candidateOperationIds) throws Exception {
         String rawPrompt = normalizeSearchText(request == null ? null : request.userPrompt());
@@ -166,6 +195,13 @@ public class AgenticAuthoringComponentOperationSelectionService {
         input.put("userPrompt", request.userPrompt());
         input.set("resolvedObjective", resolvedObjective(request.intentResolution()));
         input.set("currentConfig", config == null ? objectMapper.createObjectNode() : config.deepCopy());
+        if (validationContext != null && validationContext.path("clientSurfaceCapabilities").isObject()) {
+            input.set(
+                    "clientSurfaceCapabilities",
+                    validationContext.path("clientSurfaceCapabilities").deepCopy());
+        } else if (config != null && config.path("clientSurfaceCapabilities").isObject()) {
+            input.set("clientSurfaceCapabilities", config.path("clientSurfaceCapabilities").deepCopy());
+        }
         ArrayNode cards = input.putArray("operationCards");
         for (JsonNode operation : candidateOperations(manifest, candidateOperationIds)) {
             ObjectNode card = cards.addObject();

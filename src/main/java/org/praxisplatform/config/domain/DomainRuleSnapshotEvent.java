@@ -30,6 +30,9 @@ public class DomainRuleSnapshotEvent {
   @Column(name = "rule_set_key", nullable = false, length = 512)
   private String ruleSetKey;
 
+  @Column(name = "operation_key", nullable = false, length = 512)
+  private String operationKey;
+
   @Column(name = "event_type", nullable = false, length = 32)
   private String eventType;
 
@@ -47,6 +50,9 @@ public class DomainRuleSnapshotEvent {
 
   @Column(nullable = false, length = 255)
   private String actor;
+
+  @Column(length = 1000)
+  private String reason;
 
   @Column(name = "created_at", nullable = false)
   private Instant createdAt;

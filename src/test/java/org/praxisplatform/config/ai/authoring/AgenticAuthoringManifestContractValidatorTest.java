@@ -244,4 +244,218 @@ class AgenticAuthoringManifestContractValidatorTest {
 
         assertThat(failures).contains("destructive operation requires confirmation: column.remove");
     }
+
+    @Test
+    void shouldAcceptDeclarativeResolutionSpecInsertPositionedAndSelectionReconciliation() throws Exception {
+        JsonNode manifest = objectMapper.readTree("""
+                {
+                  "schemaVersion": "1.0.0",
+                  "componentId": "praxis-rich-content",
+                  "manifestVersion": "1.0.0",
+                  "editableTargets": [
+                    {
+                      "kind": "block",
+                      "resolver": "custom-block-resolver",
+                      "resolutionSpec": {
+                        "strategy": "recursive-array-match",
+                        "paths": ["document.nodes[]"],
+                        "matchFields": ["id"],
+                        "childrenFields": ["content", "items"],
+                        "allowedTypes": ["text", "card"]
+                      }
+                    },
+                    {
+                      "kind": "timelineItem",
+                      "resolver": "custom-timeline-item-resolver",
+                      "resolutionSpec": {
+                        "strategy": "parent-child-array-match",
+                        "paths": ["document.nodes[]"],
+                        "parentInputMatchFields": ["timelineBlockId"],
+                        "matchFields": ["id"],
+                        "childArrayField": "items",
+                        "inputMatchFields": ["itemId", "id"],
+                        "childrenFields": ["content", "items"]
+                      }
+                    }
+                  ],
+                  "validators": [
+                    { "validatorId": "target-block-exists" }
+                  ],
+                  "operations": [
+                    {
+                      "operationId": "block.insert",
+                      "target": {
+                        "kind": "block",
+                        "resolver": "custom-block-resolver",
+                        "ambiguityPolicy": "fail",
+                        "required": false,
+                        "resolutionSpec": {
+                          "strategy": "recursive-array-match",
+                          "paths": ["document.nodes[]"],
+                          "matchFields": ["id"],
+                          "childrenFields": ["content", "items"]
+                        }
+                      },
+                      "preconditions": ["config-initialized"],
+                      "validators": ["target-block-exists"],
+                      "effects": [
+                        {
+                          "kind": "insert-positioned",
+                          "path": "document.nodes[]",
+                          "key": "id",
+                          "inputPath": "node",
+                          "beforeKeyField": "beforeBlockId",
+                          "afterKeyField": "afterBlockId",
+                          "replaceKeyField": "replaceBlockId",
+                          "autoGenerateIdPrefix": "block-",
+                          "selectionReconciliation": {
+                            "selectedIndexPath": "selectedIndex",
+                            "onRemovedActive": "clamp"
+                          }
+                        }
+                      ],
+                      "affectedPaths": ["document.nodes[]"],
+                      "submissionImpact": "visual-only"
+                    }
+                  ]
+                }
+                """);
+
+        assertThat(validator.validate(manifest)).isEmpty();
+    }
+
+    @Test
+    void shouldRejectInvalidResolutionSpecInsertPositionedAndSelectionReconciliation() throws Exception {
+        JsonNode manifest = objectMapper.readTree("""
+                {
+                  "editableTargets": [
+                    {
+                      "kind": "block",
+                      "resolver": "custom-block-resolver",
+                      "resolutionSpec": {
+                        "strategy": "unsupported-strategy",
+                        "allowIndex": true
+                      }
+                    }
+                  ],
+                  "validators": [
+                    { "validatorId": "target-block-exists" }
+                  ],
+                  "operations": [
+                    {
+                      "operationId": "block.insert",
+                      "target": {
+                        "kind": "block",
+                        "resolver": "custom-block-resolver",
+                        "required": false,
+                        "resolutionSpec": {
+                          "strategy": "parent-child-array-match",
+                          "paths": []
+                        }
+                      },
+                      "preconditions": ["config-initialized"],
+                      "validators": ["target-block-exists"],
+                      "effects": [
+                        {
+                          "kind": "insert-positioned",
+                          "path": "",
+                          "key": "",
+                          "selectionReconciliation": {
+                            "selectedIndexPath": "",
+                            "onRemovedActive": "invalid-policy"
+                          }
+                        }
+                      ],
+                      "affectedPaths": ["document.nodes[]"],
+                      "submissionImpact": "visual-only"
+                    }
+                  ]
+                }
+                """);
+
+        List<String> failures = validator.validate(manifest);
+
+        assertThat(failures)
+                .contains(
+                        "editableTargets[block].resolutionSpec.strategy is unsupported: unsupported-strategy",
+                        "editableTargets[block].resolutionSpec.paths must be a non-empty array",
+                        "editableTargets[block].resolutionSpec.allowIndex must be false when specified",
+                        "operations[block.insert].target.resolutionSpec.paths must be a non-empty array",
+                        "operations[block.insert].target.resolutionSpec.childArrayField is required for parent-child-array-match",
+                        "operations[block.insert].effects[0].path is required for insert-positioned",
+                        "operations[block.insert].effects[0].key is required for insert-positioned",
+                        "operations[block.insert].effects[0].selectionReconciliation.onRemovedActive is unsupported: invalid-policy");
+    }
+
+    @Test
+    void shouldRequireDeclarativeResolutionSpecWithAllowIndexFalseAcrossAllCanonicalSnapshotManifests() throws Exception {
+        try (var input = getClass().getResourceAsStream("/ai-registry/registry-snapshot.json")) {
+            assertThat(input).as("registry-snapshot.json resource").isNotNull();
+            JsonNode snapshot = objectMapper.readTree(input);
+            JsonNode components = snapshot.path("components");
+            assertThat(components.isObject()).isTrue();
+
+            int manifestCount = 0;
+            var fields = components.fields();
+            while (fields.hasNext()) {
+                var entry = fields.next();
+                String componentId = entry.getKey();
+                JsonNode manifest = entry.getValue().path("authoringManifest");
+                if (manifest.isMissingNode() || manifest.isNull() || !manifest.isObject()) {
+                    continue;
+                }
+                manifestCount++;
+                assertThat(validator.validate(manifest))
+                        .as("contract validation for %s", componentId)
+                        .isEmpty();
+
+                for (JsonNode target : manifest.path("editableTargets")) {
+                    String kind = target.path("kind").asText("?");
+                    JsonNode spec = target.path("resolutionSpec");
+                    assertThat(spec.isObject())
+                            .as("%s editableTargets[%s].resolutionSpec must be present", componentId, kind)
+                            .isTrue();
+                    assertThat(spec.path("allowIndex").isBoolean() && !spec.path("allowIndex").asBoolean())
+                            .as("%s editableTargets[%s].resolutionSpec.allowIndex must be false", componentId, kind)
+                            .isTrue();
+                }
+
+                for (JsonNode operation : manifest.path("operations")) {
+                    String operationId = operation.path("operationId").asText("?");
+                    JsonNode spec = operation.path("target").path("resolutionSpec");
+                    assertThat(spec.isObject())
+                            .as("%s operations[%s].target.resolutionSpec must be present", componentId, operationId)
+                            .isTrue();
+                    assertThat(spec.path("allowIndex").isBoolean() && !spec.path("allowIndex").asBoolean())
+                            .as("%s operations[%s].target.resolutionSpec.allowIndex must be false", componentId, operationId)
+                            .isTrue();
+                }
+
+                for (JsonNode profile : manifest.path("controlProfiles")) {
+                    String profileId = profile.path("profileId").asText("?");
+                    for (JsonNode target : profile.path("editableTargets")) {
+                        String kind = target.path("kind").asText("?");
+                        JsonNode spec = target.path("resolutionSpec");
+                        assertThat(spec.isObject())
+                                .as("%s controlProfiles[%s].editableTargets[%s].resolutionSpec", componentId, profileId, kind)
+                                .isTrue();
+                        assertThat(spec.path("allowIndex").isBoolean() && !spec.path("allowIndex").asBoolean())
+                                .as("%s controlProfiles[%s].editableTargets[%s].resolutionSpec.allowIndex", componentId, profileId, kind)
+                                .isTrue();
+                    }
+                    for (JsonNode operation : profile.path("operations")) {
+                        String operationId = operation.path("operationId").asText("?");
+                        JsonNode spec = operation.path("target").path("resolutionSpec");
+                        assertThat(spec.isObject())
+                                .as("%s controlProfiles[%s].operations[%s].target.resolutionSpec", componentId, profileId, operationId)
+                                .isTrue();
+                        assertThat(spec.path("allowIndex").isBoolean() && !spec.path("allowIndex").asBoolean())
+                                .as("%s controlProfiles[%s].operations[%s].target.resolutionSpec.allowIndex", componentId, profileId, operationId)
+                                .isTrue();
+                    }
+                }
+            }
+            assertThat(manifestCount).isGreaterThanOrEqualTo(22);
+        }
+    }
 }

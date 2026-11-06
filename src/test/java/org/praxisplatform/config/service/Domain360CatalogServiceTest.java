@@ -232,6 +232,113 @@ class Domain360CatalogServiceTest {
                 .doesNotContain("domain360.resource-not-explicit");
     }
 
+    @Test
+    void classifiesCanonicalConceptFactAndEmbeddedOptionSourceAndAddsDataProductRoute() throws Exception {
+        DomainFederationQueryService queryService = mock(DomainFederationQueryService.class);
+        Domain360CatalogService service = new Domain360CatalogService(queryService);
+        DomainCatalogContextResponse context = new DomainCatalogContextResponse(
+                "praxis.domain-catalog-context/v0.1",
+                null,
+                "radar",
+                null,
+                "administracao-pessoal",
+                null,
+                List.of(),
+                List.of(
+                        item("node", "administracao-pessoal.radar-remuneracao-movimentacao", "administracao-pessoal", "concept", """
+                                {
+                                  "nodeKey": "administracao-pessoal.radar-remuneracao-movimentacao",
+                                  "nodeType": "concept",
+                                  "label": "Radar de Remuneração sem Movimentação",
+                                  "description": "Data Product com analytics e surface de investigação.",
+                                  "tags": ["data-product", "analytical-projection"],
+                                  "metadata": {
+                                    "resourceKey": "administracao-pessoal.radar-remuneracao-movimentacao",
+                                    "semanticRole": "analytical_data_product",
+                                    "dataProduct": true,
+                                    "analyzesConcepts": ["administracao-pessoal.vinculos"]
+                                  }
+                                }
+                                """),
+                        item("node", "administracao-pessoal.radar-remuneracao-movimentacao.field.lotacao-id", "administracao-pessoal", "field", """
+                                {
+                                  "nodeKey": "administracao-pessoal.radar-remuneracao-movimentacao.field.lotacao-id",
+                                  "nodeType": "field",
+                                  "label": "Lotação",
+                                  "description": "Unidade de lotação usada no workflow e analytics.",
+                                  "metadata": {
+                                    "fieldName": "lotacaoId",
+                                    "optionSource": {
+                                      "key": "setor",
+                                      "type": "RESOURCE_ENTITY",
+                                      "resourcePath": "/api/ergon/setores",
+                                      "entityKey": "setor",
+                                      "referencedResourceKey": "administracao-pessoal.setores"
+                                    }
+                                  }
+                                }
+                                """),
+                        item("node", "administracao-pessoal.radar-remuneracao-movimentacao.policy.ruleset.ergon-radar-validate", "administracao-pessoal", "policy_hint", "{\"nodeKey\":\"administracao-pessoal.radar-remuneracao-movimentacao.policy.ruleset.ergon-radar-validate\",\"nodeType\":\"policy_hint\",\"source\":\"rule-set\",\"label\":\"RuleSet ergon.radar.validate\",\"metadata\":{\"policyKind\":\"domain_rule_set\",\"ruleSetKey\":\"ergon.radar.validate\",\"operationKey\":\"VALIDATE\",\"availableRoots\":[\"draft\",\"vinculo\",\"neighborhood\",\"context\"]}}"),
+                        item("node", "administracao-pessoal.radar-remuneracao-movimentacao.fact.variacao-percentual", "administracao-pessoal", "fact", """
+                                {
+                                  "nodeKey": "administracao-pessoal.radar-remuneracao-movimentacao.fact.variacao-percentual",
+                                  "nodeType": "fact",
+                                  "label": "Variação Percentual (%)"
+                                }
+                                """)));
+        when(queryService.context(
+                eq("praxis-service"),
+                eq("administracao-pessoal.radar-remuneracao-movimentacao"),
+                eq("default"),
+                eq("dev"),
+                eq(null),
+                eq("administracao-pessoal"),
+                eq(null),
+                eq(null),
+                nullable(String.class),
+                eq(50),
+                eq(new DomainFederationRetrievalPolicyOptions("authoring", null, null, null))))
+                .thenReturn(new DomainFederationContextQueryResponse(
+                        "praxis.domain-federation-context/v0.1",
+                        "default",
+                        "dev",
+                        "praxis-service",
+                        "administracao-pessoal.radar-remuneracao-movimentacao",
+                        "radar",
+                        "administracao-pessoal",
+                        null,
+                        null,
+                        null,
+                        50,
+                        true,
+                        "catalog_projection_fallback",
+                        List.of(),
+                        null,
+                        context,
+                        List.of(),
+                        List.of(),
+                        List.of()));
+
+        var response = service.catalog(
+                "praxis-service",
+                "administracao-pessoal.radar-remuneracao-movimentacao",
+                "default",
+                "dev",
+                "administracao-pessoal",
+                "radar",
+                50);
+
+        assertThat(response.coverage().resourceCount()).isEqualTo(1);
+        assertThat(response.coverage().fieldCount()).isEqualTo(1);
+        assertThat(response.coverage().statsCount()).isEqualTo(1);
+        assertThat(response.coverage().optionSourceCount()).isEqualTo(1);
+        assertThat(response.recommendedRoutes()).extracting("routeKey")
+                .contains("analytical-data-product", "dashboard-overview");
+        assertThat(response.coverage().capabilityCount()).isEqualTo(1);
+        assertThat(response.capabilities()).extracting("key")
+                .containsExactly("administracao-pessoal.radar-remuneracao-movimentacao.policy.ruleset.ergon-radar-validate");
+    }
+
     private DomainCatalogItemResponse item(
             String itemType,
             String itemKey,

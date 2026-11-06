@@ -189,6 +189,13 @@ public class AgenticAuthoringManifestService {
                     failures,
                     warnings);
         }
+        if (failures.isEmpty()) {
+            validatorRegistry.validateProposedConfigAgainstClientSurfaceCapabilities(
+                    componentId,
+                    proposedConfig,
+                    validationConfig(request),
+                    failures);
+        }
         if (!failures.isEmpty()) {
             return new AgenticAuthoringManifestCompileResult(
                     false,
@@ -237,7 +244,9 @@ public class AgenticAuthoringManifestService {
                     compiledEffect.path("value"),
                     patchOperations);
             case "merge-object" -> appendReplaceOperations(
-                    pointerFromConfigPath(text(compiledEffect, "path")),
+                    pointerFromResolvedPathOrConfigPath(
+                            text(compiledEffect, "resolvedPath"),
+                            text(compiledEffect, "path")),
                     compiledEffect.path("value"),
                     patchOperations);
             case "set-value" -> patchOperations.add(baseApplicableOperation(
@@ -256,6 +265,23 @@ public class AgenticAuthoringManifestService {
                     "add",
                     pointerForAppend(compiledEffect))
                     .set("value", compiledEffect.path("value")));
+            case "insert-positioned" -> {
+                int replacedIdx = compiledEffect.path("replacedIndex").asInt(-1);
+                int insertedIdx = compiledEffect.path("insertedIndex").asInt(-1);
+                if (replacedIdx >= 0) {
+                    patchOperations.add(baseApplicableOperation(
+                            "replace",
+                            pointerForArrayIndex(text(compiledEffect, "path"), replacedIdx))
+                            .set("value", compiledEffect.path("value")));
+                } else {
+                    patchOperations.add(baseApplicableOperation(
+                            "add",
+                            insertedIdx >= 0
+                                    ? pointerForArrayIndex(text(compiledEffect, "path"), insertedIdx)
+                                    : pointerForAppend(compiledEffect))
+                            .set("value", compiledEffect.path("value")));
+                }
+            }
             case "reorder-by-key" -> {
                 ObjectNode move = baseApplicableOperation(
                         "move",
@@ -414,6 +440,8 @@ public class AgenticAuthoringManifestService {
         copyIfPresent(compiledEffect, compiledOperation, "fromIndex");
         copyIfPresent(compiledEffect, compiledOperation, "toIndex");
         copyIfPresent(compiledEffect, compiledOperation, "appendedIndex");
+        copyIfPresent(compiledEffect, compiledOperation, "insertedIndex");
+        copyIfPresent(compiledEffect, compiledOperation, "replacedIndex");
         copyIfPresent(compiledEffect, compiledOperation, "handler");
         copyIfPresent(compiledEffect, compiledOperation, "submissionImpact");
         if ("compile-domain-patch".equals(effectKind)) {
@@ -430,6 +458,7 @@ public class AgenticAuthoringManifestService {
             case "remove-by-key" -> "remove-by-key";
             case "append", "append-to-array" -> "append";
             case "append-unique" -> "append-unique";
+            case "insert-positioned" -> "insert-positioned";
             case "reorder-by-key" -> "reorder-by-key";
             case "compile-domain-patch" -> "domain-patch";
             default -> effectKind;

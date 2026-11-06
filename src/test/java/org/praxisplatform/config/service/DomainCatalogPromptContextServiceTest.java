@@ -80,6 +80,102 @@ class DomainCatalogPromptContextServiceTest {
     }
 
     @Test
+    void buildsResourceIdentityContextWithKnowledgeGraphAndDataProductTopology() throws Exception {
+        DomainCatalogIngestionService ingestionService = mock(DomainCatalogIngestionService.class);
+        DomainCatalogPromptContextService service = new DomainCatalogPromptContextService(ingestionService);
+
+        when(ingestionService.contextLatest("praxis-service", "tenant-a", "dev", "node", null, "concept", null, 30))
+                .thenReturn(new DomainCatalogContextResponse(
+                        "praxis.domain-catalog-context/v0.1",
+                        null,
+                        null,
+                        "node",
+                        null,
+                        "concept",
+                        List.of(),
+                        List.of(
+                                new DomainCatalogItemResponse(
+                                        UUID.randomUUID(),
+                                        "release-2026-04",
+                                        "node",
+                                        "ergon.vinculos",
+                                        "ergon",
+                                        "concept",
+                                        null,
+                                        null,
+                                        objectMapper.readTree("""
+                                            {
+                                              "label": "Vínculos Funcionais",
+                                              "description": "Vínculo funcional ativo do servidor público.",
+                                              "metadata": {
+                                                "resourceKey": "ergon.vinculos",
+                                                "semanticRole": "operational_resource",
+                                                "childConcepts": ["ergon.periodos-aquisitivos-ferias", "ergon.frequencias"],
+                                                "analyzedByDataProducts": ["ergon.radar-ferias-prescricao", "ergon.radar-chefias-substituicoes"],
+                                                "ontologicalFactRoots": ["draft", "current", "cargo", "setor", "neighborhood", "context"],
+                                                "governedRuleSets": ["ergon.vinculos.validate"]
+                                              }
+                                            }
+                                            """)),
+                                new DomainCatalogItemResponse(
+                                        UUID.randomUUID(),
+                                        "release-2026-04",
+                                        "node",
+                                        "ergon.radar-ferias-prescricao",
+                                        "ergon",
+                                        "concept",
+                                        null,
+                                        null,
+                                        objectMapper.readTree("""
+                                            {
+                                              "label": "Radar de Prescrição de Férias",
+                                              "description": "Data Product analítico consolidado de períodos aquisitivos vencidos.",
+                                              "metadata": {
+                                                "resourceKey": "ergon.radar-ferias-prescricao",
+                                                "semanticRole": "analytical_data_product",
+                                                "analyzesConcepts": ["ergon.vinculos", "ergon.periodos-aquisitivos-ferias"]
+                                              }
+                                            }
+                                            """)),
+                                new DomainCatalogItemResponse(
+                                        UUID.randomUUID(),
+                                        "release-2026-04",
+                                        "node",
+                                        "ergon.periodos-aquisitivos-ferias",
+                                        "ergon",
+                                        "concept",
+                                        null,
+                                        null,
+                                        objectMapper.readTree("""
+                                            {
+                                              "label": "Períodos Aquisitivos de Férias",
+                                              "description": "Período aquisitivo e concessivo do servidor.",
+                                              "metadata": {
+                                                "resourceKey": "ergon.periodos-aquisitivos-ferias",
+                                                "semanticRole": "operational_resource",
+                                                "parentConcepts": ["ergon.vinculos"],
+                                                "analyzedByDataProducts": ["ergon.radar-ferias-prescricao"]
+                                              }
+                                            }
+                                            """)))));
+
+        String context = service.buildResourceIdentityContext("tenant-a", "dev", 30);
+
+        assertThat(context)
+                .contains("resourceKey=ergon.vinculos")
+                .contains("role=operational_resource")
+                .contains("dataProducts=ergon.radar-ferias-prescricao,ergon.radar-chefias-substituicoes")
+                .contains("children=ergon.periodos-aquisitivos-ferias,ergon.frequencias")
+                .contains("factRoots=draft,current,cargo,setor,neighborhood,context")
+                .contains("ruleSets=ergon.vinculos.validate")
+                .contains("resourceKey=ergon.radar-ferias-prescricao")
+                .contains("role=analytical_data_product")
+                .contains("analyzes=ergon.vinculos,ergon.periodos-aquisitivos-ferias")
+                .contains("resourceKey=ergon.periodos-aquisitivos-ferias")
+                .contains("parents=ergon.vinculos");
+    }
+
+    @Test
     void reusesCompactResourceIdentityProjectionWithinItsScope() throws Exception {
         DomainCatalogIngestionService ingestionService = mock(DomainCatalogIngestionService.class);
         when(ingestionService.contextLatest("praxis-service", "tenant-a", "dev", "node", null, "concept", null, 12))

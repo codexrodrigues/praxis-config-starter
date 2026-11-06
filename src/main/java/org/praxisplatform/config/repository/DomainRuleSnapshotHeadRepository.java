@@ -11,8 +11,11 @@ import org.springframework.data.repository.query.Param;
 
 /** Persistence access for mutable snapshot heads. */
 public interface DomainRuleSnapshotHeadRepository extends JpaRepository<DomainRuleSnapshotHead, UUID> {
-  Optional<DomainRuleSnapshotHead> findByTenantIdAndEnvironmentAndRuleSetKey(
+  /** All operation heads, exclusively for family-wide governance and ownership coordination. */
+  java.util.List<DomainRuleSnapshotHead> findAllByTenantIdAndEnvironmentAndRuleSetKey(
       String tenantId, String environment, String ruleSetKey);
+  Optional<DomainRuleSnapshotHead> findByTenantIdAndEnvironmentAndRuleSetKeyAndOperationKey(
+      String tenantId, String environment, String ruleSetKey, String operationKey);
 
   @Lock(LockModeType.PESSIMISTIC_WRITE)
   @Query("""
@@ -20,9 +23,11 @@ public interface DomainRuleSnapshotHeadRepository extends JpaRepository<DomainRu
       where head.tenantId = :tenantId
         and head.environment = :environment
         and head.ruleSetKey = :ruleSetKey
+        and head.operationKey = :operationKey
       """)
-  Optional<DomainRuleSnapshotHead> findForUpdateByTenantIdAndEnvironmentAndRuleSetKey(
+  Optional<DomainRuleSnapshotHead> findForUpdateByTenantIdAndEnvironmentAndRuleSetKeyAndOperationKey(
       @Param("tenantId") String tenantId,
       @Param("environment") String environment,
-      @Param("ruleSetKey") String ruleSetKey);
+      @Param("ruleSetKey") String ruleSetKey,
+      @Param("operationKey") String operationKey);
 }

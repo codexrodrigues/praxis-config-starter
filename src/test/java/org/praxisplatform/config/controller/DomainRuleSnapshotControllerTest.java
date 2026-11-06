@@ -53,10 +53,9 @@ class DomainRuleSnapshotControllerTest {
     MockHttpServletRequest request = readerRequest("tenant-a", "prod");
     var active = new DomainRuleSnapshotActivationResponse(
         null, "A".repeat(64), "head-7", 7, "ACTIVE");
-    when(service.findActive("tenant-a", "prod", "grant-rules")).thenReturn(Optional.of(active));
+    when(service.findActive("tenant-a", "prod", "grant-rules", "evaluate")).thenReturn(Optional.of(active));
 
-    var response = controller.head(
-        "grant-rules", "tenant-a", "prod", "W/\"head-7\"", request);
+    var response = controller.head("grant-rules", "evaluate", "tenant-a", "prod", "W/\"head-7\"", request);
 
     assertThat(response.getStatusCode()).isEqualTo(HttpStatus.NOT_MODIFIED);
     assertThat(response.getHeaders().getETag()).isEqualTo("\"head-7\"");
@@ -85,19 +84,16 @@ class DomainRuleSnapshotControllerTest {
   @Test
   void versionCatalogUsesAuthenticatedScopeAndNoCache() {
     MockHttpServletRequest request = readerRequest("tenant-a", "prod");
-    var versions = List.of(new DomainRuleSnapshotVersionResponse(
-        "snapshot-2", "grant-rules", 2, 2, "B".repeat(64),
-        "publisher", "2026-07-14T10:00:00Z", true, "READY", "ACTIVE"));
-    when(service.listVersions("tenant-a", "prod", "grant-rules", 25))
+    var versions = List.of(new DomainRuleSnapshotVersionResponse("snapshot-2", "grant-rules", "evaluate", 2, 2, "B".repeat(64), "publisher", "2026-07-14T10:00:00Z", true, "READY", "ACTIVE"));
+    when(service.listVersions("tenant-a", "prod", "grant-rules", "evaluate", 25))
         .thenReturn(versions);
 
-    var response = controller.versions(
-        "grant-rules", 25, "tenant-a", "prod", request);
+    var response = controller.versions("grant-rules", "evaluate", 25, "tenant-a", "prod", request);
 
     assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
     assertThat(response.getHeaders().getCacheControl()).isEqualTo("no-cache");
     assertThat(response.getBody()).isSameAs(versions);
-    verify(service).listVersions("tenant-a", "prod", "grant-rules", 25);
+    verify(service).listVersions("tenant-a", "prod", "grant-rules", "evaluate", 25);
   }
 
   @Test
@@ -128,22 +124,19 @@ class DomainRuleSnapshotControllerTest {
   @Test
   void recoveryStatusReturnsHeadEtagWithoutReadingUnverifiedContent() {
     MockHttpServletRequest request = readerRequest("tenant-a", "prod");
-    var status = new DomainRuleSnapshotHeadStatusResponse(
-        "grant-rules", "legacy-snapshot", 1, 1, 3, "head-3", false,
-        "REPUBLICATION_REQUIRED");
-    when(service.findHeadStatus("tenant-a", "prod", "grant-rules"))
+    var status = new DomainRuleSnapshotHeadStatusResponse("grant-rules", "evaluate", "legacy-snapshot", 1, 1, 3, "head-3", false, "REPUBLICATION_REQUIRED");
+    when(service.findHeadStatus("tenant-a", "prod", "grant-rules", "evaluate"))
         .thenReturn(Optional.of(status));
 
-    var response = controller.headStatus("grant-rules", "tenant-a", "prod", null, request);
+    var response = controller.headStatus("grant-rules", "evaluate", "tenant-a", "prod", null, request);
 
     assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
     assertThat(response.getHeaders().getETag()).isEqualTo("\"head-3\"");
     assertThat(response.getHeaders().getCacheControl()).isEqualTo("no-store");
     assertThat(response.getBody()).isSameAs(status);
-    verify(service).findHeadStatus("tenant-a", "prod", "grant-rules");
+    verify(service).findHeadStatus("tenant-a", "prod", "grant-rules", "evaluate");
 
-    var rechecked = controller.headStatus(
-        "grant-rules", "tenant-a", "prod", "W/\"head-3\"", request);
+    var rechecked = controller.headStatus("grant-rules", "evaluate", "tenant-a", "prod", "W/\"head-3\"", request);
     assertThat(rechecked.getStatusCode()).isEqualTo(HttpStatus.OK);
     assertThat(rechecked.getHeaders().getETag()).isEqualTo("\"head-3\"");
     assertThat(rechecked.getBody()).isSameAs(status);
@@ -152,15 +145,13 @@ class DomainRuleSnapshotControllerTest {
   @Test
   void readinessChangesWithStableHeadAlwaysReturnFreshStatusDespiteIfNoneMatch() {
     MockHttpServletRequest request = readerRequest("tenant-a", "prod");
-    var ready = new DomainRuleSnapshotHeadStatusResponse(
-        "grant-rules", "snapshot-1", 1, 1, 3, "head-3", true, "READY");
-    var incompatible = new DomainRuleSnapshotHeadStatusResponse(
-        "grant-rules", "snapshot-1", 1, 1, 3, "head-3", false, "RUNTIME_INCOMPATIBLE");
-    when(service.findHeadStatus("tenant-a", "prod", "grant-rules"))
+    var ready = new DomainRuleSnapshotHeadStatusResponse("grant-rules", "evaluate", "snapshot-1", 1, 1, 3, "head-3", true, "READY");
+    var incompatible = new DomainRuleSnapshotHeadStatusResponse("grant-rules", "evaluate", "snapshot-1", 1, 1, 3, "head-3", false, "RUNTIME_INCOMPATIBLE");
+    when(service.findHeadStatus("tenant-a", "prod", "grant-rules", "evaluate"))
         .thenReturn(Optional.of(ready), Optional.of(incompatible));
 
-    var before = controller.headStatus("grant-rules", "tenant-a", "prod", null, request);
-    var after = controller.headStatus("grant-rules", "tenant-a", "prod", before.getHeaders().getETag(), request);
+    var before = controller.headStatus("grant-rules", "evaluate", "tenant-a", "prod", null, request);
+    var after = controller.headStatus("grant-rules", "evaluate", "tenant-a", "prod", before.getHeaders().getETag(), request);
 
     assertThat(before.getBody()).isSameAs(ready);
     assertThat(after.getStatusCode()).isEqualTo(HttpStatus.OK);
@@ -233,14 +224,13 @@ class DomainRuleSnapshotControllerTest {
             "tenant-server", "service:ergon", "prod"));
     var active = new DomainRuleSnapshotActivationResponse(
         null, "A".repeat(64), "head-8", 8, "ACTIVE");
-    when(service.findActive("tenant-server", "prod", "grant-rules"))
+    when(service.findActive("tenant-server", "prod", "grant-rules", "evaluate"))
         .thenReturn(Optional.of(active));
 
-    var response = controller.head(
-        "grant-rules", "tenant-caller", "test", null, request);
+    var response = controller.head("grant-rules", "evaluate", "tenant-caller", "test", null, request);
 
     assertThat(response.getBody()).isSameAs(active);
-    verify(service).findActive("tenant-server", "prod", "grant-rules");
+    verify(service).findActive("tenant-server", "prod", "grant-rules", "evaluate");
   }
 
   private MockHttpServletRequest readerRequest(String tenantId, String environment) {

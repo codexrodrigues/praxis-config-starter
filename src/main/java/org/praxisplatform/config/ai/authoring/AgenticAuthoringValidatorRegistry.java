@@ -389,6 +389,7 @@ public final class AgenticAuthoringValidatorRegistry {
             "variable-id-unique",
             "variable-scope-exists",
             "context-variable-reference-valid",
+            "condition-ontological-roots-valid",
             "effect-targets-exist",
             "effect-properties-governed",
             "effect-values-valid",
@@ -893,6 +894,7 @@ public final class AgenticAuthoringValidatorRegistry {
                 case "variable-id-unique" -> validateVisualVariableIdUnique(operationId, planOperation, config, failures);
                 case "variable-scope-exists" -> validateVisualVariableScope(operationId, planOperation, failures);
                 case "context-variable-reference-valid" -> validateVisualContextVariableReference(operationId, planOperation, failures);
+                case "condition-ontological-roots-valid" -> validateVisualConditionOntologicalRoots(operationId, planOperation, config, failures);
                 case "effect-targets-exist" -> validateVisualEffectTargets(operationId, planOperation, failures);
                 case "effect-properties-governed" -> validateVisualEffectPropertiesGoverned(operationId, planOperation, failures);
                 case "effect-values-valid" -> validateVisualEffectValues(operationId, planOperation, failures);
@@ -906,6 +908,12 @@ public final class AgenticAuthoringValidatorRegistry {
                 }
             }
         }
+        validateOperationAgainstClientSurfaceCapabilities(
+                componentId,
+                operationId,
+                planOperation.path("input"),
+                config,
+                failures);
     }
 
     private void validateSelectedStepRemovalSafe(
@@ -1465,6 +1473,34 @@ public final class AgenticAuthoringValidatorRegistry {
                 || !document.path("nodes").isArray()) {
             failures.add("validator rich-content-document-valid failed for " + operationId
                     + ": document must be a praxis.rich-content object with version and nodes[]");
+            return;
+        }
+        ResolvedClientSurfaceCapabilities capabilities = new ResolvedClientSurfaceCapabilities(
+                "form-visual-block",
+                Set.of(),
+                FORM_VISUAL_BLOCK_DEFAULT_FORBIDDEN_NODE_TYPES,
+                FORM_VISUAL_BLOCK_DEFAULT_MAX_DEPTH,
+                FORM_VISUAL_BLOCK_DEFAULT_MAX_NODES,
+                false,
+                true);
+        int[] totalNodes = new int[] {0};
+        List<String> capabilityFailures = new ArrayList<>();
+        validateRichNodeTreeAgainstSurfaceCapabilities(
+                operationId,
+                document,
+                capabilities,
+                1,
+                totalNodes,
+                capabilityFailures);
+        if (capabilities.maxNodes() > 0 && totalNodes[0] > capabilities.maxNodes()) {
+            capabilityFailures.add("validator rich-content-document-valid failed for " + operationId
+                    + ": total node count (" + totalNodes[0] + ") exceeds maxNodes (" + capabilities.maxNodes()
+                    + ") for surfaceProfile=" + capabilities.surfaceProfile());
+        }
+        for (String capabilityFailure : capabilityFailures) {
+            failures.add(capabilityFailure.replace(
+                    "validator client-surface-capabilities failed for ",
+                    "validator rich-content-document-valid failed for "));
         }
     }
 
@@ -5794,6 +5830,98 @@ public final class AgenticAuthoringValidatorRegistry {
         }
     }
 
+    private void validateVisualConditionOntologicalRoots(
+            String operationId,
+            JsonNode planOperation,
+            JsonNode config,
+            List<String> failures) {
+        JsonNode condition = planOperation.path("input").path("condition");
+        if (condition == null || condition.isMissingNode() || condition.isNull()) {
+            return;
+        }
+        Set<String> varPaths = new LinkedHashSet<>();
+        collectJsonLogicVarPaths(condition, varPaths);
+        if (varPaths.isEmpty()) {
+            return;
+        }
+        Set<String> availableRoots = extractVisualOntologicalAvailableRoots(config);
+        for (String varPath : varPaths) {
+            if ("facts".equals(varPath) || varPath.startsWith("facts.")) {
+                failures.add("validator condition-ontological-roots-valid failed for " + operationId
+                        + ": legacy scalar bag root facts.* is forbidden (" + varPath + ")");
+                continue;
+            }
+            if (!availableRoots.isEmpty()) {
+                int dotIdx = varPath.indexOf('.');
+                String root = dotIdx >= 0 ? varPath.substring(0, dotIdx).trim() : varPath.trim();
+                if (!availableRoots.contains(root)) {
+                    failures.add("validator condition-ontological-roots-valid failed for " + operationId
+                            + ": var path '" + varPath + "' does not start with an allowed ontological root " + availableRoots);
+                }
+            }
+        }
+    }
+
+    private Set<String> extractVisualOntologicalAvailableRoots(JsonNode config) {
+        if (config == null || !config.isObject()) {
+            return Set.of();
+        }
+        for (JsonNode candidate : List.of(
+                config.path("ontologicalFactTree").path("availableRoots"),
+                config.path("config").path("ontologicalFactTree").path("availableRoots"),
+                config.path("RuleBuilderConfig").path("ontologicalFactTree").path("availableRoots"))) {
+            if (candidate.isArray() && !candidate.isEmpty()) {
+                Set<String> roots = new LinkedHashSet<>();
+                for (JsonNode item : candidate) {
+                    String root = item.asText("").trim();
+                    if (!root.isBlank()) {
+                        roots.add(root);
+                    }
+                }
+                if (!roots.isEmpty()) {
+                    return roots;
+                }
+            }
+        }
+        return Set.of();
+    }
+
+    private void collectJsonLogicVarPaths(JsonNode node, Set<String> varPaths) {
+        if (node == null || node.isMissingNode() || node.isNull()) {
+            return;
+        }
+        if (node.isArray()) {
+            for (JsonNode item : node) {
+                collectJsonLogicVarPaths(item, varPaths);
+            }
+            return;
+        }
+        if (!node.isObject()) {
+            return;
+        }
+        JsonNode varNode = node.get("var");
+        if (varNode != null) {
+            if (varNode.isTextual()) {
+                String path = varNode.asText("").trim();
+                if (!path.isBlank()) {
+                    varPaths.add(path);
+                }
+            } else if (varNode.isArray() && !varNode.isEmpty() && varNode.get(0).isTextual()) {
+                String path = varNode.get(0).asText("").trim();
+                if (!path.isBlank()) {
+                    varPaths.add(path);
+                }
+            }
+        }
+        Iterator<Map.Entry<String, JsonNode>> fields = node.fields();
+        while (fields.hasNext()) {
+            Map.Entry<String, JsonNode> entry = fields.next();
+            if (!"var".equals(entry.getKey())) {
+                collectJsonLogicVarPaths(entry.getValue(), varPaths);
+            }
+        }
+    }
+
     private void validateVisualEffectTargets(String operationId, JsonNode planOperation, List<String> failures) {
         JsonNode targets = planOperation.path("input").path("targets");
         if (!targets.isArray() || targets.isEmpty()) {
@@ -6073,11 +6201,302 @@ public final class AgenticAuthoringValidatorRegistry {
         return false;
     }
 
-    private String text(JsonNode node, String field) {
+    private static final Set<String> QUICK_VIEW_DEFAULT_ALLOWED_NODE_TYPES = Set.of(
+            "text",
+            "icon",
+            "badge",
+            "avatar",
+            "metric",
+            "progress",
+            "microVisualization",
+            "compose",
+            "card",
+            "callout",
+            "keyValueList",
+            "propertySheet",
+            "statGroup",
+            "recordSummary",
+            "lookupResult",
+            "mediaBlock",
+            "emptyState");
+
+    private static final int QUICK_VIEW_DEFAULT_MAX_DEPTH = 6;
+    private static final int QUICK_VIEW_DEFAULT_MAX_NODES = 24;
+
+    private static final Set<String> FORM_VISUAL_BLOCK_DEFAULT_FORBIDDEN_NODE_TYPES = Set.of(
+            "dynamicForm",
+            "formLauncher",
+            "pageHeader",
+            "decisionPackage");
+
+    private static final int FORM_VISUAL_BLOCK_DEFAULT_MAX_DEPTH = 5;
+    private static final int FORM_VISUAL_BLOCK_DEFAULT_MAX_NODES = 32;
+
+    void validateOperationAgainstClientSurfaceCapabilities(
+            String componentId,
+            String operationId,
+            JsonNode input,
+            JsonNode config,
+            List<String> failures) {
+        ResolvedClientSurfaceCapabilities capabilities = resolveClientSurfaceCapabilities(config);
+        if (capabilities == null || !"praxis-rich-content".equals(componentId)) {
+            return;
+        }
+        if ("link.add".equals(operationId)) {
+            if (!capabilities.isNodeTypeAllowed("link")) {
+                failures.add("validator client-surface-capabilities failed for " + operationId
+                        + ": node type 'link' is not allowed in surfaceProfile=" + capabilities.surfaceProfile());
+            }
+            if (capabilities.forbidEmbeddedActions()) {
+                failures.add("validator client-surface-capabilities failed for " + operationId
+                        + ": embedded actions/links are forbidden in surfaceProfile=" + capabilities.surfaceProfile());
+            }
+            return;
+        }
+        if (input == null || !input.isObject()) {
+            return;
+        }
+        String explicitType = text(input, "type").trim();
+        JsonNode nodeCandidate = input.path("node").isObject() ? input.path("node") : input;
+        if (nodeCandidate != input
+                && !explicitType.isBlank()
+                && !explicitType.equals(text(nodeCandidate, "type").trim())
+                && !capabilities.isNodeTypeAllowed(explicitType)) {
+            failures.add("validator client-surface-capabilities failed for " + operationId
+                    + ": node type '" + explicitType + "' is not allowed in surfaceProfile=" + capabilities.surfaceProfile());
+        }
+        validateRichNodeTreeAgainstSurfaceCapabilities(
+                operationId,
+                nodeCandidate,
+                capabilities,
+                1,
+                new int[] {0},
+                failures);
+    }
+
+    void validateProposedConfigAgainstClientSurfaceCapabilities(
+            String componentId,
+            JsonNode proposedConfig,
+            JsonNode validationConfig,
+            List<String> failures) {
+        ResolvedClientSurfaceCapabilities capabilities = resolveClientSurfaceCapabilities(validationConfig);
+        if (capabilities == null) {
+            capabilities = resolveClientSurfaceCapabilities(proposedConfig);
+        }
+        if (capabilities == null || !"praxis-rich-content".equals(componentId) || proposedConfig == null) {
+            return;
+        }
+        JsonNode nodes = proposedConfig.path("document").path("nodes").isArray()
+                ? proposedConfig.path("document").path("nodes")
+                : proposedConfig.path("nodes");
+        if (!nodes.isArray()) {
+            return;
+        }
+        int[] totalNodes = new int[] {0};
+        for (JsonNode node : nodes) {
+            validateRichNodeTreeAgainstSurfaceCapabilities(
+                    "compiled-document",
+                    node,
+                    capabilities,
+                    1,
+                    totalNodes,
+                    failures);
+        }
+        if (capabilities.maxNodes() > 0 && totalNodes[0] > capabilities.maxNodes()) {
+            failures.add("validator client-surface-capabilities failed: document node count ("
+                    + totalNodes[0] + ") exceeds maxNodes (" + capabilities.maxNodes()
+                    + ") for surfaceProfile=" + capabilities.surfaceProfile());
+        }
+    }
+
+    private void validateRichNodeTreeAgainstSurfaceCapabilities(
+            String operationId,
+            JsonNode node,
+            ResolvedClientSurfaceCapabilities capabilities,
+            int depth,
+            int[] totalNodes,
+            List<String> failures) {
+        if (node == null || !node.isObject()) {
+            return;
+        }
+        boolean isRichNode = node.has("type") || node.has("nodes");
+        String nodeType = text(node, "type").trim();
+        if (isRichNode && node.has("type")) {
+            totalNodes[0]++;
+            if (capabilities.maxDepth() > 0 && depth > capabilities.maxDepth()) {
+                failures.add("validator client-surface-capabilities failed for " + operationId
+                        + ": AST depth (" + depth + ") exceeds maxDepth (" + capabilities.maxDepth()
+                        + ") for surfaceProfile=" + capabilities.surfaceProfile());
+            }
+            if (!nodeType.isBlank() && !capabilities.isNodeTypeAllowed(nodeType)) {
+                failures.add("validator client-surface-capabilities failed for " + operationId
+                        + ": node type '" + nodeType + "' is not allowed in surfaceProfile=" + capabilities.surfaceProfile());
+            }
+        }
+        if (capabilities.forbidEmbeddedActions() && hasEmbeddedRichAction(node)) {
+            failures.add("validator client-surface-capabilities failed for " + operationId
+                    + ": embedded actions are forbidden in surfaceProfile=" + capabilities.surfaceProfile());
+        }
+        if (capabilities.forbidNestedQuickView()
+                && ("recordReference".equals(nodeType)
+                        || (node.path("quickView").isObject() && !node.path("quickView").isEmpty()))) {
+            failures.add("validator client-surface-capabilities failed for " + operationId
+                    + ": nested quickView is forbidden in surfaceProfile=" + capabilities.surfaceProfile());
+        }
+        if (node.path("nodes").isArray()) {
+            for (JsonNode child : node.path("nodes")) {
+                validateRichNodeTreeAgainstSurfaceCapabilities(operationId, child, capabilities, depth, totalNodes, failures);
+            }
+        }
+        int nextDepth = (isRichNode && node.has("type")) ? depth + 1 : depth;
+        for (String slot : List.of(
+                "content",
+                "header",
+                "body",
+                "footer",
+                "aside",
+                "trailing",
+                "children",
+                "items",
+                "tabs",
+                "fields",
+                "actions",
+                "secondaryActions",
+                "overflowActions",
+                "breadcrumbs",
+                "relatedLinks")) {
+            JsonNode childSlot = node.path(slot);
+            if (childSlot.isArray()) {
+                for (JsonNode child : childSlot) {
+                    validateRichNodeTreeAgainstSurfaceCapabilities(operationId, child, capabilities, nextDepth, totalNodes, failures);
+                }
+            }
+        }
+        for (String objectSlot : List.of(
+                "itemTemplate",
+                "meta",
+                "avatar",
+                "title",
+                "subtitle",
+                "identity",
+                "primaryAction",
+                "headerAction")) {
+            JsonNode childObject = node.path(objectSlot);
+            if (childObject.isObject() && !childObject.isEmpty()) {
+                validateRichNodeTreeAgainstSurfaceCapabilities(operationId, childObject, capabilities, nextDepth, totalNodes, failures);
+            }
+        }
+    }
+
+    private boolean hasEmbeddedRichAction(JsonNode node) {
+        if (node == null || !node.isObject()) {
+            return false;
+        }
+        for (String actionField : List.of("action", "primaryAction", "headerAction")) {
+            if (node.path(actionField).isObject() && !node.path(actionField).isEmpty()) {
+                return true;
+            }
+        }
+        for (String actionArrayField : List.of("actions", "secondaryActions", "overflowActions")) {
+            if (node.path(actionArrayField).isArray() && !node.path(actionArrayField).isEmpty()) {
+                return true;
+            }
+        }
+        return "action".equals(text(node.path("interaction"), "mode").trim());
+    }
+
+    static ResolvedClientSurfaceCapabilities resolveClientSurfaceCapabilities(JsonNode config) {
+        if (config == null || !config.isObject()) {
+            return null;
+        }
+        JsonNode raw = config.path("clientSurfaceCapabilities");
+        if (!raw.isObject()) {
+            raw = config.path("validationContext").path("clientSurfaceCapabilities");
+        }
+        String surfaceProfile = staticText(raw, "surfaceProfile").trim();
+        if (surfaceProfile.isBlank()) {
+            surfaceProfile = staticText(config, "surfaceProfile").trim();
+        }
+        if (surfaceProfile.isBlank()) {
+            surfaceProfile = staticText(config.path("validationContext"), "surfaceProfile").trim();
+        }
+        if (!raw.isObject() && surfaceProfile.isBlank()) {
+            return null;
+        }
+        boolean isQuickView = "quick-view-drawer".equals(surfaceProfile);
+        boolean isFormVisualBlock = "form-visual-block".equals(surfaceProfile);
+        Set<String> allowed = new LinkedHashSet<>();
+        if (raw.path("allowedNodeTypes").isArray()) {
+            raw.path("allowedNodeTypes").forEach(item -> {
+                String val = item.asText("").trim();
+                if (!val.isBlank()) {
+                    allowed.add(val);
+                }
+            });
+        } else if (isQuickView) {
+            allowed.addAll(QUICK_VIEW_DEFAULT_ALLOWED_NODE_TYPES);
+        }
+        Set<String> forbidden = new LinkedHashSet<>();
+        if (raw.path("forbiddenNodeTypes").isArray()) {
+            raw.path("forbiddenNodeTypes").forEach(item -> {
+                String val = item.asText("").trim();
+                if (!val.isBlank()) {
+                    forbidden.add(val);
+                }
+            });
+        } else if (isFormVisualBlock) {
+            forbidden.addAll(FORM_VISUAL_BLOCK_DEFAULT_FORBIDDEN_NODE_TYPES);
+        }
+        int defaultMaxDepth = isQuickView ? QUICK_VIEW_DEFAULT_MAX_DEPTH
+                : (isFormVisualBlock ? FORM_VISUAL_BLOCK_DEFAULT_MAX_DEPTH : 0);
+        int defaultMaxNodes = isQuickView ? QUICK_VIEW_DEFAULT_MAX_NODES
+                : (isFormVisualBlock ? FORM_VISUAL_BLOCK_DEFAULT_MAX_NODES : 0);
+        int maxDepth = raw.path("maxDepth").asInt(defaultMaxDepth);
+        int maxNodes = raw.path("maxNodes").asInt(defaultMaxNodes);
+        boolean forbidEmbeddedActions = raw.has("forbidEmbeddedActions")
+                ? raw.path("forbidEmbeddedActions").asBoolean(false)
+                : isQuickView;
+        boolean forbidNestedQuickView = raw.has("forbidNestedQuickView")
+                ? raw.path("forbidNestedQuickView").asBoolean(false)
+                : (isQuickView || isFormVisualBlock);
+        return new ResolvedClientSurfaceCapabilities(
+                surfaceProfile.isBlank() ? "custom" : surfaceProfile,
+                Set.copyOf(allowed),
+                Set.copyOf(forbidden),
+                maxDepth,
+                maxNodes,
+                forbidEmbeddedActions,
+                forbidNestedQuickView);
+    }
+
+    record ResolvedClientSurfaceCapabilities(
+            String surfaceProfile,
+            Set<String> allowedNodeTypes,
+            Set<String> forbiddenNodeTypes,
+            int maxDepth,
+            int maxNodes,
+            boolean forbidEmbeddedActions,
+            boolean forbidNestedQuickView) {
+        boolean isNodeTypeAllowed(String nodeType) {
+            if (nodeType == null || nodeType.isBlank()) {
+                return true;
+            }
+            if (forbiddenNodeTypes.contains(nodeType)) {
+                return false;
+            }
+            return allowedNodeTypes.isEmpty() || allowedNodeTypes.contains(nodeType);
+        }
+    }
+
+    private static String staticText(JsonNode node, String field) {
         if (node == null) {
             return "";
         }
         JsonNode value = node.path(field);
         return value.isTextual() ? value.asText() : value.asText("");
+    }
+
+    private String text(JsonNode node, String field) {
+        return staticText(node, field);
     }
 }

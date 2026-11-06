@@ -8,6 +8,7 @@ ALTER TABLE domain_knowledge_relationship
             'part_of',
             'related_to',
             'has_field',
+            'provides_fact',
             'has_state',
             'has_action',
             'has_surface',

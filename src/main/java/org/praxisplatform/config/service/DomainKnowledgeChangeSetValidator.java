@@ -48,6 +48,9 @@ public class DomainKnowledgeChangeSetValidator {
     private static final Set<String> AUTHORED_NODE_TYPES = Set.of(
             "context",
             "concept",
+            "fact",
+            "stats",
+            "policy_hint",
             "business_capability",
             "process",
             "business_event",
@@ -62,14 +65,15 @@ public class DomainKnowledgeChangeSetValidator {
             "business_slang", "technical_name", "misspelling");
     private static final Set<String> BINDING_TYPES = Set.of(
             "api_resource", "api_operation", "dto_class", "dto_schema", "dto_field",
+            "resource_fact",
             "entity_class", "entity_field", "service_method", "repository_projection",
             "workflow_action", "approval_policy", "ui_surface", "ui_schema_field", "option_source",
             "stats_endpoint",
             "form_config", "table_config", "rule_definition", "external_reference",
             "component_capability", "event_schema");
     private static final Set<String> RELATIONSHIP_TYPES = Set.of(
-            "contains", "part_of", "related_to", "has_field", "has_state", "has_action",
-            "has_surface", "has_event", "has_metric", "has_relationship", "allowed_in_state",
+            "contains", "part_of", "related_to", "has_field", "provides_fact", "has_state", "has_action",
+            "has_surface", "has_stats", "has_event", "has_metric", "has_relationship", "allowed_in_state",
             "selectable_when", "blocked_when", "blocked_in_state", "uses_concept", "references",
             "depends_on", "computed_from", "triggers", "produces", "consumes", "applies_to",
             "measured_by", "implemented_by", "maps_to", "same_as", "equivalent_to", "broader",

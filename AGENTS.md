@@ -94,10 +94,21 @@ Comandos de Validacao Local
 - Mudancas docs-only:
   - leitura final do arquivo alterado;
   - `git diff --check`.
-- Mudancas unit/smoke do starter:
-  - `mvn -B -P ci-smoke-unit -T 1C clean verify`
-- Mudancas localizadas em authoring/registry:
-  - preferir testes focais de `src/test/java/org/praxisplatform/config/ai/**` antes de suite ampla.
+- Durante implementacao, em qualquer area do starter:
+  - mapear comportamento/contrato alterado, dependentes, provas positivas/negativas e criterio de encerramento;
+  - selecionar classes reais pelo impacto com `mvn -B "-Dtest=<classes-afetadas-e-dependentes>" test`; o argumento e um modelo, deve ser substituido pela selecao inspecionada;
+  - validar cedo o contrato neutro e seu consumidor direto quando assinaturas, DTOs ou identidade de snapshots/heads mudarem;
+  - conferir primeiro o conjunto Engine/Contracts/Config/Metadata resolvido e os arquivos de fixture/workflow usados pelos testes. `-Dtest` nao evita a compilacao das outras fontes de teste.
+- Regressao ampla do candidato consolidado, quando exigida pelo gate ou pelo impacto:
+  - `ci-smoke-unit` abrange todos os grupos unit/smoke selecionados; nao e um teste focal e nao prova integracoes externas;
+  - usar `mvn -B -P ci-smoke-unit -T 1C verify`; acrescentar `clean` quando houver causa concreta ou exigencia do gate oficial;
+  - gates oficiais de release que exigem `clean verify`, HTTP/SSE, banco ou consumidor publicado permanecem obrigatorios. Esta orientacao nao altera workflow, selecao ou criterio desses gates.
+- Reexecucao e encerramento:
+  - apos uma correcao, executar primeiro o teste afetado e dependentes; repetir a regressao ampla apenas com invalidacao da evidencia por mudanca relevante, cobertura insuficiente demonstrada ou exigencia do gate;
+  - preferir builds incrementais e instalar/empacotar quando necessario ao consumidor, sem reinstalar a mesma coordenada durante seu uso;
+  - preservar gates de migracao/historico, isolamento, precondicoes, concorrencia e HTTP/OpenAPI quando afetados; testes unitarios nao os substituem;
+  - encerrar com entrega e gates requeridos aprovados no mesmo candidato, derivados atualizados e limites declarados. Prazo e teto; pendencia obrigatoria exige checkpoint parcial, nunca aceite por contagem de testes;
+  - registrar comando, motivo, duracao, resultado e identidade do candidato; reaproveitar evidencias validas sem somar campanhas repetidas como cobertura nova.
 - Smoke local deterministico com quickstart:
   - `powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\tools\Invoke-QuickstartAgenticAuthoringHttpSmokeSuite.ps1 -Provider openai -QuickstartRoot ..\praxis-api-quickstart -DomainRuleLifecycleOnly`
 - Smoke local pago HTTP/SSE, somente depois de aprovacao deliberada do custo:

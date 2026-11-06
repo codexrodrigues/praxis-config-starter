@@ -144,6 +144,8 @@ public class AgenticAuthoringConsultativeApiCatalogProjectionService {
         }
         List<String> warnings = new ArrayList<>();
         List<AgenticAuthoringConsultativeApiCatalogProjection.Resource> resources = new ArrayList<>();
+        Set<String> projectedResourceKeys = new LinkedHashSet<>();
+        Set<String> linkedGraphResourceKeys = new LinkedHashSet<>();
         for (Map.Entry<String, AgenticAuthoringCandidate> entry : candidatesByResourceKey.entrySet()) {
             String resourceKey = entry.getKey();
             AgenticAuthoringCandidate candidate = entry.getValue();
@@ -155,14 +157,33 @@ public class AgenticAuthoringConsultativeApiCatalogProjectionService {
             if (context == null || context.items() == null || context.items().isEmpty()) {
                 continue;
             }
-            if (!isRelevant(queryTokens, resourceKey, candidate, context.items())) {
-                warnings.add("domain-api-consultative-projection-skipped-weak-match:" + resourceKey);
+            String canonicalKey = canonicalResourceKeyFromItems(resourceKey, context.items());
+            if (!projectedResourceKeys.add(canonicalKey)) {
                 continue;
             }
-            resources.add(resource(resourceKey, candidate, context.items(), apiMetadata));
+            if (!isRelevant(queryTokens, canonicalKey, candidate, context.items())) {
+                warnings.add("domain-api-consultative-projection-skipped-weak-match:" + canonicalKey);
+                continue;
+            }
+            resources.add(resource(canonicalKey, candidate, context.items(), apiMetadata));
+            collectKnowledgeGraphLinkedResources(context.items(), linkedGraphResourceKeys);
             if (resources.size() >= MAX_PROJECTED_RESOURCES) {
                 break;
             }
+        }
+        for (String linkedResourceKey : linkedGraphResourceKeys) {
+            if (resources.size() >= MAX_PROJECTED_RESOURCES || !projectedResourceKeys.add(linkedResourceKey)) {
+                continue;
+            }
+            DomainCatalogContextResponse linkedContext = latestContextForScope(
+                    domainCatalogIngestionService,
+                    linkedResourceKey,
+                    tenantId,
+                    environment);
+            if (linkedContext == null || linkedContext.items() == null || linkedContext.items().isEmpty()) {
+                continue;
+            }
+            resources.add(resource(linkedResourceKey, null, linkedContext.items(), apiMetadata));
         }
         if (resources.isEmpty()) {
             return null;
@@ -684,11 +705,14 @@ public class AgenticAuthoringConsultativeApiCatalogProjectionService {
                 ? List.of()
                 : compactResource.evidence());
         evidence.add("api_metadata");
+        String resolvedRole = "analytical".equals(compactResource.role())
+                ? "analytical"
+                : role(compactResource.resourceKey(), endpoints);
         return new AgenticAuthoringConsultativeApiCatalogProjection.Resource(
                 compactResource.resourceKey(),
                 compactResource.resourcePath(),
                 compactResource.label(),
-                role(compactResource.resourceKey(), endpoints),
+                resolvedRole,
                 compactResource.description(),
                 compactResource.fields(),
                 compactResource.actions(),
@@ -740,36 +764,62 @@ public class AgenticAuthoringConsultativeApiCatalogProjectionService {
     }
 
     private AgenticAuthoringConsultativeApiCatalogProjection.Resource compactResource(DomainCatalogItemResponse item) {
-        String resourceKey = resourceKeyFromCatalogItem(item);
+        JsonNode payload = item == null ? null : item.payload();
+        JsonNode metadata = payload == null ? null : payload.path("metadata");
+        String resourceKey = firstNonBlank(
+                firstText(metadata, "resourceKey"),
+                resourceKeyFromCatalogItem(item));
         if (resourceKey.isBlank()) {
             return null;
         }
-        JsonNode payload = item == null ? null : item.payload();
         String nodeType = safe(item == null ? "" : item.nodeType());
         boolean conceptNode = "concept".equals(nodeType);
+        JsonNode glossary = payload == null ? null : payload.path("businessGlossary");
         String label = firstNonBlank(
                 firstText(payload, "resourceLabel"),
+                conceptNode ? firstText(glossary, "preferredTerm") : "",
                 conceptNode ? firstText(payload, "label", "title", "name") : "",
                 humanLabel(resourceKey));
         String description = conceptNode
                 ? meaningfulDescription(firstNonBlank(
                         firstText(payload, "description", "summary", "helpText"),
+                        firstText(glossary, "description"),
                         firstText(payload, "businessDescription", "purpose")))
                 : meaningfulDescription(firstText(payload, "resourceDescription", "resourceSummary"));
-        List<String> evidence = List.of(firstNonBlank(
+        String resolvedPath = firstNonBlank(
+                firstText(metadata, "resourcePath"),
+                payload == null ? "" : firstText(payload.path("target"), "resourcePath"),
+                resourcePath(resourceKey, null));
+        String conceptRole = firstText(metadata, "conceptRole", "semanticRole");
+        boolean analyticalConcept = "analytical_data_product".equals(conceptRole)
+                || (metadata != null && metadata.path("dataProduct").isObject())
+                || "stats".equals(nodeType)
+                || resourceKey.contains("radar-")
+                || resourceKey.contains("vw-")
+                || resourceKey.contains("analytics")
+                || resourceKey.contains("indicadores");
+        List<String> evidence = new ArrayList<>();
+        evidence.add(firstNonBlank(
                 description,
                 nodeType.isBlank() ? "" : "Catalogo de dominio: " + nodeType,
                 "Recurso encontrado no catalogo de dominio."));
+        if ("analytical_data_product".equals(conceptRole)) {
+            evidence.add("analytical_data_product");
+        }
+        appendArrayEvidence(metadata == null ? null : metadata.path("analyzesConcepts"), "analyzes:", evidence);
+        appendArrayEvidence(metadata == null ? null : metadata.path("analyzedByDataProducts"), "analyzed_by:", evidence);
+        appendArrayEvidence(metadata == null ? null : metadata.path("ontologicalFactRoots"), "fact_root:", evidence);
+        appendArrayEvidence(metadata == null ? null : metadata.path("governedRuleSets"), "rule_set:", evidence);
         return new AgenticAuthoringConsultativeApiCatalogProjection.Resource(
                 resourceKey,
-                resourcePath(resourceKey, null),
+                resolvedPath,
                 label,
-                resourceKey.contains("vw-") || resourceKey.contains("analytics") ? "analytical" : "operational",
+                analyticalConcept ? "analytical" : "operational",
                 description,
                 List.of(),
                 List.of(),
                 List.of(),
-                evidence);
+                List.copyOf(evidence));
     }
 
     private int compactResourceScore(
@@ -1010,11 +1060,80 @@ public class AgenticAuthoringConsultativeApiCatalogProjectionService {
 
     private Set<String> resourceKeyBoundaryTerms() {
         return Set.of(
-                "concept", "field", "surface", "action", "policy", "binding", "alias",
-                "state", "estado", "status", "option", "options", "option-source", "enum", "value",
-                "stat", "stats", "metric", "metrics", "operation", "aggregation",
-                "distribution", "group-by", "timeseries", "time-series",
-                "has-field", "has-surface", "has-action", "has-workflow", "has-option-source", "has-stat");
+                "concept", "field", "fact", "facts", "surface", "action", "policy", "policy-hint",
+                "binding", "alias", "state", "estado", "status", "option", "options", "option-source",
+                "enum", "value", "stat", "stats", "metric", "metrics", "operation", "aggregation",
+                "distribution", "group-by", "timeseries", "time-series", "comparison",
+                "has-field", "has-fact", "provides-fact", "has-surface", "has-action", "has-workflow",
+                "has-option-source", "has-stat", "has-policy", "references", "contains", "part-of",
+                "depends-on", "related-to");
+    }
+
+    private String canonicalResourceKeyFromItems(
+            String fallbackResourceKey,
+            List<DomainCatalogItemResponse> items) {
+        if (items == null) {
+            return safe(fallbackResourceKey);
+        }
+        for (DomainCatalogItemResponse item : items) {
+            if (item == null || item.payload() == null || !"node".equals(safe(item.itemType()))) {
+                continue;
+            }
+            if ("concept".equals(safe(item.nodeType()))) {
+                String canonical = firstNonBlank(
+                        firstText(item.payload().path("metadata"), "resourceKey"),
+                        firstText(item.payload(), "nodeKey"));
+                if (StringUtils.hasText(canonical)) {
+                    if (canonical.endsWith(".concept")) {
+                        canonical = canonical.substring(0, canonical.length() - ".concept".length());
+                    }
+                    return canonical;
+                }
+            }
+        }
+        return safe(fallbackResourceKey);
+    }
+
+    private void collectKnowledgeGraphLinkedResources(
+            List<DomainCatalogItemResponse> items,
+            Set<String> targetKeys) {
+        if (items == null || targetKeys == null) {
+            return;
+        }
+        for (DomainCatalogItemResponse item : items) {
+            if (item == null || item.payload() == null || !"node".equals(safe(item.itemType()))) {
+                continue;
+            }
+            if (!"concept".equals(safe(item.nodeType()))) {
+                continue;
+            }
+            JsonNode metadata = item.payload().path("metadata");
+            collectArrayStrings(metadata.path("analyzedByDataProducts"), targetKeys);
+            collectArrayStrings(metadata.path("analyzesConcepts"), targetKeys);
+            collectArrayStrings(metadata.path("dataProduct").path("analyzesConcepts"), targetKeys);
+        }
+    }
+
+    private void collectArrayStrings(JsonNode arrayNode, Set<String> target) {
+        if (arrayNode == null || !arrayNode.isArray() || target == null) {
+            return;
+        }
+        for (JsonNode element : arrayNode) {
+            if (element != null && element.isTextual() && StringUtils.hasText(element.asText())) {
+                target.add(element.asText().trim());
+            }
+        }
+    }
+
+    private void appendArrayEvidence(JsonNode arrayNode, String prefix, List<String> evidence) {
+        if (arrayNode == null || !arrayNode.isArray() || evidence == null) {
+            return;
+        }
+        Set<String> values = new LinkedHashSet<>();
+        collectArrayStrings(arrayNode, values);
+        if (!values.isEmpty()) {
+            evidence.add(prefix + String.join(",", values));
+        }
     }
 
     private DomainCatalogContextResponse latestContext(
@@ -1104,9 +1223,11 @@ public class AgenticAuthoringConsultativeApiCatalogProjectionService {
             AgenticAuthoringCandidate candidate,
             List<DomainCatalogItemResponse> items,
             List<ApiMetadata> apiMetadata) {
-        String resourcePath = resourcePath(resourceKey, candidate);
+        String catalogResourcePath = "";
         String conceptLabel = "";
         String description = "";
+        boolean analyticalConcept = false;
+        List<String> graphEvidence = new ArrayList<>();
         List<AgenticAuthoringConsultativeApiCatalogProjection.Field> fields = new ArrayList<>();
         List<AgenticAuthoringConsultativeApiCatalogProjection.Action> actions = new ArrayList<>();
         for (DomainCatalogItemResponse item : items) {
@@ -1114,30 +1235,62 @@ public class AgenticAuthoringConsultativeApiCatalogProjectionService {
                 continue;
             }
             String nodeType = safe(item.nodeType());
-            if ("concept".equals(nodeType) && conceptLabel.isBlank()) {
-                conceptLabel = firstText(item.payload(), "label", "name", "title");
-                description = meaningfulDescription(firstText(item.payload(), "description", "summary", "helpText"));
+            JsonNode payload = item.payload();
+            JsonNode metadata = payload.path("metadata");
+            JsonNode glossary = payload.path("businessGlossary");
+            if ("concept".equals(nodeType)) {
+                if (conceptLabel.isBlank()) {
+                    conceptLabel = firstNonBlank(
+                            firstText(glossary, "preferredTerm"),
+                            firstText(payload, "label", "name", "title"));
+                    description = meaningfulDescription(firstNonBlank(
+                            firstText(payload, "description", "summary", "helpText"),
+                            firstText(glossary, "description")));
+                }
+                if (catalogResourcePath.isBlank()) {
+                    catalogResourcePath = firstNonBlank(
+                            firstText(metadata, "resourcePath"),
+                            firstText(payload.path("target"), "resourcePath"));
+                }
+                String conceptRole = firstText(metadata, "conceptRole", "semanticRole");
+                if ("analytical_data_product".equals(conceptRole) || metadata.path("dataProduct").isObject()) {
+                    analyticalConcept = true;
+                    graphEvidence.add("analytical_data_product");
+                }
+                appendArrayEvidence(metadata.path("analyzesConcepts"), "analyzes:", graphEvidence);
+                appendArrayEvidence(metadata.path("analyzedByDataProducts"), "analyzed_by:", graphEvidence);
+                appendArrayEvidence(metadata.path("ontologicalFactRoots"), "fact_root:", graphEvidence);
+                appendArrayEvidence(metadata.path("governedRuleSets"), "rule_set:", graphEvidence);
                 continue;
             }
-            if ("field".equals(nodeType) && fields.size() < 12) {
+            if (("field".equals(nodeType) || "fact".equals(nodeType)) && fields.size() < 12) {
                 fields.add(new AgenticAuthoringConsultativeApiCatalogProjection.Field(
-                        leafName(firstText(item.payload(), "nodeKey", "key", "name", "fieldName", "id")),
-                        firstNonBlank(firstText(item.payload(), "label", "name", "title"), leafName(item.itemKey())),
-                        meaningfulDescription(firstText(item.payload(), "description", "summary", "helpText"))));
+                        leafName(firstText(payload, "nodeKey", "key", "name", "fieldName", "id")),
+                        firstNonBlank(
+                                firstText(glossary, "preferredTerm"),
+                                firstText(payload, "label", "name", "title"),
+                                leafName(item.itemKey())),
+                        meaningfulDescription(firstNonBlank(
+                                firstText(payload, "description", "summary", "helpText"),
+                                firstText(glossary, "description")))));
                 continue;
             }
             if ("action".equals(nodeType) && actions.size() < 8) {
                 actions.add(new AgenticAuthoringConsultativeApiCatalogProjection.Action(
-                        leafName(firstText(item.payload(), "nodeKey", "key", "name", "action", "id")),
-                        firstNonBlank(firstText(item.payload(), "label", "name", "title"), leafName(item.itemKey())),
-                        meaningfulDescription(firstText(item.payload(), "description", "summary", "helpText"))));
+                        leafName(firstText(payload, "nodeKey", "key", "name", "action", "id")),
+                        firstNonBlank(firstText(payload, "label", "name", "title"), leafName(item.itemKey())),
+                        meaningfulDescription(firstText(payload, "description", "summary", "helpText"))));
             }
         }
+        String resourcePath = candidate != null && StringUtils.hasText(candidate.resourcePath())
+                ? candidate.resourcePath()
+                : firstNonBlank(catalogResourcePath, resourcePath(resourceKey, null));
         List<AgenticAuthoringConsultativeApiCatalogProjection.Endpoint> endpoints = endpoints(resourcePath, apiMetadata);
         String label = firstNonBlank(conceptLabel, humanLabel(resourceKey));
-        String role = role(resourceKey, endpoints);
+        String role = analyticalConcept ? "analytical" : role(resourceKey, endpoints);
         List<String> evidence = new ArrayList<>();
         evidence.add("domain_catalog_context");
+        evidence.addAll(graphEvidence);
         if (!endpoints.isEmpty()) {
             evidence.add("api_metadata");
         }
@@ -1189,11 +1342,20 @@ public class AgenticAuthoringConsultativeApiCatalogProjectionService {
         if (path.endsWith("/stats/timeseries")) {
             return "timeSeriesStats";
         }
+        if (path.endsWith("/stats/distribution")) {
+            return "distributionStats";
+        }
+        if (path.endsWith("/stats/comparison")) {
+            return "comparisonStats";
+        }
         if (path.endsWith("/filter/cursor")) {
             return "cursorFilter";
         }
         if (path.endsWith("/filter")) {
             return "filter";
+        }
+        if (path.endsWith("/export")) {
+            return "export";
         }
         if (path.endsWith("/all")) {
             return "listAll";
@@ -1214,7 +1376,10 @@ public class AgenticAuthoringConsultativeApiCatalogProjectionService {
         return switch (endpointKind(metadata)) {
             case "groupByStats" -> "agrupar dados para graficos";
             case "timeSeriesStats" -> "serie historica para graficos";
+            case "distributionStats" -> "distribuicao de dados para graficos";
+            case "comparisonStats" -> "comparar series para graficos";
             case "cursorFilter", "filter" -> "filtrar registros";
+            case "export" -> "exportar registros";
             case "listAll", "list" -> "listar registros";
             case "create" -> "criar registro";
             case "detail" -> "consultar detalhe";
@@ -1261,9 +1426,33 @@ public class AgenticAuthoringConsultativeApiCatalogProjectionService {
             JsonNode payload = item.payload();
             if (payload != null) {
                 appendPayloadText(text, payload, "label", "name", "title", "description", "summary", "helpText");
+                JsonNode glossary = payload.path("businessGlossary");
+                if (glossary.isObject()) {
+                    appendPayloadText(text, glossary, "preferredTerm", "description");
+                    appendPayloadArray(text, glossary.path("synonyms"));
+                }
+                JsonNode metadata = payload.path("metadata");
+                if (metadata.isObject()) {
+                    appendPayloadText(text, metadata, "conceptRole", "resourceKey", "resourcePath");
+                    appendPayloadArray(text, metadata.path("analyzesConcepts"));
+                    appendPayloadArray(text, metadata.path("analyzedByDataProducts"));
+                    appendPayloadArray(text, metadata.path("relatedConcepts"));
+                    appendPayloadText(text, metadata.path("optionSource"), "key", "resourcePath");
+                }
             }
         }
         return text.toString();
+    }
+
+    private void appendPayloadArray(StringBuilder text, JsonNode arrayNode) {
+        if (text == null || arrayNode == null || !arrayNode.isArray()) {
+            return;
+        }
+        for (JsonNode element : arrayNode) {
+            if (element != null && element.isTextual() && StringUtils.hasText(element.asText())) {
+                text.append(' ').append(element.asText().trim());
+            }
+        }
     }
 
     private void appendPayloadText(StringBuilder text, JsonNode payload, String... fields) {
@@ -1421,7 +1610,10 @@ public class AgenticAuthoringConsultativeApiCatalogProjectionService {
         return switch (safe(endpoint.kind())) {
             case "groupByStats" -> AgenticAuthoringPresentationText.display(firstNonBlank(label, "agrupar dados para gráficos"));
             case "timeSeriesStats" -> AgenticAuthoringPresentationText.display(firstNonBlank(label, "montar série histórica"));
+            case "distributionStats" -> AgenticAuthoringPresentationText.display(firstNonBlank(label, "analisar distribuição para gráficos"));
+            case "comparisonStats" -> AgenticAuthoringPresentationText.display(firstNonBlank(label, "comparar séries para gráficos"));
             case "cursorFilter", "filter" -> AgenticAuthoringPresentationText.display(firstNonBlank(label, "filtrar registros"));
+            case "export" -> AgenticAuthoringPresentationText.display(firstNonBlank(label, "exportar registros"));
             case "listAll", "list" -> AgenticAuthoringPresentationText.display(firstNonBlank(label, "listar registros"));
             case "create" -> AgenticAuthoringPresentationText.display(firstNonBlank(label, "criar registro"));
             case "detail" -> AgenticAuthoringPresentationText.display(firstNonBlank(label, "consultar detalhe"));
@@ -1448,12 +1640,28 @@ public class AgenticAuthoringConsultativeApiCatalogProjectionService {
             String resourceKey,
             List<AgenticAuthoringConsultativeApiCatalogProjection.Endpoint> endpoints) {
         String normalized = safe(resourceKey).toLowerCase(Locale.ROOT);
-        if (normalized.contains("analytics") || normalized.contains("indicadores") || normalized.contains(".vw-")) {
+        if (normalized.contains("radar-")
+                || normalized.contains("analytics")
+                || normalized.contains("indicadores")
+                || normalized.contains(".vw-")) {
             return "analytical";
         }
+        boolean hasStatsEndpoint = endpoints.stream()
+                .anyMatch(endpoint -> endpoint != null
+                        && endpoint.kind() != null
+                        && endpoint.kind().endsWith("Stats"));
         boolean hasWriteEndpoint = endpoints.stream()
-                .anyMatch(endpoint -> "POST".equals(endpoint.method()) || "PUT".equals(endpoint.method()) || "PATCH".equals(endpoint.method()));
-        return hasWriteEndpoint ? "operational" : "reference";
+                .anyMatch(endpoint -> endpoint != null
+                        && ("create".equals(endpoint.kind())
+                                || "PUT".equals(endpoint.method())
+                                || "PATCH".equals(endpoint.method())
+                                || "DELETE".equals(endpoint.method())));
+        if (hasStatsEndpoint && !hasWriteEndpoint) {
+            return "analytical";
+        }
+        boolean hasOperationalPostOrMutation = hasWriteEndpoint || endpoints.stream()
+                .anyMatch(endpoint -> "POST".equals(endpoint.method()));
+        return hasOperationalPostOrMutation ? "operational" : "reference";
     }
 
     private String resourceKey(String resourcePath) {

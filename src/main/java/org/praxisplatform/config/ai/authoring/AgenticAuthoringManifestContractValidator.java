@@ -8,6 +8,17 @@ import java.util.Set;
 
 public final class AgenticAuthoringManifestContractValidator {
 
+    private static final Set<String> SUPPORTED_RESOLUTION_STRATEGIES = Set.of(
+            "root-path",
+            "array-match",
+            "recursive-array-match",
+            "parent-child-array-match");
+
+    private static final Set<String> SUPPORTED_ON_REMOVED_ACTIVE_POLICIES = Set.of(
+            "clamp",
+            "first",
+            "clear");
+
     public AgenticAuthoringManifestContractValidator() {
     }
 
@@ -35,6 +46,10 @@ public final class AgenticAuthoringManifestContractValidator {
             if (!kind.isBlank()) {
                 targetKinds.add(kind);
             }
+            validateResolutionSpec(
+                    target.path("resolutionSpec"),
+                    "editableTargets[" + (kind.isBlank() ? "?" : kind) + "].resolutionSpec",
+                    failures);
         }
         Set<String> validatorIds = new HashSet<>();
         for (JsonNode validator : manifest.path("validators")) {
@@ -109,6 +124,10 @@ public final class AgenticAuthoringManifestContractValidator {
         } else if (!targetKinds.contains(targetKind)) {
             failures.add("operation target.kind is not declared in editableTargets: " + operationId + " -> " + targetKind);
         }
+        validateResolutionSpec(
+                target.path("resolutionSpec"),
+                "operations[" + (operationId.isBlank() ? "?" : operationId) + "].target.resolutionSpec",
+                failures);
         if (!operation.path("preconditions").isArray() || operation.path("preconditions").isEmpty()) {
             failures.add("operation preconditions are required: " + operationId);
         }
@@ -117,6 +136,15 @@ public final class AgenticAuthoringManifestContractValidator {
         }
         if (!operation.path("effects").isArray() || operation.path("effects").isEmpty()) {
             failures.add("operation effects are required: " + operationId);
+        } else {
+            int effectIndex = 0;
+            for (JsonNode effect : operation.path("effects")) {
+                validateEffect(
+                        effect,
+                        "operations[" + (operationId.isBlank() ? "?" : operationId) + "].effects[" + effectIndex + "]",
+                        failures);
+                effectIndex++;
+            }
         }
         if (!operation.path("affectedPaths").isArray() || operation.path("affectedPaths").isEmpty()) {
             failures.add("operation affectedPaths are required: " + operationId);
@@ -132,6 +160,69 @@ public final class AgenticAuthoringManifestContractValidator {
             String validatorId = validator.asText("");
             if (!validatorId.isBlank() && !validatorIds.contains(validatorId)) {
                 failures.add("operation references unknown validator: " + operationId + " -> " + validatorId);
+            }
+        }
+    }
+
+    private void validateResolutionSpec(JsonNode spec, String path, List<String> failures) {
+        if (spec == null || spec.isMissingNode() || spec.isNull()) {
+            return;
+        }
+        if (!spec.isObject()) {
+            failures.add(path + " must be an object");
+            return;
+        }
+        String strategy = text(spec, "strategy").trim();
+        if (strategy.isBlank()) {
+            failures.add(path + ".strategy is required");
+        } else if (!SUPPORTED_RESOLUTION_STRATEGIES.contains(strategy)) {
+            failures.add(path + ".strategy is unsupported: " + strategy);
+        }
+        JsonNode paths = spec.path("paths");
+        if (!paths.isArray() || paths.isEmpty()) {
+            failures.add(path + ".paths must be a non-empty array");
+        } else {
+            for (JsonNode p : paths) {
+                if (!p.isTextual()) {
+                    failures.add(path + ".paths must contain only strings");
+                    break;
+                }
+            }
+        }
+        if ("parent-child-array-match".equals(strategy) && text(spec, "childArrayField").trim().isBlank()) {
+            failures.add(path + ".childArrayField is required for parent-child-array-match");
+        }
+        JsonNode allowIndex = spec.path("allowIndex");
+        if (!allowIndex.isMissingNode() && !allowIndex.isNull()) {
+            if (!allowIndex.isBoolean() || allowIndex.asBoolean()) {
+                failures.add(path + ".allowIndex must be false when specified");
+            }
+        }
+    }
+
+    private void validateEffect(JsonNode effect, String path, List<String> failures) {
+        if (effect == null || !effect.isObject()) {
+            failures.add(path + " must be an object");
+            return;
+        }
+        String kind = text(effect, "kind").trim();
+        if ("insert-positioned".equals(kind)) {
+            if (text(effect, "path").trim().isBlank()) {
+                failures.add(path + ".path is required for insert-positioned");
+            }
+            if (text(effect, "key").trim().isBlank()) {
+                failures.add(path + ".key is required for insert-positioned");
+            }
+        }
+        JsonNode reconciliation = effect.path("selectionReconciliation");
+        if (reconciliation != null && !reconciliation.isMissingNode() && !reconciliation.isNull()) {
+            if (!reconciliation.isObject()) {
+                failures.add(path + ".selectionReconciliation must be an object");
+                return;
+            }
+            String policy = text(reconciliation, "onRemovedActive").trim();
+            if (!policy.isBlank() && !SUPPORTED_ON_REMOVED_ACTIVE_POLICIES.contains(policy)) {
+                failures.add(path + ".selectionReconciliation.onRemovedActive is unsupported: " + policy);
             }
         }
     }

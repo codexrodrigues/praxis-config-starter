@@ -714,6 +714,178 @@ class AgenticAuthoringDomainCatalogCandidateEnhancerTest {
                 .contains(AgenticAuthoringDomainCatalogCandidateEnhancer.DOMAIN_CATALOG_GROUNDING);
     }
 
+    @Test
+    void promotesAnalyticalDataProductCandidateUsingKnowledgeGraphMetadataAndAnalyzedConcepts() throws Exception {
+        DomainCatalogIngestionService domainCatalogIngestionService = Mockito.mock(DomainCatalogIngestionService.class);
+        var radarPayload = objectMapper.readTree("""
+                {
+                  "nodeKey": "administracao-pessoal.radar-remuneracao-movimentacao",
+                  "nodeType": "concept",
+                  "label": "Radar de Remuneração sem Movimentação",
+                  "description": "Projeção analítica consolidada que cruza variação remuneratória com ausência de movimentação funcional.",
+                  "tags": ["data-product", "analytical-projection"],
+                  "businessGlossary": {
+                    "preferredTerm": "Radar de Variação Remuneratória",
+                    "synonyms": ["aumento salarial sem movimentacao", "auditoria de folha"]
+                  },
+                  "metadata": {
+                    "resourceKey": "administracao-pessoal.radar-remuneracao-movimentacao",
+                    "semanticRole": "analytical_data_product",
+                    "dataProduct": true,
+                    "analyzesConcepts": ["administracao-pessoal.vinculos", "administracao-pessoal.funcionarios", "administracao-pessoal.setores"]
+                  }
+                }
+                """);
+        DomainCatalogItemResponse radarItem = new DomainCatalogItemResponse(
+                UUID.randomUUID(),
+                "praxis-service:administracao-pessoal:test",
+                "node",
+                "administracao-pessoal.radar-remuneracao-movimentacao",
+                "administracao-pessoal",
+                "concept",
+                null,
+                null,
+                radarPayload);
+        Mockito.when(domainCatalogIngestionService.contextLatest(
+                        Mockito.eq("praxis-service"),
+                        Mockito.eq("ergon.radar-remuneracao-movimentacao"),
+                        Mockito.eq("default"),
+                        Mockito.eq("dev"),
+                        Mockito.isNull(),
+                        Mockito.isNull(),
+                        Mockito.isNull(),
+                        Mockito.anyString(),
+                        Mockito.eq(8)))
+                .thenReturn(new DomainCatalogContextResponse(
+                        "praxis.domain-catalog-context/v0.1",
+                        null,
+                        "aumento salarial sem movimentacao vinculos",
+                        null,
+                        null,
+                        null,
+                        List.of(),
+                        List.of(radarItem)));
+
+        AgenticAuthoringDomainCatalogCandidateEnhancer enhancer =
+                new AgenticAuthoringDomainCatalogCandidateEnhancer(domainCatalogIngestionService, "praxis-service");
+        AgenticAuthoringCandidate radarCandidate = new AgenticAuthoringCandidate(
+                "/api/ergon/radar-remuneracao-movimentacao",
+                "post",
+                "/schemas/filtered?path=/api/ergon/radar-remuneracao-movimentacao/filter&operation=post",
+                "/api/ergon/radar-remuneracao-movimentacao/filter",
+                "post",
+                0.60d,
+                "api_metadata semantic retrieval",
+                List.of("api-metadata", "semantic-retrieval"));
+
+        List<AgenticAuthoringCandidate> enhanced = enhancer.enhance(
+                "investigar servidores com aumento salarial sem movimentacao em vinculos",
+                List.of(radarCandidate),
+                "default",
+                "dev");
+
+        assertThat(enhanced).hasSize(1);
+        AgenticAuthoringCandidate grounded = enhanced.get(0);
+        assertThat(grounded.score()).isGreaterThan(0.88d);
+        assertThat(grounded.evidenceBundle().evidence())
+                .anySatisfy(ev -> {
+                    assertThat(ev.ref()).isEqualTo("administracao-pessoal.radar-remuneracao-movimentacao");
+                    assertThat(ev.summary())
+                            .contains("role=analytical_data_product")
+                            .contains("analyzes=administracao-pessoal.vinculos,administracao-pessoal.funcionarios,administracao-pessoal.setores");
+                    assertThat(ev.matchedTerms())
+                            .contains("analytical_data_product", "vinculos", "salarial");
+                });
+    }
+
+    @Test
+    void groundsRuleGovernedCandidateUsingRuleSetReasonCodesAndOntologicalFactRoots() throws Exception {
+        DomainCatalogIngestionService domainCatalogIngestionService = Mockito.mock(DomainCatalogIngestionService.class);
+        DomainCatalogItemResponse ruleSetItem = new DomainCatalogItemResponse(
+                UUID.randomUUID(),
+                "praxis-service:administracao-pessoal.dependentes:test",
+                "node",
+                "administracao-pessoal.dependentes.policy.ruleset.ergon.administracao-pessoal.dependentes.elegibilidade",
+                "administracao-pessoal",
+                "policy_hint",
+                null,
+                null,
+                objectMapper.readTree("""
+                        {
+                          "label": "Elegibilidade de dependentes",
+                          "metadata": {
+                            "policyKind": "domain_rule_set",
+                            "resourceKey": "administracao-pessoal.dependentes",
+                            "ruleSetKey": "ergon.administracao-pessoal.dependentes.elegibilidade",
+                            "operationKey": "CREATE",
+                            "availableRoots": ["draft", "current", "servidor", "neighborhood", "context"],
+                            "referencedFactPaths": ["draft.dtfim", "servidor.situacao", "neighborhood.dependentesAtivos"],
+                            "reasonCodes": ["ERG-03162"],
+                            "targetFields": ["dtfim"],
+                            "rules": [
+                              {
+                                "reasonCode": "ERG-03162",
+                                "targetField": "dtfim",
+                                "message": "Data de término da dependência não pode anteceder data de início.",
+                                "origin": "PCK_DEPENDENTES.MAIN_PRE"
+                              }
+                            ]
+                          }
+                        }
+                        """));
+        Mockito.when(domainCatalogIngestionService.contextLatest(
+                        Mockito.eq("praxis-service"),
+                        Mockito.eq("administracao-pessoal.dependentes"),
+                        Mockito.eq("default"),
+                        Mockito.eq("dev"),
+                        Mockito.isNull(),
+                        Mockito.isNull(),
+                        Mockito.isNull(),
+                        Mockito.anyString(),
+                        Mockito.eq(8)))
+                .thenReturn(new DomainCatalogContextResponse(
+                        "praxis.domain-catalog-context/v0.1",
+                        null,
+                        "erg-03162 dependentes elegibilidade",
+                        null,
+                        null,
+                        null,
+                        List.of(),
+                        List.of(ruleSetItem)));
+
+        AgenticAuthoringDomainCatalogCandidateEnhancer enhancer =
+                new AgenticAuthoringDomainCatalogCandidateEnhancer(domainCatalogIngestionService, "praxis-service");
+        AgenticAuthoringCandidate dependenteCandidate = new AgenticAuthoringCandidate(
+                "/api/administracao-pessoal/dependentes",
+                "post",
+                "/schemas/filtered?path=/api/administracao-pessoal/dependentes&operation=post",
+                "/api/administracao-pessoal/dependentes",
+                "post",
+                0.62d,
+                "api_metadata semantic retrieval",
+                List.of("api-metadata", "semantic-retrieval"));
+
+        List<AgenticAuthoringCandidate> enhanced = enhancer.enhance(
+                "validar regra erg-03162 elegibilidade de dependentes dtfim",
+                List.of(dependenteCandidate),
+                "default",
+                "dev");
+
+        assertThat(enhanced).hasSize(1);
+        AgenticAuthoringCandidate grounded = enhanced.get(0);
+        assertThat(grounded.score()).isGreaterThan(0.88d);
+        assertThat(grounded.evidenceBundle().evidence())
+                .anySatisfy(ev -> {
+                    assertThat(ev.ref()).isEqualTo("administracao-pessoal.dependentes");
+                    assertThat(ev.summary())
+                            .contains("ruleSets=ergon.administracao-pessoal.dependentes.elegibilidade")
+                            .contains("reasons=ERG-03162")
+                            .contains("factRoots=draft,current,servidor,neighborhood,context");
+                    assertThat(ev.matchedTerms())
+                            .contains("erg-03162", "dtfim", "neighborhood");
+                });
+    }
+
     private DomainCatalogItemResponse item(String itemType, String itemKey, String label) {
         return new DomainCatalogItemResponse(
                 UUID.randomUUID(),

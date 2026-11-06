@@ -1,0 +1,19 @@
+{
+  "draft": {
+    "dtini": "2024-02-28",
+    "dtfim": null
+  },
+  "current": null,
+  "neighborhood": {
+    "periods": [
+      {
+        "dtini": "2024-02-28",
+        "dtfim": "2024-02-29",
+        "days": 2
+      }
+    ]
+  },
+  "context": {
+    "tenant": "fixture-tenant"
+  }
+}

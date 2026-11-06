@@ -84,7 +84,10 @@ public class DomainKnowledgeProjectionService {
             concept.setEnvironment(release.getEnvironment());
             concept.setConceptKey(conceptKey);
             concept.setContextKey(firstText(item.getContextKey(), text(payload, "contextKey")));
-            concept.setResourceKey(firstText(text(payload, "resourceKey"), resourceKeyFromReleaseKey(release.getReleaseKey())));
+            concept.setResourceKey(firstText(
+                    text(payload, "resourceKey"),
+                    text(payload.path("metadata"), "resourceKey"),
+                    resourceKeyFromReleaseKey(release.getReleaseKey())));
             concept.setNodeType(firstText(item.getNodeType(), text(payload, "nodeType"), "concept"));
             concept.setLabel(text(payload, "label"));
             concept.setDescription(text(payload, "description"));
@@ -198,7 +201,7 @@ public class DomainKnowledgeProjectionService {
             binding.setConcept(concept);
             binding.setBindingType(bindingType);
             binding.setBindingKey(bindingKey);
-            JsonNode target = payload.path("target");
+            JsonNode target = payload.hasNonNull("target") ? payload.path("target") : payload.path("targetRef");
             binding.setResourceKey(firstText(
                     text(payload, "resourceKey"),
                     text(target, "resourceKey"),
@@ -488,7 +491,15 @@ public class DomainKnowledgeProjectionService {
         if (StringUtils.hasText(schemaId) && StringUtils.hasText(fieldName)) {
             return schemaId + "#/" + fieldName;
         }
-        return StringUtils.hasText(schemaId) ? schemaId : null;
+        if (StringUtils.hasText(schemaId)) {
+            return schemaId;
+        }
+        String ruleSetKey = text(target, "ruleSetKey");
+        String operationKey = text(target, "operationKey");
+        if (StringUtils.hasText(ruleSetKey) && StringUtils.hasText(operationKey)) {
+            return ruleSetKey + "#" + operationKey;
+        }
+        return StringUtils.hasText(ruleSetKey) ? ruleSetKey : null;
     }
 
     private String aliasType(JsonNode payload) {

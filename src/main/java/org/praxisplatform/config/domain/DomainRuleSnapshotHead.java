@@ -31,6 +31,9 @@ public class DomainRuleSnapshotHead {
   @Column(name = "rule_set_key", nullable = false, length = 512)
   private String ruleSetKey;
 
+  @Column(name = "operation_key", nullable = false, length = 512)
+  private String operationKey;
+
   @Column(name = "active_snapshot_id", nullable = false)
   private UUID activeSnapshotId;
 
@@ -42,6 +45,10 @@ public class DomainRuleSnapshotHead {
 
   @Column(name = "updated_at", nullable = false)
   private Instant updatedAt;
+
+  /** True retains selection history without granting execution authority. */
+  @Column(nullable = false)
+  private boolean withdrawn;
 
   @Version
   @Column(name = "row_version", nullable = false)

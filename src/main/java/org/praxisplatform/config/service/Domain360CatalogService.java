@@ -80,7 +80,13 @@ public class Domain360CatalogService {
             Domain360Entry entry = toEntry(item);
             Classification classification = classify(item);
             switch (classification) {
-                case FIELD -> fields.add(entry);
+                case FIELD -> {
+                    fields.add(entry);
+                    Domain360Entry embeddedOptionSource = extractEmbeddedOptionSource(item);
+                    if (embeddedOptionSource != null) {
+                        optionSources.add(embeddedOptionSource);
+                    }
+                }
                 case CAPABILITY -> capabilities.add(entry);
                 case SURFACE -> surfaces.add(entry);
                 case ACTION -> actions.add(entry);
@@ -137,6 +143,7 @@ public class Domain360CatalogService {
                 dedupedOptionSources,
                 dedupedRelationships);
         List<Domain360Route> routes = recommendedRoutes(
+                dedupedResources,
                 dedupedFields,
                 dedupedCapabilities,
                 dedupedSurfaces,
@@ -270,6 +277,7 @@ public class Domain360CatalogService {
     }
 
     private List<Domain360Route> recommendedRoutes(
+            List<Domain360Entry> resources,
             List<Domain360Entry> fields,
             List<Domain360Entry> capabilities,
             List<Domain360Entry> surfaces,
@@ -278,6 +286,20 @@ public class Domain360CatalogService {
             List<Domain360Entry> stats,
             List<Domain360Entry> optionSources) {
         List<Domain360Route> routes = new ArrayList<>();
+        if (hasDataProductContext(resources)) {
+            routes.add(new Domain360Route(
+                    "analytical-data-product",
+                    "Investigacao em Data Product (Radar)",
+                    "analytics",
+                    "analytical-investigation",
+                    List.of("praxis-filter", "praxis-chart", "praxis-table", "praxis-rich-content"),
+                    surfaces.isEmpty()
+                            ? List.of("filter.queryContext", "chart.crossFilter")
+                            : List.of("filter.queryContext", "chart.crossFilter", "surface.open"),
+                    List.of("filter", "stats", "detail"),
+                    "Cruzar indicadores consolidados, fatos deterministicos e projecoes analiticas do Data Product (Radar) com abertura 360 da entidade operacional.",
+                    "high"));
+        }
         if (!fields.isEmpty() || !stats.isEmpty() || !capabilities.isEmpty()) {
             List<String> interactions = new ArrayList<>(List.of("filter.queryContext", "chart.crossFilter"));
             if (!surfaces.isEmpty()) {
@@ -416,15 +438,94 @@ public class Domain360CatalogService {
                 null);
     }
 
+    private boolean hasDataProductContext(List<Domain360Entry> resources) {
+        if (resources == null || resources.isEmpty()) {
+            return false;
+        }
+        for (Domain360Entry resource : resources) {
+            if (resource == null || resource.metadata() == null) {
+                continue;
+            }
+            JsonNode metadata = resource.metadata().path("metadata");
+            if ("analytical_data_product".equalsIgnoreCase(text(metadata, "semanticRole"))
+                    || metadata.path("dataProduct").asBoolean(false)
+                    || (metadata.path("analyzesConcepts").isArray() && !metadata.path("analyzesConcepts").isEmpty())
+                    || (metadata.path("analyzedByDataProducts").isArray() && !metadata.path("analyzedByDataProducts").isEmpty())) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private Domain360Entry extractEmbeddedOptionSource(DomainCatalogItemResponse item) {
+        if (item == null || item.payload() == null) {
+            return null;
+        }
+        JsonNode optionSource = item.payload().path("metadata").path("optionSource");
+        if (optionSource == null || !optionSource.isObject()) {
+            return null;
+        }
+        String key = text(optionSource, "key");
+        if (!StringUtils.hasText(key)) {
+            return null;
+        }
+        String optionKey = "option-source:" + key;
+        String label = firstText(text(optionSource, "entityKey"), key);
+        String description = firstText(
+                text(optionSource, "referencedResourceKey"),
+                text(optionSource, "resourcePath"),
+                text(optionSource, "type"));
+        return new Domain360Entry(
+                optionKey,
+                label,
+                "option_source",
+                "node",
+                firstText(item.contextKey(), text(item.payload(), "contextKey")),
+                firstText(text(item.payload(), "sourceMode"), item.releaseKey()),
+                description,
+                optionSource);
+    }
+
     private Classification classify(DomainCatalogItemResponse item) {
+        String nodeType = normalizeText(firstText(item.nodeType(), text(item.payload(), "nodeType")));
+        String bindingType = normalizeText(firstText(item.bindingType(), text(item.payload(), "bindingType")));
+        String contractType = normalizeText(text(item.payload().path("contract"), "contractType"));
+
+        if ("concept".equals(nodeType) || "context".equals(nodeType)) {
+            return Classification.RESOURCE;
+        }
+        if ("field".equals(nodeType) || "dto field".equals(bindingType)) {
+            return Classification.FIELD;
+        }
+        if ("surface".equals(nodeType) || "ui surface".equals(bindingType)) {
+            return Classification.SURFACE;
+        }
+        if ("stats".equals(nodeType) || "fact".equals(nodeType)) {
+            return Classification.STATS;
+        }
+        if ("rule definition".equals(bindingType)
+                || "domain rule set".equals(normalizeText(text(item.payload().path("metadata"), "policyKind")))
+                || "rule set".equals(normalizeText(text(item.payload(), "source")))) {
+            return Classification.CAPABILITY;
+        }
+        if ("policy hint".equals(nodeType) || containsAny(contractType, "option source", "lookup option", "lookup_option")) {
+            return Classification.OPTION_SOURCE;
+        }
+        if ("workflow action".equals(bindingType)) {
+            return Classification.WORKFLOW;
+        }
+        if ("action".equals(nodeType)) {
+            String tags = normalizeText(item.payload().path("tags").toString());
+            return containsAny(tags, "workflow", "flow", "process") ? Classification.WORKFLOW : Classification.ACTION;
+        }
+
         String haystack = normalizeText(String.join(" ",
                 value(item.itemType()),
                 value(item.itemKey()),
                 value(item.contextKey()),
-                value(item.nodeType()),
-                value(item.bindingType()),
+                nodeType,
+                bindingType,
                 value(item.edgeType()),
-                text(item.payload(), "nodeType"),
                 text(item.payload(), "contextType"),
                 text(item.payload(), "capabilityKey"),
                 text(item.payload(), "surfaceKey"),
@@ -434,7 +535,7 @@ public class Domain360CatalogService {
                 text(item.payload(), "source"),
                 item.payload().path("tags").toString(),
                 item.payload().path("metadata").path("tags").toString(),
-                text(item.payload().path("contract"), "contractType"),
+                contractType,
                 text(item.payload().path("contract"), "operationKey"),
                 text(item.payload().path("contract"), "schemaRef"),
                 text(item.payload().path("metadata"), "fieldName")));
@@ -472,7 +573,7 @@ public class Domain360CatalogService {
     private boolean isResourceLike(DomainCatalogItemResponse item) {
         String nodeType = normalizeText(firstText(item.nodeType(), text(item.payload(), "nodeType"), text(item.payload(), "contextType")));
         String source = normalizeText(text(item.payload(), "source"));
-        return containsAny(nodeType, "resource", "entity", "aggregate", "context", "domain")
+        return containsAny(nodeType, "concept", "resource", "entity", "aggregate", "context", "domain")
                 || "api resource".equals(source);
     }
 

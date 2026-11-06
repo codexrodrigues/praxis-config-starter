@@ -67,6 +67,7 @@ public class DomainRuleHostStatusService {
       throw new ConfigurationIngestionException("observedAtUtc cannot be in the future");
     }
     String ruleSetKey = requireText(request.ruleSetKey(), "ruleSetKey", 512);
+    String operationKey = requireText(request.operationKey(), "operationKey", 512);
     String contractVersion = requireText(request.hostContractVersion(), "hostContractVersion", 64);
     String engineContractVersion = optionalText(
         request.engineContractVersion(), "engineContractVersion", 64);
@@ -89,7 +90,7 @@ public class DomainRuleHostStatusService {
     }
     String failureCode = optionalText(request.failureCode(), "failureCode", 64);
     int changed = statusRepository.upsertIfNewer(
-        UUID.randomUUID(), principal.tenantId(), principal.environment(), ruleSetKey,
+        UUID.randomUUID(), principal.tenantId(), principal.environment(), ruleSetKey, operationKey,
         principal.actorRef(), snapshotKey, contentHash, revision, request.ready(), contractVersion,
         engineContractVersion, dialectVersion, corpusSha256, catalogDigest,
         failureCode, request.observedAtUtc(), receivedAt);
@@ -98,22 +99,23 @@ public class DomainRuleHostStatusService {
 
   @Transactional(transactionManager = ConfigTransactionManagerNames.CONFIG, readOnly = true)
   public DomainRuleHostStatusSummaryResponse summarizeHead(
-      String ruleSetKey, DomainRuleGovernancePrincipal principal) {
+      String ruleSetKey, String operationKey, DomainRuleGovernancePrincipal principal) {
     requirePrincipal(principal);
     String requiredRuleSetKey = requireText(ruleSetKey, "ruleSetKey", 512);
-    DomainRuleSnapshotHead head = headRepository.findByTenantIdAndEnvironmentAndRuleSetKey(
-            principal.tenantId(), principal.environment(), requiredRuleSetKey)
+    String requiredOperationKey = requireText(operationKey, "operationKey", 512);
+    DomainRuleSnapshotHead head = headRepository.findByTenantIdAndEnvironmentAndRuleSetKeyAndOperationKey(
+            principal.tenantId(), principal.environment(), requiredRuleSetKey, requiredOperationKey)
         .orElseThrow(() -> new ConfigurationIngestionException("RuleSet head was not found"));
-    DomainRuleSnapshot expected = snapshotRepository.findByIdAndTenantIdAndEnvironmentAndRuleSetKey(
-            head.getActiveSnapshotId(), principal.tenantId(), principal.environment(), requiredRuleSetKey)
+    DomainRuleSnapshot expected = snapshotRepository.findByIdAndTenantIdAndEnvironmentAndRuleSetKeyAndOperationKey(
+            head.getActiveSnapshotId(), principal.tenantId(), principal.environment(), requiredRuleSetKey, requiredOperationKey)
         .orElseThrow(() -> new IllegalStateException("Snapshot head references missing immutable content"));
     PublishedRuleSnapshot expectedEnvelope = snapshotService.findSnapshot(
             principal.tenantId(), principal.environment(), expected.getSnapshotKey())
         .orElseThrow(() -> new IllegalStateException("Active immutable snapshot could not be verified"))
         .snapshot();
     ExpectedRuntime expectedRuntime = expectedRuntime(expected, expectedEnvelope);
-    List<DomainRuleHostStatus> statuses = statusRepository.findByTenantIdAndEnvironmentAndRuleSetKey(
-        principal.tenantId(), principal.environment(), requiredRuleSetKey);
+    List<DomainRuleHostStatus> statuses = statusRepository.findByTenantIdAndEnvironmentAndRuleSetKeyAndOperationKey(
+        principal.tenantId(), principal.environment(), requiredRuleSetKey, requiredOperationKey);
     Instant staleBefore = clock.instant().minus(staleAfter);
     long stale = statuses.stream().filter(status -> status.getObservedAt().isBefore(staleBefore)).count();
     List<DomainRuleHostStatus> freshReady = statuses.stream()
@@ -130,7 +132,7 @@ public class DomainRuleHostStatusService {
     Instant lastObserved = statuses.stream().map(DomainRuleHostStatus::getObservedAt)
         .max(Comparator.naturalOrder()).orElse(null);
     return new DomainRuleHostStatusSummaryResponse(
-        requiredRuleSetKey, expected.getSnapshotKey(), expected.getContentHash(),
+        requiredRuleSetKey, requiredOperationKey, expected.getSnapshotKey(), expected.getContentHash(),
         head.getActivationRevision(), expectedRuntime.hostContractVersion(),
         expectedRuntime.compatibility().engineContractVersion(),
         expectedRuntime.compatibility().jsonLogicDialectVersion(),

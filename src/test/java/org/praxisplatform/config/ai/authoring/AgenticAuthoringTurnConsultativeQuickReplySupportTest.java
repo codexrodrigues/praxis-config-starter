@@ -7,7 +7,9 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.util.List;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Tag;
 
+@Tag("unit")
 class AgenticAuthoringTurnConsultativeQuickReplySupportTest {
 
     private final ObjectMapper objectMapper = new ObjectMapper();

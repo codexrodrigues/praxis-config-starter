@@ -9,6 +9,7 @@ ALTER TABLE domain_knowledge_binding
             'dto_class',
             'dto_schema',
             'dto_field',
+            'resource_fact',
             'entity_class',
             'entity_field',
             'service_method',

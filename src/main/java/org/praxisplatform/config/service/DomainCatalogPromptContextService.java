@@ -160,6 +160,14 @@ public class DomainCatalogPromptContextService {
                 if (StringUtils.hasText(description)) {
                     builder.append(" | description=").append(compact(description, 220));
                 }
+                JsonNode metadata = payload == null ? null : payload.path("metadata");
+                appendInline(builder, "role", text(metadata, "semanticRole"));
+                appendInline(builder, "analyzes", textArray(metadata == null ? null : metadata.path("analyzesConcepts")));
+                appendInline(builder, "dataProducts", textArray(metadata == null ? null : metadata.path("analyzedByDataProducts")));
+                appendInline(builder, "children", textArray(metadata == null ? null : metadata.path("childConcepts")));
+                appendInline(builder, "parents", textArray(metadata == null ? null : metadata.path("parentConcepts")));
+                appendInline(builder, "factRoots", textArray(metadata == null ? null : metadata.path("ontologicalFactRoots")));
+                appendInline(builder, "ruleSets", textArray(metadata == null ? null : metadata.path("governedRuleSets")));
                 builder.append('\n');
             }
             String promptContext = builder.toString().trim();
@@ -539,9 +547,36 @@ public class DomainCatalogPromptContextService {
             return;
         }
         appendInline(builder, "field", text(payload.path("metadata"), "fieldName"));
-        appendInline(builder, "type", text(payload.path("metadata"), "type"));
+        appendInline(builder, "factPath", text(payload.path("metadata"), "factPath"));
+        appendInline(builder, "type", firstText(text(payload.path("metadata"), "type"), text(payload.path("metadata"), "dataType")));
+        appendInline(builder, "unit", text(payload.path("metadata"), "unit"));
+        appendInline(builder, "referencedResourceKey", firstText(
+                text(payload.path("metadata"), "referencedResourceKey"),
+                text(payload.path("metadata").path("resourceReference"), "resourceKey"),
+                text(payload.path("metadata").path("optionSource"), "referencedResourceKey"),
+                text(payload.path("target"), "referencedResourceKey")));
+        appendInline(builder, "optionSource", text(payload.path("metadata").path("optionSource"), "key"));
         appendInline(builder, "surfaceId", text(payload.path("metadata"), "surfaceId"));
         appendInline(builder, "resourceKey", text(payload.path("metadata"), "resourceKey"));
+        appendInline(builder, "semanticRole", text(payload.path("metadata"), "semanticRole"));
+        appendInline(builder, "analyzes", textArray(payload.path("metadata").path("analyzesConcepts")));
+        appendInline(builder, "dataProducts", textArray(payload.path("metadata").path("analyzedByDataProducts")));
+        appendInline(builder, "references", textArray(payload.path("metadata").path("referencedConcepts")));
+        appendInline(builder, "children", textArray(payload.path("metadata").path("childConcepts")));
+        appendInline(builder, "parents", textArray(payload.path("metadata").path("parentConcepts")));
+        appendInline(builder, "factRoots", textArray(payload.path("metadata").path("ontologicalFactRoots")));
+        appendInline(builder, "ruleSets", textArray(payload.path("metadata").path("governedRuleSets")));
+        appendInline(builder, "ruleSetKey", text(payload.path("metadata"), "ruleSetKey"));
+        appendInline(builder, "operationKey", text(payload.path("metadata"), "operationKey"));
+        appendInline(builder, "availableRoots", textArray(payload.path("metadata").path("availableRoots")));
+        appendInline(builder, "referencedFactPaths", textArray(payload.path("metadata").path("referencedFactPaths")));
+        appendInline(builder, "reasonCodes", textArray(payload.path("metadata").path("reasonCodes")));
+        appendInline(builder, "targetFields", textArray(payload.path("metadata").path("targetFields")));
+        appendInline(builder, "relatedChildResourceKey", text(payload.path("metadata"), "relatedChildResourceKey"));
+        appendInline(builder, "statsKind", text(payload.path("metadata"), "statsKind"));
+        appendInline(builder, "projectionId", text(payload.path("metadata"), "projectionId"));
+        appendInline(builder, "primaryDimensionField", text(payload.path("metadata"), "primaryDimensionField"));
+        appendInline(builder, "primaryMetricField", text(payload.path("metadata"), "primaryMetricField"));
         appendInline(builder, "surfaceKind", text(payload.path("metadata"), "kind"));
         appendInline(builder, "surfaceScope", text(payload.path("metadata"), "scope"));
         appendInline(builder, "targetId", text(payload.path("target"), "id"));

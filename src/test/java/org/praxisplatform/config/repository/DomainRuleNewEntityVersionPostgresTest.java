@@ -139,7 +139,7 @@ class DomainRuleNewEntityVersionPostgresTest {
     tx.executeWithoutResult(ignored -> {
       DomainRuleSnapshot active = snapshots.saveAndFlush(snapshot(ruleSet, "active-" + UUID.randomUUID(), 1));
       snapshots.saveAndFlush(snapshot(ruleSet, candidateKey, 2));
-      snapshotHeads.saveAndFlush(DomainRuleSnapshotHead.builder()
+      snapshotHeads.saveAndFlush(DomainRuleSnapshotHead.builder().operationKey("evaluate")
           .id(UUID.randomUUID()).tenantId(TENANT).environment(ENVIRONMENT).ruleSetKey(ruleSet)
           .activeSnapshotId(active.getId()).activationRevision(1L).headEtag(headEtag)
           .updatedAt(Instant.now()).build());
@@ -174,7 +174,7 @@ class DomainRuleNewEntityVersionPostgresTest {
       var ruleSet = new RuleSetDefinition(
           new RuleSetRef("proof", "version", ruleSetKey, "evaluate", revision), List.of("request"),
           List.of(new DecisionSlot("eligibility", DecisionStage.DOMAIN_DECISION, SlotCardinality.SINGLE,
-              OverridePolicy.FORBIDDEN, DecisionAggregationPolicy.SINGLE_RESULT, null)),
+              OverridePolicy.FORBIDDEN, DecisionAggregationPolicy.SINGLE_RESULT, null, java.util.List.of())),
           List.of(new DecisionBinding("eligibility", "eligibility", DecisionSource.PRODUCT, null,
               RuleExecutorRef.jsonLogic(json.createObjectNode().put("var", "request.eligible")),
               List.of(), 10, true, RuleDecision.DENY, "NOT_ELIGIBLE", List.of("request.eligible"), null)),
@@ -184,7 +184,7 @@ class DomainRuleNewEntityVersionPostgresTest {
           now.toString(), null, List.of(new RuleSnapshotSource("source-1", "eligibility", 1, "C".repeat(64))),
           List.of(new RuleSnapshotApproval("approval-a", "RULE_COMPOSITION_APPROVER", "reviewer-a", now.toString(), digest),
               new RuleSnapshotApproval("approval-b", "RULE_COMPOSITION_APPROVER", "reviewer-b", now.toString(), digest)), ruleSet);
-      return DomainRuleSnapshot.builder().id(UUID.randomUUID()).tenantId(TENANT)
+      return DomainRuleSnapshot.builder().operationKey("evaluate").id(UUID.randomUUID()).tenantId(TENANT)
           .environment(ENVIRONMENT).snapshotKey(key).ruleSetKey(ruleSetKey)
           .ruleSetVersion(revision).publicationRevision(revision).snapshotPayload(json.writeValueAsString(snapshot))
           .contentHash(PraxisCanonicalJson.sha256(json.valueToTree(snapshot)))
@@ -235,10 +235,20 @@ class DomainRuleNewEntityVersionPostgresTest {
             "/db/migration/V32__enforce_domain_rule_snapshot_scope_references.sql",
             "/db/migration/V33__bind_snapshot_to_approved_composition.sql",
             "/db/migration/V44__allow_explicit_rule_snapshot_activation.sql",
+            "/db/migration/V51__create_domain_rule_host_status.sql",
+            "/db/migration/V52__add_domain_rule_host_runtime_coordinates.sql",
             "/db/migration/V53__create_domain_rule_staged_rollout.sql",
-            "/db/migration/V54__govern_domain_rule_rollout_policy.sql")) {
+            "/db/migration/V54__govern_domain_rule_rollout_policy.sql",
+            "/db/migration/V69__separate_rule_snapshot_publication_and_activation.sql")) {
           statement.execute(readResource(migration));
         }
+      }
+      try (Connection migrationConnection = postgres.getPostgresDatabase().getConnection()) {
+        migrationConnection.setAutoCommit(false);
+        var context = org.mockito.Mockito.mock(org.flywaydb.core.api.migration.Context.class);
+        org.mockito.Mockito.when(context.getConnection()).thenReturn(migrationConnection);
+        new db.migration.V72__scope_rule_snapshot_operations().migrate(context);
+        migrationConnection.commit();
       }
       return postgres;
     } catch (Exception failure) {

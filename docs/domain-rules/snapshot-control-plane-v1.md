@@ -1,5 +1,67 @@
 # Rule snapshot control plane v1
 
+## Registered product composition and withdrawal (H4)
+
+`DomainRuleProductCatalog` is a server-owned, deny-by-default port. An explicit
+empty `sourceDefinitionIds` list requests a registered product profile; `null`
+does not. The scoped owner, host contract and complete product graph must match
+that registry. Slot and binding order is canonicalized by the Engine; comparison
+uses their unique keys and every declared attribute, never a subset of rules.
+Config hashes the registered profile into a genuine `product:` source and binds
+the normalized graph into the composition manifest. This path creates no
+CUSTOMER definition or source approval. Two independent composition approvals
+and a distinct publisher remain mandatory. Publication does not select a head.
+Mixed/customer composition retains its existing source governance.
+
+`POST /api/praxis/config/domain-rules/snapshots/withdrawals` requires the
+server-authenticated `RULE_SNAPSHOT_OPERATOR`, exact tenant/environment and
+operation, a reason, and the current strong `If-Match`. V73 records withdrawal
+in the existing head and appends a `WITHDRAWN` event in the same Config
+transaction. The head keeps its identity and last selected snapshot for audit,
+rotates its ETag and increments its revision. It is never deleted/recreated.
+Active readers exclude it; head status returns `WITHDRAWN` and
+`executionReady=false`. The withdrawal response contains no executable snapshot.
+Missing precondition is 428, a stale/weak/wildcard token is 412, an already
+withdrawn head is 409, and another scope is not discoverable.
+
+Reentry, including selection of the same immutable content, requires a governed
+REQUIRED rollout with fresh positive candidate probes. Rollback cannot bypass
+this requirement. The rollout's expected snapshot/ETag pair identifies the
+retained selection for CAS; it grants no execution authority. Old rollouts and
+cached runtimes cannot survive withdrawal/reselection through an ABA sequence.
+V74 persists the server-captured `expected_head_withdrawn` state on a rollout.
+The database permits the same retained snapshot only for this explicit
+tombstone case, requires the non-null expected selection/ETag pair, and keeps
+the distinct-snapshot guard for active heads. CAS checks the captured state as
+well as identity and ETag. This value is not accepted from the public request.
+The host must enforce revocation at its own transaction boundary. Config alone
+does not provide an atomic commit spanning the Config and domain databases.
+
+The H4 local evidence and operational limits are recorded in the Ergon
+`docs/rules/ontology/g3/governed-functions-h4` checkpoint. Public publication,
+deployment and operational acceptance are separate gates.
+
+The deployment gate must coordinate V73 and every active-head consumer before
+any operational withdrawal. An older reader that does not filter tombstones
+cannot enforce revocation. The private H4 SDK is not a public rollout receipt;
+the public cohort, consumer inventory and deployment cut remain mandatory.
+
+An authored RuleSet can carry public customer error descriptions in
+`ruleSet.errorDescriptors`. The keys are enabled customer binding keys. Each
+value uses the Engine's `RuleErrorDescriptor` shape with `code`, `targetField`,
+`messagePtBr`, `lineage` and `category`. The binding supplies the slot and must
+produce a denial with that exact code. The code is exclusive among enabled
+bindings and cannot reuse product or security codes or template reason codes.
+The receiving host checks its own reserved error catalog as well.
+
+Config includes the descriptions in the composition digest that reviewers
+approve. The persisted envelope preserves them in the snapshot content hash.
+Read verification checks the descriptions, their bindings and slots, and the
+approved owner, scope and RuleSet version. Engine includes them in the plan
+digest and uses them when projecting a matching denial. An empty map is
+omitted in JSON, preserving the hash of existing descriptor-free definitions.
+Clients that relay RuleSet JSON must preserve the map as part of the definition.
+
 Operational host alignment with the current active head is exposed through the aggregate contract
 in `host-status-v1.md`. Drift remains server-derived; host identities and runtime payloads are not
 exposed to browser consumers.
@@ -116,13 +178,13 @@ to bypass the separate activation gate.
     tenant, environment, digest and actor;
   - must be called independently by each approver. A publication payload cannot
     declare or aggregate approver identities.
-- `GET /api/praxis/config/domain-rules/snapshots/head?ruleSetKey=...`
+- `GET /api/praxis/config/domain-rules/snapshots/head?ruleSetKey=...&operationKey=...`
   - resolves server authentication and requires `RULE_SNAPSHOT_READER`;
   - uses tenant and environment resolved from the principal, never directly
     from caller headers in corporate mode;
   - returns `Cache-Control: no-cache` and the mutable head ETag;
   - accepts `If-None-Match` and may return `304`.
-- `GET /api/praxis/config/domain-rules/snapshots?ruleSetKey=...&limit=50`
+- `GET /api/praxis/config/domain-rules/snapshots?ruleSetKey=...&operationKey=...&limit=50`
   - requires the authenticated `RULE_SNAPSHOT_READER` scope;
   - returns a bounded, newest-first version catalog with immutable identity,
     publication metadata, active-state marker and safe governance state;
@@ -132,7 +194,7 @@ to bypass the separate activation gate.
     `CREATE_ROLLOUT` or `UNAVAILABLE`;
   - lets policy studios expose only the server-authorized direction instead of
     inferring lifecycle semantics from revision numbers.
-- `GET /api/praxis/config/domain-rules/snapshots/head/status?ruleSetKey=...`
+- `GET /api/praxis/config/domain-rules/snapshots/head/status?ruleSetKey=...&operationKey=...`
   - requires the same authenticated `RULE_SNAPSHOT_READER` scope;
   - returns safe head identity, immutable version/revision, readiness and the mutable head ETag;
   - always re-evaluates readiness and returns `200` with `Cache-Control: no-store`, including
@@ -316,3 +378,8 @@ DomainRuleImplementationCatalog ruleImplementationCatalog() {
 The catalog implementation must resolve scope from server-owned configuration;
 it must not trust tenant, signer, artifact digest or policy evidence copied from
 the snapshot request.
+
+
+## Evolução por operação (candidato G3 H1–H3)
+
+[Identidade operacional candidata de versões, heads e rollouts](operation-scoped-control-plane.md). A seleção de head/histórico exige operação explícita; políticas e mutex de propriedade permanecem familiares. Os contratos e exemplos anteriores sem operação são históricos até o corte coordenado dos consumidores.

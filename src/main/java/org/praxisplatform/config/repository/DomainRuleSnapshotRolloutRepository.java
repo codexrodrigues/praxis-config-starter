@@ -36,4 +36,9 @@ public interface DomainRuleSnapshotRolloutRepository
 
   List<DomainRuleSnapshotRollout> findByTenantIdAndEnvironmentAndRuleSetKeyAndStatusInOrderByCreatedAtDesc(
       String tenantId, String environment, String ruleSetKey, Set<String> statuses);
+  List<DomainRuleSnapshotRollout> findByTenantIdAndEnvironmentAndRuleSetKeyAndOperationKeyAndStatusIn(
+      String tenantId, String environment, String ruleSetKey, String operationKey, Set<String> statuses);
+  List<DomainRuleSnapshotRollout> findByTenantIdAndEnvironmentAndRuleSetKeyAndOperationKeyAndStatusInOrderByCreatedAtDesc(
+      String tenantId, String environment, String ruleSetKey, String operationKey, Set<String> statuses);
 }
+

@@ -589,6 +589,26 @@ public class AgenticAuthoringPreviewService {
         if (contextHints.path("schemaFieldContext").isObject()) {
             validationContext.set("schemaFieldContext", contextHints.path("schemaFieldContext").deepCopy());
         }
+        if (contextHints.path("clientSurfaceCapabilities").isObject()
+                && !validationContext.path("clientSurfaceCapabilities").isObject()) {
+            validationContext.set(
+                    "clientSurfaceCapabilities",
+                    contextHints.path("clientSurfaceCapabilities").deepCopy());
+        }
+        if (!validationContext.path("clientSurfaceCapabilities").isObject()) {
+            JsonNode observedCapabilities = selectedClientSurfaceCapabilities(
+                    contextHints,
+                    selectedWidgetKey,
+                    componentId);
+            if (observedCapabilities.isObject()) {
+                validationContext.set("clientSurfaceCapabilities", observedCapabilities.deepCopy());
+            }
+        }
+        String surfaceProfileHint = contextHints.path("surfaceProfile").asText("").trim();
+        if (!surfaceProfileHint.isBlank()
+                && validationContext.path("surfaceProfile").asText("").trim().isBlank()) {
+            validationContext.put("surfaceProfile", surfaceProfileHint);
+        }
         JsonNode hostMaterialization = selectedHostMaterialization(contextHints, selectedWidgetKey, componentId);
         if (hostMaterialization.isObject()) {
             validationContext.set("hostMaterialization", hostMaterialization.deepCopy());
@@ -750,6 +770,29 @@ public class AgenticAuthoringPreviewService {
             JsonNode materialization = component.path("affordances").path("visualMaterialization");
             if (componentMatches && widgetMatches && materialization.isObject()) {
                 return materialization;
+            }
+        }
+        return MissingNode.getInstance();
+    }
+
+    private JsonNode selectedClientSurfaceCapabilities(
+            JsonNode contextHints,
+            String selectedWidgetKey,
+            String componentId) {
+        JsonNode components = contextHints == null
+                ? MissingNode.getInstance()
+                : contextHints.path("groundedRuntimeComponentContext").path("components");
+        if (!components.isArray()) {
+            return MissingNode.getInstance();
+        }
+        for (JsonNode component : components) {
+            JsonNode identity = component.path("identity");
+            boolean componentMatches = componentId.equals(identity.path("componentId").asText(""));
+            boolean widgetMatches = selectedWidgetKey.isBlank()
+                    || selectedWidgetKey.equals(identity.path("widgetKey").asText(""));
+            JsonNode capabilities = component.path("affordances").path("clientSurfaceCapabilities");
+            if (componentMatches && widgetMatches && capabilities.isObject()) {
+                return capabilities;
             }
         }
         return MissingNode.getInstance();

@@ -53,22 +53,20 @@ class DomainRuleRolloutServiceTest {
     var candidate = snapshot(UUID.randomUUID(), "candidate-v2", 2);
     var active = snapshot(UUID.randomUUID(), "active-v1", 1);
     UUID etag = UUID.randomUUID();
-    var head = DomainRuleSnapshotHead.builder().id(UUID.randomUUID()).tenantId("tenant-a")
+    var head = DomainRuleSnapshotHead.builder().operationKey("evaluate").id(UUID.randomUUID()).tenantId("tenant-a")
         .environment("dev").ruleSetKey("benefit.eligibility").activeSnapshotId(active.getId())
         .activationRevision(1L).headEtag(etag).updatedAt(NOW).rowVersion(0L).build();
     when(snapshots.findByTenantIdAndEnvironmentAndSnapshotKey("tenant-a", "dev", "candidate-v2"))
         .thenReturn(Optional.of(candidate));
-    when(heads.findByTenantIdAndEnvironmentAndRuleSetKey(
-        "tenant-a", "dev", "benefit.eligibility")).thenReturn(Optional.of(head));
-    when(rollouts.findByTenantIdAndEnvironmentAndRuleSetKeyAndStatusIn(
-        eq("tenant-a"), eq("dev"), eq("benefit.eligibility"), anySet())).thenReturn(List.of());
+    when(heads.findByTenantIdAndEnvironmentAndRuleSetKeyAndOperationKey("tenant-a", "dev", "benefit.eligibility", "evaluate")).thenReturn(Optional.of(head));
+    when(rollouts.findByTenantIdAndEnvironmentAndRuleSetKeyAndOperationKeyAndStatusIn(eq("tenant-a"), eq("dev"), eq("benefit.eligibility"), org.mockito.ArgumentMatchers.eq("evaluate"), anySet())).thenReturn(List.of());
     when(policyService.requireActiveOrBootstrap("benefit.eligibility", principal))
         .thenReturn(DomainRuleRolloutPolicy.builder().id(UUID.randomUUID())
             .policyKey("platform-observe-only").policyVersion(1)
             .enforcementMode("OBSERVE_ONLY").build());
     when(rollouts.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
     when(snapshots.findById(active.getId())).thenReturn(Optional.of(active));
-    when(snapshots.findByIdAndTenantIdAndEnvironmentAndRuleSetKey(active.getId(), "tenant-a", "dev", "benefit.eligibility")).thenReturn(Optional.of(active));
+    when(snapshots.findByIdAndTenantIdAndEnvironmentAndRuleSetKeyAndOperationKey(active.getId(), "tenant-a", "dev", "benefit.eligibility", "evaluate")).thenReturn(Optional.of(active));
 
     var response = service.create(new DomainRuleRolloutCreateRequest("candidate-v2", null),
         principal,  '"' + etag.toString() + '"',  null);
@@ -81,12 +79,12 @@ class DomainRuleRolloutServiceTest {
 
   @Test void createRejectsStaleHeadBeforePersistingAnything() {
     var candidate = snapshot(UUID.randomUUID(), "candidate-v2", 2);
-    var head = DomainRuleSnapshotHead.builder().id(UUID.randomUUID()).tenantId("tenant-a")
+    var head = DomainRuleSnapshotHead.builder().operationKey("evaluate").id(UUID.randomUUID()).tenantId("tenant-a")
         .environment("dev").ruleSetKey("benefit.eligibility").activeSnapshotId(UUID.randomUUID())
         .activationRevision(1L).headEtag(UUID.randomUUID()).updatedAt(NOW).rowVersion(0L).build();
     when(snapshots.findByTenantIdAndEnvironmentAndSnapshotKey(any(), any(), any()))
         .thenReturn(Optional.of(candidate));
-    when(heads.findByTenantIdAndEnvironmentAndRuleSetKey(any(), any(), any()))
+    when(heads.findByTenantIdAndEnvironmentAndRuleSetKeyAndOperationKey(any(), any(), any(), org.mockito.ArgumentMatchers.eq("evaluate")))
         .thenReturn(Optional.of(head));
 
     assertThatThrownBy(() -> service.create(
@@ -100,15 +98,13 @@ class DomainRuleRolloutServiceTest {
     var candidate = snapshot(UUID.randomUUID(), "candidate-v2", 2);
     var active = snapshot(UUID.randomUUID(), "active-v1", 1);
     UUID etag = UUID.randomUUID();
-    var head = DomainRuleSnapshotHead.builder().id(UUID.randomUUID()).tenantId("tenant-a")
+    var head = DomainRuleSnapshotHead.builder().operationKey("evaluate").id(UUID.randomUUID()).tenantId("tenant-a")
         .environment("dev").ruleSetKey("benefit.eligibility").activeSnapshotId(active.getId())
         .activationRevision(1L).headEtag(etag).updatedAt(NOW).rowVersion(0L).build();
     when(snapshots.findByTenantIdAndEnvironmentAndSnapshotKey("tenant-a", "dev", "candidate-v2"))
         .thenReturn(Optional.of(candidate));
-    when(heads.findByTenantIdAndEnvironmentAndRuleSetKey(
-        "tenant-a", "dev", "benefit.eligibility")).thenReturn(Optional.of(head));
-    when(rollouts.findByTenantIdAndEnvironmentAndRuleSetKeyAndStatusIn(
-        eq("tenant-a"), eq("dev"), eq("benefit.eligibility"), anySet())).thenReturn(List.of());
+    when(heads.findByTenantIdAndEnvironmentAndRuleSetKeyAndOperationKey("tenant-a", "dev", "benefit.eligibility", "evaluate")).thenReturn(Optional.of(head));
+    when(rollouts.findByTenantIdAndEnvironmentAndRuleSetKeyAndOperationKeyAndStatusIn(eq("tenant-a"), eq("dev"), eq("benefit.eligibility"), org.mockito.ArgumentMatchers.eq("evaluate"), anySet())).thenReturn(List.of());
     when(policyService.requireActiveOrBootstrap("benefit.eligibility", principal))
         .thenReturn(DomainRuleRolloutPolicy.builder().id(UUID.randomUUID()).policyKey("safe")
             .policyVersion(2).enforcementMode("REQUIRED").maximumRolloutAgeSeconds(300L).build());
@@ -127,10 +123,9 @@ class DomainRuleRolloutServiceTest {
     when(rollouts.findByIdAndTenantIdAndEnvironment(rolloutId, "tenant-a", "dev"))
         .thenReturn(Optional.of(rollout));
     when(snapshots.findById(candidate.getId())).thenReturn(Optional.of(candidate));
-    when(snapshots.findByIdAndTenantIdAndEnvironmentAndRuleSetKey(
-        candidate.getId(), "tenant-a", "dev", "benefit.eligibility")).thenReturn(Optional.of(candidate));
+    when(snapshots.findByIdAndTenantIdAndEnvironmentAndRuleSetKeyAndOperationKey(candidate.getId(), "tenant-a", "dev", "benefit.eligibility", "evaluate")).thenReturn(Optional.of(candidate));
     when(probes.upsertIfNewer(any(), eq(rolloutId), eq("tenant-a"), eq("dev"), any(),
-        eq("operator-a"), eq(candidate.getId()), eq("candidate-v2"), eq(HASH), eq(false),
+        eq("evaluate"), eq("operator-a"), eq(candidate.getId()), eq("candidate-v2"), eq(HASH), eq(false),
         eq("quickstart/1"), eq("wrong-engine"), eq("dialect/1"), eq("C".repeat(64)),
         eq(CATALOG), eq("RUNTIME_INCOMPATIBLE"), eq(NOW), eq(NOW))).thenReturn(1);
 
@@ -152,8 +147,7 @@ class DomainRuleRolloutServiceTest {
         .thenReturn(Optional.of(rollout));
     when(policies.findById(rollout.getPolicyId())).thenReturn(Optional.of(policy));
     when(snapshots.findById(candidate.getId())).thenReturn(Optional.of(candidate));
-    when(snapshots.findByIdAndTenantIdAndEnvironmentAndRuleSetKey(
-        candidate.getId(), "tenant-a", "dev", "benefit.eligibility")).thenReturn(Optional.of(candidate));
+    when(snapshots.findByIdAndTenantIdAndEnvironmentAndRuleSetKeyAndOperationKey(candidate.getId(), "tenant-a", "dev", "benefit.eligibility", "evaluate")).thenReturn(Optional.of(candidate));
     when(probes.findByRolloutId(rolloutId)).thenReturn(List.of(
         probe(true, null, NOW.minusSeconds(5)),
         probe(false, "RUNTIME_INCOMPATIBLE", NOW.minusSeconds(10))));
@@ -175,17 +169,15 @@ class DomainRuleRolloutServiceTest {
     rollout.setExpectedActiveSnapshotId(activeId);
     rollout.setExpectedHeadEtag(etag);
     rollout.setCreatedAt(NOW.minusSeconds(5));
-    when(rollouts.findByTenantIdAndEnvironmentAndRuleSetKeyAndStatusInOrderByCreatedAtDesc(
-        eq("tenant-a"), eq("dev"), eq("benefit.eligibility"), anySet()))
+    when(rollouts.findByTenantIdAndEnvironmentAndRuleSetKeyAndOperationKeyAndStatusInOrderByCreatedAtDesc(eq("tenant-a"), eq("dev"), eq("benefit.eligibility"), org.mockito.ArgumentMatchers.eq("evaluate"), anySet()))
         .thenReturn(List.of(rollout));
-    when(heads.findByTenantIdAndEnvironmentAndRuleSetKey("tenant-a", "dev", "benefit.eligibility"))
-        .thenReturn(Optional.of(DomainRuleSnapshotHead.builder()
+    when(heads.findByTenantIdAndEnvironmentAndRuleSetKeyAndOperationKey("tenant-a", "dev", "benefit.eligibility", "evaluate"))
+        .thenReturn(Optional.of(DomainRuleSnapshotHead.builder().operationKey("evaluate")
             .activeSnapshotId(activeId).headEtag(etag).build()));
-    when(snapshots.findByIdAndTenantIdAndEnvironmentAndRuleSetKey(
-        candidate.getId(), "tenant-a", "dev", "benefit.eligibility"))
+    when(snapshots.findByIdAndTenantIdAndEnvironmentAndRuleSetKeyAndOperationKey(candidate.getId(), "tenant-a", "dev", "benefit.eligibility", "evaluate"))
         .thenReturn(Optional.of(candidate));
 
-    var response = service.pending("benefit.eligibility", principal);
+    var response = service.pending("benefit.eligibility", "evaluate", principal);
 
     assertThat(response).isPresent();
     assertThat(response.orElseThrow().candidateSnapshotKey()).isEqualTo("candidate-v2");
@@ -197,11 +189,10 @@ class DomainRuleRolloutServiceTest {
     rollout.setExpectedActiveSnapshotId(UUID.randomUUID());
     rollout.setExpectedHeadEtag(UUID.randomUUID());
     rollout.setExpiresAt(NOW);
-    when(rollouts.findByTenantIdAndEnvironmentAndRuleSetKeyAndStatusInOrderByCreatedAtDesc(
-        eq("tenant-a"), eq("dev"), eq("benefit.eligibility"), anySet()))
+    when(rollouts.findByTenantIdAndEnvironmentAndRuleSetKeyAndOperationKeyAndStatusInOrderByCreatedAtDesc(eq("tenant-a"), eq("dev"), eq("benefit.eligibility"), org.mockito.ArgumentMatchers.eq("evaluate"), anySet()))
         .thenReturn(List.of(rollout));
 
-    assertThat(service.pending("benefit.eligibility", principal)).isEmpty();
+    assertThat(service.pending("benefit.eligibility", "evaluate", principal)).isEmpty();
     verifyNoInteractions(heads);
   }
 
@@ -221,12 +212,10 @@ class DomainRuleRolloutServiceTest {
     var policy = requiredPolicy(policyId, 1, true);
     policy.setPolicyKey("safe");
     policy.setPolicyVersion(3);
-    when(rollouts.findByTenantIdAndEnvironmentAndRuleSetKeyAndStatusInOrderByCreatedAtDesc(
-        eq("tenant-a"), eq("dev"), eq("benefit.eligibility"), anySet()))
+    when(rollouts.findByTenantIdAndEnvironmentAndRuleSetKeyAndOperationKeyAndStatusInOrderByCreatedAtDesc(eq("tenant-a"), eq("dev"), eq("benefit.eligibility"), org.mockito.ArgumentMatchers.eq("evaluate"), anySet()))
         .thenReturn(List.of(rollout));
-    when(heads.findByTenantIdAndEnvironmentAndRuleSetKey(
-        "tenant-a", "dev", "benefit.eligibility"))
-        .thenReturn(Optional.of(DomainRuleSnapshotHead.builder()
+    when(heads.findByTenantIdAndEnvironmentAndRuleSetKeyAndOperationKey("tenant-a", "dev", "benefit.eligibility", "evaluate"))
+        .thenReturn(Optional.of(DomainRuleSnapshotHead.builder().operationKey("evaluate")
             .activeSnapshotId(activeId).headEtag(etag).build()));
     when(rollouts.findByIdAndTenantIdAndEnvironment(rolloutId, "tenant-a", "dev"))
         .thenReturn(Optional.of(rollout));
@@ -234,20 +223,18 @@ class DomainRuleRolloutServiceTest {
     when(probes.findByRolloutId(rolloutId))
         .thenReturn(List.of(probe(true, null, NOW.minusSeconds(1))));
     when(snapshots.findById(candidate.getId())).thenReturn(Optional.of(candidate));
-    when(snapshots.findByIdAndTenantIdAndEnvironmentAndRuleSetKey(
-        candidate.getId(), "tenant-a", "dev", "benefit.eligibility")).thenReturn(Optional.of(candidate));
+    when(snapshots.findByIdAndTenantIdAndEnvironmentAndRuleSetKeyAndOperationKey(candidate.getId(), "tenant-a", "dev", "benefit.eligibility", "evaluate")).thenReturn(Optional.of(candidate));
     when(snapshots.findById(activeId)).thenReturn(Optional.of(active));
-    when(snapshots.findByIdAndTenantIdAndEnvironmentAndRuleSetKey(activeId, "tenant-a", "dev", "benefit.eligibility")).thenReturn(Optional.of(active));
+    when(snapshots.findByIdAndTenantIdAndEnvironmentAndRuleSetKeyAndOperationKey(activeId, "tenant-a", "dev", "benefit.eligibility", "evaluate")).thenReturn(Optional.of(active));
 
-    var catalog = service.catalog("benefit.eligibility", principal, true);
+    var catalog = service.catalog("benefit.eligibility", "evaluate", principal, true);
 
     assertThat(catalog.rollouts()).hasSize(1);
     assertThat(catalog.rollouts().getFirst().availableActions())
         .containsExactly("CANCEL", "ACTIVATE_CANDIDATE");
     assertThat(catalog.rollouts().getFirst().expectedHeadCurrent()).isTrue();
     assertThat(catalog.rollouts().getFirst().readiness().activationReady()).isTrue();
-    verify(rollouts).findByTenantIdAndEnvironmentAndRuleSetKeyAndStatusInOrderByCreatedAtDesc(
-        eq("tenant-a"), eq("dev"), eq("benefit.eligibility"), anySet());
+    verify(rollouts).findByTenantIdAndEnvironmentAndRuleSetKeyAndOperationKeyAndStatusInOrderByCreatedAtDesc(eq("tenant-a"), eq("dev"), eq("benefit.eligibility"), org.mockito.ArgumentMatchers.eq("evaluate"), anySet());
   }
 
   @Test void humanCatalogAllowsCleanupButWithholdsActivationFromExpiredRollout() {
@@ -264,30 +251,27 @@ class DomainRuleRolloutServiceTest {
     var policy = requiredPolicy(policyId, 1, true);
     policy.setPolicyKey("safe");
     policy.setPolicyVersion(1);
-    when(rollouts.findByTenantIdAndEnvironmentAndRuleSetKeyAndStatusInOrderByCreatedAtDesc(
-        any(), any(), any(), anySet())).thenReturn(List.of(rollout));
+    when(rollouts.findByTenantIdAndEnvironmentAndRuleSetKeyAndOperationKeyAndStatusInOrderByCreatedAtDesc(any(), any(), any(), org.mockito.ArgumentMatchers.eq("evaluate"), anySet())).thenReturn(List.of(rollout));
     when(rollouts.findByIdAndTenantIdAndEnvironment(rolloutId, "tenant-a", "dev"))
         .thenReturn(Optional.of(rollout));
     when(policies.findById(policyId)).thenReturn(Optional.of(policy));
     when(probes.findByRolloutId(rolloutId)).thenReturn(List.of());
     when(snapshots.findById(candidate.getId())).thenReturn(Optional.of(candidate));
-    when(snapshots.findByIdAndTenantIdAndEnvironmentAndRuleSetKey(
-        candidate.getId(), "tenant-a", "dev", "benefit.eligibility")).thenReturn(Optional.of(candidate));
+    when(snapshots.findByIdAndTenantIdAndEnvironmentAndRuleSetKeyAndOperationKey(candidate.getId(), "tenant-a", "dev", "benefit.eligibility", "evaluate")).thenReturn(Optional.of(candidate));
     when(snapshots.findById(activeId)).thenReturn(Optional.of(active));
-    when(snapshots.findByIdAndTenantIdAndEnvironmentAndRuleSetKey(activeId, "tenant-a", "dev", "benefit.eligibility")).thenReturn(Optional.of(active));
+    when(snapshots.findByIdAndTenantIdAndEnvironmentAndRuleSetKeyAndOperationKey(activeId, "tenant-a", "dev", "benefit.eligibility", "evaluate")).thenReturn(Optional.of(active));
 
-    var item = service.catalog("benefit.eligibility", principal, true).rollouts().getFirst();
+    var item = service.catalog("benefit.eligibility", "evaluate", principal, true).rollouts().getFirst();
 
     assertThat(item.expired()).isTrue();
     assertThat(item.availableActions()).containsExactly("CANCEL");
   }
 
   @Test void readerWithoutOperatorRoleReceivesNoRolloutCommands() {
-    when(rollouts.findByTenantIdAndEnvironmentAndRuleSetKeyAndStatusInOrderByCreatedAtDesc(
-        eq("tenant-a"), eq("dev"), eq("benefit.eligibility"), anySet()))
+    when(rollouts.findByTenantIdAndEnvironmentAndRuleSetKeyAndOperationKeyAndStatusInOrderByCreatedAtDesc(eq("tenant-a"), eq("dev"), eq("benefit.eligibility"), org.mockito.ArgumentMatchers.eq("evaluate"), anySet()))
         .thenReturn(List.of());
 
-    var catalog = service.catalog("benefit.eligibility", principal, false);
+    var catalog = service.catalog("benefit.eligibility", "evaluate", principal, false);
 
     assertThat(catalog.availableActions()).isEmpty();
     assertThat(catalog.rollouts()).isEmpty();
@@ -300,7 +284,7 @@ class DomainRuleRolloutServiceTest {
         .thenReturn(Optional.of(requiredPolicy(UUID.randomUUID(), 1, false)));
 
     assertThatThrownBy(() -> service.requireAllowed(null, target,
-        DomainRuleSnapshotHead.builder().activeSnapshotId(UUID.randomUUID())
+        DomainRuleSnapshotHead.builder().operationKey("evaluate").activeSnapshotId(UUID.randomUUID())
             .headEtag(UUID.randomUUID()).build(), "operator"))
         .isInstanceOf(DomainRuleSnapshotControlPlaneException.class)
         .hasMessageContaining("READY rollout is required");
@@ -320,7 +304,7 @@ class DomainRuleRolloutServiceTest {
     rollout.setExpectedHeadEtag(etag); rollout.setUpdatedAt(NOW);
     when(policies.findByTenantIdAndEnvironmentAndRuleSetKeyAndActiveTrue(
         "tenant-a", "dev", "benefit.eligibility")).thenReturn(Optional.of(policy));
-    var head = DomainRuleSnapshotHead.builder().activeSnapshotId(activeId).headEtag(etag).build();
+    var head = DomainRuleSnapshotHead.builder().operationKey("evaluate").activeSnapshotId(activeId).headEtag(etag).build();
 
     service.requireAllowed(null, target, head, "operator");
 
@@ -350,11 +334,10 @@ class DomainRuleRolloutServiceTest {
     when(policies.findById(policyId)).thenReturn(Optional.of(policy));
     when(probes.findByRolloutId(rolloutId)).thenReturn(List.of(probe(true, null, NOW.minusSeconds(1))));
     when(snapshots.findById(target.getId())).thenReturn(Optional.of(target));
-    when(snapshots.findByIdAndTenantIdAndEnvironmentAndRuleSetKey(
-        target.getId(), "tenant-a", "dev", "benefit.eligibility")).thenReturn(Optional.of(target));
+    when(snapshots.findByIdAndTenantIdAndEnvironmentAndRuleSetKeyAndOperationKey(target.getId(), "tenant-a", "dev", "benefit.eligibility", "evaluate")).thenReturn(Optional.of(target));
     when(rollouts.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
-    var head = DomainRuleSnapshotHead.builder().activeSnapshotId(activeId).headEtag(etag).build();
-    when(heads.findByTenantIdAndEnvironmentAndRuleSetKey("tenant-a", "dev", "benefit.eligibility"))
+    var head = DomainRuleSnapshotHead.builder().operationKey("evaluate").activeSnapshotId(activeId).headEtag(etag).build();
+    when(heads.findByTenantIdAndEnvironmentAndRuleSetKeyAndOperationKey("tenant-a", "dev", "benefit.eligibility", "evaluate"))
         .thenReturn(Optional.of(head));
 
     service.requireAllowed(rolloutId, target, head, "operator");
@@ -370,10 +353,10 @@ class DomainRuleRolloutServiceTest {
     var candidate = snapshot(UUID.randomUUID(), "candidate-v2", 2);
     makeNonReady(candidate, state);
     UUID etag = UUID.randomUUID();
-    var head = DomainRuleSnapshotHead.builder().activeSnapshotId(UUID.randomUUID()).headEtag(etag).build();
+    var head = DomainRuleSnapshotHead.builder().operationKey("evaluate").activeSnapshotId(UUID.randomUUID()).headEtag(etag).build();
     when(snapshots.findByTenantIdAndEnvironmentAndSnapshotKey("tenant-a", "dev", "candidate-v2"))
         .thenReturn(Optional.of(candidate));
-    when(heads.findByTenantIdAndEnvironmentAndRuleSetKey("tenant-a", "dev", "benefit.eligibility"))
+    when(heads.findByTenantIdAndEnvironmentAndRuleSetKeyAndOperationKey("tenant-a", "dev", "benefit.eligibility", "evaluate"))
         .thenReturn(Optional.of(head));
 
     assertThatThrownBy(() -> service.create(new DomainRuleRolloutCreateRequest("candidate-v2", null),
@@ -398,20 +381,18 @@ class DomainRuleRolloutServiceTest {
     var policy = requiredPolicy(rollout.getPolicyId(), 1, false);
     policy.setEnforcementMode("OBSERVE_ONLY");
     policy.setPolicyKey("observe"); policy.setPolicyVersion(1);
-    when(rollouts.findByTenantIdAndEnvironmentAndRuleSetKeyAndStatusInOrderByCreatedAtDesc(
-        eq("tenant-a"), eq("dev"), eq("benefit.eligibility"), anySet())).thenReturn(List.of(rollout));
-    when(heads.findByTenantIdAndEnvironmentAndRuleSetKey("tenant-a", "dev", "benefit.eligibility"))
-        .thenReturn(Optional.of(DomainRuleSnapshotHead.builder().activeSnapshotId(active.getId()).headEtag(etag).build()));
+    when(rollouts.findByTenantIdAndEnvironmentAndRuleSetKeyAndOperationKeyAndStatusInOrderByCreatedAtDesc(eq("tenant-a"), eq("dev"), eq("benefit.eligibility"), org.mockito.ArgumentMatchers.eq("evaluate"), anySet())).thenReturn(List.of(rollout));
+    when(heads.findByTenantIdAndEnvironmentAndRuleSetKeyAndOperationKey("tenant-a", "dev", "benefit.eligibility", "evaluate"))
+        .thenReturn(Optional.of(DomainRuleSnapshotHead.builder().operationKey("evaluate").activeSnapshotId(active.getId()).headEtag(etag).build()));
     when(rollouts.findByIdAndTenantIdAndEnvironment(rolloutId, "tenant-a", "dev")).thenReturn(Optional.of(rollout));
     when(policies.findById(policy.getId())).thenReturn(Optional.of(policy));
     when(probes.findByRolloutId(rolloutId)).thenReturn(List.of(probe(true, null, NOW.minusSeconds(1))));
     when(snapshots.findById(candidate.getId())).thenReturn(Optional.of(candidate));
     when(snapshots.findById(active.getId())).thenReturn(Optional.of(active));
-    when(snapshots.findByIdAndTenantIdAndEnvironmentAndRuleSetKey(active.getId(), "tenant-a", "dev", "benefit.eligibility")).thenReturn(Optional.of(active));
-    when(snapshots.findByIdAndTenantIdAndEnvironmentAndRuleSetKey(
-        candidate.getId(), "tenant-a", "dev", "benefit.eligibility")).thenReturn(Optional.of(candidate));
+    when(snapshots.findByIdAndTenantIdAndEnvironmentAndRuleSetKeyAndOperationKey(active.getId(), "tenant-a", "dev", "benefit.eligibility", "evaluate")).thenReturn(Optional.of(active));
+    when(snapshots.findByIdAndTenantIdAndEnvironmentAndRuleSetKeyAndOperationKey(candidate.getId(), "tenant-a", "dev", "benefit.eligibility", "evaluate")).thenReturn(Optional.of(candidate));
 
-    var item = service.catalog("benefit.eligibility", principal, true).rollouts().getFirst();
+    var item = service.catalog("benefit.eligibility", "evaluate", principal, true).rollouts().getFirst();
 
     assertThat(item.readiness().status()).isEqualTo("BLOCKED");
     assertThat(item.readiness().activationReady()).isFalse();
@@ -459,7 +440,7 @@ class DomainRuleRolloutServiceTest {
     when(policies.findById(policy.getId())).thenReturn(Optional.of(policy));
     when(policies.findByTenantIdAndEnvironmentAndRuleSetKeyAndActiveTrue("tenant-a", "dev", "benefit.eligibility"))
         .thenReturn(Optional.of(policy));
-    when(snapshots.findByIdAndTenantIdAndEnvironmentAndRuleSetKey(candidate.getId(), "tenant-a", "dev", "benefit.eligibility"))
+    when(snapshots.findByIdAndTenantIdAndEnvironmentAndRuleSetKeyAndOperationKey(candidate.getId(), "tenant-a", "dev", "benefit.eligibility", "evaluate"))
         .thenReturn(Optional.of(candidate));
     when(probes.findByRolloutId(id)).thenReturn(List.of());
     assertThatThrownBy(() -> service.requireAllowed(id, candidate, null, "operator-a"))
@@ -467,9 +448,32 @@ class DomainRuleRolloutServiceTest {
     when(probes.findByRolloutId(id)).thenReturn(List.of(probe(true, null, NOW.minusSeconds(1))));
     service.requireAllowed(id, candidate, null, "operator-a");
     assertThat(service.readiness(id, principal).activationReady()).isTrue();
-    var raced = DomainRuleSnapshotHead.builder().activeSnapshotId(UUID.randomUUID()).headEtag(UUID.randomUUID()).build();
+    var raced = DomainRuleSnapshotHead.builder().operationKey("evaluate").activeSnapshotId(UUID.randomUUID()).headEtag(UUID.randomUUID()).build();
     assertThatThrownBy(() -> service.requireAllowed(id, candidate, raced, "operator-a"))
         .isInstanceOf(DomainRuleSnapshotControlPlaneException.class).hasMessageContaining("no longer matches");
+  }
+
+  @Test void withdrawnReentryKeepsTheExactLastSelectionAndEtagButRequiresBootstrapPolicy() {
+    var candidate = snapshot(UUID.randomUUID(), "candidate-v2", 2);
+    var previous = snapshot(UUID.randomUUID(), "withdrawn-v1", 1);
+    var etag = UUID.randomUUID();
+    var head = DomainRuleSnapshotHead.builder().operationKey("evaluate").id(UUID.randomUUID())
+        .tenantId("tenant-a").environment("dev").ruleSetKey("benefit.eligibility")
+        .activeSnapshotId(previous.getId()).headEtag(etag).withdrawn(true).activationRevision(2L).build();
+    when(snapshots.findByTenantIdAndEnvironmentAndSnapshotKey("tenant-a", "dev", "candidate-v2"))
+        .thenReturn(Optional.of(candidate));
+    when(heads.findByTenantIdAndEnvironmentAndRuleSetKeyAndOperationKey("tenant-a", "dev", "benefit.eligibility", "evaluate"))
+        .thenReturn(Optional.of(head));
+    when(snapshots.findByIdAndTenantIdAndEnvironmentAndRuleSetKeyAndOperationKey(previous.getId(), "tenant-a", "dev", "benefit.eligibility", "evaluate"))
+        .thenReturn(Optional.of(previous));
+    when(policyService.requireBootstrapPolicy("benefit.eligibility", principal)).thenReturn(bootstrapPolicy(UUID.randomUUID()));
+    when(rollouts.save(any())).thenAnswer(call -> call.getArgument(0));
+    var response = service.create(new DomainRuleRolloutCreateRequest("candidate-v2", null), principal, '"' + etag.toString() + '"', null);
+    assertThat(response.expectedActiveSnapshotKey()).isEqualTo("withdrawn-v1");
+    assertThat(response.expectedHeadEtag()).isEqualTo(etag.toString());
+    assertThat(response.enforcementMode()).isEqualTo("REQUIRED");
+    verify(policyService, never()).requireActiveOrBootstrap(any(), any());
+    verify(rollouts).save(argThat(value -> value.isExpectedHeadWithdrawn() && previous.getId().equals(value.getExpectedActiveSnapshotId()) && etag.equals(value.getExpectedHeadEtag())));
   }
 
   @Test void bootstrapNeverUsesDefaultObserveOnlyOrMissingPolicyAsAuthority() {
@@ -496,7 +500,7 @@ class DomainRuleRolloutServiceTest {
     PublishedRuleSnapshot snapshot = snapshotContract(key, revision);
     try {
       String manifest = "{\"compositionContractVersion\":\"praxis-rule-composition/2\",\"testEvidence\":[],\"implementationCatalogDigest\":\"" + CATALOG + "\"}";
-      return DomainRuleSnapshot.builder().id(id).tenantId("tenant-a").environment("dev")
+      return DomainRuleSnapshot.builder().operationKey("evaluate").id(id).tenantId("tenant-a").environment("dev")
           .ruleSetKey("benefit.eligibility").snapshotKey(key)
           .ruleSetVersion(revision).publicationRevision(revision)
           .snapshotPayload(JSON.writeValueAsString(snapshot))
@@ -516,7 +520,7 @@ class DomainRuleRolloutServiceTest {
           new RuleSetRef("benefits", "eligibility", "benefit.eligibility", "evaluate", revision),
           List.of("request"),
           List.of(new DecisionSlot("eligibility", DecisionStage.DOMAIN_DECISION, SlotCardinality.SINGLE,
-              OverridePolicy.FORBIDDEN, DecisionAggregationPolicy.SINGLE_RESULT, null)),
+              OverridePolicy.FORBIDDEN, DecisionAggregationPolicy.SINGLE_RESULT, null, java.util.List.of())),
           List.of(new DecisionBinding("eligibility", "eligibility", DecisionSource.PRODUCT, null,
               RuleExecutorRef.jsonLogic(JSON.createObjectNode().put("var", "request.eligible")), List.of(),
               10, true, RuleDecision.DENY, "NOT_ELIGIBLE", List.of("request.eligible"), null)),
@@ -532,12 +536,12 @@ class DomainRuleRolloutServiceTest {
   }
 
   private static DomainRuleSnapshotRollout rollout(UUID id, UUID candidateId) {
-    return DomainRuleSnapshotRollout.builder().id(id).tenantId("tenant-a").environment("dev")
+    return DomainRuleSnapshotRollout.builder().operationKey("evaluate").id(id).tenantId("tenant-a").environment("dev")
         .ruleSetKey("benefit.eligibility").candidateSnapshotId(candidateId).policyId(UUID.randomUUID())
         .status("PREPARING").build();
   }
   private static DomainRuleCandidateProbe probe(boolean ready, String failure, Instant observed) {
-    return DomainRuleCandidateProbe.builder().preloadReady(ready).failureCode(failure)
+    return DomainRuleCandidateProbe.builder().operationKey("evaluate").preloadReady(ready).failureCode(failure)
         .observedAt(observed).build();
   }
   private static DomainRuleRolloutPolicy requiredPolicy(UUID id, int minimum, boolean block) {

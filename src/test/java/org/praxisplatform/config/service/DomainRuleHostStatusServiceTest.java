@@ -66,19 +66,11 @@ class DomainRuleHostStatusServiceTest {
 
   @Test
   void ingestsStatusUsingOnlyServerOwnedScopeAndActor() {
-    when(statusRepository.upsertIfNewer(
-        any(), eq("tenant-a"), eq("dev"), eq("benefit.eligibility"), eq("service:host-a"),
-        eq("snap-2"), eq(HASH), eq(7L), eq(true), eq("quickstart/1.0"),
-        eq(COMPATIBILITY.engineContractVersion()), eq(COMPATIBILITY.jsonLogicDialectVersion()),
-        eq(COMPATIBILITY.jsonLogicCorpusSha256()), eq("B".repeat(64)),
-        eq(null), eq(NOW), eq(NOW)))
+    when(statusRepository.upsertIfNewer(any(), eq("tenant-a"), eq("dev"), eq("benefit.eligibility"), org.mockito.ArgumentMatchers.eq("evaluate"), eq("service:host-a"), eq("snap-2"), eq(HASH), eq(7L), eq(true), eq("quickstart/1.0"), eq(COMPATIBILITY.engineContractVersion()), eq(COMPATIBILITY.jsonLogicDialectVersion()), eq(COMPATIBILITY.jsonLogicCorpusSha256()), eq("B".repeat(64)), eq(null), eq(NOW), eq(NOW)))
         .thenReturn(1);
 
     var response = service.ingest(
-        new DomainRuleHostStatusRequest(
-            "benefit.eligibility", "snap-2", HASH, 7L, true, "quickstart/1.0",
-            COMPATIBILITY.engineContractVersion(), COMPATIBILITY.jsonLogicDialectVersion(),
-            COMPATIBILITY.jsonLogicCorpusSha256(), "B".repeat(64), null, NOW), principal);
+        new DomainRuleHostStatusRequest("benefit.eligibility", "evaluate", "snap-2", HASH, 7L, true, "quickstart/1.0", COMPATIBILITY.engineContractVersion(), COMPATIBILITY.jsonLogicDialectVersion(), COMPATIBILITY.jsonLogicCorpusSha256(), "B".repeat(64), null, NOW), principal);
 
     assertThat(response.updated()).isTrue();
     assertThat(response.observedAtUtc()).isEqualTo(NOW);
@@ -87,9 +79,7 @@ class DomainRuleHostStatusServiceTest {
   @Test
   void rejectsReadyStatusWithoutCompleteLoadedIdentity() {
     assertThatThrownBy(() -> service.ingest(
-        new DomainRuleHostStatusRequest(
-            "benefit.eligibility", null, null, null, true, "quickstart/1.0",
-            null, null, null, null, null, NOW), principal))
+        new DomainRuleHostStatusRequest("benefit.eligibility", "evaluate", null, null, null, true, "quickstart/1.0", null, null, null, null, null, NOW), principal))
         .isInstanceOf(ConfigurationIngestionException.class)
         .hasMessageContaining("ready host requires");
   }
@@ -97,30 +87,27 @@ class DomainRuleHostStatusServiceTest {
   @Test
   void drillsMultipleHostsAcrossAlignmentSnapshotDriftRuntimeIncompatibilityUnavailabilityAndStaleness() {
     UUID snapshotId = UUID.randomUUID();
-    DomainRuleSnapshotHead head = DomainRuleSnapshotHead.builder()
+    DomainRuleSnapshotHead head = DomainRuleSnapshotHead.builder().operationKey("evaluate")
         .id(UUID.randomUUID()).tenantId("tenant-a").environment("dev")
         .ruleSetKey("benefit.eligibility").activeSnapshotId(snapshotId)
         .activationRevision(7L).headEtag(UUID.randomUUID()).updatedAt(NOW).rowVersion(0L).build();
-    DomainRuleSnapshot snapshot = DomainRuleSnapshot.builder()
+    DomainRuleSnapshot snapshot = DomainRuleSnapshot.builder().operationKey("evaluate")
         .id(snapshotId).tenantId("tenant-a").environment("dev")
         .ruleSetKey("benefit.eligibility").snapshotKey("snap-2").contentHash(HASH)
         .compositionManifest("{\"implementationCatalogDigest\":\"" + "B".repeat(64) + "\"}").build();
     PublishedRuleSnapshot envelope = publishedSnapshot();
-    when(headRepository.findByTenantIdAndEnvironmentAndRuleSetKey(
-        "tenant-a", "dev", "benefit.eligibility")).thenReturn(Optional.of(head));
-    when(snapshotRepository.findByIdAndTenantIdAndEnvironmentAndRuleSetKey(
-        snapshotId, "tenant-a", "dev", "benefit.eligibility")).thenReturn(Optional.of(snapshot));
+    when(headRepository.findByTenantIdAndEnvironmentAndRuleSetKeyAndOperationKey("tenant-a", "dev", "benefit.eligibility", "evaluate")).thenReturn(Optional.of(head));
+    when(snapshotRepository.findByIdAndTenantIdAndEnvironmentAndRuleSetKeyAndOperationKey(snapshotId, "tenant-a", "dev", "benefit.eligibility", "evaluate")).thenReturn(Optional.of(snapshot));
     when(snapshotService.findSnapshot("tenant-a", "dev", "snap-2"))
         .thenReturn(Optional.of(new DomainRuleSnapshotStoredResponse(envelope, HASH)));
-    when(statusRepository.findByTenantIdAndEnvironmentAndRuleSetKey(
-        "tenant-a", "dev", "benefit.eligibility")).thenReturn(List.of(
+    when(statusRepository.findByTenantIdAndEnvironmentAndRuleSetKeyAndOperationKey("tenant-a", "dev", "benefit.eligibility", "evaluate")).thenReturn(List.of(
             status(true, "snap-2", HASH, 7L, true, NOW.minusSeconds(10)),
             status(true, "snap-1", HASH, 6L, true, NOW.minusSeconds(20)),
             status(true, "snap-2", HASH, 7L, false, NOW.minusSeconds(25)),
             status(false, null, null, null, true, NOW.minusSeconds(30)),
             status(true, "snap-2", HASH, 7L, true, NOW.minusSeconds(121))));
 
-    var summary = service.summarizeHead("benefit.eligibility", principal);
+    var summary = service.summarizeHead("benefit.eligibility", "evaluate", principal);
 
     assertThat(summary.totalHosts()).isEqualTo(5);
     assertThat(summary.alignedHosts()).isEqualTo(1);
@@ -134,7 +121,7 @@ class DomainRuleHostStatusServiceTest {
   private DomainRuleHostStatus status(
       boolean ready, String snapshotKey, String hash, Long revision,
       boolean compatible, Instant observedAt) {
-    return DomainRuleHostStatus.builder().id(UUID.randomUUID()).tenantId("tenant-a")
+    return DomainRuleHostStatus.builder().operationKey("evaluate").id(UUID.randomUUID()).tenantId("tenant-a")
         .environment("dev").ruleSetKey("benefit.eligibility").hostActorRef(UUID.randomUUID().toString())
         .loadedSnapshotKey(snapshotKey).loadedSnapshotContentHash(hash).activationRevision(revision)
         .ready(ready).hostContractVersion("quickstart/1.0")
@@ -152,7 +139,7 @@ class DomainRuleHostStatusServiceTest {
         List.of("request"),
         List.of(new DecisionSlot(
             "eligibility", DecisionStage.DOMAIN_DECISION, SlotCardinality.SINGLE,
-            OverridePolicy.FORBIDDEN, DecisionAggregationPolicy.SINGLE_RESULT, null)),
+            OverridePolicy.FORBIDDEN, DecisionAggregationPolicy.SINGLE_RESULT, null, java.util.List.of())),
         List.of(new DecisionBinding(
             "eligibility", "eligibility", DecisionSource.PRODUCT, null,
             RuleExecutorRef.jsonLogic(expression), List.of(), 10, true,

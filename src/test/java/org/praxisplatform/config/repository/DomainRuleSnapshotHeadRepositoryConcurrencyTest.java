@@ -140,7 +140,7 @@ class DomainRuleSnapshotHeadRepositoryConcurrencyTest {
         }
 
         DomainRuleSnapshotHead stored = repository
-                .findByTenantIdAndEnvironmentAndRuleSetKey(TENANT, ENVIRONMENT, RULE_SET)
+                .findByTenantIdAndEnvironmentAndRuleSetKeyAndOperationKey(TENANT, ENVIRONMENT, RULE_SET, "determine")
                 .orElseThrow();
         assertThat(stored.getActivationRevision()).isEqualTo(3L);
         assertThat(stored.getRowVersion()).isEqualTo(2L);
@@ -167,7 +167,7 @@ class DomainRuleSnapshotHeadRepositoryConcurrencyTest {
         assertThat(response.activationRevision()).isEqualTo(3L);
         assertThat(response.headEtag()).isNotEqualTo(quote(originalEtag));
         DomainRuleSnapshotHead stored = repository
-                .findByTenantIdAndEnvironmentAndRuleSetKey(TENANT, ENVIRONMENT, RULE_SET)
+                .findByTenantIdAndEnvironmentAndRuleSetKeyAndOperationKey(TENANT, ENVIRONMENT, RULE_SET, "determine")
                 .orElseThrow();
         assertThat(stored.getActiveSnapshotId()).isEqualTo(
                 snapshotRepository.findByTenantIdAndEnvironmentAndSnapshotKey(
@@ -184,8 +184,7 @@ class DomainRuleSnapshotHeadRepositoryConcurrencyTest {
     }
 
     private DomainRuleSnapshotHead lock() {
-        return repository.findForUpdateByTenantIdAndEnvironmentAndRuleSetKey(
-                TENANT, ENVIRONMENT, RULE_SET).orElseThrow();
+        return repository.findForUpdateByTenantIdAndEnvironmentAndRuleSetKeyAndOperationKey(TENANT, ENVIRONMENT, RULE_SET, "determine").orElseThrow();
     }
 
     private void advance(DomainRuleSnapshotHead head) {
@@ -195,7 +194,7 @@ class DomainRuleSnapshotHeadRepositoryConcurrencyTest {
     }
 
     private DomainRuleSnapshotHead head(UUID activeSnapshotId, long activationRevision, UUID etag) {
-        return DomainRuleSnapshotHead.builder()
+        return DomainRuleSnapshotHead.builder().operationKey("determine")
                 .id(UUID.randomUUID())
                 .tenantId(TENANT)
                 .environment(ENVIRONMENT)
@@ -215,7 +214,7 @@ class DomainRuleSnapshotHeadRepositoryConcurrencyTest {
         String contentHash = new PraxisRuleSnapshotCompiler(RuleBindingExecutorRegistry.empty())
                 .compile(snapshot, snapshot.requiredHostContractVersion())
                 .snapshotContentHash();
-        return DomainRuleSnapshot.builder()
+        return DomainRuleSnapshot.builder().operationKey("determine")
                 .id(UUID.randomUUID())
                 .tenantId(TENANT)
                 .environment(ENVIRONMENT)
@@ -240,7 +239,7 @@ class DomainRuleSnapshotHeadRepositoryConcurrencyTest {
                 List.of("payroll"),
                 List.of(new DecisionSlot(
                         "payroll.amount", DecisionStage.DOMAIN_DECISION, SlotCardinality.SINGLE,
-                        OverridePolicy.FORBIDDEN, DecisionAggregationPolicy.SINGLE_RESULT, null)),
+                        OverridePolicy.FORBIDDEN, DecisionAggregationPolicy.SINGLE_RESULT, null, java.util.List.of())),
                 List.of(new DecisionBinding(
                         "payroll.amount", "payroll.amount", DecisionSource.PRODUCT, null,
                         RuleExecutorRef.jsonLogic(expression), List.of(), 10, true,
@@ -302,7 +301,7 @@ class DomainRuleSnapshotHeadRepositoryConcurrencyTest {
                 mock(DomainRuleDefinitionApprovalRepository.class),
                 new DomainRuleDefinitionFingerprint(OBJECT_MAPPER),
                 OBJECT_MAPPER,
-                DomainRuleImplementationCatalog.denyAll(),  org.praxisplatform.config.service.DomainRuleSnapshotActivationGate.unavailable(),  null,  new org.praxisplatform.config.service.JdbcDomainRuleSnapshotScopeLock(new org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate(dataSource)), new org.praxisplatform.config.service.DomainRuleEntityRefresh(jpaContext));
+                DomainRuleImplementationCatalog.denyAll(),  org.praxisplatform.config.service.DomainRuleSnapshotActivationGate.unavailable(),  null,  new org.praxisplatform.config.service.JdbcDomainRuleSnapshotScopeLock(new org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate(dataSource)), new org.praxisplatform.config.service.DomainRuleEntityRefresh(jpaContext), (scope, identity) -> java.util.Optional.empty());
     }
 
     private static String quote(UUID etag) {
@@ -338,9 +337,21 @@ class DomainRuleSnapshotHeadRepositoryConcurrencyTest {
                         "/db/migration/V30__create_domain_rule_snapshot_control_plane.sql",
                         "/db/migration/V32__enforce_domain_rule_snapshot_scope_references.sql",
                         "/db/migration/V33__bind_snapshot_to_approved_composition.sql",
-                        "/db/migration/V44__allow_explicit_rule_snapshot_activation.sql")) {
+                        "/db/migration/V44__allow_explicit_rule_snapshot_activation.sql",
+                        "/db/migration/V51__create_domain_rule_host_status.sql",
+                        "/db/migration/V52__add_domain_rule_host_runtime_coordinates.sql",
+                        "/db/migration/V53__create_domain_rule_staged_rollout.sql",
+                        "/db/migration/V54__govern_domain_rule_rollout_policy.sql",
+                        "/db/migration/V69__separate_rule_snapshot_publication_and_activation.sql")) {
                     statement.execute(readResource(migration));
                 }
+            }
+            try (Connection migrationConnection = postgres.getPostgresDatabase().getConnection()) {
+              migrationConnection.setAutoCommit(false);
+              var context = org.mockito.Mockito.mock(org.flywaydb.core.api.migration.Context.class);
+              org.mockito.Mockito.when(context.getConnection()).thenReturn(migrationConnection);
+              new db.migration.V72__scope_rule_snapshot_operations().migrate(context);
+              migrationConnection.commit();
             }
             return postgres;
         } catch (Exception exception) {

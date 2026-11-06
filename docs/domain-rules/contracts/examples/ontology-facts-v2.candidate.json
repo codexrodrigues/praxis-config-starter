@@ -1,0 +1,289 @@
+{
+  "schemaVersion": "praxis.domain-rule-fact-catalog.v2",
+  "operations": [
+    {
+      "operationKey": "contract-fixture.create",
+      "snapshotSchema": {
+        "type": "object",
+        "properties": {
+          "draft": {
+            "type": "object",
+            "properties": {
+              "dtini": {
+                "type": "string",
+                "format": "date",
+                "maxLength": 10
+              },
+              "dtfim": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "date",
+                "maxLength": 10
+              }
+            },
+            "required": [
+              "dtini",
+              "dtfim"
+            ],
+            "additionalProperties": false,
+            "maxProperties": 2
+          },
+          "current": {
+            "type": "null"
+          },
+          "neighborhood": {
+            "type": "object",
+            "properties": {
+              "periods": {
+                "type": "array",
+                "minItems": 0,
+                "maxItems": 100,
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "dtini": {
+                      "type": "string",
+                      "format": "date",
+                      "maxLength": 10
+                    },
+                    "dtfim": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "format": "date",
+                      "maxLength": 10
+                    },
+                    "days": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 999
+                    }
+                  },
+                  "required": [
+                    "dtini",
+                    "dtfim",
+                    "days"
+                  ],
+                  "additionalProperties": false,
+                  "maxProperties": 3
+                }
+              }
+            },
+            "required": [
+              "periods"
+            ],
+            "additionalProperties": false,
+            "maxProperties": 1
+          },
+          "context": {
+            "type": "object",
+            "properties": {
+              "tenant": {
+                "type": "string",
+                "maxLength": 80
+              }
+            },
+            "required": [
+              "tenant"
+            ],
+            "additionalProperties": false,
+            "maxProperties": 1
+          }
+        },
+        "required": [
+          "draft",
+          "current",
+          "neighborhood",
+          "context"
+        ],
+        "additionalProperties": false,
+        "maxProperties": 4
+      },
+      "facts": [
+        {
+          "schemaPointer": "#/properties/draft",
+          "labels": {
+            "pt-BR": "Período proposto"
+          },
+          "descriptions": {
+            "pt-BR": "Valores do período proposto depois da hidratação, antes de qualquer persistência."
+          },
+          "providerRef": "test:ontology-g1-provider",
+          "evidenceRefs": [
+            "test:ontology-g1-contract"
+          ],
+          "sensitivity": "NON_SENSITIVE",
+          "redaction": "NONE"
+        },
+        {
+          "schemaPointer": "#/properties/draft/properties/dtini",
+          "labels": {
+            "pt-BR": "Início proposto"
+          },
+          "descriptions": {
+            "pt-BR": "Primeira data civil do período proposto nesta fixture de contrato."
+          },
+          "providerRef": "test:ontology-g1-provider",
+          "evidenceRefs": [
+            "test:ontology-g1-contract"
+          ],
+          "sensitivity": "NON_SENSITIVE",
+          "redaction": "NONE"
+        },
+        {
+          "schemaPointer": "#/properties/draft/properties/dtfim",
+          "labels": {
+            "pt-BR": "Fim proposto"
+          },
+          "descriptions": {
+            "pt-BR": "Última data civil proposta; null representa período aberto e a propriedade continua obrigatória."
+          },
+          "providerRef": "test:ontology-g1-provider",
+          "evidenceRefs": [
+            "test:ontology-g1-contract"
+          ],
+          "sensitivity": "NON_SENSITIVE",
+          "redaction": "NONE"
+        },
+        {
+          "schemaPointer": "#/properties/current",
+          "labels": {
+            "pt-BR": "Estado anterior"
+          },
+          "descriptions": {
+            "pt-BR": "Em CREATE não existe estado anterior; o valor explícito é null."
+          },
+          "providerRef": "test:ontology-g1-provider",
+          "evidenceRefs": [
+            "test:ontology-g1-contract"
+          ],
+          "sensitivity": "NON_SENSITIVE",
+          "redaction": "NONE"
+        },
+        {
+          "schemaPointer": "#/properties/neighborhood",
+          "labels": {
+            "pt-BR": "Períodos relacionados"
+          },
+          "descriptions": {
+            "pt-BR": "Coleção obtida no mesmo escopo de execução para comparação de intervalos."
+          },
+          "providerRef": "test:ontology-g1-provider",
+          "evidenceRefs": [
+            "test:ontology-g1-contract"
+          ],
+          "sensitivity": "NON_SENSITIVE",
+          "redaction": "NONE"
+        },
+        {
+          "schemaPointer": "#/properties/neighborhood/properties/periods",
+          "labels": {
+            "pt-BR": "Períodos existentes"
+          },
+          "descriptions": {
+            "pt-BR": "Lista de períodos existentes no escopo; lista vazia é distinta de fato ausente."
+          },
+          "providerRef": "test:ontology-g1-provider",
+          "evidenceRefs": [
+            "test:ontology-g1-contract"
+          ],
+          "sensitivity": "NON_SENSITIVE",
+          "redaction": "NONE"
+        },
+        {
+          "schemaPointer": "#/properties/neighborhood/properties/periods/items",
+          "labels": {
+            "pt-BR": "Período existente"
+          },
+          "descriptions": {
+            "pt-BR": "Um período da coleção, com datas civis e quantidade de dias já apurada."
+          },
+          "providerRef": "test:ontology-g1-provider",
+          "evidenceRefs": [
+            "test:ontology-g1-contract"
+          ],
+          "sensitivity": "NON_SENSITIVE",
+          "redaction": "NONE"
+        },
+        {
+          "schemaPointer": "#/properties/neighborhood/properties/periods/items/properties/dtini",
+          "labels": {
+            "pt-BR": "Início existente"
+          },
+          "descriptions": {
+            "pt-BR": "Primeira data civil do período existente comparado pela regra."
+          },
+          "providerRef": "test:ontology-g1-provider",
+          "evidenceRefs": [
+            "test:ontology-g1-contract"
+          ],
+          "sensitivity": "NON_SENSITIVE",
+          "redaction": "NONE"
+        },
+        {
+          "schemaPointer": "#/properties/neighborhood/properties/periods/items/properties/dtfim",
+          "labels": {
+            "pt-BR": "Fim existente"
+          },
+          "descriptions": {
+            "pt-BR": "Última data civil do período existente; null indica intervalo aberto."
+          },
+          "providerRef": "test:ontology-g1-provider",
+          "evidenceRefs": [
+            "test:ontology-g1-contract"
+          ],
+          "sensitivity": "NON_SENSITIVE",
+          "redaction": "NONE"
+        },
+        {
+          "schemaPointer": "#/properties/neighborhood/properties/periods/items/properties/days",
+          "labels": {
+            "pt-BR": "Dias apurados"
+          },
+          "descriptions": {
+            "pt-BR": "Quantidade inteira de dias apurados para o período existente desta fixture."
+          },
+          "providerRef": "test:ontology-g1-provider",
+          "evidenceRefs": [
+            "test:ontology-g1-contract"
+          ],
+          "sensitivity": "NON_SENSITIVE",
+          "redaction": "NONE"
+        },
+        {
+          "schemaPointer": "#/properties/context",
+          "labels": {
+            "pt-BR": "Contexto capturado"
+          },
+          "descriptions": {
+            "pt-BR": "Dados de execução capturados pelo host e imutáveis durante a avaliação."
+          },
+          "providerRef": "test:ontology-g1-provider",
+          "evidenceRefs": [
+            "test:ontology-g1-contract"
+          ],
+          "sensitivity": "NON_SENSITIVE",
+          "redaction": "NONE"
+        },
+        {
+          "schemaPointer": "#/properties/context/properties/tenant",
+          "labels": {
+            "pt-BR": "Escopo do tenant"
+          },
+          "descriptions": {
+            "pt-BR": "Identificador do escopo de isolamento fornecido pelo host autenticado."
+          },
+          "providerRef": "test:ontology-g1-provider",
+          "evidenceRefs": [
+            "test:ontology-g1-contract"
+          ],
+          "sensitivity": "NON_SENSITIVE",
+          "redaction": "NONE"
+        }
+      ]
+    }
+  ]
+}

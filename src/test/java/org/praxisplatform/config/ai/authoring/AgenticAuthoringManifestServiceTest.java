@@ -1971,6 +1971,248 @@ class AgenticAuthoringManifestServiceTest {
     }
 
     @Test
+    void validatesDynamicFormVisualBlockAgainstFormVisualBlockSurfaceProfile() throws Exception {
+        AgenticAuthoringManifestService service = serviceWithPayload(
+                "praxis-dynamic-form",
+                payloadFromClasspathSnapshot("praxis-dynamic-form"));
+        JsonNode validRequest = objectMapper.readTree("""
+                {
+                  "config": {
+                    "fieldMetadata": [],
+                    "sections": [
+                      {
+                        "id": "sec-main",
+                        "title": "Principal",
+                        "rows": [
+                          {
+                            "id": "row-main",
+                            "columns": [
+                              { "id": "col-main", "items": [] }
+                            ]
+                          }
+                        ]
+                      }
+                    ]
+                  },
+                  "plan": {
+                    "operationId": "layout.visualBlock.add",
+                    "target": {
+                      "sectionId": "sec-main",
+                      "rowId": "row-main",
+                      "columnId": "col-main"
+                    },
+                    "input": {
+                      "id": "vb-guidance",
+                      "document": {
+                        "kind": "praxis.rich-content",
+                        "version": "1.0.0",
+                        "nodes": [
+                          { "type": "callout", "title": "Atenção", "body": "Preencha com cuidado." },
+                          { "type": "actionButton", "label": "Validar", "action": { "actionId": "fiscal.validate" } }
+                        ]
+                      }
+                    }
+                  }
+                }
+                """);
+
+        AgenticAuthoringManifestValidationResult validResult = service.validateEditPlan(
+                "praxis-dynamic-form",
+                objectMapper.treeToValue(validRequest, AgenticAuthoringManifestEditPlanRequest.class));
+        assertThat(validResult.valid()).isTrue();
+
+        JsonNode forbiddenNestedFormRequest = objectMapper.readTree("""
+                {
+                  "config": {
+                    "fieldMetadata": [],
+                    "sections": [
+                      {
+                        "id": "sec-main",
+                        "title": "Principal",
+                        "rows": [
+                          {
+                            "id": "row-main",
+                            "columns": [
+                              { "id": "col-main", "items": [] }
+                            ]
+                          }
+                        ]
+                      }
+                    ]
+                  },
+                  "plan": {
+                    "operationId": "layout.visualBlock.add",
+                    "target": {
+                      "sectionId": "sec-main",
+                      "rowId": "row-main",
+                      "columnId": "col-main"
+                    },
+                    "input": {
+                      "id": "vb-invalid-form",
+                      "document": {
+                        "kind": "praxis.rich-content",
+                        "version": "1.0.0",
+                        "nodes": [
+                          { "type": "dynamicForm", "resourcePath": "/api/hr/employees" }
+                        ]
+                      }
+                    }
+                  }
+                }
+                """);
+
+        AgenticAuthoringManifestValidationResult invalidFormResult = service.validateEditPlan(
+                "praxis-dynamic-form",
+                objectMapper.treeToValue(forbiddenNestedFormRequest, AgenticAuthoringManifestEditPlanRequest.class));
+        assertThat(invalidFormResult.valid()).isFalse();
+        assertThat(invalidFormResult.failures()).anyMatch(msg -> msg.contains("dynamicForm") && msg.contains("form-visual-block"));
+
+        JsonNode forbiddenNestedQuickViewRequest = objectMapper.readTree("""
+                {
+                  "config": {
+                    "fieldMetadata": [],
+                    "sections": [
+                      {
+                        "id": "sec-main",
+                        "title": "Principal",
+                        "rows": [
+                          {
+                            "id": "row-main",
+                            "columns": [
+                              { "id": "col-main", "items": [] }
+                            ]
+                          }
+                        ]
+                      }
+                    ]
+                  },
+                  "plan": {
+                    "operationId": "layout.visualBlock.add",
+                    "target": {
+                      "sectionId": "sec-main",
+                      "rowId": "row-main",
+                      "columnId": "col-main"
+                    },
+                    "input": {
+                      "id": "vb-invalid-qv",
+                      "document": {
+                        "kind": "praxis.rich-content",
+                        "version": "1.0.0",
+                        "nodes": [
+                          {
+                            "type": "badge",
+                            "label": "Colaborador",
+                            "quickView": { "resourceKey": "hr.employees", "surfaceId": "detail", "valueField": "id" }
+                          }
+                        ]
+                      }
+                    }
+                  }
+                }
+                """);
+
+        AgenticAuthoringManifestValidationResult invalidQvResult = service.validateEditPlan(
+                "praxis-dynamic-form",
+                objectMapper.treeToValue(forbiddenNestedQuickViewRequest, AgenticAuthoringManifestEditPlanRequest.class));
+        assertThat(invalidQvResult.valid()).isFalse();
+        assertThat(invalidQvResult.failures()).anyMatch(msg -> msg.contains("nested quickView") && msg.contains("form-visual-block"));
+    }
+
+    @Test
+    void narrowsRichContentManifestOperationsAndTypeEnumByClientSurfaceCapabilities() throws Exception {
+        AgenticAuthoringManifestService service = serviceWithPayload(
+                "praxis-rich-content",
+                payloadFromClasspathSnapshot("praxis-rich-content"));
+        JsonNode manifest = service.getManifest("praxis-rich-content");
+        AgenticAuthoringComponentEditPlanService editPlanService = new AgenticAuthoringComponentEditPlanService(
+                org.mockito.Mockito.mock(org.praxisplatform.config.service.AiProviderManagementService.class),
+                service,
+                objectMapper,
+                5);
+
+        JsonNode quickViewValidationContext = objectMapper.readTree("""
+                {
+                  "clientSurfaceCapabilities": {
+                    "surfaceProfile": "quick-view-drawer",
+                    "forbidEmbeddedActions": true,
+                    "forbidNestedQuickView": true
+                  }
+                }
+                """);
+        JsonNode quickViewConstrained = editPlanService.applyClientSurfaceCapabilitiesToManifest(
+                "praxis-rich-content",
+                manifest,
+                quickViewValidationContext,
+                objectMapper.createObjectNode());
+
+        java.util.List<String> quickViewOpIds = new java.util.ArrayList<>();
+        quickViewConstrained.path("operations").forEach(op -> quickViewOpIds.add(op.path("operationId").asText("")));
+        assertThat(quickViewOpIds).doesNotContain("link.add");
+
+        java.util.List<String> quickViewAllowedTypes = new java.util.ArrayList<>();
+        java.util.List<String> quickViewBlockUpdateItemTemplateTypes = new java.util.ArrayList<>();
+        java.util.List<String> quickViewTimelineUpdateItemTemplateTypes = new java.util.ArrayList<>();
+        for (JsonNode op : quickViewConstrained.path("operations")) {
+            String opId = op.path("operationId").asText("");
+            if ("block.add".equals(opId)) {
+                op.path("inputSchema").path("properties").path("type").path("enum")
+                        .forEach(val -> quickViewAllowedTypes.add(val.asText("")));
+            } else if ("block.update".equals(opId)) {
+                op.path("inputSchema").path("properties").path("itemTemplate").path("properties").path("type").path("enum")
+                        .forEach(val -> quickViewBlockUpdateItemTemplateTypes.add(val.asText("")));
+            } else if ("timeline.node.update".equals(opId)) {
+                op.path("inputSchema").path("properties").path("itemTemplate").path("properties").path("type").path("enum")
+                        .forEach(val -> quickViewTimelineUpdateItemTemplateTypes.add(val.asText("")));
+            }
+        }
+        assertThat(quickViewAllowedTypes)
+                .contains("text", "badge", "statGroup", "keyValueList", "recordSummary")
+                .doesNotContain("actionButton", "dynamicForm", "formLauncher", "decisionPackage", "tabs", "timeline");
+        assertThat(quickViewBlockUpdateItemTemplateTypes)
+                .contains("text", "badge", "statGroup", "keyValueList", "recordSummary")
+                .doesNotContain("actionButton", "dynamicForm", "formLauncher", "decisionPackage", "tabs", "timeline");
+        assertThat(quickViewTimelineUpdateItemTemplateTypes)
+                .contains("text", "badge", "statGroup", "keyValueList", "recordSummary")
+                .doesNotContain("actionButton", "dynamicForm", "formLauncher", "decisionPackage", "tabs", "timeline");
+
+        JsonNode formVisualBlockContext = objectMapper.readTree("""
+                {
+                  "clientSurfaceCapabilities": {
+                    "surfaceProfile": "form-visual-block"
+                  }
+                }
+                """);
+        JsonNode formVisualBlockConstrained = editPlanService.applyClientSurfaceCapabilitiesToManifest(
+                "praxis-rich-content",
+                manifest,
+                formVisualBlockContext,
+                objectMapper.createObjectNode());
+
+        java.util.List<String> formBlockOpIds = new java.util.ArrayList<>();
+        formVisualBlockConstrained.path("operations").forEach(op -> formBlockOpIds.add(op.path("operationId").asText("")));
+        assertThat(formBlockOpIds).contains("link.add", "block.add");
+
+        java.util.List<String> formBlockAllowedTypes = new java.util.ArrayList<>();
+        java.util.List<String> formBlockUpdateItemTemplateTypes = new java.util.ArrayList<>();
+        for (JsonNode op : formVisualBlockConstrained.path("operations")) {
+            String opId = op.path("operationId").asText("");
+            if ("block.add".equals(opId)) {
+                op.path("inputSchema").path("properties").path("type").path("enum")
+                        .forEach(val -> formBlockAllowedTypes.add(val.asText("")));
+            } else if ("block.update".equals(opId)) {
+                op.path("inputSchema").path("properties").path("itemTemplate").path("properties").path("type").path("enum")
+                        .forEach(val -> formBlockUpdateItemTemplateTypes.add(val.asText("")));
+            }
+        }
+        assertThat(formBlockAllowedTypes)
+                .contains("callout", "actionButton", "statGroup", "tabs", "timeline")
+                .doesNotContain("dynamicForm", "formLauncher", "pageHeader", "decisionPackage");
+        assertThat(formBlockUpdateItemTemplateTypes)
+                .contains("callout", "actionButton", "statGroup", "tabs", "timeline")
+                .doesNotContain("dynamicForm", "formLauncher", "pageHeader", "decisionPackage");
+    }
+
+    @Test
     void compilesRichContentTimelineItemRemoveFromClasspathRegistrySnapshot() throws Exception {
         AgenticAuthoringManifestService service = serviceWithPayload(
                 "praxis-rich-content",
@@ -2230,6 +2472,374 @@ class AgenticAuthoringManifestServiceTest {
         assertThat(validation.valid()).isFalse();
         assertThat(validation.failures())
                 .anyMatch(failure -> failure.contains("validator host-capabilities-serializable failed for preset.apply"));
+    }
+
+    @Test
+    void enforcesClientSurfaceCapabilitiesForQuickViewDrawerSurfaceProfile() throws Exception {
+        AgenticAuthoringManifestService service = serviceWithPayload(
+                "praxis-rich-content",
+                payloadFromClasspathSnapshot("praxis-rich-content"));
+
+        JsonNode disallowedNodeTypeRequest = objectMapper.readTree("""
+                {
+                  "config": {
+                    "document": {
+                      "kind": "praxis.rich-content",
+                      "version": "1.0.0",
+                      "nodes": [
+                        { "id": "intro", "type": "text", "text": "Employee summary" }
+                      ]
+                    }
+                  },
+                  "validationContext": {
+                    "clientSurfaceCapabilities": {
+                      "surfaceProfile": "quick-view-drawer",
+                      "maxDepth": 6,
+                      "maxNodes": 24,
+                      "forbidEmbeddedActions": true,
+                      "forbidNestedQuickView": true
+                    }
+                  },
+                  "plan": {
+                    "operationId": "block.add",
+                    "input": {
+                      "id": "cta-btn",
+                      "type": "actionButton",
+                      "label": "Delete Employee"
+                    }
+                  }
+                }
+                """);
+
+        AgenticAuthoringManifestCompileResult disallowedResult = service.compilePatch(
+                "praxis-rich-content",
+                objectMapper.treeToValue(disallowedNodeTypeRequest, AgenticAuthoringManifestEditPlanRequest.class));
+
+        assertThat(disallowedResult.compiled()).isFalse();
+        assertThat(disallowedResult.failures())
+                .anyMatch(failure -> failure.contains(
+                        "validator client-surface-capabilities failed for block.add: node type 'actionButton' is not allowed in surfaceProfile=quick-view-drawer"));
+
+        JsonNode embeddedActionRequest = objectMapper.readTree("""
+                {
+                  "config": {
+                    "document": {
+                      "kind": "praxis.rich-content",
+                      "version": "1.0.0",
+                      "nodes": [
+                        { "id": "intro", "type": "text", "text": "Employee summary" }
+                      ]
+                    }
+                  },
+                  "validationContext": {
+                    "clientSurfaceCapabilities": {
+                      "surfaceProfile": "quick-view-drawer"
+                    }
+                  },
+                  "plan": {
+                    "operationId": "block.add",
+                    "input": {
+                      "id": "kpi-metric",
+                      "type": "metric",
+                      "label": "Headcount",
+                      "value": "42",
+                      "action": { "actionId": "open-report" }
+                    }
+                  }
+                }
+                """);
+
+        AgenticAuthoringManifestCompileResult embeddedActionResult = service.compilePatch(
+                "praxis-rich-content",
+                objectMapper.treeToValue(embeddedActionRequest, AgenticAuthoringManifestEditPlanRequest.class));
+
+        assertThat(embeddedActionResult.compiled()).isFalse();
+        assertThat(embeddedActionResult.failures())
+                .anyMatch(failure -> failure.contains(
+                        "validator client-surface-capabilities failed for block.add: embedded actions are forbidden in surfaceProfile=quick-view-drawer"));
+
+        JsonNode allowedQuickViewRequest = objectMapper.readTree("""
+                {
+                  "config": {
+                    "document": {
+                      "kind": "praxis.rich-content",
+                      "version": "1.0.0",
+                      "nodes": [
+                        { "id": "intro", "type": "text", "text": "Employee summary" }
+                      ]
+                    }
+                  },
+                  "validationContext": {
+                    "clientSurfaceCapabilities": {
+                      "surfaceProfile": "quick-view-drawer"
+                    }
+                  },
+                  "plan": {
+                    "operationId": "block.add",
+                    "input": {
+                      "id": "kpi-metric",
+                      "type": "metric",
+                      "label": "Headcount",
+                      "value": "42"
+                    }
+                  }
+                }
+                """);
+
+        AgenticAuthoringManifestCompileResult allowedResult = service.compilePatch(
+                "praxis-rich-content",
+                objectMapper.treeToValue(allowedQuickViewRequest, AgenticAuthoringManifestEditPlanRequest.class));
+
+        assertThat(allowedResult.compiled()).isTrue();
+        assertThat(allowedResult.failures()).isEmpty();
+        assertThat(allowedResult.patch().path("proposedConfig").path("document").path("nodes")).hasSize(2);
+    }
+
+    @Test
+    void enforcesFormVisualBlockClientSurfaceCapabilitiesAndCompilesStatGroupItemTemplateAndActionChecks() throws Exception {
+        AgenticAuthoringManifestService service = serviceWithPayload(
+                "praxis-rich-content",
+                payloadFromClasspathSnapshot("praxis-rich-content"));
+
+        JsonNode forbiddenDynamicFormRequest = objectMapper.readTree("""
+                {
+                  "config": {
+                    "document": {
+                      "kind": "praxis.rich-content",
+                      "version": "1.0.0",
+                      "nodes": [
+                        { "id": "kpi-grid", "type": "statGroup" },
+                        { "id": "submit-cta", "type": "actionButton", "label": "Confirm" }
+                      ]
+                    }
+                  },
+                  "validationContext": {
+                    "clientSurfaceCapabilities": {
+                      "surfaceProfile": "form-visual-block"
+                    }
+                  },
+                  "plan": {
+                    "operationId": "block.add",
+                    "input": {
+                      "id": "nested-form",
+                      "type": "dynamicForm",
+                      "formId": "employees-edit"
+                    }
+                  }
+                }
+                """);
+
+        AgenticAuthoringManifestCompileResult forbiddenResult = service.compilePatch(
+                "praxis-rich-content",
+                objectMapper.treeToValue(forbiddenDynamicFormRequest, AgenticAuthoringManifestEditPlanRequest.class));
+
+        assertThat(forbiddenResult.compiled()).isFalse();
+        assertThat(forbiddenResult.failures())
+                .anyMatch(failure -> failure.contains(
+                        "validator client-surface-capabilities failed for block.add: node type 'dynamicForm' is not allowed in surfaceProfile=form-visual-block"));
+
+        JsonNode statGroupItemTemplateRequest = objectMapper.readTree("""
+                {
+                  "config": {
+                    "document": {
+                      "kind": "praxis.rich-content",
+                      "version": "1.0.0",
+                      "nodes": [
+                        { "id": "kpi-grid", "type": "statGroup" },
+                        { "id": "submit-cta", "type": "actionButton", "label": "Confirm" }
+                      ]
+                    }
+                  },
+                  "validationContext": {
+                    "clientSurfaceCapabilities": {
+                      "surfaceProfile": "form-visual-block"
+                    }
+                  },
+                  "plan": {
+                    "operationId": "block.update",
+                    "target": "kpi-grid",
+                    "input": {
+                      "itemsExpr": "{{metrics}}",
+                      "itemTemplate": {
+                        "labelExpr": "{{item.label}}",
+                        "valueExpr": "{{item.value}}",
+                        "deltaExpr": "{{item.delta}}",
+                        "tone": "primary"
+                      }
+                    }
+                  }
+                }
+                """);
+
+        AgenticAuthoringManifestCompileResult statGroupResult = service.compilePatch(
+                "praxis-rich-content",
+                objectMapper.treeToValue(statGroupItemTemplateRequest, AgenticAuthoringManifestEditPlanRequest.class));
+
+        assertThat(statGroupResult.compiled()).isTrue();
+        assertThat(statGroupResult.failures()).isEmpty();
+        JsonNode updatedStatGroup = statGroupResult.patch().path("proposedConfig").path("document").path("nodes").get(0);
+        assertThat(updatedStatGroup.path("itemsExpr").asText()).isEqualTo("{{metrics}}");
+        assertThat(updatedStatGroup.path("itemTemplate").path("labelExpr").asText()).isEqualTo("{{item.label}}");
+        assertThat(updatedStatGroup.path("itemTemplate").path("valueExpr").asText()).isEqualTo("{{item.value}}");
+
+        JsonNode actionChecksRequest = objectMapper.readTree("""
+                {
+                  "config": {
+                    "document": {
+                      "kind": "praxis.rich-content",
+                      "version": "1.0.0",
+                      "nodes": [
+                        { "id": "submit-cta", "type": "actionButton", "label": "Confirm" }
+                      ]
+                    }
+                  },
+                  "validationContext": {
+                    "clientSurfaceCapabilities": {
+                      "surfaceProfile": "form-visual-block"
+                    }
+                  },
+                  "plan": {
+                    "operationId": "block.update",
+                    "target": "submit-cta",
+                    "input": {
+                      "action": {
+                        "actionId": "workflow.approve",
+                        "interpolatePayload": true,
+                        "payload": {
+                          "recordId": "{{record.id}}"
+                        },
+                        "checks": [
+                          {
+                            "when": { "==": [{ "var": "record.status" }, "READY"] },
+                            "message": "Record must be in READY status before approval."
+                          }
+                        ]
+                      }
+                    }
+                  }
+                }
+                """);
+
+        AgenticAuthoringManifestCompileResult actionChecksResult = service.compilePatch(
+                "praxis-rich-content",
+                objectMapper.treeToValue(actionChecksRequest, AgenticAuthoringManifestEditPlanRequest.class));
+
+        assertThat(actionChecksResult.compiled()).isTrue();
+        assertThat(actionChecksResult.failures()).isEmpty();
+        JsonNode updatedCta = actionChecksResult.patch().path("proposedConfig").path("document").path("nodes").get(0);
+        assertThat(updatedCta.path("action").path("interpolatePayload").asBoolean()).isTrue();
+        assertThat(updatedCta.path("action").path("checks").get(0).path("message").asText())
+                .isEqualTo("Record must be in READY status before approval.");
+
+        JsonNode forbiddenRecordRefRequest = objectMapper.readTree("""
+                {
+                  "config": {
+                    "document": {
+                      "kind": "praxis.rich-content",
+                      "version": "1.0.0",
+                      "nodes": [
+                        { "id": "submit-cta", "type": "actionButton", "label": "Confirm" }
+                      ]
+                    }
+                  },
+                  "validationContext": {
+                    "clientSurfaceCapabilities": {
+                      "surfaceProfile": "form-visual-block"
+                    }
+                  },
+                  "plan": {
+                    "operationId": "block.add",
+                    "input": {
+                      "id": "emp-ref",
+                      "type": "recordReference",
+                      "label": "Employee #42"
+                    }
+                  }
+                }
+                """);
+
+        AgenticAuthoringManifestCompileResult forbiddenRecordRefResult = service.compilePatch(
+                "praxis-rich-content",
+                objectMapper.treeToValue(forbiddenRecordRefRequest, AgenticAuthoringManifestEditPlanRequest.class));
+
+        assertThat(forbiddenRecordRefResult.compiled()).isFalse();
+        assertThat(forbiddenRecordRefResult.failures())
+                .anyMatch(failure -> failure.contains(
+                        "validator client-surface-capabilities failed for block.add: nested quickView is forbidden in surfaceProfile=form-visual-block"));
+
+        JsonNode validDepthFiveWrapperTreeRequest = objectMapper.readTree("""
+                {
+                  "config": {
+                    "document": {
+                      "kind": "praxis.rich-content",
+                      "version": "1.0.0",
+                      "nodes": [
+                        {
+                          "id": "root-tabs",
+                          "type": "tabs",
+                          "items": [
+                            {
+                              "id": "tab-1",
+                              "label": "Tab 1",
+                              "content": [
+                                {
+                                  "id": "nested-acc",
+                                  "type": "accordion",
+                                  "items": [
+                                    {
+                                      "id": "acc-1",
+                                      "title": "Section 1",
+                                      "content": [
+                                        {
+                                          "id": "nested-card",
+                                          "type": "card",
+                                          "title": "Card Level 3",
+                                          "content": [
+                                            {
+                                              "id": "nested-compose",
+                                              "type": "compose",
+                                              "items": [
+                                                {
+                                                  "id": "leaf-text",
+                                                  "type": "text",
+                                                  "text": "Depth 5 leaf"
+                                                }
+                                              ]
+                                            }
+                                          ]
+                                        }
+                                      ]
+                                    }
+                                  ]
+                                }
+                              ]
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  },
+                  "validationContext": {
+                    "clientSurfaceCapabilities": {
+                      "surfaceProfile": "form-visual-block"
+                    }
+                  },
+                  "plan": {
+                    "operationId": "block.update",
+                    "target": "leaf-text",
+                    "input": {
+                      "text": "Updated depth 5 leaf"
+                    }
+                  }
+                }
+                """);
+
+        AgenticAuthoringManifestCompileResult validDepthFiveResult = service.compilePatch(
+                "praxis-rich-content",
+                objectMapper.treeToValue(validDepthFiveWrapperTreeRequest, AgenticAuthoringManifestEditPlanRequest.class));
+
+        assertThat(validDepthFiveResult.compiled()).isTrue();
+        assertThat(validDepthFiveResult.failures()).isEmpty();
     }
 
     @Test

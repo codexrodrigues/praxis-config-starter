@@ -21,6 +21,33 @@ Implementation status:
 
 ## Problem
 
+### Headless preload and withdrawn-head reentry
+
+Candidate admission must accept the immutable `PublishedRuleSnapshot` without
+an activation receipt or a fabricated ACTIVE head. The host checks scope,
+owner, operation, compatibility, protected rules and its typed fact contract,
+then emits a probe for that exact pending rollout and content hash. This pure
+step neither reads nor installs an active runtime. A probe is a deployment
+observation, not a business allow/deny result or an activation command.
+
+Ergon's Functions host publishes this observation through its authenticated
+Policy Studio candidate-probe operation. The server derives actor, clock,
+compatibility and readiness; the request cannot assert readiness or provide a
+foreign snapshot. Both initial bootstrap and reentry after WITHDRAWN require a
+governed REQUIRED policy and positive quorum. A retained head ETag after
+withdrawal is a CAS token, not proof that the policy is active.
+
+For Functions mutations, the host binds one policy fingerprint per real domain
+transaction. Its `beforeCommit` fence captures Config heads again and verifies
+identity, ETag, monotonic revision and validity with the current clock. A
+withdrawal, replacement, ABA or expiry observed at that final admission point
+aborts and rolls back the domain transaction. A revocation committed after
+that capture does not cancel the already admitted unit; the next unit must
+fail closed. This is the explicit linearization contract, not distributed
+atomicity or instantaneous cancellation of commits in flight. Read-only
+previews do not install a mutation fence. Full HTTP/idempotency/volume and
+deployment evidence remains an independent operational gate.
+
 The current host-status projection answers whether deployments are aligned with the active
 RuleSet head. It is suitable for drift detection after activation, but it cannot safely decide
 whether a newer immutable snapshot may become active.

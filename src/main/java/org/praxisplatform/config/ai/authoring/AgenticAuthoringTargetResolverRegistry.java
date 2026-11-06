@@ -126,10 +126,12 @@ public final class AgenticAuthoringTargetResolverRegistry {
             JsonNode config) {
         String operationId = text(operation, "operationId");
         JsonNode targetSpec = operation.path("target");
+        JsonNode resolutionSpec = targetSpec.path("resolutionSpec");
         String kind = text(targetSpec, "kind");
         String resolver = text(targetSpec, "resolver");
         boolean required = targetSpec.path("required").asBoolean(false);
-        if (!required && (isEmptyTarget(target) || GLOBAL_RESOLVERS.contains(resolver))) {
+        boolean rootPathGlobal = isRootPathGlobalResolution(resolver, resolutionSpec);
+        if (!required && (isEmptyTarget(target) || rootPathGlobal)) {
             return new AgenticAuthoringResolvedTarget(
                     STATUS_NOT_REQUIRED,
                     componentId,
@@ -144,7 +146,7 @@ public final class AgenticAuthoringTargetResolverRegistry {
         if (config == null || config.isMissingNode() || config.isNull()) {
             return unresolved(componentId, operationId, kind, resolver, "config is required for target resolution");
         }
-        if (GLOBAL_RESOLVERS.contains(resolver)) {
+        if (rootPathGlobal) {
             return new AgenticAuthoringResolvedTarget(
                     STATUS_RESOLVED,
                     componentId,
@@ -156,23 +158,48 @@ public final class AgenticAuthoringTargetResolverRegistry {
                     List.of("$"),
                     List.of());
         }
-        String targetValue = targetValue(target);
-        if (targetValue.isBlank() && !objectTargetResolverAcceptsBlankValue(resolver)) {
+        String targetValue = targetValue(target, resolutionSpec);
+        if (targetValue.isBlank() && !objectTargetResolverAcceptsBlankValue(resolver, resolutionSpec)) {
             return unresolved(componentId, operationId, kind, resolver, "target value is required");
         }
-        List<ResolvedCandidate> candidates = resolveCandidates(resolver, kind, config, target, targetValue);
-        if (candidates.isEmpty() && !isSupportedResolver(resolver)) {
+        List<ResolvedCandidate> candidates = resolveCandidates(resolver, kind, config, target, targetValue, resolutionSpec);
+        if (candidates.isEmpty() && !isSupportedResolver(resolver) && !hasResolutionSpec(resolutionSpec)) {
             return unresolved(componentId, operationId, kind, resolver, "unsupported target resolver: " + resolver);
         }
         return resolvedFromCandidates(componentId, operation, targetValue.isBlank() ? target.toString() : targetValue, candidates);
     }
 
-    private boolean objectTargetResolverAcceptsBlankValue(String resolver) {
+    private boolean objectTargetResolverAcceptsBlankValue(String resolver, JsonNode resolutionSpec) {
+        String strategy = text(resolutionSpec, "strategy");
         return "rich-timeline-item-by-block-id-and-item-id".equals(resolver)
                 || "editorial-journey-step-block-by-id".equals(resolver)
                 || "editorial-data-block-field-binding".equals(resolver)
                 || "page-state-path".equals(resolver)
-                || "widget-child-authoring-manifest-operation".equals(resolver);
+                || "widget-child-authoring-manifest-operation".equals(resolver)
+                || (!isSupportedResolver(resolver)
+                        && ("root-path".equals(strategy) || "parent-child-array-match".equals(strategy)));
+    }
+
+    private boolean isRootPathGlobalResolution(String resolver, JsonNode resolutionSpec) {
+        if (GLOBAL_RESOLVERS.contains(resolver)) {
+            return true;
+        }
+        if (isSupportedResolver(resolver) || !hasResolutionSpec(resolutionSpec)) {
+            return false;
+        }
+        if (!"root-path".equals(text(resolutionSpec, "strategy").trim())) {
+            return false;
+        }
+        JsonNode paths = resolutionSpec.path("paths");
+        return paths.size() == 1 && "$".equals(paths.get(0).asText("").trim());
+    }
+
+    private boolean hasResolutionSpec(JsonNode resolutionSpec) {
+        return resolutionSpec != null
+                && resolutionSpec.isObject()
+                && !text(resolutionSpec, "strategy").isBlank()
+                && resolutionSpec.path("paths").isArray()
+                && !resolutionSpec.path("paths").isEmpty();
     }
 
     AgenticAuthoringResolvedTarget unresolved(
@@ -193,8 +220,18 @@ public final class AgenticAuthoringTargetResolverRegistry {
                 List.of(failure));
     }
 
-    private List<ResolvedCandidate> resolveCandidates(String resolver, String kind, JsonNode config, JsonNode target, String targetValue) {
+    private List<ResolvedCandidate> resolveCandidates(
+            String resolver,
+            String kind,
+            JsonNode config,
+            JsonNode target,
+            String targetValue,
+            JsonNode resolutionSpec) {
         List<ResolvedCandidate> candidates = new ArrayList<>();
+        if (!isSupportedResolver(resolver) && hasResolutionSpec(resolutionSpec)) {
+            addResolutionSpecMatches(candidates, config, resolutionSpec, target, targetValue);
+            return candidates;
+        }
         switch (resolver) {
             case "column-by-field" -> addArrayMatches(
                     candidates,
@@ -213,11 +250,11 @@ public final class AgenticAuthoringTargetResolverRegistry {
                 addArrayMatches(candidates, config, "tabs[]", List.of("id", "label", "textLabel", "title"), targetValue);
                 addArrayMatches(candidates, config, "nav.links[]", List.of("id", "label", "textLabel", "title"), targetValue);
             }
-            case "tab-index-or-id" -> addTabIndexOrIdMatches(candidates, config, targetValue);
+            case "tab-index-or-id" -> addTabIndexOrIdMatches(candidates, config, targetValue, resolutionSpec);
             case "list-template-slot" -> addListTemplateSlotMatch(candidates, config, targetValue);
             case "cron-preset-by-label-or-expression" -> addCronPresetMatches(candidates, config, targetValue);
-            case "rich-block-by-id-or-index", "rich-text-node-by-id-or-path", "rich-media-node-by-id-or-path", "rich-link-node-by-id-or-path", "rich-timeline-node-by-id-or-path" -> addArrayMatches(candidates, config, "document.nodes[]", List.of("id", "path", "key"), targetValue);
-            case "rich-timeline-item-by-block-id-and-item-id" -> addRichTimelineItemMatches(candidates, config, target, targetValue);
+            case "rich-block-by-id-or-index", "rich-block-node-by-id-or-path", "rich-text-node-by-id-or-path", "rich-media-node-by-id-or-path", "rich-link-node-by-id-or-path", "rich-timeline-node-by-id-or-path" -> addRichContentNodeMatches(candidates, config, resolver, targetValue, resolutionSpec);
+            case "rich-timeline-item-by-block-id-and-item-id" -> addRichTimelineItemMatches(candidates, config, target, targetValue, resolutionSpec);
             case "rule-by-id", "rule-by-id-or-name" -> addArrayMatches(candidates, config, "formRules[]", List.of("id", "name"), targetValue);
             case "action-by-id", "form-action-by-id", "actions-by-id" -> {
                 addArrayMatches(candidates, config, "actions.custom[]", List.of("id", "name", "action"), targetValue);
@@ -279,12 +316,328 @@ public final class AgenticAuthoringTargetResolverRegistry {
             case "page-state-path" -> addPageStatePathMatch(candidates, config, target);
             case "widget-child-authoring-manifest-operation" -> addPageBuilderChildOperationMatch(candidates, config, target);
             default -> {
-                if (kind != null && !kind.isBlank()) {
+                if (hasResolutionSpec(resolutionSpec)) {
+                    addResolutionSpecMatches(candidates, config, resolutionSpec, target, targetValue);
+                } else if (kind != null && !kind.isBlank()) {
                     addRecursiveObjectMatches(candidates, config, List.of("id", "field", "name", "key", "label", "title"), targetValue);
                 }
             }
         }
         return candidates;
+    }
+
+    private void addResolutionSpecMatches(
+            List<ResolvedCandidate> candidates,
+            JsonNode config,
+            JsonNode resolutionSpec,
+            JsonNode target,
+            String targetValue) {
+        String strategy = text(resolutionSpec, "strategy").trim();
+        List<String> paths = stringList(resolutionSpec.path("paths"), List.of());
+        List<String> matchFields = stringList(
+                resolutionSpec.path("matchFields"),
+                List.of("id", "field", "name", "key", "label", "title"));
+        List<String> childrenFields = stringList(
+                resolutionSpec.path("childrenFields"),
+                List.of("children", "nodes", "items", "tabs", "content", "header", "body", "footer", "aside", "trailing"));
+        String typeField = firstNonBlank(text(resolutionSpec, "typeField").trim(), "type");
+        List<String> allowedTypes = stringList(resolutionSpec.path("allowedTypes"), List.of());
+        boolean allowIndex = resolutionSpec.path("allowIndex").asBoolean(true);
+
+        switch (strategy) {
+            case "root-path" -> {
+                for (String rawPath : paths) {
+                    String cleanPath = rawPath == null ? "" : rawPath.trim();
+                    if (cleanPath.isBlank() || "$".equals(cleanPath)) {
+                        candidates.add(new ResolvedCandidate("$", config));
+                        return;
+                    }
+                    JsonNode resolved = resolvePath(config, cleanPath);
+                    if (!resolved.isMissingNode() && !resolved.isNull()) {
+                        candidates.add(new ResolvedCandidate(cleanPath, resolved));
+                        return;
+                    }
+                }
+            }
+            case "array-match" -> {
+                for (String rawPath : paths) {
+                    String cleanPath = stripArraySuffix(rawPath);
+                    JsonNode array = resolvePath(config, cleanPath);
+                    if (!array.isArray()) {
+                        continue;
+                    }
+                    for (int i = 0; i < array.size(); i++) {
+                        JsonNode item = array.get(i);
+                        if (matchesAllowedTypes(item, typeField, allowedTypes)
+                                && matchesAnyKey(item, matchFields, targetValue)) {
+                            candidates.add(new ResolvedCandidate(cleanPath + "[]/" + i, item));
+                        }
+                    }
+                }
+                if (candidates.isEmpty() && allowIndex) {
+                    Integer index = parseNonNegativeInt(targetValue);
+                    if (index != null) {
+                        for (String rawPath : paths) {
+                            String cleanPath = stripArraySuffix(rawPath);
+                            JsonNode array = resolvePath(config, cleanPath);
+                            if (!array.isArray() || index >= array.size()) {
+                                continue;
+                            }
+                            JsonNode item = array.get(index);
+                            if (matchesAllowedTypes(item, typeField, allowedTypes)) {
+                                candidates.add(new ResolvedCandidate(cleanPath + "[]/" + index, item));
+                            }
+                        }
+                    }
+                }
+            }
+            case "recursive-array-match" -> {
+                for (String rawPath : paths) {
+                    String cleanPath = stripArraySuffix(rawPath);
+                    JsonNode array = resolvePath(config, cleanPath);
+                    if (!array.isArray()) {
+                        continue;
+                    }
+                    addResolutionSpecRecursiveMatches(
+                            candidates,
+                            array,
+                            cleanPath + "[]",
+                            matchFields,
+                            childrenFields,
+                            typeField,
+                            allowedTypes,
+                            targetValue);
+                    if (candidates.isEmpty() && allowIndex) {
+                        Integer index = parseNonNegativeInt(targetValue);
+                        if (index != null && index < array.size()) {
+                            JsonNode item = array.get(index);
+                            if (matchesAllowedTypes(item, typeField, allowedTypes)) {
+                                candidates.add(new ResolvedCandidate(cleanPath + "[]/" + index, item));
+                            }
+                        }
+                    }
+                    if (!candidates.isEmpty()) {
+                        return;
+                    }
+                }
+            }
+            case "parent-child-array-match" -> {
+                String childArrayField = text(resolutionSpec, "childArrayField").trim();
+                if (childArrayField.isBlank()) {
+                    return;
+                }
+                List<String> parentInputFields = stringList(
+                        resolutionSpec.path("parentInputMatchFields"),
+                        List.of("parentId", "blockId", "timelineBlockId"));
+                List<String> childInputFields = stringList(
+                        resolutionSpec.path("inputMatchFields"),
+                        List.of("itemId", "id"));
+                String parentKey = extractFieldFromObject(target, parentInputFields);
+                String childKey = extractFieldFromObject(target, childInputFields);
+                if (parentKey.isBlank() && childKey.isBlank() && !targetValue.isBlank()) {
+                    int sep = targetValue.indexOf('/');
+                    if (sep < 0) {
+                        sep = targetValue.indexOf(':');
+                    }
+                    if (sep > 0) {
+                        parentKey = targetValue.substring(0, sep).trim();
+                        childKey = targetValue.substring(sep + 1).trim();
+                    } else {
+                        childKey = targetValue;
+                    }
+                }
+                for (String rawPath : paths) {
+                    String cleanPath = stripArraySuffix(rawPath);
+                    JsonNode array = resolvePath(config, cleanPath);
+                    if (!array.isArray()) {
+                        continue;
+                    }
+                    List<ResolvedCandidate> parentCandidates = new ArrayList<>();
+                    if (!parentKey.isBlank()) {
+                        addResolutionSpecRecursiveMatches(
+                                parentCandidates,
+                                array,
+                                cleanPath + "[]",
+                                List.of("id", "key", "field", "name"),
+                                childrenFields,
+                                typeField,
+                                allowedTypes,
+                                parentKey);
+                    } else {
+                        collectAllAllowedNodesRecursively(
+                                parentCandidates,
+                                array,
+                                cleanPath + "[]",
+                                childrenFields,
+                                typeField,
+                                allowedTypes);
+                    }
+                    for (ResolvedCandidate parent : parentCandidates) {
+                        JsonNode children = parent.value().path(childArrayField);
+                        if (!children.isArray()) {
+                            continue;
+                        }
+                        int before = candidates.size();
+                        for (int i = 0; i < children.size(); i++) {
+                            JsonNode child = children.get(i);
+                            if (!childKey.isBlank() && matchesAnyKey(child, matchFields, childKey)) {
+                                candidates.add(new ResolvedCandidate(
+                                        parent.path() + "." + childArrayField + "[]/" + i,
+                                        child));
+                            }
+                        }
+                        if (candidates.size() == before && allowIndex) {
+                            Integer childIndex = parseNonNegativeInt(
+                                    !childKey.isBlank() ? childKey : text(target, "itemIndex"));
+                            if (childIndex != null && childIndex < children.size()) {
+                                candidates.add(new ResolvedCandidate(
+                                        parent.path() + "." + childArrayField + "[]/" + childIndex,
+                                        children.get(childIndex)));
+                            }
+                        }
+                    }
+                    if (!candidates.isEmpty()) {
+                        return;
+                    }
+                }
+            }
+            default -> {
+            }
+        }
+    }
+
+    private void addResolutionSpecRecursiveMatches(
+            List<ResolvedCandidate> candidates,
+            JsonNode array,
+            String arrayPathPrefix,
+            List<String> matchFields,
+            List<String> childrenFields,
+            String typeField,
+            List<String> allowedTypes,
+            String targetValue) {
+        if (array == null || !array.isArray() || targetValue == null || targetValue.isBlank()) {
+            return;
+        }
+        for (int i = 0; i < array.size(); i++) {
+            JsonNode item = array.get(i);
+            if (item == null || !item.isObject()) {
+                continue;
+            }
+            String itemPath = arrayPathPrefix + "/" + i;
+            if (matchesAllowedTypes(item, typeField, allowedTypes)
+                    && matchesAnyKey(item, matchFields, targetValue)) {
+                candidates.add(new ResolvedCandidate(itemPath, item));
+            }
+            for (String childField : childrenFields) {
+                JsonNode childNode = item.path(childField);
+                if (childNode.isArray()) {
+                    addResolutionSpecRecursiveMatches(
+                            candidates,
+                            childNode,
+                            itemPath + "." + childField + "[]",
+                            matchFields,
+                            childrenFields,
+                            typeField,
+                            allowedTypes,
+                            targetValue);
+                    for (int subIdx = 0; subIdx < childNode.size(); subIdx++) {
+                        JsonNode subItem = childNode.get(subIdx);
+                        if (subItem != null && subItem.isObject()) {
+                            for (String nestedField : childrenFields) {
+                                JsonNode nestedArray = subItem.path(nestedField);
+                                if (nestedArray.isArray()) {
+                                    addResolutionSpecRecursiveMatches(
+                                            candidates,
+                                            nestedArray,
+                                            itemPath + "." + childField + "[]/" + subIdx + "." + nestedField + "[]",
+                                            matchFields,
+                                            childrenFields,
+                                            typeField,
+                                            allowedTypes,
+                                            targetValue);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private void collectAllAllowedNodesRecursively(
+            List<ResolvedCandidate> candidates,
+            JsonNode array,
+            String arrayPathPrefix,
+            List<String> childrenFields,
+            String typeField,
+            List<String> allowedTypes) {
+        if (array == null || !array.isArray()) {
+            return;
+        }
+        for (int i = 0; i < array.size(); i++) {
+            JsonNode item = array.get(i);
+            if (item == null || !item.isObject()) {
+                continue;
+            }
+            String itemPath = arrayPathPrefix + "/" + i;
+            if (matchesAllowedTypes(item, typeField, allowedTypes)) {
+                candidates.add(new ResolvedCandidate(itemPath, item));
+            }
+            for (String childField : childrenFields) {
+                JsonNode childNode = item.path(childField);
+                if (childNode.isArray()) {
+                    collectAllAllowedNodesRecursively(
+                            candidates,
+                            childNode,
+                            itemPath + "." + childField + "[]",
+                            childrenFields,
+                            typeField,
+                            allowedTypes);
+                }
+            }
+        }
+    }
+
+    private boolean matchesAllowedTypes(JsonNode item, String typeField, List<String> allowedTypes) {
+        if (allowedTypes == null || allowedTypes.isEmpty()) {
+            return true;
+        }
+        String actualType = text(item, typeField).trim();
+        return allowedTypes.contains(actualType);
+    }
+
+    private String stripArraySuffix(String rawPath) {
+        if (rawPath == null) {
+            return "";
+        }
+        String trimmed = rawPath.trim();
+        return trimmed.endsWith("[]") ? trimmed.substring(0, trimmed.length() - 2) : trimmed;
+    }
+
+    private List<String> stringList(JsonNode arrayNode, List<String> fallback) {
+        if (arrayNode == null || !arrayNode.isArray() || arrayNode.isEmpty()) {
+            return fallback;
+        }
+        List<String> values = new ArrayList<>();
+        for (JsonNode item : arrayNode) {
+            if (item.isTextual()) {
+                values.add(item.asText());
+            }
+        }
+        return values.isEmpty() ? fallback : List.copyOf(values);
+    }
+
+    private String extractFieldFromObject(JsonNode node, List<String> fields) {
+        if (node == null || !node.isObject() || fields == null) {
+            return "";
+        }
+        for (String field : fields) {
+            String value = text(node, field).trim();
+            if (!value.isBlank()) {
+                return value;
+            }
+        }
+        return "";
     }
 
     private AgenticAuthoringResolvedTarget resolvedFromCandidates(
@@ -355,7 +708,7 @@ public final class AgenticAuthoringTargetResolverRegistry {
                 "tab-index-or-id",
                 "list-template-slot",
                 "cron-preset-by-label-or-expression",
-                "rich-block-by-id-or-index",
+                "rich-block-by-id-or-index", "rich-block-node-by-id-or-path",
                 "rich-text-node-by-id-or-path",
                 "rich-media-node-by-id-or-path",
                 "rich-link-node-by-id-or-path",
@@ -427,19 +780,24 @@ public final class AgenticAuthoringTargetResolverRegistry {
         }
     }
 
-    private void addTabIndexOrIdMatches(List<ResolvedCandidate> candidates, JsonNode config, String targetValue) {
+    private void addTabIndexOrIdMatches(
+            List<ResolvedCandidate> candidates,
+            JsonNode config,
+            String targetValue,
+            JsonNode resolutionSpec) {
         JsonNode tabs = resolvePath(config, "tabs");
-        if (!tabs.isArray()) {
-            return;
-        }
-        Integer index = parseNonNegativeInt(targetValue);
-        if (index != null) {
-            if (index < tabs.size()) {
-                candidates.add(new ResolvedCandidate("tabs[]/" + index, tabs.get(index)));
+        boolean allowIndex = isAllowIndexEnabled(resolutionSpec);
+        if (allowIndex && tabs.isArray()) {
+            Integer index = parseNonNegativeInt(targetValue);
+            if (index != null) {
+                if (index < tabs.size()) {
+                    candidates.add(new ResolvedCandidate("tabs[]/" + index, tabs.get(index)));
+                }
+                return;
             }
-            return;
         }
         addArrayMatches(candidates, config, "tabs[]", List.of("id", "label", "textLabel", "title"), targetValue);
+        addArrayMatches(candidates, config, "nav.links[]", List.of("id", "label", "textLabel", "title"), targetValue);
     }
 
     private void addListTemplateSlotMatch(List<ResolvedCandidate> candidates, JsonNode config, String targetValue) {
@@ -547,11 +905,78 @@ public final class AgenticAuthoringTargetResolverRegistry {
                 "emptyState");
     }
 
+    private void addRichContentNodeMatches(
+            List<ResolvedCandidate> candidates,
+            JsonNode config,
+            String resolver,
+            String targetValue,
+            JsonNode resolutionSpec) {
+        JsonNode nodes = resolvePath(config, "document.nodes");
+        if (!nodes.isArray() || targetValue == null || targetValue.isBlank()) {
+            return;
+        }
+        List<ResolvedCandidate> allNodes = new ArrayList<>();
+        collectRichContentNodes(allNodes, nodes, "document.nodes");
+        for (ResolvedCandidate candidate : allNodes) {
+            if (matchesAnyKey(candidate.value(), List.of("id", "path", "key"), targetValue)
+                    || candidate.path().equals(targetValue)) {
+                candidates.add(candidate);
+            }
+        }
+        if (candidates.isEmpty() && isAllowIndexEnabled(resolutionSpec) && "rich-block-by-id-or-index".equals(resolver)) {
+            Integer index = parseNonNegativeInt(targetValue);
+            if (index != null && index < nodes.size()) {
+                candidates.add(new ResolvedCandidate("document.nodes[]/" + index, nodes.get(index)));
+            }
+        }
+    }
+
+    private void collectRichContentNodes(
+            List<ResolvedCandidate> allNodes,
+            JsonNode nodesArray,
+            String arrayPath) {
+        if (nodesArray == null || !nodesArray.isArray()) {
+            return;
+        }
+        for (int index = 0; index < nodesArray.size(); index++) {
+            JsonNode node = nodesArray.get(index);
+            if (node == null || !node.isObject()) {
+                continue;
+            }
+            String nodePath = arrayPath + "[]/" + index;
+            allNodes.add(new ResolvedCandidate(nodePath, node));
+            for (String slot : List.of("content", "header", "body", "footer", "aside", "trailing")) {
+                JsonNode slotArray = node.path(slot);
+                if (slotArray.isArray()) {
+                    collectRichContentNodes(allNodes, slotArray, nodePath + "." + slot);
+                }
+            }
+            JsonNode items = node.path("items");
+            if (items.isArray()) {
+                String nodeType = firstText(node, "type", "kind");
+                if ("compose".equals(nodeType)) {
+                    collectRichContentNodes(allNodes, items, nodePath + ".items");
+                } else {
+                    for (int itemIndex = 0; itemIndex < items.size(); itemIndex++) {
+                        JsonNode subItem = items.get(itemIndex);
+                        if (subItem != null && subItem.isObject() && subItem.path("content").isArray()) {
+                            collectRichContentNodes(
+                                    allNodes,
+                                    subItem.path("content"),
+                                    nodePath + ".items[]/" + itemIndex + ".content");
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     private void addRichTimelineItemMatches(
             List<ResolvedCandidate> candidates,
             JsonNode config,
             JsonNode target,
-            String targetValue) {
+            String targetValue,
+            JsonNode resolutionSpec) {
         JsonNode nodes = resolvePath(config, "document.nodes");
         if (!nodes.isArray()) {
             return;
@@ -563,25 +988,28 @@ public final class AgenticAuthoringTargetResolverRegistry {
                 ? firstText(target, "itemId", "id", "key", "value")
                 : targetValue;
         Integer itemIndex = null;
-        if (target.isObject()) {
+        if (isAllowIndexEnabled(resolutionSpec) && target.isObject()) {
             itemIndex = parseNonNegativeInt(firstText(target, "itemIndex", "index"));
         }
         if (timelineBlockId.isBlank() || (itemId.isBlank() && itemIndex == null)) {
             return;
         }
-        for (int blockIndex = 0; blockIndex < nodes.size(); blockIndex++) {
-            JsonNode block = nodes.get(blockIndex);
-            if (!matchesAnyKey(block, List.of("id", "path", "key"), timelineBlockId)) {
+        List<ResolvedCandidate> allNodes = new ArrayList<>();
+        collectRichContentNodes(allNodes, nodes, "document.nodes");
+        for (ResolvedCandidate blockCandidate : allNodes) {
+            JsonNode block = blockCandidate.value();
+            if (!matchesAnyKey(block, List.of("id", "path", "key"), timelineBlockId)
+                    && !blockCandidate.path().equals(timelineBlockId)) {
                 continue;
             }
             JsonNode items = block.path("items");
             if (!items.isArray()) {
-                return;
+                continue;
             }
             if (itemIndex != null) {
                 if (itemIndex < items.size()) {
                     candidates.add(new ResolvedCandidate(
-                            "document.nodes[]/" + blockIndex + ".items[]/" + itemIndex,
+                            blockCandidate.path() + ".items[]/" + itemIndex,
                             items.get(itemIndex)));
                 }
                 return;
@@ -590,7 +1018,7 @@ public final class AgenticAuthoringTargetResolverRegistry {
                 JsonNode item = items.get(itemPosition);
                 if (matchesAnyKey(item, List.of("id", "key"), itemId)) {
                     candidates.add(new ResolvedCandidate(
-                            "document.nodes[]/" + blockIndex + ".items[]/" + itemPosition,
+                            blockCandidate.path() + ".items[]/" + itemPosition,
                             item));
                 }
             }
@@ -903,18 +1331,39 @@ public final class AgenticAuthoringTargetResolverRegistry {
     }
 
     private String targetValue(JsonNode target) {
+        return targetValue(target, MissingNode.getInstance());
+    }
+
+    private String targetValue(JsonNode target, JsonNode resolutionSpec) {
         if (target == null || target.isMissingNode() || target.isNull()) {
             return "";
         }
         if (target.isTextual() || target.isNumber() || target.isBoolean()) {
             return target.asText("");
         }
-        for (String field : List.of("id", "field", "name", "key", "value", "slot", "path", "jsonPath", "propertyName", "hintPath", "controlType", "ruleId", "effectId", "presetKey", "tableOperationId", "nodeId", "sourceNodeId", "targetNodeId")) {
+        if (resolutionSpec != null && resolutionSpec.isObject()) {
+            for (String field : stringList(resolutionSpec.path("inputMatchFields"), List.of())) {
+                if (target.has(field)) {
+                    String candidate = target.path(field).asText("").trim();
+                    if (!candidate.isBlank()) {
+                        return candidate;
+                    }
+                }
+            }
+        }
+        for (String field : List.of("id", "blockId", "linkId", "timelineBlockId", "itemId", "field", "name", "key", "value", "slot", "path", "jsonPath", "propertyName", "hintPath", "controlType", "ruleId", "effectId", "presetKey", "tableOperationId", "nodeId", "sourceNodeId", "targetNodeId")) {
             if (target.has(field)) {
                 return target.path(field).asText("");
             }
         }
         return "";
+    }
+
+    private boolean isAllowIndexEnabled(JsonNode resolutionSpec) {
+        return resolutionSpec == null
+                || resolutionSpec.isMissingNode()
+                || resolutionSpec.isNull()
+                || resolutionSpec.path("allowIndex").asBoolean(true);
     }
 
     private Integer parseNonNegativeInt(String value) {

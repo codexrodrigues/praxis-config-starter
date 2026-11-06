@@ -35,17 +35,17 @@ class DomainCatalogContractSynchronizationTest {
     }
 
     @Test
-    void v02KeepsGeneratedStatsAndOptionSourceProjectionVocabulary() throws Exception {
+    void v02KeepsGeneratedStatsOptionSourceFactAndKnowledgeGraphVocabulary() throws Exception {
         JsonNode schema = objectMapper.readTree(RUNTIME_SCHEMA.toFile());
 
         assertThat(values(schema.at("/$defs/node/properties/nodeType/enum")))
-                .contains("stats", "policy_hint");
+                .contains("stats", "policy_hint", "fact");
         assertThat(values(schema.at("/$defs/edge/properties/edgeType/enum")))
-                .contains("has_stats", "uses_concept", "selectable_when", "blocked_when");
+                .contains("has_stats", "uses_concept", "selectable_when", "blocked_when", "provides_fact", "references", "materializes");
         assertThat(values(schema.at("/$defs/binding/properties/bindingType/enum")))
-                .contains("stats_endpoint", "option_source");
+                .contains("stats_endpoint", "option_source", "resource_fact");
         assertThat(values(schema.at("/$defs/evidence/properties/evidenceType/enum")))
-                .contains("openapi_stats", "option_source");
+                .contains("openapi_stats", "option_source", "resource_fact", "custom_field");
     }
 
     @Test

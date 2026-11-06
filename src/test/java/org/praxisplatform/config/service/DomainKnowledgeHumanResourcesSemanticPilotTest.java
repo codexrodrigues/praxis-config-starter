@@ -29,7 +29,7 @@ class DomainKnowledgeHumanResourcesSemanticPilotTest {
             "resources",
             "db",
             "migration",
-            "V38__expand_domain_knowledge_semantic_ir_relationships.sql");
+            "V40__align_domain_knowledge_relationship_constraint_with_catalog_v02.sql");
 
     private final ObjectMapper objectMapper = new ObjectMapper();
 

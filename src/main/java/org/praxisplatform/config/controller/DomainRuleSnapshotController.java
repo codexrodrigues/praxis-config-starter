@@ -131,6 +131,26 @@ public class DomainRuleSnapshotController {
         .body(response);
   }
 
+  @PostMapping("/withdrawals")
+  @Operation(summary="Withdraw one selected operation policy",description="Stops new admission for the exact operation. Preserves publications and head identity, advances revision/ETag, and records the authenticated operator and reason. Reactivation requires REQUIRED rollout quorum.")
+  @ApiResponses({@ApiResponse(responseCode="200",description="Withdrawal recorded with a new strong head ETag"),
+      @ApiResponse(responseCode="400",description="Family, operation or audit reason is invalid"),
+      @ApiResponse(responseCode="403",description="Operator is outside the authenticated scope or lacks RULE_SNAPSHOT_OPERATOR"),
+      @ApiResponse(responseCode="404",description="No head in this exact scope"),
+      @ApiResponse(responseCode="409",description="Policy already withdrawn"),
+      @ApiResponse(responseCode="412",description="Stale or weak head validator"),
+      @ApiResponse(responseCode="428",description="Required If-Match missing")})
+  public ResponseEntity<org.praxisplatform.config.dto.DomainRuleSnapshotWithdrawalResponse> withdraw(
+      @RequestBody org.praxisplatform.config.dto.DomainRuleSnapshotWithdrawalRequest body,
+      @RequestHeader(value="X-Tenant-ID",required=false) String tenant,
+      @RequestHeader(value="X-Env",required=false) String environment,
+      @Parameter(description="Strong current validator for the exact operation head; wildcards and weak tokens are refused.",required=true)
+      @RequestHeader(value="If-Match",required=false) String ifMatch,HttpServletRequest request) {
+    var principal=principalResolver.resolve(request,tenant,environment,SNAPSHOT_OPERATOR_ROLE);
+    var result=snapshotService.withdraw(body,principal.tenantId(),principal.environment(),ifMatch,principal.actorRef());
+    return ResponseEntity.ok().cacheControl(CacheControl.noStore()).eTag(quoted(result.headEtag())).body(result);
+  }
+
   @GetMapping("/head")
   @Operation(summary = "Read the active snapshot head",
       description = "Returns the currently selected immutable snapshot and the opaque head ETag used for optimistic concurrency and change polling.")
@@ -143,6 +163,8 @@ public class DomainRuleSnapshotController {
   public ResponseEntity<DomainRuleSnapshotActivationResponse> head(
       @Parameter(description = "Stable semantic RuleSet identity whose active selection is requested.", required = true)
       @RequestParam String ruleSetKey,
+      @io.swagger.v3.oas.annotations.Parameter(description = "Exact operation identity; other operations of the family have independent heads and histories.", required = true)
+      @RequestParam String operationKey,
       @Parameter(description = "Governed tenant scope of the active head.", required = true)
       @RequestHeader(value = "X-Tenant-ID", required = false) String tenantId,
       @Parameter(description = "Governed deployment environment of the active head.", required = true)
@@ -153,7 +175,7 @@ public class DomainRuleSnapshotController {
     DomainRuleGovernancePrincipal principal = principalResolver.resolve(
         servletRequest, tenantId, environment, SNAPSHOT_READER_ROLE);
     DomainRuleSnapshotActivationResponse response = snapshotService
-        .findActive(principal.tenantId(), principal.environment(), ruleSetKey)
+        .findActive(principal.tenantId(), principal.environment(), ruleSetKey, operationKey)
         .orElseThrow(() -> new DomainRuleSnapshotControlPlaneException(
             HttpStatus.NOT_FOUND, "RuleSet head was not found"));
     if (matchesWeak(ifNoneMatch, response.headEtag())) {
@@ -178,6 +200,8 @@ public class DomainRuleSnapshotController {
   })
   public ResponseEntity<DomainRuleSnapshotHeadStatusResponse> headStatus(
       @RequestParam String ruleSetKey,
+      @io.swagger.v3.oas.annotations.Parameter(description = "Exact operation identity; other operations of the family have independent heads and histories.", required = true)
+      @RequestParam String operationKey,
       @RequestHeader(value = "X-Tenant-ID", required = false) String tenantId,
       @RequestHeader(value = "X-Env", required = false) String environment,
       @Parameter(description = "Ignored for this live readiness projection; the head validator remains available for mutation preconditions.")
@@ -186,7 +210,7 @@ public class DomainRuleSnapshotController {
     DomainRuleGovernancePrincipal principal = principalResolver.resolve(
         servletRequest, tenantId, environment, SNAPSHOT_READER_ROLE);
     DomainRuleSnapshotHeadStatusResponse response = snapshotService
-        .findHeadStatus(principal.tenantId(), principal.environment(), ruleSetKey)
+        .findHeadStatus(principal.tenantId(), principal.environment(), ruleSetKey, operationKey)
         .orElseThrow(() -> new DomainRuleSnapshotControlPlaneException(
             HttpStatus.NOT_FOUND, "RuleSet head was not found"));
     String headEtag = response.headEtag();
@@ -243,6 +267,8 @@ public class DomainRuleSnapshotController {
   })
   public ResponseEntity<List<DomainRuleSnapshotVersionResponse>> versions(
       @RequestParam String ruleSetKey,
+      @io.swagger.v3.oas.annotations.Parameter(description = "Exact operation identity; other operations of the family have independent heads and histories.", required = true)
+      @RequestParam String operationKey,
       @RequestParam(defaultValue = "50") int limit,
       @RequestHeader(value = "X-Tenant-ID", required = false) String tenantId,
       @RequestHeader(value = "X-Env", required = false) String environment,
@@ -252,7 +278,7 @@ public class DomainRuleSnapshotController {
     return ResponseEntity.ok()
         .cacheControl(CacheControl.noCache())
         .body(snapshotService.listVersions(
-            principal.tenantId(), principal.environment(), ruleSetKey, limit));
+            principal.tenantId(), principal.environment(), ruleSetKey, operationKey, limit));
   }
 
   @PostMapping("/{snapshotKey}/rollback")

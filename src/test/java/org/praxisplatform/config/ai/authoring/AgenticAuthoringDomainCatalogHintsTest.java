@@ -136,4 +136,44 @@ class AgenticAuthoringDomainCatalogHintsTest {
         assertThat(contextHints.path("domainCatalog").path("resourceKey").asText())
                 .isEqualTo("procurement.suppliers");
     }
+
+    @Test
+    void enrichPrefersCanonicalResourceKeyFromDomainCatalogEvidenceWhenApiPathPrefixDiffers() {
+        ObjectNode contextHints = objectMapper.createObjectNode();
+        AgenticAuthoringCandidate candidate = new AgenticAuthoringCandidate(
+                "/api/ergon/radar-ferias-prescricao",
+                "POST",
+                "/schemas/filtered?path=/api/ergon/radar-ferias-prescricao/filter&operation=post",
+                "/api/ergon/radar-ferias-prescricao/filter",
+                "POST",
+                0.93,
+                "domain_catalog grounded resource selection",
+                java.util.List.of("api-metadata", AgenticAuthoringDomainCatalogCandidateEnhancer.DOMAIN_CATALOG_GROUNDING),
+                AgenticAuthoringEvidenceBundle.of(
+                        "domain_catalog",
+                        java.util.List.of(new AgenticAuthoringEvidenceBundle.Evidence(
+                                "domain_catalog",
+                                "domain_catalog_grounding",
+                                "administracao-pessoal.radar-ferias-prescricao",
+                                "Radar de prescrição de férias",
+                                0.93,
+                                java.util.List.of("ferias", "prescricao"),
+                                "default",
+                                "dev",
+                                "ergon:release:1"))));
+
+        AgenticAuthoringDomainCatalogHints.enrich(
+                contextHints,
+                candidate,
+                "table",
+                "Investigar servidores com ferias em risco de prescricao",
+                "praxis-ergon-showcase");
+
+        assertThat(contextHints.path("domainCatalog").path("contextKey").asText())
+                .isEqualTo("administracao-pessoal");
+        assertThat(contextHints.path("domainCatalog").path("resourceKey").asText())
+                .isEqualTo("administracao-pessoal.radar-ferias-prescricao");
+        assertThat(contextHints.path("domainCatalog").path("knowledgeGraphGrounded").asBoolean())
+                .isTrue();
+    }
 }

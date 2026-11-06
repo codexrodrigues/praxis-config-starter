@@ -22,6 +22,9 @@ public class DomainRuleSnapshotRolloutEvent {
   @Column(name = "tenant_id", nullable = false, length = 128) private String tenantId;
   @Column(nullable = false, length = 128) private String environment;
   @Column(name = "rule_set_key", nullable = false, length = 512) private String ruleSetKey;
+
+  @Column(name = "operation_key", nullable = false, length = 512)
+  private String operationKey;
   @Column(name = "event_type", nullable = false, length = 32) private String eventType;
   @Column(name = "actor_ref", nullable = false, length = 255) private String actorRef;
   @Column(name = "safe_metadata", nullable = false, columnDefinition = "jsonb")

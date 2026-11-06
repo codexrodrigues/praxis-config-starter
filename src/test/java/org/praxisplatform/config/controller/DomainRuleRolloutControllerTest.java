@@ -30,9 +30,7 @@ class DomainRuleRolloutControllerTest {
     var reader = new DomainRuleGovernancePrincipal("tenant-server", "auditor", "prod");
     UUID rolloutId = UUID.randomUUID();
     var create = new DomainRuleRolloutCreateRequest("candidate-v2", null);
-    var created = new DomainRuleRolloutResponse(rolloutId, "rules", "candidate-v2", "A".repeat(64),
-        "active-v1", UUID.randomUUID().toString(), "default", 1, "OBSERVE_ONLY", "PREPARING",
-        Instant.now(), null);
+    var created = new DomainRuleRolloutResponse(rolloutId, "rules", "evaluate", "candidate-v2", "A".repeat(64), "active-v1", UUID.randomUUID().toString(), "default", 1, "OBSERVE_ONLY", "PREPARING", Instant.now(), null);
     var probe = new DomainRuleCandidateProbeRequest("candidate-v2", "A".repeat(64), false,
         "host/1", null, null, null, null, "UNAVAILABLE", Instant.now());
     var readiness = new DomainRuleRolloutReadinessResponse(rolloutId, "rules", "candidate-v2",
@@ -44,23 +42,21 @@ class DomainRuleRolloutControllerTest {
     when(service.probe(rolloutId, probe, observer))
         .thenReturn(new DomainRuleCandidateProbeResponse(true, probe.observedAtUtc()));
     when(service.readiness(rolloutId, reader)).thenReturn(readiness);
-    var catalog = new DomainRuleRolloutCatalogResponse(
-        "rules", java.util.List.of(), java.util.List.of("CREATE_ROLLOUT"));
+    var catalog = new DomainRuleRolloutCatalogResponse("rules", "evaluate", java.util.List.of(), java.util.List.of("CREATE_ROLLOUT"));
     when(resolver.hasRole(request, "RULE_SNAPSHOT_OPERATOR")).thenReturn(true);
-    when(service.catalog("rules", reader, true)).thenReturn(catalog);
-    var pending = new DomainRulePendingRolloutResponse(
-        rolloutId, "rules", "candidate-v2", "A".repeat(64), "PREPARING", null);
-    when(service.pending("rules", observer)).thenReturn(Optional.of(pending));
+    when(service.catalog("rules", "evaluate", reader, true)).thenReturn(catalog);
+    var pending = new DomainRulePendingRolloutResponse(rolloutId, "rules", "evaluate", "candidate-v2", "A".repeat(64), "PREPARING", null);
+    when(service.pending("rules", "evaluate", observer)).thenReturn(Optional.of(pending));
 
     assertThat(controller.create(create,  "\"etag\"",  null,  "caller",  "test",  request).getStatusCode())
         .isEqualTo(HttpStatus.CREATED);
     assertThat(controller.probe(rolloutId, probe, "caller", "test", request).getStatusCode())
         .isEqualTo(HttpStatus.ACCEPTED);
     assertThat(controller.readiness(rolloutId, "caller", "test", request).getBody()).isSameAs(readiness);
-    assertThat(controller.catalog("rules", "caller", "test", request).getBody()).isSameAs(catalog);
+    assertThat(controller.catalog("rules", "evaluate", "caller", "test", request).getBody()).isSameAs(catalog);
     assertThat(controller.cancel(rolloutId, "caller", "test", request).getStatusCode())
         .isEqualTo(HttpStatus.NO_CONTENT);
-    assertThat(controller.pending("rules", "caller", "test", request).getBody()).isSameAs(pending);
+    assertThat(controller.pending("rules", "evaluate", "caller", "test", request).getBody()).isSameAs(pending);
     verify(service).cancel(rolloutId, operator);
   }
 
