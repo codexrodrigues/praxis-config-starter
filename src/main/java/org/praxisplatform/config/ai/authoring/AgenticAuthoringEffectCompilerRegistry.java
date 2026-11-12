@@ -384,6 +384,7 @@ public final class AgenticAuthoringEffectCompilerRegistry {
             case "reorder-by-key" -> applyReorderByKey(effect, input, resolved, proposedConfig, compiled, failures);
             case "append", "append-to-array" -> applyAppend(effect, input, resolved, proposedConfig, compiled, failures);
             case "append-unique" -> applyAppendUnique(effect, input, resolved, proposedConfig, compiled, failures);
+            case "insert-positioned" -> applyInsertPositioned(effect, input, resolved, proposedConfig, compiled, failures);
             default -> {
                 failures.add("unsupported effect kind for compile: " + effectKind + " in " + text(operation, "operationId"));
                 return null;
@@ -1761,8 +1762,8 @@ public final class AgenticAuthoringEffectCompilerRegistry {
             JsonNode planOperation,
             ObjectNode proposedConfig,
             List<String> failures) {
-        ArrayNode nodes = arrayAt(proposedConfig, "document.nodes", true);
-        if (nodes == null) {
+        ArrayNode topLevelNodes = arrayAt(proposedConfig, "document.nodes", true);
+        if (topLevelNodes == null) {
             failures.add("rich-content-block-add path is not an array: document.nodes[]");
             return null;
         }
@@ -1773,6 +1774,24 @@ public final class AgenticAuthoringEffectCompilerRegistry {
             return null;
         }
 
+        String parentBlockId = text(input, "parentBlockId");
+        String requestedSlot = text(input, "slot");
+        String beforeBlockId = text(input, "beforeBlockId");
+        String afterBlockId = text(input, "afterBlockId");
+
+        RichContentTargetContainer targetContainer = resolveRichContentBlockAddContainer(
+                proposedConfig,
+                topLevelNodes,
+                parentBlockId,
+                requestedSlot,
+                beforeBlockId,
+                afterBlockId,
+                failures);
+        if (targetContainer == null) {
+            return null;
+        }
+        ArrayNode nodes = targetContainer.nodes();
+
         ObjectNode node = objectMapper.createObjectNode();
         if (input.path("node") instanceof ObjectNode inputNode) {
             node.setAll(inputNode);
@@ -1781,31 +1800,29 @@ public final class AgenticAuthoringEffectCompilerRegistry {
             node.put("type", type);
         }
         if (!node.hasNonNull("id")) {
-            node.put("id", nextRichContentNodeId(nodes, type));
+            node.put("id", nextRichContentNodeId(topLevelNodes, type));
         }
         String nodeId = text(node, "id");
         if (nodeId.isBlank()) {
             failures.add("rich-content-block-add requires node.id or generated id");
             return null;
         }
-        if (indexOfObjectByKey(nodes, "id", nodeId) >= 0) {
+        if (hasRichContentNodeId(topLevelNodes, nodeId)) {
             failures.add("rich-content-block-add duplicate node id: document.nodes[] id=" + nodeId);
             return null;
         }
 
         int insertedIndex = nodes.size();
-        String beforeBlockId = text(input, "beforeBlockId");
-        String afterBlockId = text(input, "afterBlockId");
         if (!beforeBlockId.isBlank()) {
             insertedIndex = indexOfObjectByKey(nodes, "id", beforeBlockId);
             if (insertedIndex < 0) {
-                failures.add("rich-content-block-add before block not found: document.nodes[] id=" + beforeBlockId);
+                failures.add("rich-content-block-add before block not found: " + targetContainer.arrayPath() + " id=" + beforeBlockId);
                 return null;
             }
         } else if (!afterBlockId.isBlank()) {
             int afterIndex = indexOfObjectByKey(nodes, "id", afterBlockId);
             if (afterIndex < 0) {
-                failures.add("rich-content-block-add after block not found: document.nodes[] id=" + afterBlockId);
+                failures.add("rich-content-block-add after block not found: " + targetContainer.arrayPath() + " id=" + afterBlockId);
                 return null;
             }
             insertedIndex = afterIndex + 1;
@@ -1818,9 +1835,16 @@ public final class AgenticAuthoringEffectCompilerRegistry {
         compiled.put("op", "insert-rich-block");
         compiled.put("effectKind", "compile-domain-patch");
         compiled.put("domainHandler", text(effect, "handler"));
-        compiled.put("path", "document.nodes[]");
+        compiled.put("path", targetContainer.arrayPath());
+        compiled.put("resolvedPath", targetContainer.resolvedElementPrefix() + "/" + insertedIndex);
         compiled.put("keyValue", nodeId);
         compiled.put("insertedIndex", insertedIndex);
+        if (!parentBlockId.isBlank()) {
+            compiled.put("parentBlockId", parentBlockId);
+        }
+        if (!targetContainer.slot().isBlank()) {
+            compiled.put("slot", targetContainer.slot());
+        }
         if (!beforeBlockId.isBlank()) {
             compiled.put("beforeBlockId", beforeBlockId);
         }
@@ -1870,22 +1894,31 @@ public final class AgenticAuthoringEffectCompilerRegistry {
         node.set("inputs", inputs);
 
         String replaceBlockId = text(input, "replaceBlockId");
+        ArrayNode targetArray = nodes;
+        String targetCollectionPath = "document.nodes[]";
         int index = nodes.size();
         JsonNode previousValue = MissingNode.getInstance();
         String op = "insert-rich-preset";
         if (!replaceBlockId.isBlank()) {
-            index = indexOfObjectByKey(nodes, "id", replaceBlockId);
+            RichContentTargetContainer match = findRichContentParentArrayByChildId(nodes, "document.nodes", replaceBlockId);
+            if (match == null) {
+                failures.add("rich-content-preset-apply replace block not found: document.nodes[] id=" + replaceBlockId);
+                return null;
+            }
+            targetArray = match.nodes();
+            targetCollectionPath = match.arrayPath();
+            index = indexOfObjectByKey(targetArray, "id", replaceBlockId);
             if (index < 0) {
                 failures.add("rich-content-preset-apply replace block not found: document.nodes[] id=" + replaceBlockId);
                 return null;
             }
-            previousValue = nodes.get(index).deepCopy();
+            previousValue = targetArray.get(index).deepCopy();
             node.put("id", replaceBlockId);
-            nodes.set(index, node);
+            targetArray.set(index, node);
             op = "replace-rich-block-with-preset";
         } else {
             String nodeId = text(node, "id");
-            if (indexOfObjectByKey(nodes, "id", nodeId) >= 0) {
+            if (hasRichContentNodeId(nodes, nodeId)) {
                 node.put("id", nextRichContentNodeId(nodes, "preset"));
             }
             nodes.add(node);
@@ -1897,7 +1930,7 @@ public final class AgenticAuthoringEffectCompilerRegistry {
         compiled.put("op", op);
         compiled.put("effectKind", "compile-domain-patch");
         compiled.put("domainHandler", text(effect, "handler"));
-        compiled.put("path", "document.nodes[]");
+        compiled.put("path", targetCollectionPath);
         compiled.put("keyValue", text(node, "id"));
         compiled.put("index", index);
         if (!previousValue.isMissingNode()) {
@@ -1919,7 +1952,7 @@ public final class AgenticAuthoringEffectCompilerRegistry {
             AgenticAuthoringResolvedTarget resolved,
             ObjectNode proposedConfig,
             List<String> failures) {
-        ArrayNode nodes = arrayAt(proposedConfig, "document.nodes", false);
+        ArrayNode nodes = parentArrayForEffect(proposedConfig, "document.nodes[]", resolved);
         if (nodes == null) {
             failures.add("rich-content-link-remove path is not an array: document.nodes[]");
             return null;
@@ -1949,7 +1982,7 @@ public final class AgenticAuthoringEffectCompilerRegistry {
         ObjectNode replacement = null;
         if (preserveLabelAsText) {
             String replacementId = linkId + "-text";
-            if (indexOfObjectByKey(nodes, "id", replacementId) >= 0) {
+            if (hasRichContentNodeId(proposedConfig.path("document").path("nodes"), replacementId)) {
                 failures.add("rich-content-link-remove duplicate replacement node id: document.nodes[] id=" + replacementId);
                 return null;
             }
@@ -6359,12 +6392,18 @@ public final class AgenticAuthoringEffectCompilerRegistry {
         String path = text(effect, "path");
         String key = text(effect, "key");
         String keyValue = resolved != null ? text(resolved.value(), key) : "";
-        ArrayNode array = arrayAt(proposedConfig, collectionPath(path), false);
+        ArrayNode array = parentArrayForEffect(proposedConfig, path, resolved);
         if (array == null) {
             failures.add("merge-by-key path is not an array: " + path);
             return;
         }
         ObjectNode target = findObjectByKey(array, key, keyValue);
+        if (target == null) {
+            int resolvedIndex = indexOfResolvedArrayTarget(resolved);
+            if (resolvedIndex >= 0 && resolvedIndex < array.size() && array.get(resolvedIndex) instanceof ObjectNode indexedTarget) {
+                target = indexedTarget;
+            }
+        }
         if (target == null) {
             failures.add("merge-by-key target not found: " + path + " " + key + "=" + keyValue);
             return;
@@ -6383,17 +6422,34 @@ public final class AgenticAuthoringEffectCompilerRegistry {
         String path = text(effect, "path");
         String key = text(effect, "key");
         String keyValue = resolved != null ? text(resolved.value(), key) : "";
-        ArrayNode array = arrayAt(proposedConfig, collectionPath(path), false);
+        ArrayNode array = parentArrayForEffect(proposedConfig, path, resolved);
         if (array == null) {
             failures.add("remove-by-key path is not an array: " + path);
             return;
         }
         int index = indexOfObjectByKey(array, key, keyValue);
         if (index < 0) {
+            index = indexOfResolvedArrayTarget(resolved);
+        }
+        if (index < 0 || index >= array.size()) {
             failures.add("remove-by-key target not found: " + path + " " + key + "=" + keyValue);
             return;
         }
+        if (keyValue.isBlank() && array.get(index) instanceof ObjectNode itemObj) {
+            keyValue = text(itemObj, key);
+        }
+        ArrayNode previousArray = array.deepCopy();
         array.remove(index);
+        if (effect.path("selectionReconciliation").isObject()) {
+            reconcileSelectionOnRemove(
+                    proposedConfig,
+                    effect.path("selectionReconciliation"),
+                    previousArray,
+                    array,
+                    key,
+                    keyValue,
+                    index);
+        }
         compiled.put("keyValue", keyValue);
         compiled.put("removedIndex", index);
     }
@@ -6406,6 +6462,32 @@ public final class AgenticAuthoringEffectCompilerRegistry {
             ObjectNode compiled,
             List<String> failures) {
         String path = text(effect, "path");
+        if (path.equals("$resolvedPath") || path.startsWith("$resolvedPath.")) {
+            if (resolved == null || resolved.path() == null || resolved.path().isBlank()) {
+                failures.add("set-value with $resolvedPath requires a resolved target");
+                return;
+            }
+            String subTail = path.equals("$resolvedPath") ? "" : path.substring("$resolvedPath.".length());
+            JsonNode value = valueForSetEffect(effect, input, subTail);
+            JsonNode targetNode = nodeAtResolvedPath(proposedConfig, resolved.path());
+            if (!(targetNode instanceof ObjectNode targetObject)) {
+                failures.add("set-value resolved target is not an object: " + resolved.path());
+                return;
+            }
+            if (!subTail.isBlank()) {
+                setDottedValue(targetObject, subTail, value);
+                compiled.put("resolvedPath", resolved.path() + "." + normalizeDottedPath(subTail));
+            } else if (value.isObject()) {
+                targetObject.removeAll();
+                mergeObject(targetObject, value);
+                compiled.put("resolvedPath", resolved.path());
+            } else {
+                failures.add("set-value on $resolvedPath root requires an object value");
+                return;
+            }
+            compiled.set("value", value);
+            return;
+        }
         String tail = tailAfterArray(path);
         JsonNode value = valueForSetEffect(effect, input, tail);
         if (resolved != null && !tail.isBlank()) {
@@ -6431,6 +6513,29 @@ public final class AgenticAuthoringEffectCompilerRegistry {
             ObjectNode compiled,
             List<String> failures) {
         String path = text(effect, "path");
+        String inputPath = text(effect, "inputPath");
+        JsonNode mergePayload = !inputPath.isBlank() ? resolvePath(input, inputPath) : input;
+        if (path.equals("$resolvedPath") || path.startsWith("$resolvedPath.")) {
+            if (resolved == null || resolved.path() == null || resolved.path().isBlank()) {
+                failures.add("merge-object with $resolvedPath requires a resolved target");
+                return;
+            }
+            JsonNode resolvedNode = nodeAtResolvedPath(proposedConfig, resolved.path());
+            if (!(resolvedNode instanceof ObjectNode resolvedObject)) {
+                failures.add("merge-object resolved target is not an object: " + resolved.path());
+                return;
+            }
+            String subTail = path.equals("$resolvedPath") ? "" : normalizeDottedPath(path.substring("$resolvedPath.".length()));
+            ObjectNode targetObject = subTail.isBlank() ? resolvedObject : objectAt(resolvedObject, subTail, true);
+            if (targetObject == null) {
+                failures.add("merge-object path is not an object: " + path);
+                return;
+            }
+            mergeObject(targetObject, mergePayload);
+            compiled.put("resolvedPath", subTail.isBlank() ? resolved.path() : resolved.path() + "." + subTail);
+            compiled.set("value", mergePayload);
+            return;
+        }
         String tail = tailAfterArray(path);
         JsonNode target;
         String resolvedPath;
@@ -6449,9 +6554,9 @@ public final class AgenticAuthoringEffectCompilerRegistry {
             resolvedPath = normalizedPath;
         }
         if (target instanceof ObjectNode targetObject) {
-            mergeObject(targetObject, input);
+            mergeObject(targetObject, mergePayload);
             compiled.put("resolvedPath", resolvedPath);
-            compiled.set("value", input);
+            compiled.set("value", mergePayload);
         } else {
             failures.add("merge-object path is not an object: " + path);
         }
@@ -6475,7 +6580,7 @@ public final class AgenticAuthoringEffectCompilerRegistry {
             failures.add("reorder-by-key target key is missing for path: " + path);
             return;
         }
-        ArrayNode array = arrayAt(proposedConfig, collectionPath(path), false);
+        ArrayNode array = parentArrayForEffect(proposedConfig, path, resolved);
         if (array == null) {
             failures.add("reorder-by-key path is not an array: " + path);
             return;
@@ -6485,6 +6590,7 @@ public final class AgenticAuthoringEffectCompilerRegistry {
             failures.add("reorder-by-key target not found: " + path + " " + key + "=" + keyValue);
             return;
         }
+        ArrayNode previousArray = array.deepCopy();
         JsonNode item = array.remove(fromIndex);
         int toIndex = resolveReorderIndex(array, input, key, path, failures);
         if (toIndex < 0) {
@@ -6492,9 +6598,235 @@ public final class AgenticAuthoringEffectCompilerRegistry {
             return;
         }
         array.insert(toIndex, item);
+        if (effect.path("selectionReconciliation").isObject()) {
+            reconcileSelectionOnReorder(
+                    proposedConfig,
+                    effect.path("selectionReconciliation"),
+                    previousArray,
+                    array,
+                    key);
+        }
         compiled.put("keyValue", keyValue);
         compiled.put("fromIndex", fromIndex);
         compiled.put("toIndex", toIndex);
+    }
+
+    private void applyInsertPositioned(
+            JsonNode effect,
+            JsonNode input,
+            AgenticAuthoringResolvedTarget resolved,
+            ObjectNode proposedConfig,
+            ObjectNode compiled,
+            List<String> failures) {
+        String path = text(effect, "path");
+        String key = text(effect, "key");
+        if (key.isBlank()) {
+            failures.add("insert-positioned requires key for path: " + path);
+            return;
+        }
+        ArrayNode array = arrayForAppend(effect, resolved, proposedConfig, failures);
+        if (array == null) {
+            return;
+        }
+        String inputPath = text(effect, "inputPath");
+        JsonNode rawItem = !inputPath.isBlank()
+                ? resolvePath(input, inputPath)
+                : (input.path("item").isObject() ? input.path("item") : input);
+        if (!(rawItem instanceof ObjectNode itemSource)) {
+            failures.add("insert-positioned requires an object item for path: " + path);
+            return;
+        }
+        ObjectNode item = itemSource.deepCopy();
+        String beforeField = firstNonBlank(text(effect, "beforeKeyField"), "beforeId", "beforeBlockId", "beforeItemId");
+        String afterField = firstNonBlank(text(effect, "afterKeyField"), "afterId", "afterBlockId", "afterItemId");
+        String replaceField = firstNonBlank(text(effect, "replaceKeyField"), "replaceId", "replaceBlockId", "replaceItemId");
+        if (rawItem == input) {
+            item.remove(beforeField);
+            item.remove(afterField);
+            item.remove(replaceField);
+        }
+        String keyValue = text(item, key);
+        if (keyValue.isBlank()) {
+            String prefix = firstNonBlank(text(effect, "autoGenerateIdPrefix"), "item");
+            keyValue = nextGeneratedItemId(array, key, prefix);
+            item.put(key, keyValue);
+        }
+
+        String replaceKeyValue = text(input, replaceField);
+        if (!replaceKeyValue.isBlank()) {
+            int replaceIndex = indexOfObjectByKey(array, key, replaceKeyValue);
+            if (replaceIndex < 0) {
+                failures.add("insert-positioned replace target not found: " + path + " " + key + "=" + replaceKeyValue);
+                return;
+            }
+            if (!replaceKeyValue.equals(keyValue) && indexOfObjectByKey(array, key, keyValue) >= 0) {
+                failures.add("insert-positioned duplicate value for " + path + " " + key + "=" + keyValue);
+                return;
+            }
+            array.set(replaceIndex, item);
+            compiled.put("keyValue", keyValue);
+            compiled.put("replacedIndex", replaceIndex);
+            compiled.set("value", item);
+            return;
+        }
+
+        if (indexOfObjectByKey(array, key, keyValue) >= 0) {
+            failures.add("insert-positioned duplicate value for " + path + " " + key + "=" + keyValue);
+            return;
+        }
+
+        String beforeKeyValue = text(input, beforeField);
+        String afterKeyValue = text(input, afterField);
+        int insertIndex = array.size();
+        if (!beforeKeyValue.isBlank()) {
+            int beforeIndex = indexOfObjectByKey(array, key, beforeKeyValue);
+            if (beforeIndex < 0) {
+                failures.add("insert-positioned before target not found: " + path + " " + key + "=" + beforeKeyValue);
+                return;
+            }
+            insertIndex = beforeIndex;
+        } else if (!afterKeyValue.isBlank()) {
+            int afterIndex = indexOfObjectByKey(array, key, afterKeyValue);
+            if (afterIndex < 0) {
+                failures.add("insert-positioned after target not found: " + path + " " + key + "=" + afterKeyValue);
+                return;
+            }
+            insertIndex = afterIndex + 1;
+        } else if (input.has("index") && input.path("index").canConvertToInt()) {
+            int idx = input.path("index").asInt();
+            if (idx < 0 || idx > array.size()) {
+                failures.add("insert-positioned index is out of bounds: " + idx + " for " + path);
+                return;
+            }
+            insertIndex = idx;
+        }
+        array.insert(insertIndex, item);
+        compiled.put("keyValue", keyValue);
+        compiled.put("insertedIndex", insertIndex);
+        compiled.set("value", item);
+    }
+
+    private String nextGeneratedItemId(ArrayNode array, String key, String prefix) {
+        String separator = prefix.endsWith("-") ? "" : "-";
+        for (int i = array.size() + 1; ; i++) {
+            String candidate = prefix + separator + i;
+            if (indexOfObjectByKey(array, key, candidate) < 0) {
+                return candidate;
+            }
+        }
+    }
+
+    private void reconcileSelectionOnRemove(
+            ObjectNode proposedConfig,
+            JsonNode reconciliation,
+            ArrayNode previousArray,
+            ArrayNode currentArray,
+            String defaultKeyField,
+            String removedKeyValue,
+            int removedIndex) {
+        String selectedIndexPath = firstNonBlank(text(reconciliation, "selectedIndexPath"), text(reconciliation, "activeIndexPath"));
+        String selectedIdPath = firstNonBlank(text(reconciliation, "selectedIdPath"), text(reconciliation, "activeIdPath"));
+        String itemKeyField = firstNonBlank(text(reconciliation, "itemKeyField"), defaultKeyField, "id");
+        String policy = firstNonBlank(text(reconciliation, "onRemovedActive"), "clamp");
+
+        String activeId = !selectedIdPath.isBlank()
+                ? resolvePath(proposedConfig, selectedIdPath).asText("")
+                : "";
+        if (activeId.isBlank() && !selectedIndexPath.isBlank()) {
+            int prevIdx = resolvePath(proposedConfig, selectedIndexPath).asInt(-1);
+            if (prevIdx >= 0 && prevIdx < previousArray.size()) {
+                activeId = text(previousArray.get(prevIdx), itemKeyField);
+            }
+        }
+
+        if (currentArray.isEmpty()) {
+            if (!selectedIndexPath.isBlank()) {
+                setDottedValue(proposedConfig, selectedIndexPath, objectMapper.getNodeFactory().numberNode(-1));
+            }
+            if (!selectedIdPath.isBlank()) {
+                setDottedValue(proposedConfig, selectedIdPath, objectMapper.getNodeFactory().textNode(""));
+            }
+            return;
+        }
+
+        if (!activeId.isBlank() && activeId.equals(removedKeyValue)) {
+            int nextIndex;
+            String nextId;
+            switch (policy) {
+                case "clear" -> {
+                    nextIndex = -1;
+                    nextId = "";
+                }
+                case "first" -> {
+                    nextIndex = 0;
+                    nextId = text(currentArray.get(0), itemKeyField);
+                }
+                default -> {
+                    nextIndex = Math.min(removedIndex, currentArray.size() - 1);
+                    nextId = text(currentArray.get(nextIndex), itemKeyField);
+                }
+            }
+            if (!selectedIndexPath.isBlank()) {
+                setDottedValue(proposedConfig, selectedIndexPath, objectMapper.getNodeFactory().numberNode(nextIndex));
+            }
+            if (!selectedIdPath.isBlank()) {
+                setDottedValue(proposedConfig, selectedIdPath, objectMapper.getNodeFactory().textNode(nextId));
+            }
+        } else if (!activeId.isBlank()) {
+            int newIdx = indexOfObjectByKey(currentArray, itemKeyField, activeId);
+            if (newIdx >= 0 && !selectedIndexPath.isBlank()) {
+                setDottedValue(proposedConfig, selectedIndexPath, objectMapper.getNodeFactory().numberNode(newIdx));
+            }
+        }
+    }
+
+    private void reconcileSelectionOnReorder(
+            ObjectNode proposedConfig,
+            JsonNode reconciliation,
+            ArrayNode previousArray,
+            ArrayNode currentArray,
+            String defaultKeyField) {
+        String selectedIndexPath = firstNonBlank(text(reconciliation, "selectedIndexPath"), text(reconciliation, "activeIndexPath"));
+        String selectedIdPath = firstNonBlank(text(reconciliation, "selectedIdPath"), text(reconciliation, "activeIdPath"));
+        String itemKeyField = firstNonBlank(text(reconciliation, "itemKeyField"), defaultKeyField, "id");
+
+        String activeId = !selectedIdPath.isBlank()
+                ? resolvePath(proposedConfig, selectedIdPath).asText("")
+                : "";
+        if (activeId.isBlank() && !selectedIndexPath.isBlank()) {
+            int prevIdx = resolvePath(proposedConfig, selectedIndexPath).asInt(-1);
+            if (prevIdx >= 0 && prevIdx < previousArray.size()) {
+                activeId = text(previousArray.get(prevIdx), itemKeyField);
+            }
+        }
+        if (activeId.isBlank()) {
+            return;
+        }
+        int newIdx = indexOfObjectByKey(currentArray, itemKeyField, activeId);
+        if (newIdx >= 0) {
+            if (!selectedIndexPath.isBlank()) {
+                setDottedValue(proposedConfig, selectedIndexPath, objectMapper.getNodeFactory().numberNode(newIdx));
+            }
+            if (!selectedIdPath.isBlank()) {
+                setDottedValue(proposedConfig, selectedIdPath, objectMapper.getNodeFactory().textNode(activeId));
+            }
+        }
+    }
+
+    private ArrayNode parentArrayForEffect(
+            ObjectNode proposedConfig,
+            String effectPath,
+            AgenticAuthoringResolvedTarget resolved) {
+        if (resolved != null && resolved.path() != null && resolved.path().matches(".*\\[]/\\d+$")) {
+            int lastArrayMarker = resolved.path().lastIndexOf("[]/");
+            if (lastArrayMarker > 0) {
+                JsonNode resolvedArrayNode = nodeAtResolvedPath(proposedConfig, resolved.path().substring(0, lastArrayMarker));
+                if (resolvedArrayNode instanceof ArrayNode resolvedArray) {
+                    return resolvedArray;
+                }
+            }
+        }
+        return arrayAt(proposedConfig, collectionPath(effectPath), false);
     }
 
     private void applyAppend(
@@ -6551,6 +6883,26 @@ public final class AgenticAuthoringEffectCompilerRegistry {
             ObjectNode proposedConfig,
             List<String> failures) {
         String path = text(effect, "path");
+        if (path.equals("$resolvedPath") || path.startsWith("$resolvedPath.")) {
+            if (resolved == null || resolved.path() == null || resolved.path().isBlank()) {
+                failures.add("append with $resolvedPath requires a resolved target");
+                return null;
+            }
+            JsonNode targetNode = nodeAtResolvedPath(proposedConfig, resolved.path());
+            if (path.equals("$resolvedPath") && targetNode instanceof ArrayNode resolvedArray) {
+                return resolvedArray;
+            }
+            if (!(targetNode instanceof ObjectNode targetObject)) {
+                failures.add("append resolved target is not an object: " + resolved.path());
+                return null;
+            }
+            String subTail = collectionPath(path.substring("$resolvedPath.".length()));
+            ArrayNode array = arrayAt(targetObject, subTail, true);
+            if (array == null) {
+                failures.add("append path is not an array: " + path);
+            }
+            return array;
+        }
         ObjectNode root = proposedConfig;
         String arrayPath = collectionPath(path);
         if (resolved != null && path.contains("[].")) {
@@ -6647,10 +6999,217 @@ public final class AgenticAuthoringEffectCompilerRegistry {
                 : type.replaceAll("[^A-Za-z0-9]+", "-").toLowerCase();
         for (int i = nodes.size() + 1; ; i++) {
             String candidate = normalizedType + "-" + i;
-            if (indexOfObjectByKey(nodes, "id", candidate) < 0) {
+            if (!hasRichContentNodeId(nodes, candidate)) {
                 return candidate;
             }
         }
+    }
+
+    private boolean hasRichContentNodeId(JsonNode nodesArray, String nodeId) {
+        if (nodesArray == null || !nodesArray.isArray() || nodeId == null || nodeId.isBlank()) {
+            return false;
+        }
+        for (JsonNode node : nodesArray) {
+            if (node == null || !node.isObject()) {
+                continue;
+            }
+            if (nodeId.equals(text(node, "id"))) {
+                return true;
+            }
+            for (String slot : List.of("content", "header", "body", "footer", "aside", "trailing")) {
+                if (hasRichContentNodeId(node.path(slot), nodeId)) {
+                    return true;
+                }
+            }
+            JsonNode items = node.path("items");
+            if (items.isArray()) {
+                if ("compose".equals(firstText(node, "type", "kind"))) {
+                    if (hasRichContentNodeId(items, nodeId)) {
+                        return true;
+                    }
+                } else {
+                    for (JsonNode subItem : items) {
+                        if (subItem != null && subItem.isObject() && hasRichContentNodeId(subItem.path("content"), nodeId)) {
+                            return true;
+                        }
+                    }
+                }
+            }
+        }
+        return false;
+    }
+
+    private record RichContentTargetContainer(
+            ArrayNode nodes,
+            String arrayPath,
+            String resolvedElementPrefix,
+            String slot) {
+    }
+
+    private RichContentTargetContainer resolveRichContentBlockAddContainer(
+            ObjectNode proposedConfig,
+            ArrayNode topLevelNodes,
+            String parentBlockId,
+            String requestedSlot,
+            String beforeBlockId,
+            String afterBlockId,
+            List<String> failures) {
+        if (!parentBlockId.isBlank()) {
+            String parentPath = findRichContentContainerPathById(topLevelNodes, "document.nodes", parentBlockId);
+            if (parentPath.isBlank()) {
+                failures.add("rich-content-block-add parent block not found: document.nodes[] id=" + parentBlockId);
+                return null;
+            }
+            JsonNode parentNode = nodeAtResolvedPath(proposedConfig, parentPath);
+            if (!(parentNode instanceof ObjectNode parentObject)) {
+                failures.add("rich-content-block-add parent block is not an object: " + parentPath);
+                return null;
+            }
+            String parentType = firstText(parentObject, "type", "kind");
+            String slot = requestedSlot;
+            if (slot.isBlank()) {
+                if ("compose".equals(parentType)) {
+                    slot = "items";
+                } else if ("mediaBlock".equals(parentType)) {
+                    slot = "trailing";
+                } else if ("card".equals(parentType) && parentObject.has("body") && !parentObject.has("content")) {
+                    slot = "body";
+                } else {
+                    slot = "content";
+                }
+            } else if (!Set.of("content", "header", "body", "footer", "aside", "items", "trailing").contains(slot)) {
+                failures.add("rich-content-block-add unsupported container slot: " + slot);
+                return null;
+            }
+            ArrayNode targetArray;
+            if (parentObject.path(slot) instanceof ArrayNode existingArray) {
+                targetArray = existingArray;
+            } else if (parentObject.path(slot).isMissingNode() || parentObject.path(slot).isNull()) {
+                targetArray = parentObject.putArray(slot);
+            } else {
+                failures.add("rich-content-block-add target slot is not an array: " + parentPath + "." + slot + "[]");
+                return null;
+            }
+            String prefix = parentPath + "." + slot + "[]";
+            return new RichContentTargetContainer(targetArray, prefix, prefix, slot);
+        }
+
+        String neighborId = !beforeBlockId.isBlank() ? beforeBlockId : afterBlockId;
+        if (!neighborId.isBlank() && indexOfObjectByKey(topLevelNodes, "id", neighborId) < 0) {
+            RichContentTargetContainer neighborContainer = findRichContentParentArrayByChildId(
+                    topLevelNodes,
+                    "document.nodes",
+                    neighborId);
+            if (neighborContainer != null) {
+                return neighborContainer;
+            }
+        }
+        return new RichContentTargetContainer(topLevelNodes, "document.nodes[]", "document.nodes[]", "");
+    }
+
+    private String findRichContentContainerPathById(JsonNode nodesArray, String arrayPath, String targetId) {
+        if (nodesArray == null || !nodesArray.isArray() || targetId.isBlank()) {
+            return "";
+        }
+        for (int index = 0; index < nodesArray.size(); index++) {
+            JsonNode node = nodesArray.get(index);
+            if (node == null || !node.isObject()) {
+                continue;
+            }
+            String nodePath = arrayPath + "[]/" + index;
+            if (targetId.equals(text(node, "id"))) {
+                return nodePath;
+            }
+            for (String slot : List.of("content", "header", "body", "footer", "aside", "trailing")) {
+                String found = findRichContentContainerPathById(node.path(slot), nodePath + "." + slot, targetId);
+                if (!found.isBlank()) {
+                    return found;
+                }
+            }
+            JsonNode items = node.path("items");
+            if (items.isArray()) {
+                if ("compose".equals(firstText(node, "type", "kind"))) {
+                    String found = findRichContentContainerPathById(items, nodePath + ".items", targetId);
+                    if (!found.isBlank()) {
+                        return found;
+                    }
+                } else {
+                    for (int itemIndex = 0; itemIndex < items.size(); itemIndex++) {
+                        JsonNode subItem = items.get(itemIndex);
+                        if (subItem == null || !subItem.isObject()) {
+                            continue;
+                        }
+                        String subItemPath = nodePath + ".items[]/" + itemIndex;
+                        if (targetId.equals(text(subItem, "id"))) {
+                            return subItemPath;
+                        }
+                        String found = findRichContentContainerPathById(
+                                subItem.path("content"),
+                                subItemPath + ".content",
+                                targetId);
+                        if (!found.isBlank()) {
+                            return found;
+                        }
+                    }
+                }
+            }
+        }
+        return "";
+    }
+
+    private RichContentTargetContainer findRichContentParentArrayByChildId(
+            JsonNode nodesArray,
+            String arrayPath,
+            String childId) {
+        if (!(nodesArray instanceof ArrayNode array) || childId.isBlank()) {
+            return null;
+        }
+        if (indexOfObjectByKey(array, "id", childId) >= 0) {
+            String prefix = arrayPath + "[]";
+            return new RichContentTargetContainer(array, prefix, prefix, "");
+        }
+        for (int index = 0; index < array.size(); index++) {
+            JsonNode node = array.get(index);
+            if (node == null || !node.isObject()) {
+                continue;
+            }
+            String nodePath = arrayPath + "[]/" + index;
+            for (String slot : List.of("content", "header", "body", "footer", "aside", "trailing")) {
+                RichContentTargetContainer found = findRichContentParentArrayByChildId(
+                        node.path(slot),
+                        nodePath + "." + slot,
+                        childId);
+                if (found != null) {
+                    return found;
+                }
+            }
+            JsonNode items = node.path("items");
+            if (items.isArray()) {
+                if ("compose".equals(firstText(node, "type", "kind"))) {
+                    RichContentTargetContainer found = findRichContentParentArrayByChildId(
+                            items,
+                            nodePath + ".items",
+                            childId);
+                    if (found != null) {
+                        return found;
+                    }
+                } else {
+                    for (int itemIndex = 0; itemIndex < items.size(); itemIndex++) {
+                        JsonNode subItem = items.get(itemIndex);
+                        if (subItem != null && subItem.isObject()) {
+                            RichContentTargetContainer found = findRichContentParentArrayByChildId(
+                                    subItem.path("content"),
+                                    nodePath + ".items[]/" + itemIndex + ".content",
+                                    childId);
+                            if (found != null) {
+                                return found;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        return null;
     }
 
     private String nextRichTimelineItemId(ArrayNode items) {
@@ -6731,7 +7290,7 @@ public final class AgenticAuthoringEffectCompilerRegistry {
                 : presetId.replaceAll("[^A-Za-z0-9]+", "-").replaceAll("(^-|-$)", "").toLowerCase();
         String candidateBase = normalized.isBlank() ? "preset" : normalized;
         String candidate = candidateBase;
-        for (int suffix = 2; indexOfObjectByKey(nodes, "id", candidate) >= 0; suffix++) {
+        for (int suffix = 2; hasRichContentNodeId(nodes, candidate); suffix++) {
             candidate = candidateBase + "-" + suffix;
         }
         return candidate;
@@ -6755,10 +7314,15 @@ public final class AgenticAuthoringEffectCompilerRegistry {
                 "iconExpr",
                 "badge",
                 "badgeExpr",
+                "badgeTone",
+                "itemLayout",
                 "markerColor",
                 "markerStyle",
                 "connectorColor",
-                "connectorVariant");
+                "connectorVariant",
+                "avatar",
+                "action",
+                "children");
     }
 
     private Set<String> timelineNodeFields() {
@@ -6769,11 +7333,18 @@ public final class AgenticAuthoringEffectCompilerRegistry {
                 "orientation",
                 "order",
                 "position",
+                "itemLayout",
                 "connectorVariant",
                 "connectorColor",
                 "markerVariant",
                 "markerColor",
-                "markerStyle");
+                "markerStyle",
+                "emphasis",
+                "density",
+                "textAppearance",
+                "initialLimit",
+                "itemsExpr",
+                "itemTemplate");
     }
 
     private boolean isTimelineNodeFieldValueValid(String field, JsonNode value) {
@@ -6781,19 +7352,29 @@ public final class AgenticAuthoringEffectCompilerRegistry {
             case "orientation" -> isTimelineEnum(value, Set.of("vertical", "horizontal"));
             case "order" -> isTimelineEnum(value, Set.of("normal", "reverse"));
             case "position" -> isTimelineEnum(value, Set.of("left", "right", "alternate", "alternate-reverse"));
+            case "itemLayout" -> isTimelineEnum(value, Set.of("stacked", "split"));
             case "connectorVariant" -> isTimelineEnum(value, Set.of("solid", "dashed", "none"));
             case "connectorColor", "markerColor" -> isTimelineEnum(value, timelineColorValues());
             case "markerVariant" -> isTimelineEnum(value, Set.of("dot", "icon", "number"));
-            case "markerStyle" -> isTimelineEnum(value, Set.of("filled", "outlined"));
+            case "markerStyle" -> isTimelineEnum(value, Set.of("filled", "outlined", "soft"));
+            case "emphasis" -> isTimelineEnum(value, Set.of("subtle", "standard", "strong", "hero"));
+            case "density" -> isTimelineEnum(value, Set.of("compact", "comfortable", "spacious"));
+            case "textAppearance" -> isTimelineEnum(value, Set.of("default", "prominent", "eyebrow", "label"));
+            case "initialLimit" -> value != null && value.isIntegralNumber() && value.asInt(-1) >= 1;
+            case "itemsExpr", "title", "titleExpr", "emptyText" -> value != null && value.isTextual();
+            case "itemTemplate" -> value != null && value.isObject() && !value.isEmpty();
             default -> true;
         };
     }
 
     private boolean isTimelineItemFieldValueValid(String field, JsonNode value) {
         return switch (field) {
+            case "itemLayout" -> isTimelineEnum(value, Set.of("stacked", "split"));
             case "connectorVariant" -> isTimelineEnum(value, Set.of("solid", "dashed", "none"));
-            case "connectorColor", "markerColor" -> isTimelineEnum(value, timelineColorValues());
-            case "markerStyle" -> isTimelineEnum(value, Set.of("filled", "outlined"));
+            case "connectorColor", "markerColor", "badgeTone" -> isTimelineEnum(value, timelineColorValues());
+            case "markerStyle" -> isTimelineEnum(value, Set.of("filled", "outlined", "soft"));
+            case "avatar", "action" -> value != null && value.isObject();
+            case "children" -> value != null && value.isArray();
             default -> true;
         };
     }
@@ -6803,7 +7384,7 @@ public final class AgenticAuthoringEffectCompilerRegistry {
     }
 
     private Set<String> timelineColorValues() {
-        return Set.of("primary", "secondary", "tertiary", "success", "warning", "error", "info", "neutral");
+        return Set.of("primary", "secondary", "tertiary", "success", "warning", "error", "danger", "info", "neutral");
     }
 
     private int resolveReorderIndex(

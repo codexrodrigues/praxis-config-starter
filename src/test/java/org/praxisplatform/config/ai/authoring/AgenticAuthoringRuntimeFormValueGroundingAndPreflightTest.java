@@ -24,6 +24,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Tag;
 import org.mockito.ArgumentCaptor;
 import org.praxisplatform.config.domain.AiThread;
 import org.praxisplatform.config.dto.AiOrchestratorRequest;
@@ -41,6 +42,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.web.server.ResponseStatusException;
 
+@Tag("unit")
 class AgenticAuthoringRuntimeFormValueGroundingAndPreflightTest {
 
     private final ObjectMapper objectMapper = new ObjectMapper();

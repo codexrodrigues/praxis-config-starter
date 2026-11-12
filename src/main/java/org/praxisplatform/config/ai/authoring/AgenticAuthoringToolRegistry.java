@@ -384,7 +384,7 @@ public class AgenticAuthoringToolRegistry {
     private static final class DomainDecisionInspectionToolExecutor implements AgenticAuthoringToolExecutor {
 
         private static final String SELECTION_SCHEMA = "praxis.ai.context-hints.domain-decision/v1";
-        private static final String SELECTION_SOURCE = "policy-studio-selection";
+        private static final Set<String> SELECTION_SOURCES = Set.of("rules-studio-selection", "policy-studio-selection");
 
         private static final AgenticAuthoringToolDefinition DEFINITION = new AgenticAuthoringToolDefinition(
                 INSPECT_DOMAIN_DECISION,
@@ -433,7 +433,7 @@ public class AgenticAuthoringToolRegistry {
                         "Domain decision explanation requires a server-resolved governed principal.");
             }
             if (!SELECTION_SCHEMA.equals(payload.path("schemaVersion").asText(""))
-                    || !SELECTION_SOURCE.equals(payload.path("source").asText(""))) {
+                    || !SELECTION_SOURCES.contains(payload.path("source").asText(""))) {
                 return AgenticAuthoringToolResult.failure(
                         call.name(),
                         "decision-ref-contract-invalid",

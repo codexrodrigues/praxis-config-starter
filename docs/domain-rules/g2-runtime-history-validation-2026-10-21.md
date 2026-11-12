@@ -21,7 +21,7 @@ Plan executed: factor that existing verification; separate historical detail fro
 execution admission; adopt published engine beta.16; project the state and actions through
 existing DTOs; reconcile rollout admission and caching; run focal tests and package.
 
-Consumers: authenticated immutable detail readers, version catalogs/Policy Studio, head
+Consumers: authenticated immutable detail readers, version catalogs/Rules Studio, head
 status, in-process active-head adapter and candidate rollout/preload. Public OpenAPI
 annotations and local snapshot/staged-readiness docs changed. External Core/Studio/host,
 HTTP corpus, public site and canonical skill updates remain coordinated downstream work.

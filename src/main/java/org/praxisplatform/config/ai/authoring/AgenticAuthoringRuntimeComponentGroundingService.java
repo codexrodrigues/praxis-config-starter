@@ -262,6 +262,26 @@ class AgenticAuthoringRuntimeComponentGroundingService {
                     groundedAffordances.set("visualMaterialization", groundedVisualMaterialization);
                 }
             }
+            JsonNode clientSurfaceCapabilities = affordances.path("clientSurfaceCapabilities");
+            if (clientSurfaceCapabilities.isObject()) {
+                ObjectNode groundedSurfaceCapabilities = objectMapper.createObjectNode();
+                copyText(clientSurfaceCapabilities, groundedSurfaceCapabilities, "surfaceProfile");
+                ArrayNode allowedNodeTypes = textArray(clientSurfaceCapabilities.path("allowedNodeTypes"), 64);
+                if (!allowedNodeTypes.isEmpty()) {
+                    groundedSurfaceCapabilities.set("allowedNodeTypes", allowedNodeTypes);
+                }
+                ArrayNode forbiddenNodeTypes = textArray(clientSurfaceCapabilities.path("forbiddenNodeTypes"), 64);
+                if (!forbiddenNodeTypes.isEmpty()) {
+                    groundedSurfaceCapabilities.set("forbiddenNodeTypes", forbiddenNodeTypes);
+                }
+                copyInt(clientSurfaceCapabilities, groundedSurfaceCapabilities, "maxDepth");
+                copyInt(clientSurfaceCapabilities, groundedSurfaceCapabilities, "maxNodes");
+                copyBoolean(clientSurfaceCapabilities, groundedSurfaceCapabilities, "forbidEmbeddedActions");
+                copyBoolean(clientSurfaceCapabilities, groundedSurfaceCapabilities, "forbidNestedQuickView");
+                if (!groundedSurfaceCapabilities.isEmpty()) {
+                    groundedAffordances.set("clientSurfaceCapabilities", groundedSurfaceCapabilities);
+                }
+            }
         }
         return component;
     }

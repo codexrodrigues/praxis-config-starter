@@ -152,6 +152,73 @@ class DomainKnowledgeChangeSetValidatorTest {
     }
 
     @Test
+    void acceptsCatalogV02FactStatsBindingAndRelationshipOperations() {
+        var factConceptPayload = (com.fasterxml.jackson.databind.node.ObjectNode) semanticConceptPayload();
+        factConceptPayload.put("nodeType", "fact");
+        factConceptPayload.put("label", "Tempo de Serviço (Anos)");
+        ((com.fasterxml.jackson.databind.node.ObjectNode) factConceptPayload.path("provenance"))
+                .put("claimId", "claim:hr:fact-tempo-servico:v1");
+
+        var factBindingPayload = (com.fasterxml.jackson.databind.node.ObjectNode) semanticConceptPayload();
+        factBindingPayload.put("bindingType", "resource_fact");
+        factBindingPayload.put("bindingKey", "binding:human-resources.funcionarios.fact.tempo-servico:resource-fact");
+        ((com.fasterxml.jackson.databind.node.ObjectNode) factBindingPayload.path("provenance"))
+                .put("claimId", "claim:hr:binding-tempo-servico:v1");
+
+        var providesFactPayload = (com.fasterxml.jackson.databind.node.ObjectNode) semanticConceptPayload();
+        providesFactPayload.put("relationshipKey", "rel:human-resources.funcionarios:provides_fact:tempo-servico");
+        providesFactPayload.put("relationshipType", "provides_fact");
+        providesFactPayload.put("targetConceptKey", "human-resources.funcionarios.fact.tempo-servico");
+        ((com.fasterxml.jackson.databind.node.ObjectNode) providesFactPayload.path("provenance"))
+                .put("claimId", "claim:hr:rel-provides-fact:v1");
+
+        var hasStatsPayload = (com.fasterxml.jackson.databind.node.ObjectNode) semanticConceptPayload();
+        hasStatsPayload.put("relationshipKey", "rel:human-resources.funcionarios:has_stats:group-by");
+        hasStatsPayload.put("relationshipType", "has_stats");
+        hasStatsPayload.put("targetConceptKey", "human-resources.funcionarios.stats.group-by");
+        ((com.fasterxml.jackson.databind.node.ObjectNode) hasStatsPayload.path("provenance"))
+                .put("claimId", "claim:hr:rel-has-stats:v1");
+
+        var request = new DomainKnowledgeChangeSetCreateRequest(
+                "project-knowledge:hr:catalog-v02-primitives:v1",
+                "proposed",
+                "llm",
+                "openai:gpt-5.6-mini",
+                "Curate catalog v0.2 fact and stats primitives",
+                "Ensure fact nodes, resource_fact bindings, provides_fact and has_stats relationships pass validation.",
+                List.of(
+                        operation(
+                                "op-create-fact-node",
+                                "create_concept",
+                                conceptTarget("human-resources.funcionarios.fact.tempo-servico"),
+                                factConceptPayload),
+                        operation(
+                                "op-approve-fact-binding",
+                                "approve_binding",
+                                conceptTarget("human-resources.funcionarios.fact.tempo-servico"),
+                                factBindingPayload),
+                        operation(
+                                "op-add-provides-fact",
+                                "add_relationship",
+                                relationshipTarget(
+                                        "human-resources.funcionarios",
+                                        "human-resources.funcionarios.fact.tempo-servico"),
+                                providesFactPayload),
+                        operation(
+                                "op-add-has-stats",
+                                "add_relationship",
+                                relationshipTarget(
+                                        "human-resources.funcionarios",
+                                        "human-resources.funcionarios.stats.group-by"),
+                                hasStatsPayload)));
+
+        var report = validator.validateCreateRequest(TENANT, ENVIRONMENT, request);
+
+        assertThat(report.valid()).isTrue();
+        assertThat(report.issues()).isEmpty();
+    }
+
+    @Test
     void rejectsLlmSemanticClaimWithoutInferenceProvenance() {
         JsonNode payload = semanticConceptPayload();
         ((com.fasterxml.jackson.databind.node.ObjectNode) payload.path("provenance"))
@@ -440,6 +507,14 @@ class DomainKnowledgeChangeSetValidatorTest {
                 .put("tenantId", TENANT)
                 .put("environment", ENVIRONMENT)
                 .put("conceptKey", conceptKey);
+    }
+
+    private JsonNode relationshipTarget(String sourceConceptKey, String targetConceptKey) {
+        return objectMapper.createObjectNode()
+                .put("tenantId", TENANT)
+                .put("environment", ENVIRONMENT)
+                .put("sourceConceptKey", sourceConceptKey)
+                .put("targetConceptKey", targetConceptKey);
     }
 
     private JsonNode semanticConceptPayload() {

@@ -12,3 +12,4 @@ org.praxisplatform.config.autoconfig.AgenticAuthoringAutoConfiguration
 org.praxisplatform.config.autoconfig.AiRegistryBootstrapAutoConfiguration
 org.praxisplatform.config.autoconfig.AiRegistryHealthAutoConfiguration
 org.praxisplatform.config.autoconfig.OperationalPolicyAutoConfiguration
+org.praxisplatform.config.autoconfig.GovernedRulesStudioAutoConfiguration

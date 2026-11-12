@@ -59,6 +59,50 @@ class DomainRuleSnapshotAutoConfigurationTest {
           () -> mock(DomainRuleHostStatusRepository.class));
 
   @Test
+  void exposesConsistentSetReaderOnlyWithTheConfigJdbcBoundary() {
+    contextRunner.withBean("configNamedParameterJdbcTemplate",
+        org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate.class,
+        () -> mock(org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate.class))
+        .run(context -> {
+          assertThat(context).hasNotFailed();
+          assertThat(context).hasSingleBean(org.praxisplatform.config.contract.PublishedRuleSnapshotHeadSetReader.class);
+          assertThat(context).hasSingleBean(org.praxisplatform.config.controller.DomainRuleSnapshotHeadSetController.class);
+        });
+  }
+
+  @Test
+  void hostImplementationOwnerMayConsumeHeadSetReaderWithoutCreationCycle() {
+    var jdbc = mock(org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate.class);
+    contextRunner.withBean("configNamedParameterJdbcTemplate",
+        org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate.class, () -> jdbc)
+        .withUserConfiguration(HeadAwareCatalogHost.class)
+        .run(context -> {
+          assertThat(context).hasNotFailed();
+          var reader = context.getBean(org.praxisplatform.config.contract.PublishedRuleSnapshotHeadSetReader.class);
+          assertThat(context.getBean(HeadAwareCatalogOwner.class).reader()).isSameAs(reader);
+          assertThat(context.getBean(DomainRuleImplementationCatalog.class)
+              .allowedImplementations(new DomainRuleImplementationScope("tenant-a", "test", "host"))).isEmpty();
+          org.mockito.Mockito.verifyNoInteractions(jdbc);
+        });
+  }
+
+  record HeadAwareCatalogOwner(org.praxisplatform.config.contract.PublishedRuleSnapshotHeadSetReader reader) { }
+
+  @org.springframework.context.annotation.Configuration(proxyBeanMethods = false)
+  static class HeadAwareCatalogHost {
+    @org.springframework.context.annotation.Bean
+    HeadAwareCatalogOwner headAwareCatalogOwner(
+        org.praxisplatform.config.contract.PublishedRuleSnapshotHeadSetReader reader) {
+      return new HeadAwareCatalogOwner(reader);
+    }
+    @org.springframework.context.annotation.Bean
+    DomainRuleImplementationCatalog headAwareCatalog(HeadAwareCatalogOwner owner) {
+      java.util.Objects.requireNonNull(owner.reader());
+      return scope -> java.util.List.of();
+    }
+  }
+
+  @Test
   void exposesPublicReaderAndHttpControllerWhenPersistenceBoundaryExists() {
     contextRunner.run(context -> {
       assertThat(context).hasSingleBean(PublishedRuleSnapshotHeadReader.class);

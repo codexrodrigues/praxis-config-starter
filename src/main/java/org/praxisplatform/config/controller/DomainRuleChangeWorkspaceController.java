@@ -34,7 +34,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
 
-/** Governed authoring workspaces and reusable outcome scenarios for Policy Studio. */
+/** Governed authoring workspaces and reusable outcome scenarios for Rules Studio. */
 @RestController("configDomainRuleChangeWorkspaceController")
 @RequestMapping(DomainRuleChangeWorkspaceContract.RESOURCE_PATH)
 @RequiredArgsConstructor

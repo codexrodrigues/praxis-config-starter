@@ -50,7 +50,7 @@ owner; auto-configuration supplies canonical infrastructure and a fail-closed mi
 ## Impact and derived artifacts
 
 Canonical owner is Config Starter. Consumers include Contracts composition receipts,
-Quickstart composition/runtime/probe callers, Core API types and Policy Studio. Root
+Quickstart composition/runtime/probe callers, Core API types and Rules Studio. Root
 coordinates those downstream changes and public documentation/corpus adoption. Local
 README, snapshot control plane, staged readiness and execution-observation docs plus
 controller/DTO OpenAPI annotations were updated. The versioned AI OpenAPI YAML does not

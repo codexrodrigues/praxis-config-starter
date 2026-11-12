@@ -9,6 +9,7 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashSet;
@@ -420,7 +421,7 @@ public class DomainRuleService {
         if ("approved".equals(status) || "active".equals(status)) {
             definition.setApprovedBy(principal.actorRef());
         }
-        Instant now = Instant.now();
+        Instant now = Instant.now().truncatedTo(ChronoUnit.MICROS);
         if ("approved".equals(status) && definition.getApprovedAt() == null) {
             definition.setApprovedAt(now);
         }

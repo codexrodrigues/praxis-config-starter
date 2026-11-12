@@ -101,4 +101,72 @@ class UiLayoutPageRevisionReproductionTest {
       """));
     assertThrows(UiLayoutLifecycleException.class, () -> reproduce(orphan, orphan));
   }
+
+  @Test void admitsAllSixCorporateDeclarativeWidgetsReproducesEditsAndProtectsResourceBindings() throws Exception {
+    ObjectNode dashboard = (ObjectNode) JSON.readTree("""
+      {"kind":"praxis.dynamic-page.editor","version":1,"config":{"definition":{"widgets":[
+        {"key":"10000000-0000-4000-8000-000000000001","definition":{"id":"praxis-chart","inputs":{
+          "chartDocument":{"version":1,"series":[{"name":"Servidores"}]},
+          "resourceKey":"administracao-pessoal.tabelas-vencimento",
+          "projectionKey":"por-regime",
+          "queryContext":null}}},
+        {"key":"10000000-0000-4000-8000-000000000002","definition":{"id":"praxis-list","inputs":{
+          "config":{"layout":"card","titleField":"nome"},
+          "resourcePath":"/api/ergon/processos-progressao"}}},
+        {"key":"10000000-0000-4000-8000-000000000003","definition":{"id":"praxis-rich-content","inputs":{
+          "document":{"version":1,"blocks":[{"type":"heading","text":"Resumo Executivo"}]},
+          "presetId":"executive-banner"}}},
+        {"key":"10000000-0000-4000-8000-000000000004","definition":{"id":"praxis-tabs","inputs":{
+          "tabs":[{"label":"Visão Geral"},{"label":"Auditoria"}],
+          "selectedIndex":0,
+          "mode":"group"}}},
+        {"key":"10000000-0000-4000-8000-000000000005","definition":{"id":"praxis-stepper","inputs":{
+          "steps":[{"label":"Apuração"},{"label":"Homologação"}],
+          "linear":true,
+          "orientation":"horizontal"}}},
+        {"key":"10000000-0000-4000-8000-000000000006","definition":{"id":"praxis-expansion","inputs":{
+          "panels":[{"title":"Fundamentação Legal"}],
+          "multi":true}}}
+      ],"layout":{"orientation":"columns","columns":12,"gap":"16px"}},
+      "presentation":{"title":"Painel Executivo de Carreiras","icon":"analytics"},"navigation":[]}}
+      """);
+
+    var children = UiLayoutPageRevisionReproduction.children(dashboard);
+    assertEquals(6, children.size());
+    assertEquals("praxis.chart.editor", children.get("10000000-0000-4000-8000-000000000001").path("kind").asText());
+    assertEquals("praxis.list.editor", children.get("10000000-0000-4000-8000-000000000002").path("kind").asText());
+    assertEquals("praxis.rich-content.editor", children.get("10000000-0000-4000-8000-000000000003").path("kind").asText());
+    assertEquals("praxis.tabs.editor", children.get("10000000-0000-4000-8000-000000000004").path("kind").asText());
+    assertEquals("praxis.stepper.editor", children.get("10000000-0000-4000-8000-000000000005").path("kind").asText());
+    assertEquals("praxis.expansion.editor", children.get("10000000-0000-4000-8000-000000000006").path("kind").asText());
+
+    // Valid editorial mutations across chartDocument, list config, rich-content document, tabs, stepper, expansion
+    var edited = dashboard.deepCopy();
+    ((ObjectNode) input(edited, 0).get("chartDocument")).put("title", "Distribuição por Regime");
+    ((ObjectNode) input(edited, 1).get("config")).put("layout", "tile");
+    ((ObjectNode) input(edited, 2).get("document")).put("subtitle", "Exercício 2026");
+    input(edited, 3).put("selectedIndex", 1);
+    input(edited, 4).put("orientation", "vertical");
+    input(edited, 5).put("multi", false);
+    reproduce(dashboard, edited);
+
+    // Changing resourceKey, projectionKey, resourcePath or presetId on an existing widget key violates envelope immutability
+    var retargetedChart = dashboard.deepCopy();
+    input(retargetedChart, 0).put("resourceKey", "administracao-pessoal.outro-recurso");
+    assertThrows(UiLayoutLifecycleException.class, () -> reproduce(dashboard, retargetedChart));
+
+    var retargetedList = dashboard.deepCopy();
+    input(retargetedList, 1).put("resourcePath", "/api/ergon/outro");
+    assertThrows(UiLayoutLifecycleException.class, () -> reproduce(dashboard, retargetedList));
+
+    var retargetedRich = dashboard.deepCopy();
+    input(retargetedRich, 2).put("presetId", "other-preset");
+    assertThrows(UiLayoutLifecycleException.class, () -> reproduce(dashboard, retargetedRich));
+
+    // PageCopyTransformation allocates fresh UUIDs cleanly across all 6 declarative widgets
+    var copied = new PageCopyTransformation(new CanonicalJsonHashService(JSON))
+        .allocate(dashboard, java.util.UUID.fromString(PAGE.componentId()), java.util.UUID.randomUUID(), "Cópia do Painel");
+    assertEquals(6, copied.identityMap().size());
+    reproduce(copied.document(), copied.document());
+  }
 }

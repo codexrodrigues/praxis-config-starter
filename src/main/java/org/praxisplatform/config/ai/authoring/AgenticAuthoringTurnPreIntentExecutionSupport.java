@@ -67,7 +67,7 @@ final class AgenticAuthoringTurnPreIntentExecutionSupport {
             selected.put("definitionId", candidate.definitionId().toString());
             selected.put("ruleKey", candidate.ruleKey());
             selected.put("version", candidate.version());
-            selected.put("source", "policy-studio-selection");
+            selected.put("source", "rules-studio-selection");
             String locale = responseLocale(request);
             if (StringUtils.hasText(locale)) {
                 contextHints.put("responseLocale", locale);

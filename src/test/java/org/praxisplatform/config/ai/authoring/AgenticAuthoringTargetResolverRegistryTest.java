@@ -343,6 +343,90 @@ class AgenticAuthoringTargetResolverRegistryTest {
     }
 
     @Test
+    void shouldResolveNestedRichContentNodesAndTimelineItemsAcrossContainerSlots() throws Exception {
+        JsonNode nestedConfig = objectMapper.readTree("""
+                {
+                  "document": {
+                    "nodes": [
+                      {
+                        "id": "profile-card",
+                        "type": "card",
+                        "header": [
+                          {
+                            "id": "header-media",
+                            "type": "mediaBlock",
+                            "title": "Avatar",
+                            "trailing": [
+                              { "id": "profile-link", "type": "link", "label": "Profile", "href": "/profile" }
+                            ]
+                          }
+                        ],
+                        "body": [
+                          {
+                            "id": "main-tabs",
+                            "type": "tabs",
+                            "items": [
+                              {
+                                "id": "overview-tab",
+                                "label": "Overview",
+                                "content": [
+                                  {
+                                    "id": "hero-compose",
+                                    "type": "compose",
+                                    "items": [
+                                      { "id": "welcome-text", "type": "text", "text": "Welcome" },
+                                      {
+                                        "id": "nested-history",
+                                        "type": "timeline",
+                                        "items": [
+                                          { "id": "step-1", "title": "Started" },
+                                          { "id": "step-2", "title": "Completed" }
+                                        ]
+                                      }
+                                    ]
+                                  }
+                                ]
+                              }
+                            ]
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                }
+                """);
+
+        AgenticAuthoringResolvedTarget textTarget = registry.resolve(
+                "praxis-rich-content",
+                operation("text.update", "text", "rich-text-node-by-id-or-path", "fail", true),
+                objectMapper.readTree("\"welcome-text\""),
+                nestedConfig);
+        assertThat(textTarget.status()).isEqualTo("resolved");
+        assertThat(textTarget.path()).isEqualTo("document.nodes[]/0.body[]/0.items[]/0.content[]/0.items[]/0");
+
+        AgenticAuthoringResolvedTarget linkTarget = registry.resolve(
+                "praxis-rich-content",
+                operation("link.remove", "link", "rich-link-node-by-id-or-path", "fail", true),
+                objectMapper.readTree("\"profile-link\""),
+                nestedConfig);
+        assertThat(linkTarget.status()).isEqualTo("resolved");
+        assertThat(linkTarget.path()).isEqualTo("document.nodes[]/0.header[]/0.trailing[]/0");
+
+        AgenticAuthoringResolvedTarget timelineItemTarget = registry.resolve(
+                "praxis-rich-content",
+                operation("timeline.item.update", "timelineItem", "rich-timeline-item-by-block-id-and-item-id", "fail", true),
+                objectMapper.readTree("""
+                        {
+                          "timelineBlockId": "nested-history",
+                          "itemId": "step-2"
+                        }
+                        """),
+                nestedConfig);
+        assertThat(timelineItemTarget.status()).isEqualTo("resolved");
+        assertThat(timelineItemTarget.path()).isEqualTo("document.nodes[]/0.body[]/0.items[]/0.content[]/0.items[]/1.items[]/1");
+    }
+
+    @Test
     void shouldResolveTableConditionalRendererById() throws Exception {
         AgenticAuthoringResolvedTarget result = registry.resolve(
                 "praxis-table",
@@ -823,6 +907,318 @@ class AgenticAuthoringTargetResolverRegistryTest {
         assertThat(state.path()).isEqualTo("state.page.filters.status");
         assertThat(child.status()).isEqualTo("resolved");
         assertThat(child.path()).isEqualTo("widgets[]/0.definition.inputs");
+    }
+
+    @Test
+    void shouldResolveDeclarativeResolutionSpecStrategiesWithoutHardcodedResolverSwitch() throws Exception {
+        JsonNode config = objectMapper.readTree("""
+                {
+                  "display": { "density": "compact" },
+                  "panels": [
+                    { "id": "general", "title": "General Settings" },
+                    { "id": "security", "title": "Security Policy" }
+                  ],
+                  "document": {
+                    "nodes": [
+                      {
+                        "id": "outer-card",
+                        "type": "card",
+                        "body": [
+                          { "id": "inner-link", "type": "link", "label": "Terms" },
+                          {
+                            "id": "audit-timeline",
+                            "type": "timeline",
+                            "items": [
+                              { "id": "evt-1", "title": "Created" },
+                              { "id": "evt-2", "title": "Approved" }
+                            ]
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                }
+                """);
+
+        JsonNode rootPathOperation = objectMapper.readTree("""
+                {
+                  "operationId": "display.configure",
+                  "target": {
+                    "kind": "display",
+                    "resolver": "custom-declarative-root-resolver",
+                    "ambiguityPolicy": "fail",
+                    "required": true,
+                    "resolutionSpec": {
+                      "strategy": "root-path",
+                      "paths": ["display"]
+                    }
+                  }
+                }
+                """);
+        AgenticAuthoringResolvedTarget rootResolved = registry.resolve(
+                "custom-component",
+                rootPathOperation,
+                objectMapper.readTree("\"display\""),
+                config);
+        assertThat(rootResolved.status()).isEqualTo("resolved");
+        assertThat(rootResolved.path()).isEqualTo("display");
+        assertThat(rootResolved.value().path("density").asText()).isEqualTo("compact");
+
+        JsonNode arrayMatchOperation = objectMapper.readTree("""
+                {
+                  "operationId": "panel.update",
+                  "target": {
+                    "kind": "panel",
+                    "resolver": "custom-declarative-array-resolver",
+                    "ambiguityPolicy": "fail",
+                    "required": true,
+                    "resolutionSpec": {
+                      "strategy": "array-match",
+                      "paths": ["panels[]"],
+                      "matchFields": ["id", "title"]
+                    }
+                  }
+                }
+                """);
+        AgenticAuthoringResolvedTarget arrayResolved = registry.resolve(
+                "custom-component",
+                arrayMatchOperation,
+                objectMapper.readTree("\"Security Policy\""),
+                config);
+        assertThat(arrayResolved.status()).isEqualTo("resolved");
+        assertThat(arrayResolved.path()).isEqualTo("panels[]/1");
+        assertThat(arrayResolved.value().path("id").asText()).isEqualTo("security");
+
+        JsonNode recursiveMatchOperation = objectMapper.readTree("""
+                {
+                  "operationId": "link.update",
+                  "target": {
+                    "kind": "link",
+                    "resolver": "custom-declarative-recursive-resolver",
+                    "ambiguityPolicy": "fail",
+                    "required": true,
+                    "resolutionSpec": {
+                      "strategy": "recursive-array-match",
+                      "paths": ["document.nodes[]"],
+                      "matchFields": ["id"],
+                      "childrenFields": ["body", "items"],
+                      "allowedTypes": ["link"]
+                    }
+                  }
+                }
+                """);
+        AgenticAuthoringResolvedTarget recursiveResolved = registry.resolve(
+                "custom-component",
+                recursiveMatchOperation,
+                objectMapper.readTree("\"inner-link\""),
+                config);
+        assertThat(recursiveResolved.status()).isEqualTo("resolved");
+        assertThat(recursiveResolved.path()).isEqualTo("document.nodes[]/0.body[]/0");
+        assertThat(recursiveResolved.value().path("type").asText()).isEqualTo("link");
+
+        JsonNode parentChildOperation = objectMapper.readTree("""
+                {
+                  "operationId": "timeline.item.update",
+                  "target": {
+                    "kind": "timelineItem",
+                    "resolver": "custom-declarative-parent-child-resolver",
+                    "ambiguityPolicy": "fail",
+                    "required": true,
+                    "resolutionSpec": {
+                      "strategy": "parent-child-array-match",
+                      "paths": ["document.nodes[]"],
+                      "parentInputMatchFields": ["timelineBlockId"],
+                      "matchFields": ["id"],
+                      "childArrayField": "items",
+                      "inputMatchFields": ["itemId", "id"],
+                      "childrenFields": ["body", "items"]
+                    }
+                  }
+                }
+                """);
+        AgenticAuthoringResolvedTarget parentChildResolved = registry.resolve(
+                "custom-component",
+                parentChildOperation,
+                objectMapper.readTree("""
+                        {
+                          "timelineBlockId": "audit-timeline",
+                          "itemId": "evt-2"
+                        }
+                        """),
+                config);
+        assertThat(parentChildResolved.status()).isEqualTo("resolved");
+        assertThat(parentChildResolved.path()).isEqualTo("document.nodes[]/0.body[]/1.items[]/1");
+        assertThat(parentChildResolved.value().path("title").asText()).isEqualTo("Approved");
+
+        JsonNode multiPathTabsConfig = objectMapper.readTree("""
+                {
+                  "tabs": [
+                    { "id": "general", "textLabel": "General" }
+                  ],
+                  "nav": {
+                    "links": [
+                      { "id": "audit-link", "label": "Audit Log" }
+                    ]
+                  }
+                }
+                """);
+        JsonNode multiPathArrayOperation = objectMapper.readTree("""
+                {
+                  "operationId": "tab.label.set",
+                  "target": {
+                    "kind": "tabLabel",
+                    "resolver": "custom-multi-path-array-resolver",
+                    "ambiguityPolicy": "fail",
+                    "required": true,
+                    "resolutionSpec": {
+                      "strategy": "array-match",
+                      "paths": ["tabs[]", "nav.links[]"],
+                      "matchFields": ["id", "textLabel", "label"],
+                      "inputMatchFields": ["tabId", "id", "label"],
+                      "allowIndex": true
+                    }
+                  }
+                }
+                """);
+        AgenticAuthoringResolvedTarget navLinkResolved = registry.resolve(
+                "custom-component",
+                multiPathArrayOperation,
+                objectMapper.readTree("\"Audit Log\""),
+                multiPathTabsConfig);
+        assertThat(navLinkResolved.status()).isEqualTo("resolved");
+        assertThat(navLinkResolved.path()).isEqualTo("nav.links[]/0");
+        assertThat(navLinkResolved.value().path("id").asText()).isEqualTo("audit-link");
+
+        JsonNode strictNoIndexOperation = objectMapper.readTree("""
+                {
+                  "operationId": "item.action.update",
+                  "target": {
+                    "kind": "itemAction",
+                    "resolver": "custom-strict-no-index-resolver",
+                    "ambiguityPolicy": "fail",
+                    "required": true,
+                    "resolutionSpec": {
+                      "strategy": "array-match",
+                      "paths": ["nav.links[]"],
+                      "matchFields": ["id", "label"],
+                      "inputMatchFields": ["id"],
+                      "allowIndex": false
+                    }
+                  }
+                }
+                """);
+        AgenticAuthoringResolvedTarget numericRejected = registry.resolve(
+                "custom-component",
+                strictNoIndexOperation,
+                objectMapper.readTree("\"0\""),
+                multiPathTabsConfig);
+        assertThat(numericRejected.status()).isEqualTo("not-found");
+
+        JsonNode strictNoIndexParentChildOperation = objectMapper.readTree("""
+                {
+                  "operationId": "timeline.item.update",
+                  "target": {
+                    "kind": "timelineItem",
+                    "resolver": "custom-declarative-parent-child-resolver",
+                    "ambiguityPolicy": "fail",
+                    "required": true,
+                    "resolutionSpec": {
+                      "strategy": "parent-child-array-match",
+                      "paths": ["document.nodes[]"],
+                      "parentInputMatchFields": ["timelineBlockId"],
+                      "matchFields": ["id"],
+                      "childArrayField": "items",
+                      "inputMatchFields": ["itemId", "id"],
+                      "childrenFields": ["body", "items"],
+                      "allowIndex": false
+                    }
+                  }
+                }
+                """);
+        AgenticAuthoringResolvedTarget parentChildNumericRejected = registry.resolve(
+                "custom-component",
+                strictNoIndexParentChildOperation,
+                objectMapper.readTree("""
+                        {
+                          "timelineBlockId": "audit-timeline",
+                          "itemId": "0"
+                        }
+                        """),
+                config);
+        assertThat(parentChildNumericRejected.status()).isEqualTo("not-found");
+
+        JsonNode strictNoIndexNamedTabOperation = objectMapper.readTree("""
+                {
+                  "operationId": "tab.active.set",
+                  "target": {
+                    "kind": "activeTab",
+                    "resolver": "tab-index-or-id",
+                    "ambiguityPolicy": "fail",
+                    "required": true,
+                    "resolutionSpec": {
+                      "strategy": "array-match",
+                      "paths": ["tabs[]", "nav.links[]"],
+                      "matchFields": ["id", "textLabel", "label"],
+                      "inputMatchFields": ["tabId", "id"],
+                      "allowIndex": false
+                    }
+                  }
+                }
+                """);
+        AgenticAuthoringResolvedTarget namedTabIndexRejected = registry.resolve(
+                "praxis-tabs",
+                strictNoIndexNamedTabOperation,
+                objectMapper.readTree("0"),
+                multiPathTabsConfig);
+        assertThat(namedTabIndexRejected.status()).isEqualTo("not-found");
+
+        JsonNode declarativeOptionalRootOperation = objectMapper.readTree("""
+                {
+                  "operationId": "custom.root.optional",
+                  "target": {
+                    "kind": "customRoot",
+                    "resolver": "custom-declarative-root-resolver",
+                    "ambiguityPolicy": "fail",
+                    "required": false,
+                    "resolutionSpec": {
+                      "strategy": "root-path",
+                      "paths": ["$"],
+                      "allowIndex": false
+                    }
+                  }
+                }
+                """);
+        AgenticAuthoringResolvedTarget optionalRootResolved = registry.resolve(
+                "custom-component",
+                declarativeOptionalRootOperation,
+                objectMapper.readTree("\"non-empty-target\""),
+                multiPathTabsConfig);
+        assertThat(optionalRootResolved.status()).isEqualTo("not-required");
+        assertThat(optionalRootResolved.resolver()).isEqualTo("custom-declarative-root-resolver");
+
+        JsonNode declarativeRequiredRootOperation = objectMapper.readTree("""
+                {
+                  "operationId": "custom.root.required",
+                  "target": {
+                    "kind": "customRoot",
+                    "resolver": "custom-declarative-root-resolver",
+                    "ambiguityPolicy": "fail",
+                    "required": true,
+                    "resolutionSpec": {
+                      "strategy": "root-path",
+                      "paths": ["$"],
+                      "allowIndex": false
+                    }
+                  }
+                }
+                """);
+        AgenticAuthoringResolvedTarget requiredRootResolved = registry.resolve(
+                "custom-component",
+                declarativeRequiredRootOperation,
+                objectMapper.createObjectNode(),
+                multiPathTabsConfig);
+        assertThat(requiredRootResolved.status()).isEqualTo("resolved");
+        assertThat(requiredRootResolved.path()).isEqualTo("$");
     }
 
     private JsonNode operation(

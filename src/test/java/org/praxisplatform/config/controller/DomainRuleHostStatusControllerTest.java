@@ -30,9 +30,7 @@ class DomainRuleHostStatusControllerTest {
     Instant now = Instant.parse("2026-08-13T12:00:00Z");
     var servletRequest = new MockHttpServletRequest();
     var principal = new DomainRuleGovernancePrincipal("tenant-server", "service:host-a", "prod");
-    var request = new DomainRuleHostStatusRequest(
-        "benefit.eligibility", "snap-2", "A".repeat(64), 7L, true, "quickstart/1.0",
-        "1.4", "praxis-json-logic/1.0", "B".repeat(64), "C".repeat(64), null, now);
+    var request = new DomainRuleHostStatusRequest("benefit.eligibility", "evaluate", "snap-2", "A".repeat(64), 7L, true, "quickstart/1.0", "1.4", "praxis-json-logic/1.0", "B".repeat(64), "C".repeat(64), null, now);
     var result = new DomainRuleHostStatusIngestionResponse(true, now);
     when(resolver.resolve(servletRequest, "tenant-caller", "test", "RULE_EXECUTION_OBSERVER"))
         .thenReturn(principal);
@@ -50,19 +48,15 @@ class DomainRuleHostStatusControllerTest {
     Instant now = Instant.parse("2026-08-13T12:00:00Z");
     var servletRequest = new MockHttpServletRequest();
     var principal = new DomainRuleGovernancePrincipal("tenant-server", "auditor-a", "prod");
-    var result = new DomainRuleHostStatusSummaryResponse(
-        "benefit.eligibility", "snap-2", "A".repeat(64), 7L,
-        "quickstart/1.0", "1.4", "praxis-json-logic/1.0", "B".repeat(64), "C".repeat(64),
-        3, 1, 1, 1, 0, 0, now, now.minusSeconds(120));
+    var result = new DomainRuleHostStatusSummaryResponse("benefit.eligibility", "evaluate", "snap-2", "A".repeat(64), 7L, "quickstart/1.0", "1.4", "praxis-json-logic/1.0", "B".repeat(64), "C".repeat(64), 3, 1, 1, 1, 0, 0, now, now.minusSeconds(120));
     when(resolver.resolve(servletRequest, "tenant-caller", "test", "RULE_SNAPSHOT_READER"))
         .thenReturn(principal);
-    when(service.summarizeHead("benefit.eligibility", principal)).thenReturn(result);
+    when(service.summarizeHead("benefit.eligibility", "evaluate", principal)).thenReturn(result);
 
-    var response = controller.summarizeHead(
-        "benefit.eligibility", "tenant-caller", "test", servletRequest);
+    var response = controller.summarizeHead("benefit.eligibility", "evaluate", "tenant-caller", "test", servletRequest);
 
     assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
     assertThat(response.getBody()).isSameAs(result);
-    verify(service).summarizeHead("benefit.eligibility", principal);
+    verify(service).summarizeHead("benefit.eligibility", "evaluate", principal);
   }
 }

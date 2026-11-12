@@ -177,7 +177,10 @@ final class UiLayoutPageChildCaptures {
         seed.sourceRef(), seed.authoring(), hashes.sha256Exact(seed.document()));
   }
   private UiLayoutTarget childTarget(UiLayoutPageChildSeed seed) {
-    return new UiLayoutTarget("praxis.table.editor".equals(seed.authoring().documentType()) ? "praxis-table" : "praxis-dynamic-form", seed.request().widgetKey());
+    return new UiLayoutTarget(
+        UiLayoutDeclarativeWidgetRevisionReproduction.resolveComponentTypeForDocumentType(
+            seed.authoring().documentType()),
+        seed.request().widgetKey());
   }
   private UiLayoutPageChildSeed seed(UiLayoutPageChildEvidence entry, UiLayoutMetadataCapture capture) {
     return new UiLayoutPageChildSeed(entry.request(), capture.binding().authoring(), entry.patch(), capture.binding().baselineSourceRef(), capture.baselineDocument(),

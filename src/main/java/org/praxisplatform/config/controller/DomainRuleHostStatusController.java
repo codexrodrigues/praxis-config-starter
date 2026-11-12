@@ -42,11 +42,13 @@ public class DomainRuleHostStatusController {
   @GetMapping("/head/host-status-summary")
   public ResponseEntity<DomainRuleHostStatusSummaryResponse> summarizeHead(
       @RequestParam String ruleSetKey,
+      @io.swagger.v3.oas.annotations.Parameter(description = "Exact operation identity; other operations of the family have independent heads and histories.", required = true)
+      @RequestParam String operationKey,
       @RequestHeader(value = "X-Tenant-ID", required = false) String tenantId,
       @RequestHeader(value = "X-Env", required = false) String environment,
       HttpServletRequest servletRequest) {
     DomainRuleGovernancePrincipal principal = principalResolver.resolve(
         servletRequest, tenantId, environment, "RULE_SNAPSHOT_READER");
-    return ResponseEntity.ok(service.summarizeHead(ruleSetKey, principal));
+    return ResponseEntity.ok(service.summarizeHead(ruleSetKey, operationKey, principal));
   }
 }

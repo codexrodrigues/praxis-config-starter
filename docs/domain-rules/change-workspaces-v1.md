@@ -1,6 +1,6 @@
 # Domain Rule Change Workspaces v1
 
-Policy Studio authors a governed decision through a change workspace. The workspace is not a
+Rules Studio authors a governed decision through a change workspace. The workspace is not a
 second rule definition and is never executable: it is mutable authoring state anchored to the
 canonical fingerprint of one persisted `domain_rule_definition`.
 
@@ -29,7 +29,7 @@ canonical fingerprint of one persisted `domain_rule_definition`.
 
 The Config Starter owns workspace and scenario persistence. The Rules Engine owns deterministic
 evaluation semantics. The host owns fact resolution, executable registries and sandbox execution.
-Policy Studio is the experience plane over these contracts.
+Rules Studio is the experience plane over these contracts.
 
 The stable semantic identity of this resource is
 `praxis.config.domain-rule-change-workspaces`, published by

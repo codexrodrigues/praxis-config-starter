@@ -28,6 +28,12 @@ final class UiLayoutAuthoringProjection {
       case "praxis.dynamic-page.editor" -> UiLayoutPageRevisionReproduction.requireNative(target, descriptor, baseline, candidate, patchDescriptor);
       case "praxis.table.editor" -> UiLayoutTableRevisionReproduction.requireNative(target, descriptor, baseline, candidate, patchDescriptor);
       case "praxis.dynamic-form.editor" -> UiLayoutFormRevisionReproduction.requireNative(target, descriptor, baseline, candidate, patchDescriptor);
+      case "praxis.chart.editor",
+          "praxis.list.editor",
+          "praxis.rich-content.editor",
+          "praxis.tabs.editor",
+          "praxis.stepper.editor",
+          "praxis.expansion.editor" -> UiLayoutDeclarativeWidgetRevisionReproduction.requireNative(target, descriptor, baseline, candidate, patchDescriptor);
       default -> throw unavailable();
     }
     checkpoint.run();

@@ -582,15 +582,30 @@ public class DomainCatalogIngestionService {
             return true;
         }
         String rawPayload = item.payload();
-        if (!StringUtils.hasText(rawPayload) || !rawPayload.contains(normalizedResourceKey)) {
+        String derivedApiPath = "/api/" + normalizedResourceKey.replace('.', '/');
+        if (!StringUtils.hasText(rawPayload)
+                || (!rawPayload.contains(normalizedResourceKey) && !rawPayload.contains(derivedApiPath))) {
             return false;
         }
         JsonNode payload = read(rawPayload);
         return matchesResourceIdentity(text(payload, "resourceKey"), normalizedResourceKey)
+                || matchesResourceIdentity(text(payload.path("metadata"), "resourceKey"), normalizedResourceKey)
                 || matchesResourceIdentity(text(payload, "canonicalKey"), normalizedResourceKey)
                 || matchesResourceIdentity(text(payload, "nodeKey"), normalizedResourceKey)
                 || matchesResourceIdentity(text(payload, "sourceNodeKey"), normalizedResourceKey)
-                || matchesResourceIdentity(text(payload.path("target"), "resourceKey"), normalizedResourceKey);
+                || matchesResourceIdentity(text(payload, "targetNodeKey"), normalizedResourceKey)
+                || matchesResourceIdentity(text(payload.path("target"), "resourceKey"), normalizedResourceKey)
+                || matchesResourcePath(text(payload, "resourcePath"), derivedApiPath)
+                || matchesResourcePath(text(payload.path("metadata"), "resourcePath"), derivedApiPath)
+                || matchesResourcePath(text(payload.path("target"), "resourcePath"), derivedApiPath);
+    }
+
+    private boolean matchesResourcePath(String candidatePath, String derivedApiPath) {
+        String normalizedPath = normalize(candidatePath);
+        if (!StringUtils.hasText(normalizedPath) || !StringUtils.hasText(derivedApiPath)) {
+            return false;
+        }
+        return normalizedPath.equals(derivedApiPath) || normalizedPath.startsWith(derivedApiPath + "/");
     }
 
     private boolean matchesResourceIdentity(String candidate, String normalizedResourceKey) {
@@ -804,6 +819,7 @@ public class DomainCatalogIngestionService {
         String effectiveEnvironment = releases.isEmpty() ? environment : releases.get(0).environment();
         List<DomainCatalogItemResponse> items = semanticContextItems(
                 releases,
+                resourceKey,
                 effectiveTenantId,
                 effectiveEnvironment,
                 itemType,
@@ -850,6 +866,7 @@ public class DomainCatalogIngestionService {
         int resolvedLimit = Math.min(Math.max(limit, 1), 200);
         return searchSummaries(
                         latestReleaseSummariesForScope(serviceKey, tenantId, environment, resourceKey),
+                        resourceKey,
                         "edge",
                         null,
                         null,
@@ -864,7 +881,9 @@ public class DomainCatalogIngestionService {
     private List<String> retrievalGuidance(boolean federated) {
         List<String> guidance = new ArrayList<>();
         guidance.add("Use this context as the semantic vocabulary for the requested business scope.");
-        guidance.add("Prefer node items for business concepts, fields, actions, states and policy hints.");
+        guidance.add("Prefer node items for business concepts, fields, facts, actions, states and policy hints.");
+        guidance.add("Concepts with semanticRole=analytical_data_product consolidate and analyze operational concepts listed in analyzesConcepts (materializes edges).");
+        guidance.add("Use childConcepts, parentConcepts and referencedConcepts on concept nodes to navigate 360-degree master-detail and cross-entity relationships.");
         guidance.add("Use governance items to respect privacy, compliance and AI visibility constraints.");
         guidance.add("Use binding and evidence items to cite runtime/API/schema sources.");
         guidance.add("Do not infer executable rules from policy_hint nodes unless an executable rule binding is present.");
@@ -1217,6 +1236,7 @@ public class DomainCatalogIngestionService {
 
     private List<DomainCatalogItemResponse> semanticContextItems(
             List<DomainCatalogReleaseSummary> releases,
+            String resourceKey,
             String tenantId,
             String environment,
             String itemType,
@@ -1243,6 +1263,9 @@ public class DomainCatalogIngestionService {
             if (documents == null || documents.isEmpty()) {
                 return List.of();
             }
+            String normalizedResourceKey = normalize(resourceKey);
+            boolean filterContextBundleItemsByResourceKey = StringUtils.hasText(normalizedResourceKey)
+                    && releases.stream().anyMatch(release -> !StringUtils.hasText(normalize(release.resourceKey())));
             Map<String, DomainCatalogItemResponse> itemsByDocumentIdentity = new LinkedHashMap<>();
             List<DomainCatalogItemSummary> persistedItems = itemRepository.searchSummariesAcrossReleaseIds(
                     releases.stream().map(DomainCatalogReleaseSummary::id).toList(),
@@ -1252,6 +1275,9 @@ public class DomainCatalogIngestionService {
                     null,
                     PageRequest.of(0, 10_000));
             for (DomainCatalogItemSummary item : persistedItems) {
+                if (filterContextBundleItemsByResourceKey && !itemMatchesResourceKey(item, normalizedResourceKey)) {
+                    continue;
+                }
                 if (matchesSemanticContextItem(item)) {
                     DomainCatalogItemResponse response = toResponse(item);
                     itemsByDocumentIdentity.put(
@@ -1768,12 +1794,26 @@ public class DomainCatalogIngestionService {
         add(joiner, text(node, "nodeType"));
         add(joiner, text(node, "bindingType"));
         add(joiner, text(node, "edgeType"));
+        add(joiner, text(node, "sourceNodeKey"));
+        add(joiner, text(node, "targetNodeKey"));
         add(joiner, text(node, "alias"));
         add(joiner, text(node, "summary"));
         add(joiner, text(node, "annotationType"));
         add(joiner, text(node, "classification"));
         add(joiner, text(node, "dataCategory"));
         add(joiner, text(node, "nodeKey"));
+        JsonNode tags = node.path("tags");
+        if (tags.isArray()) {
+            add(joiner, tags.toString());
+        }
+        JsonNode businessGlossary = node.path("businessGlossary");
+        if (businessGlossary.isObject()) {
+            add(joiner, businessGlossary.toString());
+        }
+        JsonNode target = node.path("target");
+        if (target.isObject()) {
+            add(joiner, target.toString());
+        }
         JsonNode complianceTags = node.path("complianceTags");
         if (complianceTags.isArray()) {
             add(joiner, complianceTags.toString());

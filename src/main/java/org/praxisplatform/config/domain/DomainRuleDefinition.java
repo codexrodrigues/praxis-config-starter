@@ -18,7 +18,19 @@ import lombok.NoArgsConstructor;
 import org.hibernate.annotations.ColumnTransformer;
 
 /**
- * Shared, governed rule definition that may later be materialized into one or more runtime artifacts.
+ * Shared, governed rule definition in the Praxis Decision Platform Control Plane (PAP) that may later
+ * be materialized into one or more runtime artifacts across two distinct decision tracks:
+ * <ul>
+ *   <li><b>Business Decisions ({@code decisionKind = BUSINESS}):</b> deterministic business rules,
+ *       eligibility, cálculos e parâmetros operacionais ({@code ruleType = "business_constraint"},
+ *       {@code "operational_parameter"}, {@code "approval_policy"}, {@code "workflow_action"},
+ *       {@code "backend_validation"}), compilados em {@code PublishedRuleSnapshot} para o
+ *       {@code praxis-rules-engine}.</li>
+ *   <li><b>Authorization Decisions ({@code decisionKind = AUTHORIZATION}):</b> políticas de acesso,
+ *       escopo relacional ({@code DataScopePlan}), governança por campo e mascaramento pós-leitura
+ *       ({@code ruleType = "authorization_policy"}), compiladas em {@code OpaPolicyUnitManifest} /
+ *       {@code OpaRuntimeRelease} para o {@code praxis-authz-enforcement-core} e {@code praxis-authz-opa}.</li>
+ * </ul>
  */
 @Entity
 @Table(name = "domain_rule_definition")

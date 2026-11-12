@@ -15,6 +15,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Tag;
 import org.praxisplatform.config.service.AiProviderManagementService;
 import org.springframework.test.util.ReflectionTestUtils;
 
@@ -24,6 +25,7 @@ import org.springframework.test.util.ReflectionTestUtils;
  * impedindo a reintroducao de classificadores lexicais de intencao do usuario,
  * resolvers de fallback por keywords ou mocks permissivos em testes.
  */
+@Tag("unit")
 class AgenticAuthoringSemanticIntentHygieneTest {
 
     private static final Path MAIN_AUTHORING_DIR = Path.of(

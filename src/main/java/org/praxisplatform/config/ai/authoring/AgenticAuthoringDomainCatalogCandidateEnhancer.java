@@ -321,11 +321,12 @@ public class AgenticAuthoringDomainCatalogCandidateEnhancer {
             String tenantId,
             String environment,
             String releaseKey) {
+        String resolvedResourceKey = canonicalResourceKey(items, resourceKey);
         List<AgenticAuthoringEvidenceBundle.Evidence> evidence = new ArrayList<>();
         evidence.add(new AgenticAuthoringEvidenceBundle.Evidence(
                 "domain_catalog",
                 "domain_catalog_grounding",
-                resourceKey,
+                resolvedResourceKey,
                 summary(items),
                 score(items, query),
                 matchedTerms(resourceKey, items),
@@ -419,13 +420,30 @@ public class AgenticAuthoringDomainCatalogCandidateEnhancer {
                 .filter(Objects::nonNull)
                 .map(value -> value.toLowerCase(Locale.ROOT))
                 .anyMatch("node"::equals);
+        boolean analyticalDataProduct = items.stream()
+                .map(DomainCatalogItemResponse::payload)
+                .filter(Objects::nonNull)
+                .anyMatch(payload -> "analytical_data_product".equalsIgnoreCase(
+                        text(path(payload, "metadata"), "semanticRole"))
+                        || payload.path("metadata").path("dataProduct").asBoolean(false));
+        boolean ruleGoverned = items.stream()
+                .map(DomainCatalogItemResponse::payload)
+                .filter(Objects::nonNull)
+                .anyMatch(payload -> "domain_rule_set".equalsIgnoreCase(
+                        text(path(payload, "metadata"), "policyKind"))
+                        || payload.path("metadata").hasNonNull("governedRuleSets")
+                        || payload.path("metadata").hasNonNull("ontologicalFactRoots"));
         double score = 0.82d + Math.min(items.size(), CONTEXT_LIMIT) * 0.01d;
-        score += catalogItemQueryCoverage(items, query) * 0.08d;
+        double coverage = catalogItemQueryCoverage(items, query);
+        score += coverage * 0.08d;
         if (governance) {
             score += 0.04d;
         }
         if (node) {
             score += 0.03d;
+        }
+        if ((analyticalDataProduct || ruleGoverned) && coverage > 0d) {
+            score += 0.02d;
         }
         return Math.min(0.94d, score);
     }
@@ -440,15 +458,7 @@ public class AgenticAuthoringDomainCatalogCandidateEnhancer {
             if (item == null) {
                 continue;
             }
-            addNormalizedTerms(itemTerms, item.itemKey());
-            addNormalizedTerms(itemTerms, item.contextKey());
-            addNormalizedTerms(itemTerms, item.nodeType());
-            addNormalizedTerms(itemTerms, item.bindingType());
-            addNormalizedTerms(itemTerms, item.edgeType());
-            JsonNode payload = item.payload();
-            addNormalizedTerms(itemTerms, text(payload, "label", "name", "title", "summary", "description", "aliases", "synonyms"));
-            addNormalizedTerms(itemTerms, text(path(payload, "target"), "fieldName", "resourceKey", "resourcePath"));
-            addNormalizedTerms(itemTerms, text(path(payload, "metadata"), "fieldName", "resourceKey", "resourcePath"));
+            extractCatalogItemSemanticTexts(item).forEach(value -> addNormalizedTerms(itemTerms, value));
         }
         long matches = queryTerms.stream()
                 .filter(term -> termMatches(itemTerms, term))
@@ -500,11 +510,46 @@ public class AgenticAuthoringDomainCatalogCandidateEnhancer {
         if (label.isBlank()) {
             label = valueOrEmpty(item.itemKey());
         }
+        JsonNode metadata = path(payload, "metadata");
+        JsonNode target = path(payload, "target");
         String fieldName = firstNonBlank(
-                text(path(payload, "target"), "fieldName"),
-                text(path(payload, "metadata"), "fieldName"));
+                text(target, "fieldName"),
+                text(metadata, "fieldName"));
         String fieldSummary = fieldName.isBlank() ? "" : " field=" + fieldName;
-        return compact(valueOrEmpty(item.itemType()) + " " + valueOrEmpty(item.itemKey()) + " " + label + fieldSummary);
+        String semanticRole = text(metadata, "semanticRole");
+        String roleSummary = semanticRole.isBlank() ? "" : " role=" + semanticRole;
+        String analyzes = joinArrayNode(path(metadata, "analyzesConcepts"));
+        String analyzesSummary = analyzes.isBlank() ? "" : " analyzes=" + analyzes;
+        String dataProducts = joinArrayNode(path(metadata, "analyzedByDataProducts"));
+        String dataProductsSummary = dataProducts.isBlank() ? "" : " dataProducts=" + dataProducts;
+        String children = joinArrayNode(path(metadata, "childConcepts"));
+        String childrenSummary = children.isBlank() ? "" : " children=" + children;
+        String parents = joinArrayNode(path(metadata, "parentConcepts"));
+        String parentsSummary = parents.isBlank() ? "" : " parents=" + parents;
+        String referenced = firstNonBlank(
+                text(metadata, "referencedResourceKey"),
+                text(path(metadata, "resourceReference"), "resourceKey"),
+                text(path(metadata, "optionSource"), "referencedResourceKey"),
+                text(target, "referencedResourceKey"));
+        String referencedSummary = referenced.isBlank() ? "" : " references=" + referenced;
+        String ruleSet = firstNonBlank(
+                text(metadata, "ruleSetKey"),
+                joinArrayNode(path(metadata, "governedRuleSets")),
+                text(target, "ruleSetKey"));
+        String ruleSetSummary = ruleSet.isBlank() ? "" : " ruleSets=" + ruleSet;
+        String reasons = firstNonBlank(
+                joinArrayNode(path(metadata, "reasonCodes")),
+                joinArrayNode(path(metadata, "governedReasonCodes")));
+        String reasonsSummary = reasons.isBlank() ? "" : " reasons=" + reasons;
+        String factRoots = firstNonBlank(
+                joinArrayNode(path(metadata, "availableRoots")),
+                joinArrayNode(path(metadata, "ontologicalFactRoots")),
+                joinArrayNode(path(target, "availableRoots")));
+        String factRootsSummary = factRoots.isBlank() ? "" : " factRoots=" + factRoots;
+        return compact(valueOrEmpty(item.itemType()) + " " + valueOrEmpty(item.itemKey()) + " " + label
+                + fieldSummary + roleSummary + analyzesSummary + dataProductsSummary
+                + childrenSummary + parentsSummary + referencedSummary
+                + ruleSetSummary + reasonsSummary + factRootsSummary);
     }
 
     private List<String> matchedTerms(String resourceKey, List<DomainCatalogItemResponse> items) {
@@ -516,22 +561,107 @@ public class AgenticAuthoringDomainCatalogCandidateEnhancer {
         }
         items.stream()
                 .limit(5)
-                .flatMap(item -> Stream.concat(
-                        Stream.of(valueOrEmpty(item.itemKey())),
-                        Stream.of(
-                                text(path(item.payload(), "target"), "fieldName"),
-                                text(path(item.payload(), "metadata"), "fieldName"),
-                                text(item.payload(), "label"),
-                                text(item.payload(), "name"),
-                                text(item.payload(), "title"),
-                                text(item.payload(), "summary"),
-                                text(item.payload(), "description"),
-                                text(item.payload(), "aliases"),
-                                text(item.payload(), "synonyms"))))
+                .flatMap(item -> extractCatalogItemSemanticTexts(item).stream())
                 .flatMap(itemText -> List.of(normalizePrompt(itemText.replace('.', ' ')).split("\\s+")).stream())
                 .filter(token -> token.length() > 2)
                 .forEach(terms::add);
         return List.copyOf(terms);
+    }
+
+    private List<String> extractCatalogItemSemanticTexts(DomainCatalogItemResponse item) {
+        if (item == null) {
+            return List.of();
+        }
+        List<String> values = new ArrayList<>();
+        values.add(valueOrEmpty(item.itemKey()));
+        values.add(valueOrEmpty(item.contextKey()));
+        values.add(valueOrEmpty(item.nodeType()));
+        values.add(valueOrEmpty(item.bindingType()));
+        values.add(valueOrEmpty(item.edgeType()));
+        JsonNode payload = item.payload();
+        if (payload != null && !payload.isMissingNode() && !payload.isNull()) {
+            values.add(text(payload, "label"));
+            values.add(text(payload, "name"));
+            values.add(text(payload, "title"));
+            values.add(text(payload, "summary"));
+            values.add(text(payload, "description"));
+            values.add(text(payload, "aliases"));
+            values.add(text(payload, "synonyms"));
+            values.add(text(payload, "sourceNodeKey"));
+            values.add(text(payload, "targetNodeKey"));
+            values.add(joinArrayNode(path(payload, "tags")));
+            JsonNode glossary = path(payload, "businessGlossary");
+            values.add(text(glossary, "preferredTerm"));
+            values.add(text(glossary, "description"));
+            values.add(joinArrayNode(path(glossary, "synonyms")));
+            JsonNode target = path(payload, "target");
+            values.add(text(target, "fieldName"));
+            values.add(text(target, "resourceKey"));
+            values.add(text(target, "resourcePath"));
+            values.add(text(target, "referencedResourceKey"));
+            JsonNode metadata = path(payload, "metadata");
+            values.add(text(metadata, "fieldName"));
+            values.add(text(metadata, "resourceKey"));
+            values.add(text(metadata, "resourcePath"));
+            values.add(text(metadata, "referencedResourceKey"));
+            values.add(text(metadata, "semanticRole"));
+            values.add(text(metadata, "statsKind"));
+            values.add(joinArrayNode(path(metadata, "analyzesConcepts")));
+            values.add(joinArrayNode(path(metadata, "analyzedByDataProducts")));
+            values.add(joinArrayNode(path(metadata, "childConcepts")));
+            values.add(joinArrayNode(path(metadata, "parentConcepts")));
+            values.add(joinArrayNode(path(metadata, "referencedConcepts")));
+            JsonNode optionSource = path(metadata, "optionSource");
+            values.add(text(optionSource, "key"));
+            values.add(text(optionSource, "entityKey"));
+            values.add(text(optionSource, "resourcePath"));
+            values.add(text(optionSource, "referencedResourceKey"));
+            values.add(text(metadata, "policyKind"));
+            values.add(text(metadata, "ruleSetKey"));
+            values.add(text(metadata, "operationKey"));
+            values.add(joinArrayNode(path(metadata, "governedRuleSets")));
+            values.add(joinArrayNode(path(metadata, "governedOperations")));
+            values.add(joinArrayNode(path(metadata, "governedReasonCodes")));
+            values.add(joinArrayNode(path(metadata, "ontologicalFactRoots")));
+            values.add(joinArrayNode(path(metadata, "availableRoots")));
+            values.add(joinArrayNode(path(metadata, "referencedFactPaths")));
+            values.add(joinArrayNode(path(metadata, "reasonCodes")));
+            values.add(joinArrayNode(path(metadata, "targetFields")));
+            JsonNode rulesNode = path(metadata, "rules");
+            if (rulesNode != null && rulesNode.isArray()) {
+                for (JsonNode rule : rulesNode) {
+                    if (rule != null && rule.isObject()) {
+                        values.add(text(rule, "reasonCode"));
+                        values.add(text(rule, "targetField"));
+                        values.add(text(rule, "message"));
+                        values.add(text(rule, "origin"));
+                        values.add(text(rule, "lineage"));
+                        values.add(text(rule, "slotKey"));
+                    }
+                }
+            }
+            values.add(text(target, "ruleSetKey"));
+            values.add(text(target, "operationKey"));
+            values.add(joinArrayNode(path(target, "availableRoots")));
+            values.add(joinArrayNode(path(target, "referencedFactPaths")));
+        }
+        return values.stream().filter(v -> !v.isBlank()).toList();
+    }
+
+    private String joinArrayNode(JsonNode node) {
+        if (node == null || !node.isArray() || node.isEmpty()) {
+            return "";
+        }
+        List<String> values = new ArrayList<>();
+        for (JsonNode element : node) {
+            if (element != null && element.isValueNode()) {
+                String text = valueOrEmpty(element.asText(""));
+                if (!text.isBlank()) {
+                    values.add(text);
+                }
+            }
+        }
+        return String.join(",", values);
     }
 
     private String firstNonBlank(String... values) {
@@ -555,6 +685,25 @@ public class AgenticAuthoringDomainCatalogCandidateEnhancer {
         return candidate != null
                 && candidate.evidence() != null
                 && candidate.evidence().contains(evidence);
+    }
+
+    private String canonicalResourceKey(List<DomainCatalogItemResponse> items, String fallbackResourceKey) {
+        if (items != null) {
+            for (DomainCatalogItemResponse item : items) {
+                if (item == null || item.payload() == null) {
+                    continue;
+                }
+                JsonNode payload = item.payload();
+                String candidate = firstNonBlank(
+                        text(path(payload, "metadata"), "resourceKey"),
+                        text(payload, "resourceKey"),
+                        text(path(payload, "target"), "resourceKey"));
+                if (!candidate.isBlank()) {
+                    return candidate;
+                }
+            }
+        }
+        return fallbackResourceKey;
     }
 
     private String resourceKey(String resourcePath) {
@@ -582,7 +731,7 @@ public class AgenticAuthoringDomainCatalogCandidateEnhancer {
 
     private String compact(String value) {
         String normalized = valueOrEmpty(value).replaceAll("\\s+", " ").trim();
-        return normalized.length() <= 220 ? normalized : normalized.substring(0, 220).trim();
+        return normalized.length() <= 320 ? normalized : normalized.substring(0, 320).trim();
     }
 
     private String normalizePrompt(String value) {

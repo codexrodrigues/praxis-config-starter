@@ -21,7 +21,31 @@ public record AgenticAuthoringConsultativeApiCatalogProjection(
             List<Field> fields,
             List<Action> actions,
             List<Endpoint> endpoints,
-            List<String> evidence
+            List<String> evidence,
+            List<QuickFilter> quickFilters
+    ) {
+        public Resource(
+                String resourceKey,
+                String resourcePath,
+                String label,
+                String role,
+                String description,
+                List<Field> fields,
+                List<Action> actions,
+                List<Endpoint> endpoints,
+                List<String> evidence
+        ) {
+            this(resourceKey, resourcePath, label, role, description, fields, actions, endpoints, evidence, List.of());
+        }
+    }
+
+    public record QuickFilter(
+            String id,
+            String label,
+            String description,
+            String tone,
+            boolean isDefault,
+            List<String> filterFields
     ) {
     }
 

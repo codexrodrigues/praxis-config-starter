@@ -2254,6 +2254,82 @@ class AgenticAuthoringEffectCompilerRegistryTest {
     }
 
     @Test
+    void shouldCompileNestedRichContentBlockUpdateAddReorderAndRemoveById() throws Exception {
+        ObjectNode proposedConfig = (ObjectNode) objectMapper.readTree("""
+                {
+                  "document": {
+                    "kind": "praxis.rich-content",
+                    "version": "1.0.0",
+                    "nodes": [
+                      {
+                        "id": "profile-card",
+                        "type": "card",
+                        "body": [
+                          { "id": "bio", "type": "text", "text": "Old bio" },
+                          { "id": "role", "type": "badge", "label": "Developer" }
+                        ]
+                      }
+                    ]
+                  }
+                }
+                """);
+        ArrayNode patchOperations = objectMapper.createArrayNode();
+        List<String> failures = new ArrayList<>();
+        List<String> warnings = new ArrayList<>();
+
+        registry.appendCompiledEffects(
+                "praxis-rich-content",
+                operation("text.update", "text", "rich-text-node-by-id-or-path", true,
+                        "merge-by-key", "document.nodes[]", "id", "document.nodes[].text"),
+                plan("\"bio\"", "{ \"text\": \"Senior Architect\" }"),
+                proposedConfig,
+                patchOperations,
+                failures,
+                warnings);
+
+        registry.appendCompiledEffects(
+                "praxis-rich-content",
+                operationWithHandler("block.add", "block", "document-nodes-array", false,
+                        "compile-domain-patch", "rich-content-block-add", "document.nodes[]"),
+                plan("{}", "{ \"type\": \"link\", \"parentBlockId\": \"profile-card\", \"slot\": \"body\", \"afterBlockId\": \"bio\", \"node\": { \"id\": \"docs-link\", \"label\": \"Docs\", \"href\": \"/docs\" } }"),
+                proposedConfig,
+                patchOperations,
+                failures,
+                warnings);
+
+        registry.appendCompiledEffects(
+                "praxis-rich-content",
+                operation("block.order.set", "block", "rich-block-by-id-or-index", true,
+                        "reorder-by-key", "document.nodes[]", "id", "document.nodes[]"),
+                plan("\"role\"", "{ \"blockId\": \"role\", \"beforeBlockId\": \"bio\" }"),
+                proposedConfig,
+                patchOperations,
+                failures,
+                warnings);
+
+        registry.appendCompiledEffects(
+                "praxis-rich-content",
+                operationWithHandler("link.remove", "link", "rich-link-node-by-id-or-path", true,
+                        "compile-domain-patch", "rich-content-link-remove", "document.nodes[]"),
+                plan("\"docs-link\"", "{ \"preserveLabelAsText\": true }"),
+                proposedConfig,
+                patchOperations,
+                failures,
+                warnings);
+
+        assertThat(failures).isEmpty();
+        assertThat(patchOperations).hasSize(4);
+        JsonNode body = proposedConfig.path("document").path("nodes").get(0).path("body");
+        assertThat(body).hasSize(3);
+        assertThat(body.get(0).path("id").asText()).isEqualTo("role");
+        assertThat(body.get(1).path("id").asText()).isEqualTo("bio");
+        assertThat(body.get(1).path("text").asText()).isEqualTo("Senior Architect");
+        assertThat(body.get(2).path("id").asText()).isEqualTo("docs-link-text");
+        assertThat(body.get(2).path("type").asText()).isEqualTo("text");
+        assertThat(body.get(2).path("text").asText()).isEqualTo("Docs");
+    }
+
+    @Test
     void shouldCompileRichContentTimelineItemRemoveDomainPatch() throws Exception {
         ObjectNode proposedConfig = (ObjectNode) objectMapper.readTree("""
                 {
@@ -4121,6 +4197,290 @@ class AgenticAuthoringEffectCompilerRegistryTest {
         assertThat(failures).containsExactly("ui-composition-plan-version-invalid");
         assertThat(patchOperations).isEmpty();
         assertThat(proposedConfig.has("compiledFormPatch")).isFalse();
+    }
+
+    @Test
+    void shouldCompileRichContentPresetApplyReplacingNestedBlockById() throws Exception {
+        ObjectNode proposedConfig = (ObjectNode) objectMapper.readTree("""
+                {
+                  "document": {
+                    "kind": "praxis.rich-content",
+                    "version": "1.0.0",
+                    "nodes": [
+                      {
+                        "id": "outer-card",
+                        "type": "card",
+                        "content": [
+                          { "id": "nested-placeholder", "type": "text", "text": "Replace me" }
+                        ]
+                      }
+                    ]
+                  }
+                }
+                """);
+        ArrayNode patchOperations = objectMapper.createArrayNode();
+        List<String> failures = new ArrayList<>();
+
+        registry.appendCompiledEffects(
+                "praxis-rich-content",
+                operationWithHandler("preset.apply", "preset", "rich-block-preset-ref", false,
+                        "compile-domain-patch", "rich-content-preset-apply", "document.nodes[]"),
+                plan("null", """
+                        {
+                          "replaceBlockId": "nested-placeholder",
+                          "ref": {
+                            "kind": "rich-block",
+                            "namespace": "corporate.hr",
+                            "presetId": "employee-header",
+                            "version": "1.0.0"
+                          },
+                          "inputs": { "compact": true }
+                        }
+                        """),
+                proposedConfig,
+                patchOperations,
+                failures,
+                new ArrayList<>());
+
+        assertThat(failures).isEmpty();
+        assertThat(patchOperations).hasSize(1);
+        assertThat(patchOperations.get(0).path("op").asText()).isEqualTo("replace-rich-block-with-preset");
+        assertThat(patchOperations.get(0).path("path").asText())
+                .isEqualTo("document.nodes[]/0.content[]");
+        JsonNode replaced = proposedConfig.path("document").path("nodes").get(0).path("content").get(0);
+        assertThat(replaced.path("id").asText()).isEqualTo("nested-placeholder");
+        assertThat(replaced.path("type").asText()).isEqualTo("preset");
+        assertThat(replaced.path("ref").path("presetId").asText()).isEqualTo("employee-header");
+    }
+
+    @Test
+    void shouldCompileResolvedPathTokenInSetValueAndMergeObjectAcrossDeepContainers() throws Exception {
+        ObjectNode proposedConfig = (ObjectNode) objectMapper.readTree("""
+                {
+                  "document": {
+                    "nodes": [
+                      {
+                        "id": "outer-card",
+                        "type": "card",
+                        "body": [
+                          {
+                            "id": "deep-media",
+                            "type": "mediaBlock",
+                            "title": "Old Title",
+                            "subtitle": "Keep me"
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                }
+                """);
+        JsonNode setOperation = objectMapper.readTree("""
+                {
+                  "operationId": "media.title.set",
+                  "target": {
+                    "kind": "media",
+                    "resolver": "custom-recursive-media",
+                    "ambiguityPolicy": "fail",
+                    "required": true,
+                    "resolutionSpec": {
+                      "strategy": "recursive-array-match",
+                      "paths": ["document.nodes[]"],
+                      "matchFields": ["id"],
+                      "childrenFields": ["body"],
+                      "allowedTypes": ["mediaBlock"]
+                    }
+                  },
+                  "effects": [
+                    { "kind": "set-value", "path": "$resolvedPath.title", "inputPath": "title" }
+                  ],
+                  "affectedPaths": ["document.nodes[].title"]
+                }
+                """);
+        JsonNode mergeOperation = objectMapper.readTree("""
+                {
+                  "operationId": "media.merge",
+                  "target": {
+                    "kind": "media",
+                    "resolver": "custom-recursive-media",
+                    "ambiguityPolicy": "fail",
+                    "required": true,
+                    "resolutionSpec": {
+                      "strategy": "recursive-array-match",
+                      "paths": ["document.nodes[]"],
+                      "matchFields": ["id"],
+                      "childrenFields": ["body"],
+                      "allowedTypes": ["mediaBlock"]
+                    }
+                  },
+                  "effects": [
+                    { "kind": "merge-object", "path": "$resolvedPath", "inputPath": "patch" }
+                  ],
+                  "affectedPaths": ["document.nodes[]"]
+                }
+                """);
+        ArrayNode patchOperations = objectMapper.createArrayNode();
+        List<String> failures = new ArrayList<>();
+
+        registry.appendCompiledEffects(
+                "praxis-rich-content",
+                setOperation,
+                plan("\"deep-media\"", "{ \"title\": \"Updated Title\" }"),
+                proposedConfig,
+                patchOperations,
+                failures,
+                new ArrayList<>());
+        registry.appendCompiledEffects(
+                "praxis-rich-content",
+                mergeOperation,
+                plan("\"deep-media\"", "{ \"patch\": { \"caption\": \"New Caption\" } }"),
+                proposedConfig,
+                patchOperations,
+                failures,
+                new ArrayList<>());
+
+        assertThat(failures).isEmpty();
+        assertThat(patchOperations).hasSize(2);
+        assertThat(patchOperations.get(0).path("resolvedPath").asText())
+                .isEqualTo("document.nodes[]/0.body[]/0.title");
+        assertThat(patchOperations.get(1).path("resolvedPath").asText())
+                .isEqualTo("document.nodes[]/0.body[]/0");
+        JsonNode mediaNode = proposedConfig.path("document").path("nodes").get(0).path("body").get(0);
+        assertThat(mediaNode.path("title").asText()).isEqualTo("Updated Title");
+        assertThat(mediaNode.path("subtitle").asText()).isEqualTo("Keep me");
+        assertThat(mediaNode.path("caption").asText()).isEqualTo("New Caption");
+    }
+
+    @Test
+    void shouldCompileInsertPositionedAndSelectionReconciliationEffects() throws Exception {
+        ObjectNode proposedConfig = (ObjectNode) objectMapper.readTree("""
+                {
+                  "selectedIndex": 1,
+                  "tabs": [
+                    { "id": "tab-a", "textLabel": "Tab A" },
+                    { "id": "tab-b", "textLabel": "Tab B" }
+                  ]
+                }
+                """);
+        JsonNode insertOperation = objectMapper.readTree("""
+                {
+                  "operationId": "tab.insert",
+                  "target": {
+                    "kind": "tabs",
+                    "resolver": "custom-tabs-root",
+                    "ambiguityPolicy": "fail",
+                    "required": false
+                  },
+                  "effects": [
+                    {
+                      "kind": "insert-positioned",
+                      "path": "tabs[]",
+                      "key": "id",
+                      "inputPath": "tab",
+                      "beforeKeyField": "beforeTabId",
+                      "afterKeyField": "afterTabId",
+                      "replaceKeyField": "replaceTabId",
+                      "autoGenerateIdPrefix": "tab-"
+                    }
+                  ],
+                  "affectedPaths": ["tabs[]"]
+                }
+                """);
+        JsonNode reorderOperation = objectMapper.readTree("""
+                {
+                  "operationId": "tab.reorder",
+                  "target": {
+                    "kind": "tab",
+                    "resolver": "tab-index-or-id",
+                    "ambiguityPolicy": "fail",
+                    "required": true
+                  },
+                  "effects": [
+                    {
+                      "kind": "reorder-by-key",
+                      "path": "tabs[]",
+                      "key": "id",
+                      "selectionReconciliation": {
+                        "activeIndexPath": "selectedIndex",
+                        "onRemovedActive": "clamp"
+                      }
+                    }
+                  ],
+                  "affectedPaths": ["tabs[]", "selectedIndex"]
+                }
+                """);
+        JsonNode removeOperation = objectMapper.readTree("""
+                {
+                  "operationId": "tab.remove",
+                  "target": {
+                    "kind": "tab",
+                    "resolver": "tab-index-or-id",
+                    "ambiguityPolicy": "fail",
+                    "required": true
+                  },
+                  "effects": [
+                    {
+                      "kind": "remove-by-key",
+                      "path": "tabs[]",
+                      "key": "id",
+                      "selectionReconciliation": {
+                        "activeIndexPath": "selectedIndex",
+                        "onRemovedActive": "clamp"
+                      }
+                    }
+                  ],
+                  "affectedPaths": ["tabs[]", "selectedIndex"]
+                }
+                """);
+        ArrayNode patchOperations = objectMapper.createArrayNode();
+        List<String> failures = new ArrayList<>();
+
+        registry.appendCompiledEffects(
+                "praxis-tabs",
+                insertOperation,
+                plan("null", """
+                        {
+                          "tab": { "textLabel": "Inserted Between" },
+                          "afterTabId": "tab-a"
+                        }
+                        """),
+                proposedConfig,
+                patchOperations,
+                failures,
+                new ArrayList<>());
+
+        assertThat(failures).isEmpty();
+        assertThat(proposedConfig.path("tabs")).hasSize(3);
+        assertThat(proposedConfig.path("tabs").get(1).path("id").asText()).isEqualTo("tab-3");
+        assertThat(proposedConfig.path("tabs").get(1).path("textLabel").asText()).isEqualTo("Inserted Between");
+
+        // selectedIndex is 1 (now "tab-3"). Reordering "tab-3" to index 2 should move selectedIndex to 2.
+        registry.appendCompiledEffects(
+                "praxis-tabs",
+                reorderOperation,
+                plan("\"tab-3\"", "{ \"index\": 2 }"),
+                proposedConfig,
+                patchOperations,
+                failures,
+                new ArrayList<>());
+
+        assertThat(failures).isEmpty();
+        assertThat(proposedConfig.path("selectedIndex").asInt()).isEqualTo(2);
+        assertThat(proposedConfig.path("tabs").get(2).path("id").asText()).isEqualTo("tab-3");
+
+        // Removing the active tab at index 2 with onRemovedActive="clamp" clamps selectedIndex to 1.
+        registry.appendCompiledEffects(
+                "praxis-tabs",
+                removeOperation,
+                plan("\"tab-3\"", "{}"),
+                proposedConfig,
+                patchOperations,
+                failures,
+                new ArrayList<>());
+
+        assertThat(failures).isEmpty();
+        assertThat(proposedConfig.path("tabs")).hasSize(2);
+        assertThat(proposedConfig.path("selectedIndex").asInt()).isEqualTo(1);
     }
 
     private ObjectNode dynamicFormConfig() throws Exception {

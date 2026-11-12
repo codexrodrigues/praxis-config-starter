@@ -289,6 +289,393 @@
       ],
       "additionalProperties": false
     },
+    "chartWidget": {
+      "type": "object",
+      "properties": {
+        "key": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}(?![\\s\\S])",
+          "minLength": 36,
+          "maxLength": 36
+        },
+        "definition": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "const": "praxis-chart"
+            },
+            "inputs": {
+              "type": "object",
+              "properties": {
+                "config": {
+                  "type": "object"
+                },
+                "chartDocument": {
+                  "type": "object"
+                },
+                "resourceKey": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "minLength": 1,
+                  "maxLength": 255,
+                  "pattern": "^(?![\\s\\S]*[\\u0000-\\u001f\\u007f\\u2028\\u2029])[^\\u0009-\\u000d\\u0020\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000\\ufeff](?:[\\s\\S]*[^\\u0009-\\u000d\\u0020\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000\\ufeff])?(?![\\s\\S])"
+                },
+                "resourcePath": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "maxLength": 1024
+                },
+                "projectionKey": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "minLength": 1,
+                  "maxLength": 255,
+                  "pattern": "^(?![\\s\\S]*[\\u0000-\\u001f\\u007f\\u2028\\u2029])[^\\u0009-\\u000d\\u0020\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000\\ufeff](?:[\\s\\S]*[^\\u0009-\\u000d\\u0020\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000\\ufeff])?(?![\\s\\S])"
+                },
+                "queryContext": {
+                  "type": [
+                    "object",
+                    "null"
+                  ]
+                }
+              },
+              "anyOf": [
+                {
+                  "required": [
+                    "config"
+                  ]
+                },
+                {
+                  "required": [
+                    "chartDocument"
+                  ]
+                }
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "id",
+            "inputs"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "key",
+        "definition"
+      ],
+      "additionalProperties": false
+    },
+    "listWidget": {
+      "type": "object",
+      "properties": {
+        "key": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}(?![\\s\\S])",
+          "minLength": 36,
+          "maxLength": 36
+        },
+        "definition": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "const": "praxis-list"
+            },
+            "inputs": {
+              "type": "object",
+              "properties": {
+                "config": {
+                  "type": "object"
+                },
+                "resourcePath": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "maxLength": 1024
+                },
+                "queryContext": {
+                  "type": [
+                    "object",
+                    "null"
+                  ]
+                }
+              },
+              "required": [
+                "config"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "id",
+            "inputs"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "key",
+        "definition"
+      ],
+      "additionalProperties": false
+    },
+    "richContentWidget": {
+      "type": "object",
+      "properties": {
+        "key": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}(?![\\s\\S])",
+          "minLength": 36,
+          "maxLength": 36
+        },
+        "definition": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "const": "praxis-rich-content"
+            },
+            "inputs": {
+              "type": "object",
+              "properties": {
+                "config": {
+                  "type": "object"
+                },
+                "document": {
+                  "type": "object"
+                },
+                "presetId": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "minLength": 1,
+                  "maxLength": 255,
+                  "pattern": "^(?![\\s\\S]*[\\u0000-\\u001f\\u007f\\u2028\\u2029])[^\\u0009-\\u000d\\u0020\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000\\ufeff](?:[\\s\\S]*[^\\u0009-\\u000d\\u0020\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000\\ufeff])?(?![\\s\\S])"
+                },
+                "context": {
+                  "type": [
+                    "object",
+                    "null"
+                  ]
+                }
+              },
+              "anyOf": [
+                {
+                  "required": [
+                    "config"
+                  ]
+                },
+                {
+                  "required": [
+                    "document"
+                  ]
+                }
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "id",
+            "inputs"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "key",
+        "definition"
+      ],
+      "additionalProperties": false
+    },
+    "tabsWidget": {
+      "type": "object",
+      "properties": {
+        "key": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}(?![\\s\\S])",
+          "minLength": 36,
+          "maxLength": 36
+        },
+        "definition": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "const": "praxis-tabs"
+            },
+            "inputs": {
+              "type": "object",
+              "properties": {
+                "config": {
+                  "type": "object"
+                },
+                "tabs": {
+                  "type": "array"
+                },
+                "selectedIndex": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "mode": {
+                  "enum": [
+                    "group",
+                    "nav"
+                  ]
+                }
+              },
+              "anyOf": [
+                {
+                  "required": [
+                    "config"
+                  ]
+                },
+                {
+                  "required": [
+                    "tabs"
+                  ]
+                }
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "id",
+            "inputs"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "key",
+        "definition"
+      ],
+      "additionalProperties": false
+    },
+    "stepperWidget": {
+      "type": "object",
+      "properties": {
+        "key": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}(?![\\s\\S])",
+          "minLength": 36,
+          "maxLength": 36
+        },
+        "definition": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "const": "praxis-stepper"
+            },
+            "inputs": {
+              "type": "object",
+              "properties": {
+                "config": {
+                  "type": "object"
+                },
+                "steps": {
+                  "type": "array"
+                },
+                "linear": {
+                  "type": "boolean"
+                },
+                "orientation": {
+                  "enum": [
+                    "horizontal",
+                    "vertical"
+                  ]
+                }
+              },
+              "anyOf": [
+                {
+                  "required": [
+                    "config"
+                  ]
+                },
+                {
+                  "required": [
+                    "steps"
+                  ]
+                }
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "id",
+            "inputs"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "key",
+        "definition"
+      ],
+      "additionalProperties": false
+    },
+    "expansionWidget": {
+      "type": "object",
+      "properties": {
+        "key": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}(?![\\s\\S])",
+          "minLength": 36,
+          "maxLength": 36
+        },
+        "definition": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "const": "praxis-expansion"
+            },
+            "inputs": {
+              "type": "object",
+              "properties": {
+                "config": {
+                  "type": "object"
+                },
+                "panels": {
+                  "type": "array"
+                },
+                "multi": {
+                  "type": "boolean"
+                }
+              },
+              "anyOf": [
+                {
+                  "required": [
+                    "config"
+                  ]
+                },
+                {
+                  "required": [
+                    "panels"
+                  ]
+                }
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "id",
+            "inputs"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "key",
+        "definition"
+      ],
+      "additionalProperties": false
+    },
     "inputEndpoint": {
       "type": "object",
       "properties": {
@@ -406,6 +793,24 @@
               },
               {
                 "$ref": "#/$defs/tableWidget"
+              },
+              {
+                "$ref": "#/$defs/chartWidget"
+              },
+              {
+                "$ref": "#/$defs/listWidget"
+              },
+              {
+                "$ref": "#/$defs/richContentWidget"
+              },
+              {
+                "$ref": "#/$defs/tabsWidget"
+              },
+              {
+                "$ref": "#/$defs/stepperWidget"
+              },
+              {
+                "$ref": "#/$defs/expansionWidget"
               }
             ]
           }

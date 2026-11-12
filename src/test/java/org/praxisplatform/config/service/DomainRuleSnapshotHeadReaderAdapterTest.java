@@ -42,11 +42,10 @@ class DomainRuleSnapshotHeadReaderAdapterTest {
     String contentHash = "A".repeat(64);
     var response = new DomainRuleSnapshotActivationResponse(
         snapshot, contentHash, "\"head-7\"", 7, "ACTIVE");
-    when(snapshotService.findActive("tenant-a", "prod", "frequency-rules"))
+    when(snapshotService.findActive("tenant-a", "prod", "frequency-rules", "validate"))
         .thenReturn(Optional.of(response));
 
-    var head = adapter.findActive(new PublishedRuleSnapshotHeadScope(
-        " tenant-a ", " prod ", " frequency-rules ")).orElseThrow();
+    var head = adapter.findActive(new PublishedRuleSnapshotHeadScope(" tenant-a ", " prod ", " frequency-rules ", "validate")).orElseThrow();
 
     assertThat(head.snapshot()).isSameAs(snapshot);
     assertThat(head.snapshotContentHash()).isEqualTo(contentHash);
@@ -57,20 +56,18 @@ class DomainRuleSnapshotHeadReaderAdapterTest {
 
   @Test
   void returnsEmptyOnlyWhenTheServiceHasNoExactActiveHead() {
-    when(snapshotService.findActive("tenant-a", "prod", "missing"))
+    when(snapshotService.findActive("tenant-a", "prod", "missing", "validate"))
         .thenReturn(Optional.empty());
 
-    assertThat(adapter.findActive(new PublishedRuleSnapshotHeadScope(
-        "tenant-a", "prod", "missing"))).isEmpty();
+    assertThat(adapter.findActive(new PublishedRuleSnapshotHeadScope("tenant-a", "prod", "missing", "validate"))).isEmpty();
   }
 
   @Test
   void propagatesIntegrityFailuresInsteadOfInventingFallbackContent() {
-    when(snapshotService.findActive("tenant-a", "prod", "invalid"))
+    when(snapshotService.findActive("tenant-a", "prod", "invalid", "validate"))
         .thenThrow(new IllegalStateException("content hash verification failed"));
 
-    assertThatThrownBy(() -> adapter.findActive(new PublishedRuleSnapshotHeadScope(
-        "tenant-a", "prod", "invalid")))
+    assertThatThrownBy(() -> adapter.findActive(new PublishedRuleSnapshotHeadScope("tenant-a", "prod", "invalid", "validate")))
         .isInstanceOf(IllegalStateException.class)
         .hasMessageContaining("content hash verification failed");
   }
@@ -82,7 +79,7 @@ class DomainRuleSnapshotHeadReaderAdapterTest {
         List.of("request"),
         List.of(new DecisionSlot(
             "eligibility", DecisionStage.DOMAIN_DECISION, SlotCardinality.SINGLE,
-            OverridePolicy.FORBIDDEN, DecisionAggregationPolicy.SINGLE_RESULT, null)),
+            OverridePolicy.FORBIDDEN, DecisionAggregationPolicy.SINGLE_RESULT, null, java.util.List.of())),
         List.of(new DecisionBinding(
             "eligibility", "eligibility", DecisionSource.PRODUCT, null,
             RuleExecutorRef.jsonLogic(expression), List.of(), 10, true,

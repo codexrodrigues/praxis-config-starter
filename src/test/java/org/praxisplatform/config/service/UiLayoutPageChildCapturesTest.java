@@ -143,4 +143,30 @@ class UiLayoutPageChildCapturesTest {
     assertNotNull(new UiLayoutPageChildSource.NativeSource("registered-native", "😀".repeat(200), "r1"));
     assertThrows(IllegalArgumentException.class, () -> new UiLayoutPageChildSource.NativeSource("registered-native", "😀".repeat(256), "r1"));
   }
+
+  @Test void sealsAndVerifiesDeclarativeChartAndRichContentPageChildren() throws Exception {
+    var candidate = UiLayoutPageRevisionReproductionTest.page();
+    var widgets = (com.fasterxml.jackson.databind.node.ArrayNode) candidate.at("/config/definition/widgets");
+    var chartWidget = (ObjectNode) UiLayoutPageRevisionReproductionTest.JSON.readTree("""
+      {"key":"66666666-6666-4666-8666-666666666666","definition":{"id":"praxis-chart","inputs":{
+        "chartDocument":{"version":1,"series":[]},"resourceKey":"ergon.tabelas-vencimento"}}}
+      """);
+    var richWidget = (ObjectNode) UiLayoutPageRevisionReproductionTest.JSON.readTree("""
+      {"key":"77777777-7777-4777-8777-777777777777","definition":{"id":"praxis-rich-content","inputs":{
+        "document":{"version":1,"blocks":[]},"presetId":"summary"}}}
+      """);
+    widgets.add(chartWidget);
+    widgets.add(richWidget);
+
+    var baseline = UiLayoutPageRevisionReproductionTest.page();
+    var evidence = initial(baseline);
+    var chartSeed = register(chartWidget.path("key").asText(), UiLayoutPageRevisionReproduction.nativeChild(chartWidget));
+    var richSeed = register(richWidget.path("key").asText(), UiLayoutPageRevisionReproduction.nativeChild(richWidget));
+
+    var accepted = captures.revision(invocation, draft, state(baseline, baseline, evidence), candidate,
+        List.of(chartSeed.request(), richSeed.request()), source, validation());
+    assertEquals(4, accepted.size());
+    captures.verify(invocation, draft, page, baseline, candidate, accepted, source, validation());
+    captures.historicalIntegrity(draft, page, baseline, candidate, accepted);
+  }
 }

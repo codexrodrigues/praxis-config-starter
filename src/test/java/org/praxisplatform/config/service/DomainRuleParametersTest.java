@@ -88,7 +88,7 @@ class DomainRuleParametersTest {
         new RuleParameterization("test:grant-share", "1", declared));
     var set = new RuleSetDefinition(new RuleSetRef("test", "grant", "grant", "evaluate", 1),
         List.of("request"), List.of(new DecisionSlot("limit", DecisionStage.DOMAIN_DECISION,
-        SlotCardinality.SINGLE, OverridePolicy.PARAMETERIZABLE, DecisionAggregationPolicy.SINGLE_RESULT, template)),
+        SlotCardinality.SINGLE, OverridePolicy.PARAMETERIZABLE, DecisionAggregationPolicy.SINGLE_RESULT, template, java.util.List.of())),
         List.of(binding), RuleRuntimeCompatibility.current(), RuleFailPolicy.FAIL_CLOSED);
     DomainRuleParameters.composition(mapper, set, List.of(source));
     assertThatThrownBy(() -> DomainRuleParameters.composition(mapper, set, List.of()))

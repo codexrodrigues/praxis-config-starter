@@ -86,6 +86,16 @@ class AgenticAuthoringRuntimeComponentGroundingServiceTest {
                                 "supportedPresetIds": ["warning", "danger", "forged"]
                               },
                               "nonce": "must-not-survive"
+                            },
+                            "clientSurfaceCapabilities": {
+                              "surfaceProfile": "quick-view-drawer",
+                              "allowedNodeTypes": ["text", "badge", "statGroup"],
+                              "forbiddenNodeTypes": ["tabs", "accordion", "actionButton"],
+                              "maxDepth": 6,
+                              "maxNodes": 24,
+                              "forbidEmbeddedActions": true,
+                              "forbidNestedQuickView": true,
+                              "untrustedExtraProperty": "dropped"
                             }
                           },
                           "claims": [
@@ -133,6 +143,9 @@ class AgenticAuthoringRuntimeComponentGroundingServiceTest {
         org.assertj.core.api.Assertions.assertThat(component.path("affordances").path("visualMaterialization").toString())
                 .contains("blocked", "supported", "csp.strict-style-src", "0.2.0", "warning", "danger")
                 .doesNotContain("forged-policy", "toolbar", "forged", "nonce", "must-not-survive");
+        org.assertj.core.api.Assertions.assertThat(component.path("affordances").path("clientSurfaceCapabilities").toString())
+                .contains("quick-view-drawer", "statGroup", "actionButton", "forbidEmbeddedActions", "forbidNestedQuickView")
+                .doesNotContain("untrustedExtraProperty", "dropped");
         org.assertj.core.api.Assertions.assertThat(context.toString())
                 .doesNotContain("sampleRows")
                 .doesNotContain("rawRows")

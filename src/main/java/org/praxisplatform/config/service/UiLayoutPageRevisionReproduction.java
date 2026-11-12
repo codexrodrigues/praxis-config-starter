@@ -72,8 +72,14 @@ final class UiLayoutPageRevisionReproduction {
   }
 
   static ObjectNode nativeChild(JsonNode widget) {
-    boolean form = "praxis-dynamic-form".equals(widget.at("/definition/id").asText());
+    String widgetId = widget.at("/definition/id").asText();
     JsonNode inputs = widget.at("/definition/inputs");
+    var declarative = UiLayoutDeclarativeWidgetRevisionReproduction.findByComponentType(widgetId);
+    if (declarative.isPresent()) {
+      return UiLayoutDeclarativeWidgetRevisionReproduction.buildNativeChild(JSON, declarative.get(), inputs);
+    }
+    boolean form = "praxis-dynamic-form".equals(widgetId);
+    if (!form && !"praxis-table".equals(widgetId)) throw invalid();
     ObjectNode nativeDocument = JSON.createObjectNode().put("kind", form ? "praxis.dynamic-form.editor" : "praxis.table.editor").put("version", 1);
     nativeDocument.set("config", inputs.get("config").deepCopy());
     var bindings = JSON.createObjectNode();
@@ -93,7 +99,8 @@ final class UiLayoutPageRevisionReproduction {
   static void requireChild(JsonNode baseline, JsonNode candidate, String key) {
     var descriptor = new UiLayoutAuthoringDocumentDescriptor(candidate.path("kind").asText(), "praxis:page-child-native", "1");
     var patch = new UiLayoutPatchDocumentDescriptor("praxis:page-child-patch", "praxis.ui-layout/v1");
-    var target = new UiLayoutTarget("praxis.table.editor".equals(descriptor.documentType()) ? "praxis-table" : "praxis-dynamic-form", key);
+    var target = new UiLayoutTarget(
+        UiLayoutDeclarativeWidgetRevisionReproduction.resolveComponentTypeForDocumentType(descriptor.documentType()), key);
     var projection = UiLayoutAuthoringProjection.project(target, descriptor, baseline, candidate, patch, () -> {});
     UiLayoutRevisionRelation.requireReproduction(projection.baselineConfig(), projection.candidateConfig(), projection.compilePatch());
   }

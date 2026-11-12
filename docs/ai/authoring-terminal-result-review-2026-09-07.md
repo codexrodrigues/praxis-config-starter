@@ -24,7 +24,7 @@ mvn -o -q '-Dtest=AgenticAuthoringTurnEngineTest,AgenticAuthoringPreviewMessageS
 
 312 testes, zero falhas/erros/skips: motor 206; mensagens 25; serviço de stream 40; eventos 16; controller 16; HTTP/SSE 9. `git diff --check` aprovado.
 
-A suite HTTP/SSE carregava um controller de paletas que exigia serviços fora de seu escopo. O teste agora isola esse controller como já fazia com outros controllers do Policy Studio. Não se alterou wiring de produção. A primeira execução conjunta também encontrou proibição de bind no sandbox; a repetição com permissão para sockets locais passou integralmente.
+A suite HTTP/SSE carregava um controller de paletas que exigia serviços fora de seu escopo. O teste agora isola esse controller como já fazia com outros controllers do Rules Studio. Não se alterou wiring de produção. A primeira execução conjunta também encontrou proibição de bind no sandbox; a repetição com permissão para sockets locais passou integralmente.
 
 Downstream: Quickstart `bdb702ba70bffcdd7b8e3c81eb5ce54e48735ef2` (`2.0.0-rc.54`), em checkout limpo e reactor Maven com este starter, executou `AgenticAuthoringStreamIsolatedIntegrationTest`: um teste aprovado. O classpath do relatório Surefire confirma as classes do starter deste worktree. O teste usa HTTP local e verifica start/probe, identidade e token assinado; o serviço de turno é mockado. O Quickstart não recebeu alterações e não foi sobrescrito um artefato publicado no cache Maven.
 

@@ -4,7 +4,7 @@ import io.swagger.v3.oas.annotations.media.Schema;
 import java.util.List;
 import java.util.UUID;
 
-@Schema(description = "Server-owned actions and business blockers for one governed Policy Studio workspace.")
+@Schema(description = "Server-owned actions and business blockers for one governed Rules Studio workspace.")
 public record DomainRuleWorkspaceCapabilityResponse(
     UUID workspaceId,
     String ruleKey,

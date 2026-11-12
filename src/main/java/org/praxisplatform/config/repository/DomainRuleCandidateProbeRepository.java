@@ -17,13 +17,13 @@ public interface DomainRuleCandidateProbeRepository
   @Modifying
   @Query(value = """
       INSERT INTO domain_rule_candidate_probe (
-        id, rollout_id, tenant_id, environment, rule_set_key, host_actor_ref,
+        id, rollout_id, tenant_id, environment, rule_set_key, operation_key, host_actor_ref,
         candidate_snapshot_id, candidate_snapshot_key, candidate_content_hash, preload_ready,
         host_contract_version, engine_contract_version, json_logic_dialect_version,
         json_logic_corpus_sha256, implementation_catalog_digest, failure_code,
         observed_at, received_at
       ) VALUES (
-        :id, :rolloutId, :tenantId, :environment, :ruleSetKey, :hostActorRef,
+        :id, :rolloutId, :tenantId, :environment, :ruleSetKey, :operationKey, :hostActorRef,
         :candidateSnapshotId, :candidateSnapshotKey, :candidateContentHash, :preloadReady,
         :hostContractVersion, :engineContractVersion, :jsonLogicDialectVersion,
         :jsonLogicCorpusSha256, :implementationCatalogDigest, :failureCode,
@@ -51,6 +51,7 @@ public interface DomainRuleCandidateProbeRepository
       @Param("tenantId") String tenantId,
       @Param("environment") String environment,
       @Param("ruleSetKey") String ruleSetKey,
+      @Param("operationKey") String operationKey,
       @Param("hostActorRef") String hostActorRef,
       @Param("candidateSnapshotId") UUID candidateSnapshotId,
       @Param("candidateSnapshotKey") String candidateSnapshotKey,

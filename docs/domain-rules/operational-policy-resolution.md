@@ -1,5 +1,7 @@
 # Operational policy resolution for embedded hosts
 
+> **Coexistência na Praxis Decision Platform (`CC12`):** `OperationalPolicyService` resolve as 3 famílias operacionais embutidas (`approval_policy`, `workflow_action`, `backend_validation`) dentro do host Java. Quando o ponto de decisão também possui enforcement de autorização governado via `praxis-authz-starter` / `praxis-authz-opa` (`ruleType = "authorization_policy"`, `decisionKind = AUTHORIZATION`), o modo de autoridade é governado por `PointAuthorityMode` (`RESTRICT_BASELINE`, em que ambos os gates são avaliados e prevalece o resultado mais restritivo, ou `AUTHORITATIVE`, em que `praxis-authz-*` assume autoridade primária). Em ambos os modos, `OperationalPolicyResolution` com `ALLOW` jamais substitui autorização, invariantes de domínio, segregação de funções ou controle de versão (`If-Match`).
+
 Config owns governed definitions, publication and materialization history. `OperationalPolicyService.resolveOperationalPolicy(OperationalPolicyTarget, DomainRuleGovernancePrincipal)` exposes a public Java boundary for a colocated host. It does not add an HTTP endpoint or depend on Metadata Starter. Keep using the existing authenticated authoring/review/publication HTTP routes.
 
 ## Exact identity and outcomes

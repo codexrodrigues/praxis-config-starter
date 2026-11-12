@@ -225,9 +225,9 @@ final class PageCatalogLifecycleBridge {
             if (target
                     .componentType()
                     .equals(
-                        child.authoring().documentType().equals("praxis.dynamic-form.editor")
-                            ? "praxis-dynamic-form"
-                            : "praxis-table")
+                        UiLayoutDeclarativeWidgetRevisionReproduction
+                            .resolveComponentTypeForDocumentType(
+                                child.authoring().documentType()))
                 && target.componentId().equals(child.request().widgetKey())
                 && descriptor.equals(child.authoring())
                 && sourceRef.equals(child.sourceRef())

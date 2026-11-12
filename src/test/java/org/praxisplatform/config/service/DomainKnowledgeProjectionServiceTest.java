@@ -262,6 +262,177 @@ class DomainKnowledgeProjectionServiceTest {
                 .satisfies(evidence -> assertThat(evidence.getSubjectId()).isNotNull());
     }
 
+    @Test
+    void honorsMetadataResourceKeyWhenProjectingGroupBundleRelease() {
+        DomainKnowledgeConceptRepository conceptRepository = mock(DomainKnowledgeConceptRepository.class);
+        DomainKnowledgeAliasRepository aliasRepository = mock(DomainKnowledgeAliasRepository.class);
+        DomainKnowledgeBindingRepository bindingRepository = mock(DomainKnowledgeBindingRepository.class);
+        DomainKnowledgeRelationshipRepository relationshipRepository = mock(DomainKnowledgeRelationshipRepository.class);
+        DomainKnowledgeEvidenceRepository evidenceRepository = mock(DomainKnowledgeEvidenceRepository.class);
+        DomainKnowledgeProjectionService service = new DomainKnowledgeProjectionService(
+                conceptRepository,
+                aliasRepository,
+                bindingRepository,
+                relationshipRepository,
+                evidenceRepository,
+                objectMapper);
+
+        DomainCatalogRelease release = DomainCatalogRelease.builder()
+                .releaseKey("ergon-host:ergon:2026-04-22T12:00:00Z")
+                .schemaVersion("praxis.domain-catalog/v0.2")
+                .tenantId("tenant-a")
+                .environment("dev")
+                .build();
+        List<DomainCatalogItem> items = List.of(
+                item(release, "node", "ergon.radar-remuneracao-movimentacao", "ergon", "concept", null, null, """
+                        {
+                          "nodeKey": "ergon.radar-remuneracao-movimentacao",
+                          "nodeType": "concept",
+                          "contextKey": "ergon",
+                          "label": "Radar de Remuneração sem Movimentação",
+                          "metadata": {
+                            "resourceKey": "ergon.radar-remuneracao-movimentacao",
+                            "semanticRole": "analytical_data_product"
+                          }
+                        }
+                        """)
+        );
+
+        when(conceptRepository.findByTenantIdAndEnvironmentAndConceptKeyIn(any(), any(), any()))
+                .thenReturn(List.of());
+        when(conceptRepository.saveAll(any())).thenAnswer(invocation -> {
+            List<DomainKnowledgeConcept> concepts = toList(invocation.getArgument(0));
+            concepts.forEach(DomainKnowledgeConcept::onInsert);
+            return concepts;
+        });
+
+        service.project(release, items);
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<Iterable<DomainKnowledgeConcept>> conceptCaptor = ArgumentCaptor.forClass(Iterable.class);
+        verify(conceptRepository).saveAll(conceptCaptor.capture());
+        assertThat(toList(conceptCaptor.getValue()))
+                .singleElement()
+                .satisfies(concept -> {
+                    assertThat(concept.getConceptKey()).isEqualTo("ergon.radar-remuneracao-movimentacao");
+                    assertThat(concept.getResourceKey()).isEqualTo("ergon.radar-remuneracao-movimentacao");
+                });
+    }
+
+    @Test
+    void projectsRuleDefinitionBindingAndGovernedByRelationshipFromPolicyHintNode() {
+        DomainKnowledgeConceptRepository conceptRepository = mock(DomainKnowledgeConceptRepository.class);
+        DomainKnowledgeAliasRepository aliasRepository = mock(DomainKnowledgeAliasRepository.class);
+        DomainKnowledgeBindingRepository bindingRepository = mock(DomainKnowledgeBindingRepository.class);
+        DomainKnowledgeRelationshipRepository relationshipRepository = mock(DomainKnowledgeRelationshipRepository.class);
+        DomainKnowledgeEvidenceRepository evidenceRepository = mock(DomainKnowledgeEvidenceRepository.class);
+        DomainKnowledgeProjectionService service = new DomainKnowledgeProjectionService(
+                conceptRepository,
+                aliasRepository,
+                bindingRepository,
+                relationshipRepository,
+                evidenceRepository,
+                objectMapper);
+
+        DomainCatalogRelease release = DomainCatalogRelease.builder()
+                .releaseKey("praxis-ergon-showcase:administracao-pessoal.dependentes:2026-11-03T18:00:00Z")
+                .schemaVersion("praxis.domain-catalog/v0.2")
+                .tenantId("1")
+                .environment("dev")
+                .build();
+        List<DomainCatalogItem> items = List.of(
+                item(release, "node", "administracao-pessoal.dependentes", "administracao-pessoal", "concept", null, null, """
+                        {
+                          "nodeKey": "administracao-pessoal.dependentes",
+                          "nodeType": "concept",
+                          "contextKey": "administracao-pessoal",
+                          "label": "Dependentes",
+                          "metadata": {
+                            "resourceKey": "administracao-pessoal.dependentes",
+                            "governedRuleSets": ["ergon.administracao-pessoal.dependentes.elegibilidade"],
+                            "ontologicalFactRoots": ["draft", "current", "servidor", "neighborhood", "context"]
+                          }
+                        }
+                        """),
+                item(release, "node", "administracao-pessoal.dependentes.policy.ruleset.ergon.administracao-pessoal.dependentes.elegibilidade",
+                        "administracao-pessoal", "policy_hint", null, null, """
+                        {
+                          "nodeKey": "administracao-pessoal.dependentes.policy.ruleset.ergon.administracao-pessoal.dependentes.elegibilidade",
+                          "nodeType": "policy_hint",
+                          "contextKey": "administracao-pessoal",
+                          "label": "Elegibilidade de dependentes",
+                          "metadata": {
+                            "policyKind": "domain_rule_set",
+                            "resourceKey": "administracao-pessoal.dependentes",
+                            "ruleSetKey": "ergon.administracao-pessoal.dependentes.elegibilidade",
+                            "operationKey": "CREATE"
+                          }
+                        }
+                        """),
+                item(release, "edge", "administracao-pessoal.dependentes.governed-by.ergon.administracao-pessoal.dependentes.elegibilidade",
+                        "administracao-pessoal", null, null, "governed_by", """
+                        {
+                          "edgeKey": "administracao-pessoal.dependentes.governed-by.ergon.administracao-pessoal.dependentes.elegibilidade",
+                          "sourceNodeKey": "administracao-pessoal.dependentes",
+                          "targetNodeKey": "administracao-pessoal.dependentes.policy.ruleset.ergon.administracao-pessoal.dependentes.elegibilidade",
+                          "edgeType": "governed_by"
+                        }
+                        """),
+                item(release, "binding", "binding:administracao-pessoal.dependentes.policy.ruleset.ergon.administracao-pessoal.dependentes.elegibilidade:rule-set",
+                        "administracao-pessoal", null, "rule_definition", null, """
+                        {
+                          "bindingKey": "binding:administracao-pessoal.dependentes.policy.ruleset.ergon.administracao-pessoal.dependentes.elegibilidade:rule-set",
+                          "nodeKey": "administracao-pessoal.dependentes.policy.ruleset.ergon.administracao-pessoal.dependentes.elegibilidade",
+                          "bindingType": "rule_definition",
+                          "confidence": 0.99,
+                          "targetRef": {
+                            "resourceKey": "administracao-pessoal.dependentes",
+                            "ruleSetKey": "ergon.administracao-pessoal.dependentes.elegibilidade",
+                            "operationKey": "CREATE"
+                          }
+                        }
+                        """)
+        );
+
+        when(conceptRepository.findByTenantIdAndEnvironmentAndConceptKeyIn(any(), any(), any()))
+                .thenReturn(List.of());
+        when(conceptRepository.saveAll(any())).thenAnswer(invocation -> {
+            List<DomainKnowledgeConcept> concepts = toList(invocation.getArgument(0));
+            concepts.forEach(DomainKnowledgeConcept::onInsert);
+            return concepts;
+        });
+        when(bindingRepository.findByTenantIdAndEnvironmentAndBindingKeyIn(any(), any(), any()))
+                .thenReturn(List.of());
+        when(bindingRepository.saveAll(any())).thenAnswer(invocation -> invocation.getArgument(0));
+        when(relationshipRepository.findByTenantIdAndEnvironmentAndSourceConcept_IdIn(any(), any(), any()))
+                .thenReturn(List.of());
+        when(relationshipRepository.saveAll(any())).thenAnswer(invocation -> invocation.getArgument(0));
+        when(evidenceRepository.findByTenantIdAndEnvironmentAndEvidenceKeyIn(any(), any(), any()))
+                .thenReturn(List.of());
+        when(evidenceRepository.saveAll(any())).thenAnswer(invocation -> invocation.getArgument(0));
+
+        service.project(release, items);
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<Iterable<DomainKnowledgeBinding>> bindingCaptor = ArgumentCaptor.forClass(Iterable.class);
+        verify(bindingRepository).saveAll(bindingCaptor.capture());
+        assertThat(toList(bindingCaptor.getValue()))
+                .singleElement()
+                .satisfies(binding -> {
+                    assertThat(binding.getBindingType()).isEqualTo("rule_definition");
+                    assertThat(binding.getResourceKey()).isEqualTo("administracao-pessoal.dependentes");
+                    assertThat(binding.getSchemaPointer())
+                            .isEqualTo("ergon.administracao-pessoal.dependentes.elegibilidade#CREATE");
+                });
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<Iterable<DomainKnowledgeRelationship>> relationshipCaptor = ArgumentCaptor.forClass(Iterable.class);
+        verify(relationshipRepository).saveAll(relationshipCaptor.capture());
+        assertThat(toList(relationshipCaptor.getValue()))
+                .singleElement()
+                .satisfies(relationship -> assertThat(relationship.getRelationshipType()).isEqualTo("governed_by"));
+    }
+
     private DomainCatalogItem item(
             DomainCatalogRelease release,
             String itemType,

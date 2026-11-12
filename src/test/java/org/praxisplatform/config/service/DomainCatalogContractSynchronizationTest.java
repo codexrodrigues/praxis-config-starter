@@ -19,10 +19,10 @@ class DomainCatalogContractSynchronizationTest {
             "src", "main", "resources", "domain-catalog", "contracts", "praxis-domain-catalog-v0.2.schema.json");
     private static final Path BINDING_CONSTRAINT_MIGRATION = Path.of(
             "src", "main", "resources", "db", "migration",
-            "V39__align_domain_knowledge_binding_constraint_with_catalog_v02.sql");
+            "V75__align_domain_knowledge_quick_filter_vocabulary.sql");
     private static final Path RELATIONSHIP_CONSTRAINT_MIGRATION = Path.of(
             "src", "main", "resources", "db", "migration",
-            "V40__align_domain_knowledge_relationship_constraint_with_catalog_v02.sql");
+            "V75__align_domain_knowledge_quick_filter_vocabulary.sql");
 
     private final ObjectMapper objectMapper = new ObjectMapper();
 
@@ -35,17 +35,17 @@ class DomainCatalogContractSynchronizationTest {
     }
 
     @Test
-    void v02KeepsGeneratedStatsAndOptionSourceProjectionVocabulary() throws Exception {
+    void v02KeepsGeneratedStatsOptionSourceFactAndKnowledgeGraphVocabulary() throws Exception {
         JsonNode schema = objectMapper.readTree(RUNTIME_SCHEMA.toFile());
 
         assertThat(values(schema.at("/$defs/node/properties/nodeType/enum")))
-                .contains("stats", "policy_hint");
+                .contains("stats", "policy_hint", "fact", "quick_filter");
         assertThat(values(schema.at("/$defs/edge/properties/edgeType/enum")))
-                .contains("has_stats", "uses_concept", "selectable_when", "blocked_when");
+                .contains("has_stats", "has_quick_filter", "filters_field", "uses_concept", "selectable_when", "blocked_when", "provides_fact", "references", "materializes");
         assertThat(values(schema.at("/$defs/binding/properties/bindingType/enum")))
-                .contains("stats_endpoint", "option_source");
+                .contains("stats_endpoint", "option_source", "resource_fact", "quick_filter");
         assertThat(values(schema.at("/$defs/evidence/properties/evidenceType/enum")))
-                .contains("openapi_stats", "option_source");
+                .contains("openapi_stats", "option_source", "resource_fact", "custom_field");
     }
 
     @Test

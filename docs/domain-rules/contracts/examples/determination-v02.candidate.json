@@ -1,0 +1,200 @@
+{
+  "nodes": [
+    {
+      "nodeKey": "concept:period",
+      "contextKey": "context:fixture",
+      "nodeType": "concept",
+      "label": "Período",
+      "status": "active"
+    },
+    {
+      "nodeKey": "field:period:dtini",
+      "contextKey": "context:fixture",
+      "nodeType": "field",
+      "label": "Início",
+      "status": "active"
+    },
+    {
+      "nodeKey": "field:period:dtfim",
+      "contextKey": "context:fixture",
+      "nodeType": "field",
+      "label": "Fim",
+      "status": "active"
+    },
+    {
+      "nodeKey": "field:period:id",
+      "contextKey": "context:fixture",
+      "nodeType": "field",
+      "label": "Identificador",
+      "status": "active"
+    },
+    {
+      "nodeKey": "field:period:days",
+      "contextKey": "context:fixture",
+      "nodeType": "field",
+      "label": "Dias",
+      "status": "active"
+    },
+    {
+      "nodeKey": "operation:period:period_update:edit:recompute-period",
+      "contextKey": "context:fixture",
+      "nodeType": "operation",
+      "label": "Calcular dias",
+      "status": "active",
+      "source": "reactive-determination",
+      "metadata": {
+        "operationKind": "reactive_determination",
+        "reactiveDetermination": {
+          "id": "recompute-period",
+          "trigger": {
+            "mode": "on-change",
+            "sourcePaths": [
+              "/dtini",
+              "/dtfim"
+            ]
+          },
+          "scope": {
+            "schemaOperationId": "period_update",
+            "formMode": "edit"
+          },
+          "capability": {
+            "operationId": "period_preview",
+            "method": "POST",
+            "href": "/api/periods/preview",
+            "requestSchemaUrl": "/schemas/filtered?operationId=period_preview&schemaType=request",
+            "responseSchemaUrl": "/schemas/filtered?operationId=period_preview&schemaType=response"
+          },
+          "inputs": [
+            {
+              "fieldPath": "/dtini",
+              "requestPath": "/dtini"
+            },
+            {
+              "fieldPath": "/dtfim",
+              "requestPath": "/dtfim"
+            },
+            {
+              "fieldPath": "/id",
+              "requestPath": "/periodId"
+            }
+          ],
+          "outputs": [
+            {
+              "responsePath": "/days",
+              "fieldPath": "/days"
+            }
+          ],
+          "provenance": {
+            "kind": "host",
+            "source": "contract-fixture",
+            "version": "1"
+          }
+        }
+      }
+    }
+  ],
+  "bindings": [
+    {
+      "bindingKey": "binding:period:preview",
+      "nodeKey": "operation:period:period_update:edit:recompute-period",
+      "bindingType": "api_operation",
+      "target": {
+        "operationId": "period_preview",
+        "method": "POST",
+        "href": "/api/periods/preview",
+        "requestSchemaUrl": "/schemas/filtered?operationId=period_preview&schemaType=request",
+        "responseSchemaUrl": "/schemas/filtered?operationId=period_preview&schemaType=response"
+      }
+    },
+    {
+      "bindingKey": "binding:period:form",
+      "nodeKey": "operation:period:period_update:edit:recompute-period",
+      "bindingType": "form_config",
+      "target": {
+        "schemaOperationId": "period_update",
+        "formMode": "edit",
+        "schemaUrl": "/schemas/filtered?operationId=period_update&schemaType=request",
+        "configurationPath": "/x-ui/reactiveDeterminations",
+        "determinationId": "recompute-period",
+        "configuration": {
+          "id": "recompute-period",
+          "trigger": {
+            "mode": "on-change",
+            "sourcePaths": [
+              "/dtini",
+              "/dtfim"
+            ]
+          },
+          "scope": {
+            "schemaOperationId": "period_update",
+            "formMode": "edit"
+          },
+          "capability": {
+            "operationId": "period_preview",
+            "method": "POST",
+            "href": "/api/periods/preview",
+            "requestSchemaUrl": "/schemas/filtered?operationId=period_preview&schemaType=request",
+            "responseSchemaUrl": "/schemas/filtered?operationId=period_preview&schemaType=response"
+          },
+          "inputs": [
+            {
+              "fieldPath": "/dtini",
+              "requestPath": "/dtini"
+            },
+            {
+              "fieldPath": "/dtfim",
+              "requestPath": "/dtfim"
+            },
+            {
+              "fieldPath": "/id",
+              "requestPath": "/periodId"
+            }
+          ],
+          "outputs": [
+            {
+              "responsePath": "/days",
+              "fieldPath": "/days"
+            }
+          ],
+          "provenance": {
+            "kind": "host",
+            "source": "contract-fixture",
+            "version": "1"
+          }
+        }
+      }
+    }
+  ],
+  "edges": [
+    {
+      "edgeKey": "edge:period:governed",
+      "sourceNodeKey": "concept:period",
+      "targetNodeKey": "operation:period:period_update:edit:recompute-period",
+      "edgeType": "governed_by"
+    },
+    {
+      "edgeKey": "edge:days:governed",
+      "sourceNodeKey": "field:period:days",
+      "targetNodeKey": "operation:period:period_update:edit:recompute-period",
+      "edgeType": "governed_by"
+    },
+    {
+      "edgeKey": "edge:preview:input:dtini",
+      "sourceNodeKey": "operation:period:period_update:edit:recompute-period",
+      "targetNodeKey": "field:period:dtini",
+      "edgeType": "depends_on"
+    },
+    {
+      "edgeKey": "edge:preview:input:dtfim",
+      "sourceNodeKey": "operation:period:period_update:edit:recompute-period",
+      "targetNodeKey": "field:period:dtfim",
+      "edgeType": "depends_on"
+    },
+    {
+      "edgeKey": "edge:preview:input:id",
+      "sourceNodeKey": "operation:period:period_update:edit:recompute-period",
+      "targetNodeKey": "field:period:id",
+      "edgeType": "depends_on"
+    }
+  ]
+}

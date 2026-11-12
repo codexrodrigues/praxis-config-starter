@@ -36,19 +36,23 @@ public class DomainRuleRolloutController {
   @GetMapping
   public ResponseEntity<DomainRuleRolloutCatalogResponse> catalog(
       @RequestParam String ruleSetKey,
+      @io.swagger.v3.oas.annotations.Parameter(description = "Exact operation identity; other operations of the family have independent heads and histories.", required = true)
+      @RequestParam String operationKey,
       @RequestHeader(value="X-Tenant-ID", required=false) String tenant,
       @RequestHeader(value="X-Env", required=false) String env, HttpServletRequest request) {
     var principal = principals.resolve(request, tenant, env, "RULE_SNAPSHOT_READER");
     boolean canOperate = principals.hasRole(request, "RULE_SNAPSHOT_OPERATOR");
-    return ResponseEntity.ok(service.catalog(ruleSetKey, principal, canOperate));
+    return ResponseEntity.ok(service.catalog(ruleSetKey, operationKey, principal, canOperate));
   }
 
   @GetMapping("/pending")
   public ResponseEntity<DomainRulePendingRolloutResponse> pending(@RequestParam String ruleSetKey,
+      @io.swagger.v3.oas.annotations.Parameter(description = "Exact operation identity; other operations of the family have independent heads and histories.", required = true)
+      @RequestParam String operationKey,
       @RequestHeader(value="X-Tenant-ID", required=false) String tenant,
       @RequestHeader(value="X-Env", required=false) String env, HttpServletRequest request) {
     var principal = principals.resolve(request, tenant, env, "RULE_EXECUTION_OBSERVER");
-    return service.pending(ruleSetKey, principal)
+    return service.pending(ruleSetKey, operationKey, principal)
         .map(ResponseEntity::ok)
         .orElseGet(() -> ResponseEntity.noContent().build());
   }

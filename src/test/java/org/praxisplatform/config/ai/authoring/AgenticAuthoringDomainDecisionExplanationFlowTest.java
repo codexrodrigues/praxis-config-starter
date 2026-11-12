@@ -51,7 +51,7 @@ class AgenticAuthoringDomainDecisionExplanationFlowTest {
                                 {"schemaVersion":"praxis.ai.context-hints.domain-decision/v1",
                                  "definitionId":"00000000-0000-0000-0000-000000000382",
                                  "ruleKey":"ERG-08382","version":3,
-                                 "source":"policy-studio-selection"}
+                                 "source":"rules-studio-selection"}
                                 """)),
                 principal,
                 "retrieveEvidence");
@@ -187,7 +187,7 @@ class AgenticAuthoringDomainDecisionExplanationFlowTest {
                             "definitionId": "00000000-0000-0000-0000-000000000382",
                             "ruleKey": "ERG-08382",
                             "version": 3,
-                            "source": "policy-studio-selection"
+                            "source": "rules-studio-selection"
                           },
                           "resolvedIntent": {
                             "operationKind": "explain",

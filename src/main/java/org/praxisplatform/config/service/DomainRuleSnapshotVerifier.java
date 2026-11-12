@@ -1,6 +1,7 @@
 package org.praxisplatform.config.service;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.Collection;
 import java.util.Comparator;
@@ -44,6 +45,8 @@ final class DomainRuleSnapshotVerifier {
     }
     if (!isPreManifestSnapshot(stored)) {
       verifyStoredComposition(stored, snapshot);
+    } else if (!snapshot.ruleSet().errorDescriptors().isEmpty()) {
+      throw new IllegalStateException("Persisted error descriptors require composition approval");
     }
     return snapshot;
   }
@@ -91,6 +94,7 @@ final class DomainRuleSnapshotVerifier {
         || !stored.getTenantId().equals(snapshot.tenantId())
         || !stored.getEnvironment().equals(snapshot.environment())
         || !stored.getRuleSetKey().equals(snapshot.ruleSet().ref().ruleSetKey())
+        || !snapshot.ruleSet().ref().operationKey().equals(stored.getOperationKey())
         || !stored.getRuleSetVersion().equals(snapshot.ruleSet().ref().version())
         || !stored.getPublicationRevision().equals(snapshot.publicationRevision())) {
       throw new IllegalStateException("Persisted RuleSet snapshot identity does not match its immutable envelope");
@@ -108,6 +112,25 @@ final class DomainRuleSnapshotVerifier {
     }
     try {
       var manifest = objectMapper.readTree(stored.getCompositionManifest());
+      var approvedDescriptors = manifest.path("ruleSet").path("errorDescriptors");
+      var storedDescriptors = snapshot.ruleSet().errorDescriptors();
+      if ((!approvedDescriptors.isMissingNode() || !storedDescriptors.isEmpty())
+          && !approvedDescriptors.equals(objectMapper.valueToTree(storedDescriptors))) {
+        throw new IllegalStateException("Persisted error descriptors do not match the approved composition");
+      }
+      if (!storedDescriptors.isEmpty()) {
+        verifyDescriptorScope(manifest, snapshot);
+      }
+      if (manifest.has("productProfile")) {
+        var product=objectMapper.treeToValue(manifest.get("productProfile"),DomainRuleProductProfile.class);
+        if (!product.ownerServiceKey().equals(snapshot.ownerServiceKey())
+            || !product.hostContractVersion().equals(snapshot.requiredHostContractVersion()) || !product.matches(snapshot.ruleSet())
+            || !snapshot.sources().equals(List.of(product.source(objectMapper)))
+            || !manifest.path("sources").equals(objectMapper.valueToTree(snapshot.sources())))
+          throw new IllegalStateException("Persisted product provenance differs from its approved profile");
+      } else if (snapshot.sources().stream().anyMatch(source->source.definitionId().startsWith("product:"))) {
+        throw new IllegalStateException("Product provenance requires its approved server profile");
+      }
       String digest = PraxisCanonicalJson.sha256(manifest);
       long approvers = snapshot.approvals().stream()
           .filter(approval -> "RULE_COMPOSITION_APPROVER".equals(approval.role()))
@@ -136,6 +159,35 @@ final class DomainRuleSnapshotVerifier {
     } catch (JsonProcessingException | NullPointerException exception) {
       throw new IllegalStateException("Persisted RuleSet composition manifest is unreadable", exception);
     }
+  }
+
+  private void verifyDescriptorScope(JsonNode manifest, PublishedRuleSnapshot snapshot) {
+    var approved = manifest.path("ruleSet");
+    var ruleSet = snapshot.ruleSet();
+    if (!snapshot.tenantId().equals(manifest.path("tenantId").asText())
+        || !snapshot.environment().equals(manifest.path("environment").asText())
+        || !snapshot.ownerServiceKey().equals(manifest.path("ownerServiceKey").asText())
+        || !approved.path("ref").equals(objectMapper.valueToTree(ruleSet.ref()))) {
+      throw new IllegalStateException("Persisted error descriptors do not match the approved scope");
+    }
+    for (String key : ruleSet.errorDescriptors().keySet()) {
+      var binding = ruleSet.bindings().stream().filter(item -> item.bindingKey().equals(key))
+          .findFirst().orElseThrow(() -> new IllegalStateException("Persisted descriptor binding is missing"));
+      var slot = ruleSet.slots().stream().filter(item -> item.slotKey().equals(binding.slotKey()))
+          .findFirst().orElseThrow(() -> new IllegalStateException("Persisted descriptor slot is missing"));
+      if (!contains(approved.path("bindings"), objectMapper.valueToTree(binding))
+          || !contains(approved.path("slots"), objectMapper.valueToTree(slot))) {
+        throw new IllegalStateException("Persisted error descriptor binding or slot was not approved");
+      }
+    }
+  }
+
+  private static boolean contains(JsonNode array, JsonNode expected) {
+    if (!array.isArray()) return false;
+    for (var element : array) {
+      if (expected.equals(element)) return true;
+    }
+    return false;
   }
 
   private PublishedRuleSnapshot readSnapshot(DomainRuleSnapshot stored) {

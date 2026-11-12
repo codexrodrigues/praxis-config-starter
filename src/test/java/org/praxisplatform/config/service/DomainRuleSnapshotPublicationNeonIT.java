@@ -66,6 +66,7 @@ class DomainRuleSnapshotPublicationNeonIT {
   private static DomainRuleSnapshotScopeLock scopeLock;
 
   @BeforeAll static void connectOnlyToTheExplicitlyAssignedChildDatabase() throws Exception {
+    javax.net.ssl.SSLContext.getDefault().getSocketFactory().getDefaultCipherSuites();
     var owner = assignedSource("OWNER");
     runtime = assignedSource("RUNTIME");
     attest(owner, required("PRAXIS_CONFIG_G2_NEON_EXPECTED_OWNER_ROLE"), true);
@@ -101,12 +102,35 @@ class DomainRuleSnapshotPublicationNeonIT {
 
   @AfterAll static void closeOnlyTheTestContext() { if (context != null) context.close(); }
 
+  @Test void withdrawnReentrySchemaKeepsActiveDistinctGuard() {
+    Fixture f=fixture();
+    var published=tx(()->snapshots.publish(f.request(1),f.tenant(),"g2",null,"*","publisher"));
+    governPolicy(f);
+    var rollout=tx(()->rollouts.create(new DomainRuleRolloutCreateRequest(published.snapshot().snapshotKey(),null),f.operator(),null,"*"));
+    preload(f,published,rollout.rolloutId());
+    tx(()->snapshots.activatePublished(published.snapshot().snapshotKey(),"operator",f.tenant(),"g2",null,"*",rollout.rolloutId()));
+    var jdbc=new JdbcTemplate(runtime);
+    assertThat(jdbc.queryForObject("select count(*) from flyway_schema_history where version='74' and success",Integer.class)).isEqualTo(1);
+    assertThatThrownBy(()->jdbc.update("""
+        insert into domain_rule_snapshot_rollout
+        (id,tenant_id,environment,rule_set_key,operation_key,candidate_snapshot_id,expected_active_snapshot_id,
+         expected_head_etag,expected_head_withdrawn,policy_id,status,created_by,created_at,updated_at,row_version)
+        select gen_random_uuid(),h.tenant_id,h.environment,h.rule_set_key,h.operation_key,h.active_snapshot_id,
+               h.active_snapshot_id,h.head_etag,false,p.id,'PREPARING','negative-schema-probe',now(),now(),0
+        from domain_rule_snapshot_head h join domain_rule_rollout_policy p
+          on p.tenant_id=h.tenant_id and p.environment=h.environment and p.rule_set_key=h.rule_set_key and p.active
+        where h.tenant_id=? and h.environment='g2' and not h.withdrawn limit 1
+        """,f.tenant()))
+        .isInstanceOf(org.springframework.dao.DataIntegrityViolationException.class)
+        .hasMessageContaining("ck_domain_rule_rollout_distinct_snapshots");
+  }
+
   @Test void realLifecycleConcurrencyAndAtomicityUnderRuntimePrivileges() throws Exception {
     Fixture f = fixture();
     var published = tx(() -> snapshots.publish(f.request(1), f.tenant(), "g2", null, "*", "publisher"));
     String key = published.snapshot().snapshotKey();
     String bytes = tx(() -> snapshotRows.findByTenantIdAndEnvironmentAndSnapshotKey(f.tenant(), "g2", key).orElseThrow().getSnapshotPayload());
-    assertThat(tx(() -> heads.findByTenantIdAndEnvironmentAndRuleSetKey(f.tenant(), "g2", f.ruleSet()))).isEmpty();
+    assertThat(tx(() -> heads.findByTenantIdAndEnvironmentAndRuleSetKeyAndOperationKey(f.tenant(), "g2", f.ruleSet(), "evaluate"))).isEmpty();
     assertThat(new JdbcTemplate(runtime).queryForObject(
         "select count(*) from domain_rule_snapshot_event where tenant_id=? and event_type='PUBLISHED' and activation_revision is null and head_etag is null",
         Integer.class, f.tenant())).isEqualTo(1);
@@ -133,7 +157,7 @@ class DomainRuleSnapshotPublicationNeonIT {
     });
     assertThatThrownBy(() -> tx(() -> failing.activatePublished(key, "operator", f.tenant(), "g2", null, "*", rollout.rolloutId())))
         .isInstanceOf(IllegalStateException.class).hasMessageContaining("injected completion");
-    assertThat(tx(() -> heads.findByTenantIdAndEnvironmentAndRuleSetKey(f.tenant(), "g2", f.ruleSet()))).isEmpty();
+    assertThat(tx(() -> heads.findByTenantIdAndEnvironmentAndRuleSetKeyAndOperationKey(f.tenant(), "g2", f.ruleSet(), "evaluate"))).isEmpty();
     assertThat(tx(() -> rolloutRows.findById(rollout.rolloutId()).orElseThrow().getStatus())).isEqualTo("PREPARING");
     // Two bootstrap operators: one selection, one stale-absence response, no duplicate event.
     var attempts = race(() -> tx(() -> snapshots.activatePublished(key, "operator", f.tenant(), "g2", null, "*", rollout.rolloutId())));
@@ -181,7 +205,7 @@ class DomainRuleSnapshotPublicationNeonIT {
     if (publication instanceof DomainRuleSnapshotControlPlaneException stale)
       assertThat(stale.status()).isEqualTo(org.springframework.http.HttpStatus.PRECONDITION_FAILED);
     else assertThat(publication).isInstanceOf(DomainRuleSnapshotStoredResponse.class);
-    var selected = tx(() -> heads.findByTenantIdAndEnvironmentAndRuleSetKey(f.tenant(), "g2", f.ruleSet()).orElseThrow());
+    var selected = tx(() -> heads.findByTenantIdAndEnvironmentAndRuleSetKeyAndOperationKey(f.tenant(), "g2", f.ruleSet(), "evaluate").orElseThrow());
     assertThat(selected.getActivationRevision()).isEqualTo(1);
     assertThat(tx(() -> snapshotRows.findById(selected.getActiveSnapshotId()).orElseThrow().getSnapshotKey()))
         .isEqualTo(candidate.snapshot().snapshotKey());
@@ -236,7 +260,7 @@ class DomainRuleSnapshotPublicationNeonIT {
     var selected = new CountDownLatch(1);
     try (var pool = Executors.newVirtualThreadPerTaskExecutor()) {
       var stale = pool.submit(() -> tx(() -> {
-        heads.findByTenantIdAndEnvironmentAndRuleSetKey(f.tenant(), "g2", f.ruleSet()).orElseThrow();
+        heads.findByTenantIdAndEnvironmentAndRuleSetKeyAndOperationKey(f.tenant(), "g2", f.ruleSet(), "evaluate").orElseThrow();
         loaded.countDown();
         if (!selected.await(30, TimeUnit.SECONDS)) throw new AssertionError("selection timeout");
         return snapshots.publish(f.request(3), f.tenant(), "g2", quote(first.headEtag()), null, "publisher");
@@ -249,11 +273,11 @@ class DomainRuleSnapshotPublicationNeonIT {
   }
 
   private static void concurrentPublicationIsAppendOnly(Fixture f) throws Exception {
-    var head = tx(() -> heads.findByTenantIdAndEnvironmentAndRuleSetKey(f.tenant(), "g2", f.ruleSet()).orElseThrow());
+    var head = tx(() -> heads.findByTenantIdAndEnvironmentAndRuleSetKeyAndOperationKey(f.tenant(), "g2", f.ruleSet(), "evaluate").orElseThrow());
     var attempts = race(() -> tx(() -> snapshots.publish(f.request(3), f.tenant(), "g2", quote(head.getHeadEtag().toString()), null, "publisher")));
     assertThat(attempts.stream().filter(DomainRuleSnapshotStoredResponse.class::isInstance).count()).isEqualTo(1);
     assertThat(attempts.stream().filter(DomainRuleSnapshotControlPlaneException.class::isInstance).count()).isEqualTo(1);
-    assertThat(tx(() -> heads.findByTenantIdAndEnvironmentAndRuleSetKey(f.tenant(), "g2", f.ruleSet()).orElseThrow().getHeadEtag())).isEqualTo(head.getHeadEtag());
+    assertThat(tx(() -> heads.findByTenantIdAndEnvironmentAndRuleSetKeyAndOperationKey(f.tenant(), "g2", f.ruleSet(), "evaluate").orElseThrow().getHeadEtag())).isEqualTo(head.getHeadEtag());
   }
 
   private static void preload(Fixture f, DomainRuleSnapshotStoredResponse candidate, UUID rolloutId) {
@@ -303,7 +327,7 @@ class DomainRuleSnapshotPublicationNeonIT {
     DomainRuleGovernancePrincipal operator() { return new DomainRuleGovernancePrincipal(tenant, "operator", "g2"); }
     RuleSetDefinition definition(int version) {
       return new RuleSetDefinition(new RuleSetRef("proof", "publication", ruleSet, "evaluate", version), List.of("request"),
-          List.of(new DecisionSlot("eligible", DecisionStage.DOMAIN_DECISION, SlotCardinality.SINGLE, OverridePolicy.FORBIDDEN, DecisionAggregationPolicy.SINGLE_RESULT, null)),
+          List.of(new DecisionSlot("eligible", DecisionStage.DOMAIN_DECISION, SlotCardinality.SINGLE, OverridePolicy.FORBIDDEN, DecisionAggregationPolicy.SINGLE_RESULT, null, java.util.List.of())),
           List.of(new DecisionBinding("eligible", "eligible", DecisionSource.PRODUCT, null, RuleExecutorRef.jsonLogic(JSON.createObjectNode().put("var", "request.eligible")),
               List.of(), 10, true, RuleDecision.DENY, "NOT_ELIGIBLE", List.of("request.eligible"), null)), RuleRuntimeCompatibility.current(), RuleFailPolicy.FAIL_CLOSED);
     }
@@ -332,7 +356,7 @@ class DomainRuleSnapshotPublicationNeonIT {
   private static DomainRuleSnapshotService snapshotService(DomainRuleSnapshotActivationGate gate) {
     return new DomainRuleSnapshotService(context.getBean(DomainRuleDefinitionRepository.class), snapshotRows, heads, events,
         context.getBean(DomainRuleCompositionApprovalRepository.class), context.getBean(DomainRuleDefinitionApprovalRepository.class),
-        new DomainRuleDefinitionFingerprint(JSON), JSON, DomainRuleImplementationCatalog.denyAll(), gate, null, scopeLock, refresh);
+        new DomainRuleDefinitionFingerprint(JSON), JSON, DomainRuleImplementationCatalog.denyAll(), gate, null, scopeLock, refresh, (scope, identity) -> java.util.Optional.empty());
   }
   private static <T> T tx(Callable<T> action) {
     return transactions.execute(status -> { try { return action.call(); } catch (RuntimeException e) { throw e; } catch (Exception e) { throw new IllegalStateException(e); } });
@@ -352,7 +376,17 @@ class DomainRuleSnapshotPublicationNeonIT {
 
   private static PGSimpleDataSource assignedSource(String roleKind) throws Exception {
     Path file = Path.of(required("PRAXIS_CONFIG_G2_NEON_" + roleKind + "_URI_FILE"));
-    assertThat(Files.getPosixFilePermissions(file)).isEqualTo(Set.of(PosixFilePermission.OWNER_READ, PosixFilePermission.OWNER_WRITE));
+    if (Files.getFileStore(file).supportsFileAttributeView("posix")) {
+      assertThat(Files.getPosixFilePermissions(file)).isEqualTo(Set.of(PosixFilePermission.OWNER_READ, PosixFilePermission.OWNER_WRITE));
+    } else {
+      var acl=Files.getFileAttributeView(file,java.nio.file.attribute.AclFileAttributeView.class);
+      assertThat(acl).as("Owner-only ACL support required when POSIX permissions are unavailable").isNotNull();
+      var owner=Files.getOwner(file);
+      assertThat(acl.getAcl()).isNotEmpty().allSatisfy(entry->{
+        assertThat(entry.type()).isEqualTo(java.nio.file.attribute.AclEntryType.ALLOW);
+        assertThat(entry.principal()).isEqualTo(owner);
+      });
+    }
     URI uri = URI.create(Files.readString(file).strip());
     assertThat(uri.getScheme()).isIn("postgresql", "postgres");
     assertThat(uri.getHost()).isEqualTo(required("PRAXIS_CONFIG_G2_NEON_EXPECTED_HOST")).endsWith(".neon.tech").doesNotContain("-pooler");

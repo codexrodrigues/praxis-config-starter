@@ -32,11 +32,17 @@ final class AgenticAuthoringDomainCatalogHints {
         domainCatalog.put("intent", "authoring");
         domainCatalog.put("policyProfile", policyProfile(userPrompt));
         domainCatalog.put("limit", 12);
-        String contextKey = contextKey(candidate.resourcePath());
+        String groundedResourceKey = groundedResourceKey(candidate);
+        String resourceKey = !groundedResourceKey.isBlank()
+                ? groundedResourceKey
+                : resourceKey(candidate.resourcePath());
+        String contextKey = contextKeyFromResourceKey(groundedResourceKey);
+        if (contextKey.isBlank()) {
+            contextKey = contextKey(candidate.resourcePath());
+        }
         if (!contextKey.isBlank()) {
             domainCatalog.put("contextKey", contextKey);
         }
-        String resourceKey = resourceKey(candidate.resourcePath());
         if (!resourceKey.isBlank()) {
             domainCatalog.put("resourceKey", resourceKey);
         }
@@ -64,6 +70,34 @@ final class AgenticAuthoringDomainCatalogHints {
         if (requiresGovernanceContext(userPrompt)) {
             domainCatalog.put("recommendedAuthoringFlow", "shared_rule_authoring");
         }
+        if (candidate.evidence() != null
+                && candidate.evidence().contains(AgenticAuthoringDomainCatalogCandidateEnhancer.DOMAIN_CATALOG_GROUNDING)) {
+            domainCatalog.put("knowledgeGraphGrounded", true);
+        }
+    }
+
+    private static String groundedResourceKey(AgenticAuthoringCandidate candidate) {
+        if (candidate == null || candidate.evidenceBundle() == null || candidate.evidenceBundle().evidence() == null) {
+            return "";
+        }
+        for (AgenticAuthoringEvidenceBundle.Evidence item : candidate.evidenceBundle().evidence()) {
+            if (item != null
+                    && "domain_catalog".equals(item.source())
+                    && item.ref() != null
+                    && !item.ref().isBlank()
+                    && !item.ref().startsWith("/")) {
+                return item.ref().trim();
+            }
+        }
+        return "";
+    }
+
+    private static String contextKeyFromResourceKey(String resourceKey) {
+        if (resourceKey == null || resourceKey.isBlank()) {
+            return "";
+        }
+        int dot = resourceKey.indexOf('.');
+        return dot > 0 ? resourceKey.substring(0, dot).trim() : "";
     }
 
     private static String contextKey(String resourcePath) {

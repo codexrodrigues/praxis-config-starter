@@ -5,6 +5,8 @@ import java.time.Instant;
 /** Safe aggregate of runtime alignment against the server-owned active snapshot head. */
 public record DomainRuleHostStatusSummaryResponse(
     String ruleSetKey,
+    @io.swagger.v3.oas.annotations.media.Schema(description = "Operation whose expected head and host convergence are summarized; heartbeats for other operations are excluded.", requiredMode = io.swagger.v3.oas.annotations.media.Schema.RequiredMode.REQUIRED)
+    String operationKey,
     String expectedSnapshotKey,
     String expectedSnapshotContentHash,
     long expectedActivationRevision,

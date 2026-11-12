@@ -13,7 +13,7 @@
 
     <groupId>io.github.codexrodrigues</groupId>
     <artifactId>praxis-config-starter</artifactId>
-    <version>0.1.0-rc.176</version>
+    <version>0.1.0-rc.177-SNAPSHOT</version>
     <packaging>jar</packaging>
 
     <name>Praxis Config Starter</name>
@@ -48,8 +48,9 @@
         <spring-ai.version>1.1.8</spring-ai.version>
         <openai-java.version>4.43.0</openai-java.version>
         <lombok.version>1.18.30</lombok.version>
-        <praxis-config-contracts.version>0.1.0-beta.5</praxis-config-contracts.version>
-        <praxis-rules-engine.version>0.1.0-beta.17</praxis-rules-engine.version>
+        <praxis-config-contracts.version>0.1.0-beta.5-SNAPSHOT</praxis-config-contracts.version>
+        <praxis-rules-engine.version>0.1.0-beta.19-SNAPSHOT</praxis-rules-engine.version>
+        <praxis-metadata-starter.version>8.0.0-rc.188</praxis-metadata-starter.version>
         <swagger-annotations.version>2.2.47</swagger-annotations.version>
         <swagger-core.version>2.2.22</swagger-core.version>
     </properties>
@@ -199,6 +200,12 @@
         <dependency>
             <groupId>org.springframework.security</groupId>
             <artifactId>spring-security-web</artifactId>
+            <optional>true</optional>
+        </dependency>
+        <dependency>
+            <groupId>io.github.codexrodrigues</groupId>
+            <artifactId>praxis-metadata-starter</artifactId>
+            <version>${praxis-metadata-starter.version}</version>
             <optional>true</optional>
         </dependency>
     </dependencies>

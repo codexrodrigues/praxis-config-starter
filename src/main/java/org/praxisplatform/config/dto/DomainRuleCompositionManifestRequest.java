@@ -10,7 +10,7 @@ import org.praxisplatform.rules.contract.RuleSetDefinition;
 public record DomainRuleCompositionManifestRequest(
     @Schema(description = "Complete deterministic RuleSet graph whose exact canonical content will be approved.", requiredMode = Schema.RequiredMode.REQUIRED)
     RuleSetDefinition ruleSet,
-    @Schema(description = "Distinct governed definition IDs whose current approved content hashes become immutable manifest provenance.", requiredMode = Schema.RequiredMode.REQUIRED)
+    @Schema(description = "Distinct governed definition IDs whose approved hashes become provenance. An explicit empty list selects only an exact server-registered product profile; null never requests product implicitly.", requiredMode = Schema.RequiredMode.REQUIRED)
     List<UUID> sourceDefinitionIds,
     @Schema(description = "Stable domain-host service identity authorized to consume the composition.", example = "praxis-api-quickstart", requiredMode = Schema.RequiredMode.REQUIRED)
     String ownerServiceKey,

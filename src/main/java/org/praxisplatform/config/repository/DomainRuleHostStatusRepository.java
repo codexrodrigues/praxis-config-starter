@@ -11,24 +11,24 @@ import org.springframework.data.repository.query.Param;
 
 /** Persistence access for replaceable, monotonic host heartbeats. */
 public interface DomainRuleHostStatusRepository extends JpaRepository<DomainRuleHostStatus, UUID> {
-  List<DomainRuleHostStatus> findByTenantIdAndEnvironmentAndRuleSetKey(
-      String tenantId, String environment, String ruleSetKey);
+  List<DomainRuleHostStatus> findByTenantIdAndEnvironmentAndRuleSetKeyAndOperationKey(
+      String tenantId, String environment, String ruleSetKey, String operationKey);
 
   @Modifying
   @Query(value = """
       INSERT INTO domain_rule_host_status (
-        id, tenant_id, environment, rule_set_key, host_actor_ref,
+        id, tenant_id, environment, rule_set_key, operation_key, host_actor_ref,
         loaded_snapshot_key, loaded_snapshot_content_hash, activation_revision,
         ready, host_contract_version, engine_contract_version, json_logic_dialect_version,
         json_logic_corpus_sha256, implementation_catalog_digest,
         failure_code, observed_at, received_at
       ) VALUES (
-        :id, :tenantId, :environment, :ruleSetKey, :hostActorRef,
+        :id, :tenantId, :environment, :ruleSetKey, :operationKey, :hostActorRef,
         :snapshotKey, :contentHash, :activationRevision,
         :ready, :contractVersion, :engineContractVersion, :dialectVersion,
         :corpusSha256, :catalogDigest, :failureCode, :observedAt, :receivedAt
       )
-      ON CONFLICT (tenant_id, environment, rule_set_key, host_actor_ref)
+      ON CONFLICT (tenant_id, environment, rule_set_key, operation_key, host_actor_ref)
       DO UPDATE SET
         loaded_snapshot_key = EXCLUDED.loaded_snapshot_key,
         loaded_snapshot_content_hash = EXCLUDED.loaded_snapshot_content_hash,
@@ -49,6 +49,7 @@ public interface DomainRuleHostStatusRepository extends JpaRepository<DomainRule
       @Param("tenantId") String tenantId,
       @Param("environment") String environment,
       @Param("ruleSetKey") String ruleSetKey,
+      @Param("operationKey") String operationKey,
       @Param("hostActorRef") String hostActorRef,
       @Param("snapshotKey") String snapshotKey,
       @Param("contentHash") String contentHash,

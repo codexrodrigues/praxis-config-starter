@@ -12525,7 +12525,7 @@ class AgenticAuthoringTurnEngineTest {
         assertThat(reply.path("contextHints").path("selectedDomainDecisionRef").path("version").asInt())
                 .isEqualTo(3);
         assertThat(reply.path("contextHints").path("selectedDomainDecisionRef").path("source").asText())
-                .isEqualTo("policy-studio-selection");
+                .isEqualTo("rules-studio-selection");
     }
 
     @Test

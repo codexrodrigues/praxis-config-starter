@@ -292,8 +292,8 @@ public class DomainRuleRolloutPolicyService {
 
   private void lockSnapshotHead(DomainRuleGovernancePrincipal principal, String ruleSetKey) {
     scopeLock.lock(principal.tenantId(), principal.environment(), ruleSetKey);
-    snapshotHeads.findByTenantIdAndEnvironmentAndRuleSetKey(
-        principal.tenantId(), principal.environment(), ruleSetKey).ifPresent(entityRefresh::snapshotHead);
+    snapshotHeads.findAllByTenantIdAndEnvironmentAndRuleSetKey(
+        principal.tenantId(), principal.environment(), ruleSetKey).forEach(entityRefresh::snapshotHead);
   }
 
   private DomainRuleRolloutPolicy scoped(UUID id, DomainRuleGovernancePrincipal principal) {

@@ -9,6 +9,8 @@ public record DomainRuleSnapshotVersionResponse(
     String snapshotKey,
     @Schema(description = "Stable semantic RuleSet identity shared by all versions in the catalog.", requiredMode = Schema.RequiredMode.REQUIRED)
     String ruleSetKey,
+    @io.swagger.v3.oas.annotations.media.Schema(description = "Operation whose immutable version history is listed; version and publication revision are local to this operation.", requiredMode = io.swagger.v3.oas.annotations.media.Schema.RequiredMode.REQUIRED)
+    String operationKey,
     @Schema(description = "Immutable version declared by the RuleSet content.", minimum = "1", requiredMode = Schema.RequiredMode.REQUIRED)
     int ruleSetVersion,
     @Schema(description = "Append-only publication order within the governed scope.", minimum = "1", requiredMode = Schema.RequiredMode.REQUIRED)

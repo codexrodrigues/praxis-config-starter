@@ -837,7 +837,7 @@ diagnostico restrito. Falhas inesperadas de processamento usam
 
 ### Descoberta consultiva de decisoes governadas
 
-Antes de existir uma selecao exata do Policy Studio, o planner LLM pode escolher
+Antes de existir uma selecao exata do Rules Studio, o planner LLM pode escolher
 `groundingProfile=domain_decision` e executar a tool read-only
 `searchDomainRules`. A escolha e semantica e authorada pelo modelo; query e
 filtros textuais apenas ranqueiam candidatos depois dessa decisao e nunca roteiam
@@ -866,7 +866,7 @@ autoridade para tools.
 
 ### Explicacao consultiva de decisao governada
 
-Quando o Policy Studio envia `contextHints.selectedDomainDecisionRef` com o
+Quando o Rules Studio envia `contextHints.selectedDomainDecisionRef` com o
 contrato `praxis.ai.context-hints.domain-decision/v1`, o resolvedor LLM pode
 produzir `explain/domain_decision/explain_domain_decision`. A referencia e
 somente um hint de selecao: em corporate mode o controller exige

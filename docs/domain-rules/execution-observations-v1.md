@@ -61,6 +61,6 @@ The application must not silently delete audit evidence or retain it indefinitel
 1. Quickstart outbox with bounded retry/backoff and a dedicated service principal.
 2. Host heartbeat/status for current-head alignment and last-known-good drift is now defined by
    `host-status-v1.md`; engine-coordinate compatibility remains a separate future increment.
-3. `@praxisui/core` read client and Policy Studio projection after the backend contract is consumed
+3. `@praxisui/core` read client and Rules Studio projection after the backend contract is consumed
    by at least two real hosts.
 4. Production retention/archival adapter and load/cardinality validation.

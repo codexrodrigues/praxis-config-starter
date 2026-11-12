@@ -19,7 +19,7 @@ public final class DomainRuleSnapshotHeadReaderAdapter implements PublishedRuleS
   @Override
   public Optional<PublishedRuleSnapshotHead> findActive(PublishedRuleSnapshotHeadScope scope) {
     Objects.requireNonNull(scope, "scope is required");
-    return snapshotService.findActive(scope.tenantId(), scope.environment(), scope.ruleSetKey())
+    return snapshotService.findActive(scope.tenantId(), scope.environment(), scope.ruleSetKey(), scope.operationKey())
         .map(DomainRuleSnapshotHeadReaderAdapter::toPublishedHead);
   }
 

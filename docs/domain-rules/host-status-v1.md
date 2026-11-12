@@ -11,7 +11,7 @@ aligned with the server-owned active snapshot head. Config remains the control-p
 
 Required role: `RULE_EXECUTION_OBSERVER`.
 
-The host reports `ruleSetKey`, its loaded snapshot key/hash/revision, readiness, host contract,
+The host reports `ruleSetKey`, the exact required `operationKey`, its loaded snapshot key/hash/revision, readiness, host contract,
 engine contract, JSON Logic dialect, normative corpus SHA-256, admitted implementation-catalog
 digest, an optional bounded failure code and `observedAtUtc`. Tenant, environment and internal host
 identity come exclusively from the server principal. Older or exact replays do not regress the
@@ -19,7 +19,7 @@ current row. A ready report without the complete compatibility evidence is rejec
 
 ## Read contract
 
-`GET /api/praxis/config/domain-rules/snapshots/head/host-status-summary?ruleSetKey=...`
+`GET /api/praxis/config/domain-rules/snapshots/head/host-status-summary?ruleSetKey=...&operationKey=...`
 
 Required role: `RULE_SNAPSHOT_READER`.
 

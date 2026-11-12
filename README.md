@@ -2,7 +2,7 @@
 
 [![Maven Central](https://img.shields.io/maven-central/v/io.github.codexrodrigues/praxis-config-starter?logo=apachemaven&color=blue)](https://central.sonatype.com/artifact/io.github.codexrodrigues/praxis-config-starter)
 ![Spring Boot](https://img.shields.io/badge/Spring%20Boot-3.5%2B-brightgreen)
-![Java](https://img.shields.io/badge/Java-17%2B-orange)
+![Java](https://img.shields.io/badge/Java-21%2B-orange)
 ![PostgreSQL](https://img.shields.io/badge/PostgreSQL-pgvector-blue)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 
@@ -32,7 +32,10 @@ The public Praxis UI site, examples, and documentation are available at
 | Concern | Canonical owner |
 | --- | --- |
 | Backend resource semantics, `x-ui`, `/schemas/filtered`, discovery, and capabilities | [`praxis-metadata-starter`](https://github.com/codexrodrigues/praxis-metadata-starter) |
-| Runtime configuration, enterprise context projection, AI registry, API metadata, templates, stream auth, and governed authoring state | `praxis-config-starter` |
+| Runtime configuration, enterprise context projection, AI registry, API metadata, templates, stream auth, and governed decision control plane (`decisionKind = BUSINESS` & `decisionKind = AUTHORIZATION`) | `praxis-config-starter` |
+| Deterministic 5-state business rule evaluation (`decisionKind = BUSINESS`, `RuleSet`, JSON Logic, `RuleParameterTemplate`, Step 12 of mutation pipeline) | `praxis-rules-engine` |
+| Lightweight authorization contracts, 15-step PEP runtime, OPA/Rego sidecar adapter, and Spring auto-configuration (`decisionKind = AUTHORIZATION`, `ACCESS`, `DATA_SCOPE` Kleene 3VL, `FIELD_USE`, `FIELD_WRITE`, `MASK`, `OBLIGATIONS`, Steps 1–11 & 13–15) | `praxis-authz-contracts`, `praxis-authz-enforcement-core`, `praxis-authz-opa`, `praxis-authz-starter` |
+| Governed decision workstation (**Business Rules Lens** & **Access & Data Protection Lens**) | `praxis-rules-studio` |
 | Angular runtime rendering, materializers, editors, and host integration APIs | [`praxis-ui-angular`](https://github.com/codexrodrigues/praxis-ui-angular) |
 | Public site, examples, playgrounds, and platform documentation | [praxisui.dev](https://praxisui.dev/) |
 | Public operational proof and downstream HTTP validation | [`praxis-api-quickstart`](https://github.com/codexrodrigues/praxis-api-quickstart) |
@@ -78,7 +81,7 @@ CodeWiki is complementary navigation for code reading; the repository docs and s
 - AI registry definitions, authoring manifests, templates, and diagnostics;
 - signed or cookie-based stream access for browser-compatible authoring flows;
 - governed domain decisions and materialization workflows under `/api/praxis/config/**`.
-- Policy Studio change workspaces with strong ETag concurrency and reusable five-state outcome
+- Rules Studio change workspaces with strong ETag concurrency and reusable five-state outcome
   scenarios, documented in [`docs/domain-rules/change-workspaces-v1.md`](docs/domain-rules/change-workspaces-v1.md).
   The public `DomainRuleChangeWorkspaceContract` keeps its semantic `RESOURCE_KEY` distinct from
   the canonical HTTP `RESOURCE_PATH`, allowing cross-resource action preconditions without URL inference.
@@ -544,7 +547,7 @@ Start with these repository documents:
 - [Rule execution observations v1](docs/domain-rules/execution-observations-v1.md)
 - [Domain-rule host status v1](docs/domain-rules/host-status-v1.md)
 - [Staged activation readiness v1](docs/domain-rules/staged-activation-readiness-v1.md)
-- [Policy Studio change workspaces v1](docs/domain-rules/change-workspaces-v1.md)
+- [Rules Studio change workspaces v1](docs/domain-rules/change-workspaces-v1.md)
 
 RuleSet publication is a governed maker-checker flow: first request
 `POST /api/praxis/config/domain-rules/snapshots/composition-manifest`, obtain two
@@ -565,7 +568,7 @@ authenticated `RULE_SNAPSHOT_PUBLISHER` and uses that same server-resolved scope
 Hosts that publish execution observations or candidate probes additionally map
 `RULE_EXECUTION_OBSERVER`. Structural simulation requires `RULE_DEFINITION_AUTHOR`; caller hints
 never widen the resolved scope.
-Policy Studio workspaces require a current, fully passing, idempotently recorded Test Run before
+Rules Studio workspaces require a current, fully passing, idempotently recorded Test Run before
 submission. The run may carry an independent redacted baseline lane and governed operational
 CREATE/UPDATE evidence; the accepted run id is bound to the submitted workspace. A different
 authenticated `RULE_DEFINITION_APPROVER` then appends an immutable review for that exact workspace

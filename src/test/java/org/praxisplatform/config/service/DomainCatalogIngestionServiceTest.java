@@ -2396,4 +2396,87 @@ class DomainCatalogIngestionServiceTest {
         verify(releaseRepository).findLatestSummaries(eq("praxis-service"), eq(null), eq("shield-hq"), eq("local"), any(Pageable.class));
         verify(releaseRepository).findLatestSummaries(eq("praxis-service"), eq(null), eq("desenv"), eq("local"), any(Pageable.class));
     }
+
+    @Test
+    void filtersContextBundleReleaseByMetadataResourceKeyAndIncomingTargetNodeKey() {
+        DomainCatalogReleaseRepository releaseRepository = mock(DomainCatalogReleaseRepository.class);
+        DomainCatalogItemRepository itemRepository = mock(DomainCatalogItemRepository.class);
+        RagVectorStoreService ragVectorStoreService = mock(RagVectorStoreService.class);
+        DomainCatalogIngestionService service = new DomainCatalogIngestionService(
+                releaseRepository,
+                itemRepository,
+                objectMapper,
+                ragVectorStoreService,
+                validationService()
+        );
+
+        DomainCatalogRelease bundleRelease = DomainCatalogRelease.builder()
+                .id(UUID.fromString("f190c524-b67a-4cc0-b754-d652d7424e14"))
+                .releaseKey("praxis-service:ergon:hash")
+                .schemaVersion("praxis.domain-catalog/v0.2")
+                .serviceKey("praxis-service")
+                .resourceKey(null)
+                .tenantId("tenant-a")
+                .environment("dev")
+                .generatedAt(Instant.parse("2026-04-21T12:00:00Z"))
+                .createdAt(Instant.parse("2026-04-21T12:00:01Z"))
+                .build();
+
+        DomainCatalogItem incomingMaterializesEdge = DomainCatalogItem.builder()
+                .release(bundleRelease)
+                .itemType("edge")
+                .itemKey("ergon.radar-ferias-prescricao.materializes.ergon.vinculos")
+                .edgeType("materializes")
+                .payload("""
+                    {
+                      "edgeKey": "ergon.radar-ferias-prescricao.materializes.ergon.vinculos",
+                      "sourceNodeKey": "ergon.radar-ferias-prescricao",
+                      "targetNodeKey": "ergon.vinculos",
+                      "edgeType": "materializes"
+                    }
+                    """)
+                .build();
+        DomainCatalogItem unrelatedEdge = DomainCatalogItem.builder()
+                .release(bundleRelease)
+                .itemType("edge")
+                .itemKey("ergon.cargos.references.ergon.setores")
+                .edgeType("references")
+                .payload("""
+                    {
+                      "edgeKey": "ergon.cargos.references.ergon.setores",
+                      "sourceNodeKey": "ergon.cargos",
+                      "targetNodeKey": "ergon.setores",
+                      "edgeType": "references"
+                    }
+                    """)
+                .build();
+
+        when(releaseRepository.findLatestSummaries(eq("praxis-service"), eq("ergon.vinculos"), eq("tenant-a"), eq("dev"), any(Pageable.class)))
+                .thenReturn(List.of());
+        when(releaseRepository.findLatestSummaries(eq("praxis-service"), eq(null), eq("tenant-a"), eq("dev"), any(Pageable.class)))
+                .thenReturn(releaseSummaries(bundleRelease));
+        when(itemRepository.searchSummariesAcrossReleaseIds(
+                eq(releaseIds(bundleRelease)),
+                eq("edge"),
+                eq(null),
+                eq(null),
+                eq(null),
+                any(Pageable.class)))
+                .thenReturn(itemSummaries(incomingMaterializesEdge, unrelatedEdge));
+
+        var edges = service.relationshipsLatest(
+                "praxis-service",
+                "ergon.vinculos",
+                "tenant-a",
+                "dev",
+                null,
+                "ergon.vinculos",
+                "materializes",
+                null,
+                10);
+
+        assertThat(edges).singleElement()
+                .satisfies(edge -> assertThat(edge.itemKey())
+                        .isEqualTo("ergon.radar-ferias-prescricao.materializes.ergon.vinculos"));
+    }
 }

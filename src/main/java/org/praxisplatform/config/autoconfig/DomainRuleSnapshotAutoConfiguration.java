@@ -84,6 +84,21 @@ public class DomainRuleSnapshotAutoConfiguration {
 
   @Bean
   @ConditionalOnMissingBean
+  org.praxisplatform.config.runtime.GovernedRuleFamilyRegistry governedRuleFamilyRegistry(
+      ObjectProvider<org.praxisplatform.config.runtime.GovernedRuleFamilyDescriptor<?>> descriptors) {
+    return new org.praxisplatform.config.runtime.GovernedRuleFamilyRegistry(
+        descriptors.orderedStream().collect(java.util.stream.Collectors.toList()));
+  }
+
+  @Bean
+  @ConditionalOnMissingBean
+  org.praxisplatform.config.service.DomainRuleProductCatalog domainRuleProductCatalog(
+      org.praxisplatform.config.runtime.GovernedRuleFamilyRegistry familyRegistry) {
+    return familyRegistry.toProductCatalog();
+  }
+
+  @Bean
+  @ConditionalOnMissingBean
   DomainRuleSnapshotService domainRuleSnapshotService(
       DomainRuleDefinitionRepository definitionRepository,
       DomainRuleDefinitionApprovalRepository definitionApprovalRepository,
@@ -95,7 +110,8 @@ public class DomainRuleSnapshotAutoConfiguration {
       DomainRuleDefinitionFingerprint definitionFingerprint,
       DomainRuleImplementationCatalog implementationCatalog,
       ObjectProvider<DomainRuleSnapshotActivationGate> activationGate,
-      ObjectProvider<DomainRuleDefinitionEvidenceGateService> evidenceGate, DomainRuleSnapshotScopeLock scopeLock, org.praxisplatform.config.service.DomainRuleEntityRefresh entityRefresh) {
+      ObjectProvider<DomainRuleDefinitionEvidenceGateService> evidenceGate, DomainRuleSnapshotScopeLock scopeLock, org.praxisplatform.config.service.DomainRuleEntityRefresh entityRefresh,
+      org.praxisplatform.config.service.DomainRuleProductCatalog productCatalog) {
     return new DomainRuleSnapshotService(
         definitionRepository,
         snapshotRepository,
@@ -107,7 +123,7 @@ public class DomainRuleSnapshotAutoConfiguration {
         objectMapper,
         implementationCatalog,
         activationGate.getIfAvailable(DomainRuleSnapshotActivationGate::unavailable),
-        evidenceGate, scopeLock, entityRefresh);
+        evidenceGate, scopeLock, entityRefresh, productCatalog);
   }
 
   @Bean
@@ -131,6 +147,29 @@ public class DomainRuleSnapshotAutoConfiguration {
       DomainRuleSnapshotService service,
       DomainRuleGovernancePrincipalResolver principalResolver) {
     return new DomainRuleSnapshotController(service, principalResolver);
+  }
+
+  @Bean
+  @ConditionalOnMissingBean(org.praxisplatform.config.contract.PublishedRuleSnapshotHeadSetReader.class)
+  @ConditionalOnBean(name = "configNamedParameterJdbcTemplate")
+  org.praxisplatform.config.service.DomainRuleSnapshotHeadSetService domainRuleSnapshotHeadSetReader(
+      @org.springframework.beans.factory.annotation.Qualifier("configNamedParameterJdbcTemplate")
+      org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate jdbc,
+      ObjectMapper mapper, ObjectProvider<DomainRuleImplementationCatalog> catalog) {
+    // A host's implementation owner may itself consume this reader. Resolve the
+    // catalog at verification time, preserving its exact scope and fail-closed
+    // result without constructing another engine or caching an admission.
+    return new org.praxisplatform.config.service.DomainRuleSnapshotHeadSetService(jdbc, mapper,
+        scope -> catalog.getObject().allowedImplementations(scope));
+  }
+
+  @Bean
+  @ConditionalOnMissingBean
+  @ConditionalOnBean(org.praxisplatform.config.contract.PublishedRuleSnapshotHeadSetReader.class)
+  org.praxisplatform.config.controller.DomainRuleSnapshotHeadSetController domainRuleSnapshotHeadSetController(
+      org.praxisplatform.config.contract.PublishedRuleSnapshotHeadSetReader reader,
+      DomainRuleGovernancePrincipalResolver principals) {
+    return new org.praxisplatform.config.controller.DomainRuleSnapshotHeadSetController(reader, principals);
   }
 
   @Bean
@@ -187,7 +226,8 @@ public class DomainRuleSnapshotAutoConfiguration {
       DomainRuleRolloutPolicyHeadRepository policyHeads,
       DomainRuleRolloutPolicyEventRepository policyEvents,
       DomainRuleSnapshotHeadRepository snapshotHeads,
-      DomainRuleSnapshotRolloutRepository rollouts, DomainRuleSnapshotScopeLock scopeLock, org.praxisplatform.config.service.DomainRuleEntityRefresh entityRefresh) {
+      DomainRuleSnapshotRolloutRepository rollouts, DomainRuleSnapshotScopeLock scopeLock, org.praxisplatform.config.service.DomainRuleEntityRefresh entityRefresh,
+      org.praxisplatform.config.service.DomainRuleProductCatalog productCatalog) {
     return new DomainRuleRolloutPolicyService(
         policies, policyHeads, policyEvents, snapshotHeads, rollouts, Clock.systemUTC(), scopeLock, entityRefresh);
   }
@@ -210,7 +250,8 @@ public class DomainRuleSnapshotAutoConfiguration {
       DomainRuleSnapshotRolloutRepository rollouts, DomainRuleCandidateProbeRepository probes,
       DomainRuleSnapshotRolloutEventRepository events, DomainRuleSnapshotRepository snapshots,
       DomainRuleSnapshotHeadRepository heads, DomainRuleRolloutPolicyService policyService,
-      ObjectMapper objectMapper, DomainRuleImplementationCatalog implementationCatalog, DomainRuleSnapshotScopeLock scopeLock, org.praxisplatform.config.service.DomainRuleEntityRefresh entityRefresh) {
+      ObjectMapper objectMapper, DomainRuleImplementationCatalog implementationCatalog, DomainRuleSnapshotScopeLock scopeLock, org.praxisplatform.config.service.DomainRuleEntityRefresh entityRefresh,
+      org.praxisplatform.config.service.DomainRuleProductCatalog productCatalog) {
     return new DomainRuleRolloutService(policies, rollouts, probes, events, snapshots, heads,
         policyService, objectMapper, Clock.systemUTC(), implementationCatalog, scopeLock, entityRefresh);
   }
@@ -221,5 +262,42 @@ public class DomainRuleSnapshotAutoConfiguration {
   DomainRuleRolloutController domainRuleRolloutController(DomainRuleRolloutService service,
       DomainRuleGovernancePrincipalResolver principalResolver) {
     return new DomainRuleRolloutController(service, principalResolver);
+  }
+
+  @Bean
+  @ConditionalOnMissingBean
+  @ConditionalOnBean({DomainRuleRolloutPolicyService.class, DomainRuleRolloutService.class})
+  @org.springframework.boot.autoconfigure.condition.ConditionalOnProperty(
+      prefix = "praxis.config.domain-rules.genesis",
+      name = "enabled",
+      havingValue = "true")
+  org.praxisplatform.config.runtime.ProductBaselineGenesisInitializer
+      productBaselineGenesisInitializer(
+          org.praxisplatform.config.runtime.GovernedRuleFamilyRegistry familyRegistry,
+          DomainRuleSnapshotHeadRepository headRepository,
+          DomainRuleSnapshotRepository snapshotRepository,
+          DomainRuleSnapshotService snapshotService,
+          DomainRuleRolloutPolicyService rolloutPolicyService,
+          DomainRuleRolloutService rolloutService,
+          DomainRuleImplementationCatalog implementationCatalog,
+          ObjectMapper objectMapper,
+          @Value("${praxis.config.domain-rules.genesis.tenant-ids:1}")
+              java.util.List<String> tenantIds,
+          @Value("${praxis.config.domain-rules.genesis.environment:local}") String environment,
+          @Value("${praxis.config.domain-rules.genesis.valid-from-utc:2020-01-01T00:00:00Z}")
+              String validFromUtc) {
+    return new org.praxisplatform.config.runtime.ProductBaselineGenesisInitializer(
+        familyRegistry,
+        headRepository,
+        snapshotRepository,
+        snapshotService,
+        rolloutPolicyService,
+        rolloutService,
+        implementationCatalog,
+        objectMapper,
+        Clock.systemUTC(),
+        tenantIds,
+        environment,
+        validFromUtc);
   }
 }

@@ -34,6 +34,9 @@ public class DomainRuleSnapshot {
   @Column(name = "rule_set_key", nullable = false, length = 512)
   private String ruleSetKey;
 
+  @Column(name = "operation_key", nullable = false, length = 512)
+  private String operationKey;
+
   @Column(name = "rule_set_version", nullable = false)
   private Integer ruleSetVersion;
 
