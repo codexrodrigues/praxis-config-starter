@@ -1029,7 +1029,11 @@ class DomainCatalogPromptContextServiceTest {
                                         "resourceKey": "ergon.aposentadorias",
                                         "tone": "success",
                                         "isDefault": true,
-                                        "filterFields": ["situacoesConcessaoIn", "apenasVigentes"]
+                                        "filterFields": ["situacoesConcessaoIn", "apenasVigentes"],
+                                        "filter": {
+                                          "situacoesConcessaoIn": ["ATIVA", "CONCEDIDA"],
+                                          "apenasVigentes": true
+                                        }
                                       }
                                     }
                                     """)))));
@@ -1055,6 +1059,7 @@ class DomainCatalogPromptContextServiceTest {
                 .contains("resourceKey=ergon.aposentadorias")
                 .contains("tone=success")
                 .contains("isDefault=true")
-                .contains("filterFields=situacoesConcessaoIn,apenasVigentes");
+                .contains("filterFields=situacoesConcessaoIn,apenasVigentes")
+                .contains("filter=situacoesConcessaoIn=ATIVA,CONCEDIDA,apenasVigentes=true");
     }
 }

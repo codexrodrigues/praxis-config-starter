@@ -1296,6 +1296,7 @@ public class AgenticAuthoringConsultativeApiCatalogProjectionService {
                         }
                     });
                 }
+                java.util.Map<String, Object> filterCriteria = extractFilterCriteriaMap(metadata.path("filter"));
                 quickFilters.add(new AgenticAuthoringConsultativeApiCatalogProjection.QuickFilter(
                         firstNonBlank(
                                 firstText(metadata, "quickFilterId", "id"),
@@ -1304,7 +1305,8 @@ public class AgenticAuthoringConsultativeApiCatalogProjectionService {
                         meaningfulDescription(firstText(payload, "description", "summary", "helpText")),
                         firstText(metadata, "tone"),
                         metadata.path("isDefault").asBoolean(false),
-                        List.copyOf(filterFields)));
+                        List.copyOf(filterFields),
+                        filterCriteria));
             }
         }
         String resourcePath = candidate != null && StringUtils.hasText(candidate.resourcePath())
@@ -1882,6 +1884,54 @@ public class AgenticAuthoringConsultativeApiCatalogProjectionService {
 
     private String plural(String token) {
         return token.endsWith("s") ? token : token + "s";
+    }
+
+    private java.util.Map<String, Object> extractFilterCriteriaMap(JsonNode filterNode) {
+        if (filterNode == null || !filterNode.isObject() || filterNode.isEmpty()) {
+            return java.util.Map.of();
+        }
+        java.util.Map<String, Object> result = new java.util.LinkedHashMap<>();
+        filterNode.fields().forEachRemaining(entry -> {
+            String key = safe(entry.getKey());
+            Object converted = convertJsonFilterValue(entry.getValue());
+            if (!key.isEmpty() && converted != null) {
+                result.put(key, converted);
+            }
+        });
+        return java.util.Collections.unmodifiableMap(result);
+    }
+
+    private Object convertJsonFilterValue(JsonNode node) {
+        if (node == null || node.isNull() || node.isMissingNode()) {
+            return null;
+        }
+        if (node.isTextual()) {
+            return node.asText();
+        }
+        if (node.isBoolean()) {
+            return node.asBoolean();
+        }
+        if (node.isIntegralNumber()) {
+            long value = node.asLong();
+            if (value >= Integer.MIN_VALUE && value <= Integer.MAX_VALUE) {
+                return (int) value;
+            }
+            return value;
+        }
+        if (node.isFloatingPointNumber()) {
+            return node.asDouble();
+        }
+        if (node.isArray()) {
+            List<Object> items = new ArrayList<>();
+            for (JsonNode child : node) {
+                Object converted = convertJsonFilterValue(child);
+                if (converted != null) {
+                    items.add(converted);
+                }
+            }
+            return List.copyOf(items);
+        }
+        return null;
     }
 
     private String safe(String value) {

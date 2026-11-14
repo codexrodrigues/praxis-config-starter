@@ -265,4 +265,139 @@ class AgenticAuthoringConsultativeApiCatalogProjectionServiceTest {
         assertThat(projection.assistantMessage())
                 .contains("fontes analíticas confirmadas");
     }
+
+    @Test
+    void projectsQuickFiltersIncludingStructuredFilterCriteriaFromDomainCatalog() {
+        DomainCatalogIngestionService ingestionService = Mockito.mock(DomainCatalogIngestionService.class);
+        ApiMetadataRepository apiMetadataRepository = Mockito.mock(ApiMetadataRepository.class);
+
+        when(apiMetadataRepository.findAll()).thenReturn(List.of(
+                new ApiMetadata(
+                        "/api/ergon/funcionarios/filter",
+                        "POST",
+                        "ergon",
+                        "Filtrar servidores",
+                        "Filtra servidores públicos",
+                        "filterFuncionarios",
+                        "{}",
+                        "{}",
+                        "[]",
+                        "{}",
+                        null)));
+
+        DomainCatalogReleaseResponse release = new DomainCatalogReleaseResponse(
+                UUID.randomUUID(),
+                "praxis-ergon-showcase:administracao-pessoal:v1",
+                "praxis.domain-catalog/v0.2",
+                "praxis-ergon-showcase",
+                "Praxis Ergon Showcase",
+                "1.0.0",
+                Instant.parse("2026-11-03T12:00:00Z"),
+                "sha256:test",
+                "default",
+                "dev",
+                Instant.parse("2026-11-03T12:00:01Z"));
+
+        ObjectNode funcionarioConcept = objectMapper.createObjectNode();
+        funcionarioConcept.put("nodeKey", "administracao-pessoal.funcionarios");
+        funcionarioConcept.put("nodeType", "concept");
+        funcionarioConcept.put("label", "Funcionarios");
+        funcionarioConcept.put("description", "Cadastro funcional de servidores públicos.");
+        ObjectNode conceptMeta = funcionarioConcept.putObject("metadata");
+        conceptMeta.put("resourceKey", "administracao-pessoal.funcionarios");
+        conceptMeta.put("resourcePath", "/api/ergon/funcionarios");
+
+        ObjectNode quickFilterNode = objectMapper.createObjectNode();
+        quickFilterNode.put("nodeKey", "administracao-pessoal.funcionarios.quickFilter.ativos-folha");
+        quickFilterNode.put("nodeType", "quick_filter");
+        quickFilterNode.put("label", "Ativos em folha");
+        quickFilterNode.put("description", "Servidores em exercício ativos implantados na folha.");
+        ObjectNode qfMeta = quickFilterNode.putObject("metadata");
+        qfMeta.put("quickFilterId", "ativos-folha");
+        qfMeta.put("resourceKey", "administracao-pessoal.funcionarios");
+        qfMeta.put("tone", "success");
+        qfMeta.put("isDefault", true);
+        qfMeta.putArray("filterFields").add("situacoesIn").add("apenasFolha");
+        ObjectNode qfFilter = qfMeta.putObject("filter");
+        qfFilter.putArray("situacoesIn").add("ATIVO");
+        qfFilter.put("apenasFolha", true);
+        qfFilter.put("idadeMinima", 60);
+
+        DomainCatalogContextResponse contextResponse = new DomainCatalogContextResponse(
+                "praxis.domain-catalog-context/v0.1",
+                release,
+                null,
+                null,
+                "administracao-pessoal",
+                null,
+                List.of(),
+                List.of(
+                        new DomainCatalogItemResponse(
+                                UUID.randomUUID(),
+                                "praxis-ergon-showcase:administracao-pessoal:v1",
+                                "node",
+                                "administracao-pessoal.funcionarios",
+                                "administracao-pessoal",
+                                "concept",
+                                null,
+                                null,
+                                funcionarioConcept),
+                        new DomainCatalogItemResponse(
+                                UUID.randomUUID(),
+                                "praxis-ergon-showcase:administracao-pessoal:v1",
+                                "node",
+                                "administracao-pessoal.funcionarios.quickFilter.ativos-folha",
+                                "administracao-pessoal",
+                                "quick_filter",
+                                null,
+                                null,
+                                quickFilterNode)));
+
+        when(ingestionService.contextLatest(
+                Mockito.eq("praxis-ergon-showcase"),
+                Mockito.eq("ergon.funcionarios"),
+                Mockito.eq("default"),
+                Mockito.eq("dev"),
+                Mockito.isNull(),
+                Mockito.isNull(),
+                Mockito.isNull(),
+                Mockito.isNull(),
+                Mockito.anyInt())).thenReturn(contextResponse);
+
+        AgenticAuthoringConsultativeApiCatalogProjectionService service =
+                new AgenticAuthoringConsultativeApiCatalogProjectionService(
+                        () -> ingestionService,
+                        apiMetadataRepository,
+                        "praxis-ergon-showcase");
+
+        AgenticAuthoringCandidate candidate = new AgenticAuthoringCandidate(
+                "/api/ergon/funcionarios",
+                "post",
+                "/schemas/filtered?path=/api/ergon/funcionarios/filter&operation=post&schemaType=request",
+                "/api/ergon/funcionarios/filter",
+                "post",
+                0.9,
+                "matched funcionarios",
+                List.of(AgenticAuthoringDomainCatalogCandidateEnhancer.DOMAIN_CATALOG_GROUNDING));
+
+        AgenticAuthoringConsultativeApiCatalogProjection projection = service.project(
+                "Quais filtros rápidos existem para servidores ativos em folha?",
+                List.of(candidate),
+                "default",
+                "dev");
+
+        assertThat(projection.resources()).hasSize(1);
+        AgenticAuthoringConsultativeApiCatalogProjection.Resource resource = projection.resources().get(0);
+        assertThat(resource.quickFilters()).singleElement().satisfies(qf -> {
+            assertThat(qf.id()).isEqualTo("ativos-folha");
+            assertThat(qf.label()).isEqualTo("Ativos em folha");
+            assertThat(qf.tone()).isEqualTo("success");
+            assertThat(qf.isDefault()).isTrue();
+            assertThat(qf.filterFields()).containsExactly("situacoesIn", "apenasFolha");
+            assertThat(qf.filter())
+                    .containsEntry("situacoesIn", List.of("ATIVO"))
+                    .containsEntry("apenasFolha", true)
+                    .containsEntry("idadeMinima", 60);
+        });
+    }
 }

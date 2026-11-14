@@ -561,6 +561,7 @@ public class DomainCatalogPromptContextService {
                 text(payload.path("metadata"), "quickFilterId"),
                 text(payload.path("metadata"), "id")));
         appendInline(builder, "filterFields", textArray(payload.path("metadata").path("filterFields")));
+        appendInline(builder, "filter", objectSummary(payload.path("metadata").path("filter")));
         appendInline(builder, "tone", text(payload.path("metadata"), "tone"));
         if (payload.path("metadata").has("isDefault")) {
             appendInline(builder, "isDefault", Boolean.toString(payload.path("metadata").path("isDefault").asBoolean()));

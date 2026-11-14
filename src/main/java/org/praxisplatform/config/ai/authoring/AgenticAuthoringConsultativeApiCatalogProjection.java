@@ -45,8 +45,26 @@ public record AgenticAuthoringConsultativeApiCatalogProjection(
             String description,
             String tone,
             boolean isDefault,
-            List<String> filterFields
+            List<String> filterFields,
+            java.util.Map<String, Object> filter
     ) {
+        public QuickFilter(
+                String id,
+                String label,
+                String description,
+                String tone,
+                boolean isDefault,
+                List<String> filterFields
+        ) {
+            this(id, label, description, tone, isDefault, filterFields, java.util.Map.of());
+        }
+
+        public QuickFilter {
+            filterFields = filterFields == null ? List.of() : List.copyOf(filterFields);
+            filter = filter == null
+                    ? java.util.Map.of()
+                    : java.util.Collections.unmodifiableMap(new java.util.LinkedHashMap<>(filter));
+        }
     }
 
     public record Field(
