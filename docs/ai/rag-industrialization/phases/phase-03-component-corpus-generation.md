@@ -9,13 +9,13 @@ Evoluir os generators existentes para produzir corpus granular por componente, u
 ## Escopo e Alterações
 
 - **Backend Contract Sync**:
-  - `praxis-config-starter`: Atualizado [RegistryIngestionRequest.java](../../../../praxis-config-starter/src/main/java/org/praxisplatform/config/dto/RegistryIngestionRequest.java) introduzindo a estrutura aninhada de `ChunkEntry` correspondendo ao design do corpus granular.
+  - `praxis-config-starter`: Atualizado [RegistryIngestionRequest.java](../../../../src/main/java/org/praxisplatform/config/dto/RegistryIngestionRequest.java) introduzindo a estrutura aninhada de `ChunkEntry` correspondendo ao design do corpus granular.
 - **Frontend Schemas**:
-  - `praxis-ui-angular`: Atualizado [praxis-component-registry-ingestion.schema.json](../../../../praxis-ui-angular/tools/ai-registry/schemas/praxis-component-registry-ingestion.schema.json) para incluir as definições formais de validação para a lista de `chunks`.
+  - `praxis-ui-angular`: Atualizado `praxis-ui-angular/tools/ai-registry/schemas/praxis-component-registry-ingestion.schema.json` para incluir as definições formais de validação para a lista de `chunks`.
 - **Generation & Decomposition**:
-  - `praxis-ui-angular`: Evolução do script [generate-registry-ingestion.ts](../../../../praxis-ui-angular/tools/ai-registry/generate-registry-ingestion.ts) para realizar a coleta recursiva de arquivos de receita (`recipes`), decompor cada componente em múltiplos `chunks` (`summary`, `authoring_manifest`, `recipe`), associar referências seguras via `sourcePointer` e calcular os hashes SHA-256 (`contentHash`).
+  - `praxis-ui-angular`: Evolução do script `praxis-ui-angular/tools/ai-registry/generate-registry-ingestion.ts` para realizar a coleta recursiva de arquivos de receita (`recipes`), decompor cada componente em múltiplos `chunks` (`summary`, `authoring_manifest`, `recipe`), associar referências seguras via `sourcePointer` e calcular os hashes SHA-256 (`contentHash`).
 - **Governance Gate**:
-  - `praxis-ui-angular`: Modificação de [validate-catalog-governance.js](../../../../praxis-ui-angular/tools/ai-registry/validate-catalog-governance.js) adicionando a função `validateChunks` para garantir a integridade dos dados, sequência de `chunkIndex`, consistência do hash SHA-256 em relação ao conteúdo e detecção de arquivos de receita órfãos (`drift detection`).
+  - `praxis-ui-angular`: Modificação de `praxis-ui-angular/tools/ai-registry/validate-catalog-governance.js` adicionando a função `validateChunks` para garantir a integridade dos dados, sequência de `chunkIndex`, consistência do hash SHA-256 em relação ao conteúdo e detecção de arquivos de receita órfãos (`drift detection`).
 
 ## Guardrails Respeitados
 
@@ -39,7 +39,7 @@ Evoluir os generators existentes para produzir corpus granular por componente, u
 ## Handoff para Fase 04
 
 ### 1. Interface de Entrada / Saída
-- **Entrada da Fase 04**: O arquivo JSON completo gerado em [dist/praxis-component-registry-ingestion.json](../../../../praxis-ui-angular/dist/praxis-component-registry-ingestion.json), validado pelo esquema e pelo script de governança.
+- **Entrada da Fase 04**: O arquivo JSON completo gerado em `praxis-ui-angular/dist/praxis-component-registry-ingestion.json`, validado pelo esquema e pelo script de governança.
 - **Contrato de Ingestão de Chunk**:
   Cada chunk no payload possui a seguinte assinatura garantida e validada:
   ```json

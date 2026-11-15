@@ -5,7 +5,7 @@
 > dependências deste fluxo. O texto abaixo conserva o checkpoint anterior;
 > propostas de execução externa estão superadas. Requisitos independentes de
 > integridade, autoridade e reconciliação precisam ser avaliados separadamente.
-> Ver [decisão e próximo pacote](../../../../praxis-api-quickstart/docs/ui-layout-frontend-baseline-decision.md).
+> Ver `praxis-api-quickstart/docs/ui-layout-frontend-baseline-decision.md`.
 
 Continuidade: [inventário e aceite proposto B2d](ui-layout-execution-b2d-readiness.md).
 O contexto cooperativo está implementado; provider/isolamento/protocolo ainda
@@ -17,7 +17,7 @@ O check final de validation.require mede prazo e igualdade com a invocation
 capturada; não consulta autoridade atual. Cinco probes determinísticos reproduziram
 o problema, sem banco ou runtime owner. Correção no owner Config e regressões
 focais são prioritárias antes de ativação; ver
-[relatório da revisão](../../../../../../docs/agent-artifacts/praxis-json-upgrade-2026-09-30/review-b2c2-b2d1-2026-10-05/resultado.md).
+`review-b2c2-b2d1-2026-10-05/resultado.md`.
 
 Correção candidata rc.167: histórico reconsulta invocation/operação após o último
 loop de acesso. Diagnose revalida histórico e acesso corrente após a validação
@@ -25,7 +25,7 @@ nativa final e reconsulta invocation/DIAGNOSE_EVOLUTION antes de aceitar o recib
 Mesma tentativa, política única, sem recaptura de source ou CREATE_DRAFT adicional.
 validation.require continua sendo check de prazo/snapshot, não consulta de grants.
 Provas locais e limitações constam do
-[resultado da correção](../../../../../../docs/agent-artifacts/praxis-json-upgrade-2026-09-30/final-read-authority-fix-2026-10-05/resultado.md).
+`final-read-authority-fix-2026-10-05/resultado.md`.
 
 Config cria uma única UiLayoutValidationAttempt por comando ou leitura externa,
 com invocation confirmada, operação iniciadora, UUID de correlação e orçamento
