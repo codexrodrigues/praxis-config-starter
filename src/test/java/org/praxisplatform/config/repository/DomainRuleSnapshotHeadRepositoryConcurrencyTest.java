@@ -353,6 +353,14 @@ class DomainRuleSnapshotHeadRepositoryConcurrencyTest {
               new db.migration.V72__scope_rule_snapshot_operations().migrate(context);
               migrationConnection.commit();
             }
+            try (Connection connection = postgres.getPostgresDatabase().getConnection();
+                    Statement statement = connection.createStatement()) {
+                for (String migration : List.of(
+                        "/db/migration/V73__governed_rule_snapshot_withdrawal.sql",
+                        "/db/migration/V74__bind_rollout_withdrawn_head_state.sql")) {
+                    statement.execute(readResource(migration));
+                }
+            }
             return postgres;
         } catch (Exception exception) {
             if (postgres != null) {

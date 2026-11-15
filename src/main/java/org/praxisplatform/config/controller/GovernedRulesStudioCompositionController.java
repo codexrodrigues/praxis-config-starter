@@ -20,6 +20,7 @@ import org.praxisplatform.config.runtime.TenantScopeResolver;
 import org.praxisplatform.config.service.DomainRuleGovernancePrincipal;
 import org.praxisplatform.config.service.DomainRuleGovernancePrincipalResolver;
 import org.praxisplatform.rules.plan.RulePlanException;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 import org.springframework.http.CacheControl;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -43,6 +44,7 @@ import org.springframework.web.server.ResponseStatusException;
  */
 @RestController
 @RequestMapping({"/api/praxis/rules-studio/rule-sets", "/api/praxis/policy-studio/rule-sets"})
+@ConditionalOnBean({GovernedRulesStudioCompositionService.class, DomainRuleGovernancePrincipalResolver.class})
 public class GovernedRulesStudioCompositionController
         implements GovernedRulesStudioCompositionEndpointOwner {
 

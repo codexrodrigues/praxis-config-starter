@@ -56,6 +56,35 @@ final class UiLayoutDeclarativeWidgetRevisionReproduction {
         false,
         List.of("config", "panels", "multi"),
         List.of("config", "panels"),
+        List.of()),
+    ORGANOGRAM(
+        "praxis-organogram",
+        "praxis.organogram.editor",
+        false,
+        List.of(
+            "config",
+            "nodes",
+            "topology",
+            "hierarchyType",
+            "includeExtinct",
+            "selectedSubtreeRoot",
+            "rootScopeLabel",
+            "synthesizePolymorphicNodes"),
+        List.of("config", "nodes", "resourcePath"),
+        List.of("resourcePath", "queryContext")),
+    PROGRESSION_LADDER(
+        "praxis-progression-ladder",
+        "praxis.progression-ladder.editor",
+        false,
+        List.of(
+            "document",
+            "variant",
+            "showVariantSwitcher",
+            "showFinancialDetails",
+            "showIntersticeRunway",
+            "showBridgeBanner",
+            "selectedStepId"),
+        List.of("document"),
         List.of());
 
     final String componentType;
@@ -82,22 +111,26 @@ final class UiLayoutDeclarativeWidgetRevisionReproduction {
   }
 
   private static final Map<String, Spec> BY_COMPONENT_TYPE =
-      Map.of(
-          Spec.CHART.componentType, Spec.CHART,
-          Spec.LIST.componentType, Spec.LIST,
-          Spec.RICH_CONTENT.componentType, Spec.RICH_CONTENT,
-          Spec.TABS.componentType, Spec.TABS,
-          Spec.STEPPER.componentType, Spec.STEPPER,
-          Spec.EXPANSION.componentType, Spec.EXPANSION);
+      Map.ofEntries(
+          Map.entry(Spec.CHART.componentType, Spec.CHART),
+          Map.entry(Spec.LIST.componentType, Spec.LIST),
+          Map.entry(Spec.RICH_CONTENT.componentType, Spec.RICH_CONTENT),
+          Map.entry(Spec.TABS.componentType, Spec.TABS),
+          Map.entry(Spec.STEPPER.componentType, Spec.STEPPER),
+          Map.entry(Spec.EXPANSION.componentType, Spec.EXPANSION),
+          Map.entry(Spec.ORGANOGRAM.componentType, Spec.ORGANOGRAM),
+          Map.entry(Spec.PROGRESSION_LADDER.componentType, Spec.PROGRESSION_LADDER));
 
   private static final Map<String, Spec> BY_DOCUMENT_TYPE =
-      Map.of(
-          Spec.CHART.documentType, Spec.CHART,
-          Spec.LIST.documentType, Spec.LIST,
-          Spec.RICH_CONTENT.documentType, Spec.RICH_CONTENT,
-          Spec.TABS.documentType, Spec.TABS,
-          Spec.STEPPER.documentType, Spec.STEPPER,
-          Spec.EXPANSION.documentType, Spec.EXPANSION);
+      Map.ofEntries(
+          Map.entry(Spec.CHART.documentType, Spec.CHART),
+          Map.entry(Spec.LIST.documentType, Spec.LIST),
+          Map.entry(Spec.RICH_CONTENT.documentType, Spec.RICH_CONTENT),
+          Map.entry(Spec.TABS.documentType, Spec.TABS),
+          Map.entry(Spec.STEPPER.documentType, Spec.STEPPER),
+          Map.entry(Spec.EXPANSION.documentType, Spec.EXPANSION),
+          Map.entry(Spec.ORGANOGRAM.documentType, Spec.ORGANOGRAM),
+          Map.entry(Spec.PROGRESSION_LADDER.documentType, Spec.PROGRESSION_LADDER));
 
   private UiLayoutDeclarativeWidgetRevisionReproduction() {}
 
@@ -192,12 +225,23 @@ final class UiLayoutDeclarativeWidgetRevisionReproduction {
     }
     JsonNode config = document.get("config");
     if (!spec.directConfigObject) {
+      JsonNode bindings = document.path("bindings");
       boolean hasRequiredPayload =
           spec.requiredAnyOfFields.stream()
               .anyMatch(
                   field -> {
                     JsonNode entry = config.get(field);
-                    return entry != null && (entry.isObject() || entry.isArray());
+                    if (entry != null && (entry.isObject() || entry.isArray())) {
+                      return true;
+                    }
+                    if (spec.bindingFields.contains(field)) {
+                      JsonNode bound = bindings.get(field);
+                      if (bound != null && bound.isTextual() && !bound.asText().isBlank()) {
+                        return true;
+                      }
+                      return entry != null && entry.isTextual() && !entry.asText().isBlank();
+                    }
+                    return false;
                   });
       if (!hasRequiredPayload) {
         throw invalid();

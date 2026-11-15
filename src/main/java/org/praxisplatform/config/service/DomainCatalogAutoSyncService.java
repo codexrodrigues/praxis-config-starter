@@ -9,6 +9,8 @@ import java.util.List;
 import java.util.Set;
 import lombok.extern.slf4j.Slf4j;
 import org.praxisplatform.config.dto.DomainCatalogIngestionResponse;
+import org.praxisplatform.config.repository.DomainCatalogItemRepository;
+import org.praxisplatform.config.repository.DomainCatalogReleaseRepository;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
@@ -27,7 +29,7 @@ import org.springframework.util.StringUtils;
  */
 @Service
 @Slf4j
-@ConditionalOnBean(DomainCatalogIngestionService.class)
+@ConditionalOnBean({DomainCatalogReleaseRepository.class, DomainCatalogItemRepository.class, DomainCatalogIngestionService.class})
 @ConditionalOnProperty(prefix = "praxis.domain-catalog.auto-sync", name = "enabled", havingValue = "true", matchIfMissing = true)
 public class DomainCatalogAutoSyncService {
 

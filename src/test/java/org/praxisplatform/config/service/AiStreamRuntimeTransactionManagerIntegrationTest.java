@@ -58,17 +58,22 @@ import org.springframework.transaction.PlatformTransactionManager;
         })
 @ActiveProfiles("test")
 @Import(AiStreamRuntimeTransactionManagerIntegrationTest.MultiTransactionManagerTestConfig.class)
-@EnableAutoConfiguration(exclude = {
-        GoogleGenAiEmbeddingConnectionAutoConfiguration.class,
-        GoogleGenAiTextEmbeddingAutoConfiguration.class,
-        GoogleGenAiChatAutoConfiguration.class,
-        OpenAiAudioSpeechAutoConfiguration.class,
-        OpenAiAudioTranscriptionAutoConfiguration.class,
-        OpenAiChatAutoConfiguration.class,
-        OpenAiEmbeddingAutoConfiguration.class,
-        OpenAiImageAutoConfiguration.class,
-        OpenAiModerationAutoConfiguration.class
-})
+@EnableAutoConfiguration(
+        excludeName = {
+                "org.praxisplatform.uischema.configuration.PraxisMetadataAutoConfiguration",
+                "org.praxisplatform.uischema.configuration.OpenApiUiSchemaAutoConfiguration"
+        },
+        exclude = {
+                GoogleGenAiEmbeddingConnectionAutoConfiguration.class,
+                GoogleGenAiTextEmbeddingAutoConfiguration.class,
+                GoogleGenAiChatAutoConfiguration.class,
+                OpenAiAudioSpeechAutoConfiguration.class,
+                OpenAiAudioTranscriptionAutoConfiguration.class,
+                OpenAiChatAutoConfiguration.class,
+                OpenAiEmbeddingAutoConfiguration.class,
+                OpenAiImageAutoConfiguration.class,
+                OpenAiModerationAutoConfiguration.class
+        })
 @Tag("integration")
 class AiStreamRuntimeTransactionManagerIntegrationTest {
 

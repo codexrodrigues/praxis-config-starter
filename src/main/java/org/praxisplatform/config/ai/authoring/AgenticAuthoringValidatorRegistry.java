@@ -499,6 +499,7 @@ public final class AgenticAuthoringValidatorRegistry {
             "timeline-setting-supported",
             "timeline-target-valid",
             "unsafe-style-rejected",
+            "variant-supported",
             "visible-when-json-logic",
             "runtime-operation-declared");
 

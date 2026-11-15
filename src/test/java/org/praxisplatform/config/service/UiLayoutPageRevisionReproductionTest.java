@@ -126,21 +126,38 @@ class UiLayoutPageRevisionReproductionTest {
           "orientation":"horizontal"}}},
         {"key":"10000000-0000-4000-8000-000000000006","definition":{"id":"praxis-expansion","inputs":{
           "panels":[{"title":"Fundamentação Legal"}],
-          "multi":true}}}
+          "multi":true}}},
+        {"key":"10000000-0000-4000-8000-000000000007","definition":{"id":"praxis-organogram","inputs":{
+          "config":{"cardPreset":"compact","height":420},
+          "resourcePath":"/api/ergon/unidades-organizacionais",
+          "queryContext":null,
+          "topology":"orthogonal-compact",
+          "hierarchyType":0,
+          "includeExtinct":false,
+          "rootScopeLabel":"Secretaria",
+          "synthesizePolymorphicNodes":false}}},
+        {"key":"10000000-0000-4000-8000-000000000008","definition":{"id":"praxis-progression-ladder","inputs":{
+          "document":{"version":1,"careerName":"Magistério"},
+          "variant":"staircase",
+          "showVariantSwitcher":true,
+          "showFinancialDetails":true,
+          "selectedStepId":"A1"}}}
       ],"layout":{"orientation":"columns","columns":12,"gap":"16px"}},
       "presentation":{"title":"Painel Executivo de Carreiras","icon":"analytics"},"navigation":[]}}
       """);
 
     var children = UiLayoutPageRevisionReproduction.children(dashboard);
-    assertEquals(6, children.size());
+    assertEquals(8, children.size());
     assertEquals("praxis.chart.editor", children.get("10000000-0000-4000-8000-000000000001").path("kind").asText());
     assertEquals("praxis.list.editor", children.get("10000000-0000-4000-8000-000000000002").path("kind").asText());
     assertEquals("praxis.rich-content.editor", children.get("10000000-0000-4000-8000-000000000003").path("kind").asText());
     assertEquals("praxis.tabs.editor", children.get("10000000-0000-4000-8000-000000000004").path("kind").asText());
     assertEquals("praxis.stepper.editor", children.get("10000000-0000-4000-8000-000000000005").path("kind").asText());
     assertEquals("praxis.expansion.editor", children.get("10000000-0000-4000-8000-000000000006").path("kind").asText());
+    assertEquals("praxis.organogram.editor", children.get("10000000-0000-4000-8000-000000000007").path("kind").asText());
+    assertEquals("praxis.progression-ladder.editor", children.get("10000000-0000-4000-8000-000000000008").path("kind").asText());
 
-    // Valid editorial mutations across chartDocument, list config, rich-content document, tabs, stepper, expansion
+    // Valid editorial mutations across chartDocument, list config, rich-content document, tabs, stepper, expansion, organogram, progression-ladder
     var edited = dashboard.deepCopy();
     ((ObjectNode) input(edited, 0).get("chartDocument")).put("title", "Distribuição por Regime");
     ((ObjectNode) input(edited, 1).get("config")).put("layout", "tile");
@@ -148,7 +165,23 @@ class UiLayoutPageRevisionReproductionTest {
     input(edited, 3).put("selectedIndex", 1);
     input(edited, 4).put("orientation", "vertical");
     input(edited, 5).put("multi", false);
+    input(edited, 6).put("topology", "pillars");
+    input(edited, 6).put("includeExtinct", true);
+    input(edited, 7).put("variant", "pillars");
+    ((ObjectNode) input(edited, 7).get("document")).put("careerName", "Magistério Superior");
     reproduce(dashboard, edited);
+
+    // Organogram admits resourcePath-only widget configurations without config/nodes
+    var organogramResourceOnly = JSON.readTree("""
+      {"kind":"praxis.dynamic-page.editor","version":1,"config":{
+      "definition":{"widgets":[
+        {"key":"20000000-0000-4000-8000-000000000001","definition":{"id":"praxis-organogram","inputs":{
+          "resourcePath":"/api/ergon/unidades-organizacionais",
+          "topology":"curved-hub"}}}
+      ],"layout":{"orientation":"vertical","columns":12,"gap":"16px"}},
+      "presentation":{"title":"Organograma Remoto","icon":"account_tree"},"navigation":[]}}
+      """);
+    reproduce(organogramResourceOnly, organogramResourceOnly);
 
     // Changing resourceKey, projectionKey, resourcePath or presetId on an existing widget key violates envelope immutability
     var retargetedChart = dashboard.deepCopy();
@@ -163,10 +196,14 @@ class UiLayoutPageRevisionReproductionTest {
     input(retargetedRich, 2).put("presetId", "other-preset");
     assertThrows(UiLayoutLifecycleException.class, () -> reproduce(dashboard, retargetedRich));
 
-    // PageCopyTransformation allocates fresh UUIDs cleanly across all 6 declarative widgets
+    var retargetedOrganogram = dashboard.deepCopy();
+    input(retargetedOrganogram, 6).put("resourcePath", "/api/ergon/outras-unidades");
+    assertThrows(UiLayoutLifecycleException.class, () -> reproduce(dashboard, retargetedOrganogram));
+
+    // PageCopyTransformation allocates fresh UUIDs cleanly across all 8 declarative widgets
     var copied = new PageCopyTransformation(new CanonicalJsonHashService(JSON))
         .allocate(dashboard, java.util.UUID.fromString(PAGE.componentId()), java.util.UUID.randomUUID(), "Cópia do Painel");
-    assertEquals(6, copied.identityMap().size());
+    assertEquals(8, copied.identityMap().size());
     reproduce(copied.document(), copied.document());
   }
 }

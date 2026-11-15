@@ -33,7 +33,9 @@ final class UiLayoutAuthoringProjection {
           "praxis.rich-content.editor",
           "praxis.tabs.editor",
           "praxis.stepper.editor",
-          "praxis.expansion.editor" -> UiLayoutDeclarativeWidgetRevisionReproduction.requireNative(target, descriptor, baseline, candidate, patchDescriptor);
+          "praxis.expansion.editor",
+          "praxis.organogram.editor",
+          "praxis.progression-ladder.editor" -> UiLayoutDeclarativeWidgetRevisionReproduction.requireNative(target, descriptor, baseline, candidate, patchDescriptor);
       default -> throw unavailable();
     }
     checkpoint.run();

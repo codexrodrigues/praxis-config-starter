@@ -47,10 +47,17 @@ class ConfigOpenApiAutoConfigurationTest {
     @Schema(additionalProperties = Schema.AdditionalPropertiesValue.FALSE)
     record ForeignContract(String value) {}
 
+    record ForeignDefaultContract(String value) {}
+
     @Test void converterDoesNotRedefineOtherOwnersContracts() {
+        var baseline = new ModelConverters().resolveAsResolvedSchema(new AnnotatedType(ForeignContract.class));
+        var baselineDefault = new ModelConverters().resolveAsResolvedSchema(new AnnotatedType(ForeignDefaultContract.class));
         var converters = new ModelConverters();
         converters.addConverter(new ConfigOpenApiAutoConfiguration().configClosedDtoModelConverter());
         var resolved = converters.resolveAsResolvedSchema(new AnnotatedType(ForeignContract.class));
-        assertThat(resolved.schema.getAdditionalProperties()).isNull();
+        var resolvedDefault = converters.resolveAsResolvedSchema(new AnnotatedType(ForeignDefaultContract.class));
+        assertThat(resolved.schema.getAdditionalProperties()).isEqualTo(baseline.schema.getAdditionalProperties());
+        assertThat(resolvedDefault.schema.getAdditionalProperties()).isEqualTo(baselineDefault.schema.getAdditionalProperties());
+        assertThat(resolvedDefault.schema.getAdditionalProperties()).isNull();
     }
 }

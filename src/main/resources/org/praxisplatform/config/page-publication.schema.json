@@ -676,6 +676,198 @@
       ],
       "additionalProperties": false
     },
+    "organogramWidget": {
+      "type": "object",
+      "properties": {
+        "key": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}(?![\\s\\S])",
+          "minLength": 36,
+          "maxLength": 36
+        },
+        "definition": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "const": "praxis-organogram"
+            },
+            "inputs": {
+              "type": "object",
+              "properties": {
+                "config": {
+                  "type": "object"
+                },
+                "nodes": {
+                  "type": "array"
+                },
+                "resourcePath": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "maxLength": 1024
+                },
+                "queryContext": {
+                  "type": [
+                    "object",
+                    "null"
+                  ]
+                },
+                "topology": {
+                  "enum": [
+                    "orthogonal-compact",
+                    "pillars",
+                    "curved-hub",
+                    "radial-360"
+                  ]
+                },
+                "hierarchyType": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 4
+                },
+                "includeExtinct": {
+                  "type": "boolean"
+                },
+                "selectedSubtreeRoot": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "minLength": 1,
+                  "maxLength": 255,
+                  "pattern": "^(?![\\s\\S]*[\\u0000-\\u001f\\u007f\\u2028\\u2029])[^\\u0009-\\u000d\\u0020\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000\\ufeff](?:[\\s\\S]*[^\\u0009-\\u000d\\u0020\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000\\ufeff])?(?![\\s\\S])"
+                },
+                "rootScopeLabel": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 255,
+                  "pattern": "^(?![\\s\\S]*[\\u0000-\\u001f\\u007f\\u2028\\u2029])[^\\u0009-\\u000d\\u0020\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000\\ufeff](?:[\\s\\S]*[^\\u0009-\\u000d\\u0020\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000\\ufeff])?(?![\\s\\S])"
+                },
+                "synthesizePolymorphicNodes": {
+                  "type": "boolean"
+                }
+              },
+              "anyOf": [
+                {
+                  "required": [
+                    "config"
+                  ]
+                },
+                {
+                  "required": [
+                    "nodes"
+                  ]
+                },
+                {
+                  "required": [
+                    "resourcePath"
+                  ],
+                  "properties": {
+                    "resourcePath": {
+                      "type": "string",
+                      "minLength": 1,
+                      "pattern": "^[\\s\\S]*\\S[\\s\\S]*$"
+                    }
+                  }
+                }
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "id",
+            "inputs"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "key",
+        "definition"
+      ],
+      "additionalProperties": false
+    },
+    "progressionLadderWidget": {
+      "type": "object",
+      "properties": {
+        "key": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}(?![\\s\\S])",
+          "minLength": 36,
+          "maxLength": 36
+        },
+        "definition": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "const": "praxis-progression-ladder"
+            },
+            "inputs": {
+              "type": "object",
+              "properties": {
+                "document": {
+                  "type": "object"
+                },
+                "variant": {
+                  "enum": [
+                    "staircase",
+                    "pillars",
+                    "matrix-2d",
+                    "ribbon-compact",
+                    null
+                  ]
+                },
+                "showVariantSwitcher": {
+                  "type": "boolean"
+                },
+                "showFinancialDetails": {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                },
+                "showIntersticeRunway": {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                },
+                "showBridgeBanner": {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                },
+                "selectedStepId": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "minLength": 1,
+                  "maxLength": 255,
+                  "pattern": "^(?![\\s\\S]*[\\u0000-\\u001f\\u007f\\u2028\\u2029])[^\\u0009-\\u000d\\u0020\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000\\ufeff](?:[\\s\\S]*[^\\u0009-\\u000d\\u0020\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000\\ufeff])?(?![\\s\\S])"
+                }
+              },
+              "required": [
+                "document"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "id",
+            "inputs"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "key",
+        "definition"
+      ],
+      "additionalProperties": false
+    },
     "inputEndpoint": {
       "type": "object",
       "properties": {
@@ -811,6 +1003,12 @@
               },
               {
                 "$ref": "#/$defs/expansionWidget"
+              },
+              {
+                "$ref": "#/$defs/organogramWidget"
+              },
+              {
+                "$ref": "#/$defs/progressionLadderWidget"
               }
             ]
           }
