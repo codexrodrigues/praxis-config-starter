@@ -712,9 +712,9 @@ model, registry, catalog, matrix and contract coordinates across runs. An
 adversarial test continues to reject a non-identical nested JAR.
 
 This certifies the narrow `tabs-nested` platform profile and makes its real
-receipt eligible for the Ergo measurement protocol. It does not certify the
-remaining archetypes or authorize broad Ergo promotion before the portfolio
-gate in #372 and consumer protocol in `Techne-ErgonX-migracao#305` are updated.
+receipt eligible for the measurement protocol. It does not certify the
+remaining archetypes or authorize broad promotion before the portfolio
+gate in #372 and the consumer migration protocol are updated.
 
 ### P0 — Shared golden corpus and attestation
 

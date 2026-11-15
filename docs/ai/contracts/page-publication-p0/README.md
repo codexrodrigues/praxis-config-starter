@@ -242,7 +242,7 @@ operações independentemente da autorização para página/menu.
 | Core `widgets/dynamic-widget-page.component.ts:1294,2416–2424,9944–9976` | Identidade, observabilidade e storage; materializar componentInstanceId estável e impedir storage paralelo governado. |
 | Page Builder `dynamic-page-builder.component.ts:1528,2700` e `ai/page-builder-ai.adapter.ts:32–50` | Preservar fingerprint/contexto da página editada; cópia recebe identidade nova. |
 | Page settings `page-config-editor/page-config-editor.component.ts:1073,1117` | Recebe identidade, não cria catálogo. |
-| Exemplo `dynamic-page-lab.page.ts:646–653`, `ergon-composition-case.page.ts:324–328`, labs persistence/connections/json-logic | Continuam usando buildPageKey/PageIdentity; migrar somente o fluxo de páginas publicadas. |
+| Exemplo `dynamic-page-lab.page.ts:646–653`, `corporate-composition-case.page.ts:324–328`, labs persistence/connections/json-logic | Continuam usando buildPageKey/PageIdentity; migrar somente o fluxo de páginas publicadas. |
 | PersistedPageConfig/createPersistedPage | Nenhum consumidor funcional fora do próprio model localizado nessa ref. Não remover API pública nem promover status/version a lifecycle novo. |
 | Hero HEAD a3190dfa + alterações locais | Dashboard, comando/workspace studio e visitor-lab fornecem identidades. Personas simuladas não são contexto autenticado. |
 | Landing HEAD a6e7d4e4, fontes src | Nenhum uso dos quatro símbolos localizado; exemplos gerados fora desse recorte não foram atestados. |

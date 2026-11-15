@@ -82,8 +82,8 @@ outro DataSource e outra conexão continuam rejeitados. Não foi introduzido byp
   metadados alterados, UUID de draft divergente, remoção/restauração e fontes exatas.
 - Regressão focal dos owners, entrada HTTP modelada, lifecycle e store: ver relatório de execução.
   MockMvc/Mockito provam entrada/ordenação, não durabilidade PostgreSQL.
-- Neon: projeto `ancient-leaf-72055027`, branch exclusiva `br-round-sun-a4fj4hz6`, endpoint
-  `ep-calm-tree-a432ds1p.us-east-1.aws.neon.tech`, PostgreSQL 17.11, schema
+- Neon: projeto `<neon-project-id>`, branch exclusiva `<neon-branch-id>`, endpoint
+  `<neon-endpoint>`, PostgreSQL 17.11, schema
   `b1a_it_page_p1_508_20261022`, runtime `p1_page_508_runtime` sem superuser/createdb/createrole/bypassrls.
   O socket JDBC comprova TLSv1.3/hostname via sslmode=verify-full e truststore Java. `pg_stat_ssl=false`
   observado no proxy Neon não foi usado como prova de TLS.
@@ -113,11 +113,11 @@ Template do arquivo privado (substituir apenas por atribuição oficial; nunca c
 {
   "projectId": "<projeto-Neon-atribuido>",
   "branchId": "br-<branch-filha-atribuida>",
-  "endpoint": "ep-<endpoint>.<regiao>.aws.neon.tech",
+  "endpoint": "<neon-endpoint>",
   "schema": "b1a_it_page_<ensaio>",
   "username": "p1_page_<ensaio>_runtime",
   "password": "<segredo-privado>",
-  "jdbcUrl": "jdbc:postgresql://ep-<endpoint>.<regiao>.aws.neon.tech/neondb?sslmode=verify-full&sslfactory=org.postgresql.ssl.DefaultJavaSSLFactory"
+  "jdbcUrl": "jdbc:postgresql://<neon-endpoint>/neondb?sslmode=verify-full&sslfactory=org.postgresql.ssl.DefaultJavaSSLFactory"
 }
 ```
 

@@ -70,7 +70,7 @@ PRAXIS_PROJECT_KNOWLEDGE_RAG_RETRIEVAL_ENABLED=true
 Config-starter focal gate:
 
 ```bash
-cd /Users/rodrigo/Dev/pessoal/praxis-plataform/praxis-config-starter
+cd <monorepo-root>/praxis-config-starter
 
 mvn -q -Dtest=VectorRankedProjectKnowledgeCandidateRetrieverTest,AgenticAuthoringProjectKnowledgeServiceTest,RagProjectKnowledgeDerivedIndexServiceTest,RagProjectKnowledgeMetadataTest test
 git diff --check
@@ -84,10 +84,10 @@ Result:
 Local install and quickstart package gate:
 
 ```bash
-cd /Users/rodrigo/Dev/pessoal/praxis-plataform/praxis-config-starter
+cd <monorepo-root>/praxis-config-starter
 mvn -q -DskipTests install
 
-cd /Users/rodrigo/Dev/pessoal/praxis-plataform/praxis-api-quickstart
+cd <monorepo-root>/praxis-api-quickstart
 mvn -q clean package -DskipTests -Dpraxis.config.version=0.1.0-rc.5
 ```
 
@@ -99,7 +99,7 @@ Result:
 Local quickstart startup used the configured Neon datasource and vector store:
 
 ```bash
-cd /Users/rodrigo/Dev/pessoal/praxis-plataform/praxis-config-starter
+cd <monorepo-root>/praxis-config-starter
 
 PORT=8099 \
 PROVIDER=openai \
@@ -120,7 +120,7 @@ Observed:
 Revert runtime proof:
 
 ```bash
-cd /Users/rodrigo/Dev/pessoal/praxis-plataform/praxis-api-quickstart
+cd <monorepo-root>/praxis-api-quickstart
 
 BACKEND_URL=http://localhost:8099 \
 TENANT_ID=desenv \
@@ -142,7 +142,7 @@ Observed result:
 Supersession runtime proof:
 
 ```bash
-cd /Users/rodrigo/Dev/pessoal/praxis-plataform/praxis-api-quickstart
+cd <monorepo-root>/praxis-api-quickstart
 
 BACKEND_URL=http://localhost:8099 \
 TENANT_ID=desenv \

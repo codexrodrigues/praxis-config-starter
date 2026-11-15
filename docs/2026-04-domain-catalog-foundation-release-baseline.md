@@ -79,8 +79,8 @@ Validation commands:
 ```powershell
 mvn -B -DskipTests install
 mvn -B -DskipTests "-Dpraxis.config.version=0.1.0-rc.1" package
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\tools\Invoke-QuickstartAgenticAuthoringHttpSmokeSuite.ps1 -Provider openai -JavaHome "D:\Developer\JAVA\openjdk-21_windows-x64_bin\jdk-21" -QuickstartRoot "D:\Developer\praxis-plataform\praxis-api-quickstart" -EnvFile "D:\Developer\praxis-plataform\praxis-config-starter\.env.openai.local.ps1" -StreamProcessingTimeoutSeconds 180 -ConfirmPaidProviderRun
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\tools\Invoke-PbAgenticFullE2E.ps1 -Provider openai -JavaHome "D:\Developer\JAVA\openjdk-21_windows-x64_bin\jdk-21" -QuickstartRoot "D:\Developer\praxis-plataform\praxis-api-quickstart" -UiRoot "D:\Developer\praxis-plataform\praxis-ui-angular" -EnvFile "D:\Developer\praxis-plataform\praxis-config-starter\.env.openai.local.ps1" -StreamProcessingTimeoutSeconds 180 -Retries 0 -ConfirmPaidProviderRun
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\tools\Invoke-QuickstartAgenticAuthoringHttpSmokeSuite.ps1 -Provider openai -JavaHome "<jdk-home>" -QuickstartRoot "<monorepo-root>\praxis-api-quickstart" -EnvFile "<monorepo-root>\praxis-config-starter\.env.openai.local.ps1" -StreamProcessingTimeoutSeconds 180 -ConfirmPaidProviderRun
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\tools\Invoke-PbAgenticFullE2E.ps1 -Provider openai -JavaHome "<jdk-home>" -QuickstartRoot "<monorepo-root>\praxis-api-quickstart" -UiRoot "<monorepo-root>\praxis-ui-angular" -EnvFile "<monorepo-root>\praxis-config-starter\.env.openai.local.ps1" -StreamProcessingTimeoutSeconds 180 -Retries 0 -ConfirmPaidProviderRun
 ```
 
 Confirmed results:
@@ -196,7 +196,7 @@ queryable projection.
 The same path is now covered by the repeatable smoke script:
 
 ```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\tools\Invoke-QuickstartDomainCatalogV2HttpSmoke.ps1 -JavaHome "D:\Developer\JAVA\openjdk-21_windows-x64_bin\jdk-21" -QuickstartRoot "D:\Developer\praxis-plataform\praxis-api-quickstart"
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\tools\Invoke-QuickstartDomainCatalogV2HttpSmoke.ps1 -JavaHome "<jdk-home>" -QuickstartRoot "<monorepo-root>\praxis-api-quickstart"
 ```
 
 The first script run against the locally packaged quickstart confirmed:

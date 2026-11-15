@@ -30,8 +30,8 @@ then emits a probe for that exact pending rollout and content hash. This pure
 step neither reads nor installs an active runtime. A probe is a deployment
 observation, not a business allow/deny result or an activation command.
 
-Ergon's Functions host publishes this observation through its authenticated
-Rules Studio candidate-probe operation. The server derives actor, clock,
+The corporate Functions host publishes this observation through its authenticated
+Policy Studio candidate-probe operation. The server derives actor, clock,
 compatibility and readiness; the request cannot assert readiness or provide a
 foreign snapshot. Both initial bootstrap and reentry after WITHDRAWN require a
 governed REQUIRED policy and positive quorum. A retained head ETag after

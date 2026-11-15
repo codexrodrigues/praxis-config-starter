@@ -43,8 +43,8 @@ Coordenação: root único escritor Config/harness/POM/docs/release/Maven/Neon. 
 p3c_page_providers escreve só Host/Configuration e testes atribuídos; revisão independente
 p3c_security_review somente leitura. Modelo/esforço herdados nos followups (sem override),
 adequados a autorização/transação; decisões críticas com root. Instruções raiz/local e
-/Users/rodrigo/Dev/pessoal/praxis-plataform/docs/engineering/agentes-e-modelos.md aplicadas.
-Neon br-wandering-frog-adu4l0bu root exclusivo, c1 encerrada; nova atribuição/atestações
+<monorepo-root>/docs/engineering/agentes-e-modelos.md aplicadas.
+Neon <neon-branch-id> root exclusivo, c1 encerrada; nova atribuição/atestações
 antes de conectar. Reusar P3-A/B/b1/b2 inalterados com fonte/limites; não repetir por reflexo.
 
 

@@ -76,10 +76,10 @@ mvn -q -Dtest=VectorRankedProjectKnowledgeCandidateRetrieverTest,AgenticAuthorin
 Local quickstart packaging against the unreleased starter passed:
 
 ```bash
-cd /Users/rodrigo/Dev/pessoal/praxis-plataform/praxis-config-starter
+cd <monorepo-root>/praxis-config-starter
 mvn -q -DskipTests install
 
-cd /Users/rodrigo/Dev/pessoal/praxis-plataform/praxis-api-quickstart
+cd <monorepo-root>/praxis-api-quickstart
 mvn -q clean package -DskipTests -Dpraxis.config.version=0.1.0-rc.5
 ```
 
@@ -196,14 +196,14 @@ mvn -q -DskipTests install
 5. Package quickstart against the local starter:
 
 ```bash
-cd /Users/rodrigo/Dev/pessoal/praxis-plataform/praxis-api-quickstart
+cd <monorepo-root>/praxis-api-quickstart
 mvn -q clean package -DskipTests -Dpraxis.config.version=0.1.0-rc.5
 ```
 
 6. Start the quickstart with vector flags enabled:
 
 ```bash
-cd /Users/rodrigo/Dev/pessoal/praxis-plataform/praxis-config-starter
+cd <monorepo-root>/praxis-config-starter
 
 PORT=8099 \
 PROVIDER=openai \
@@ -218,7 +218,7 @@ tools/local-e2e/start-quickstart-local-e2e.sh
 7. Run both strict quickstart vector smokes:
 
 ```bash
-cd /Users/rodrigo/Dev/pessoal/praxis-plataform/praxis-api-quickstart
+cd <monorepo-root>/praxis-api-quickstart
 
 BACKEND_URL=http://localhost:8099 \
 TENANT_ID=desenv \

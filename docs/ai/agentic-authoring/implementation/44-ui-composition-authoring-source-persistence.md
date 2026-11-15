@@ -188,5 +188,5 @@ no `praxis-api-quickstart`, com PostgreSQL compativel e o consumidor Angular
 real. O provider OpenAI entra somente como canario final, depois dos gates
 deterministicos; indisponibilidade de LLM nao bloqueia persistencia, reopen,
 integridade, compilacao nem concorrencia. Somente depois dessa prova e dos
-gates corporativos dos cinco arquetipos novas integracoes devem voltar ao
-Ergon.
+gates corporativos dos cinco arquetipos novas integracoes devem voltar aos
+hosts corporativos consumidores.

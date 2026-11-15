@@ -6,7 +6,7 @@ Estado: gates focais Config concluídos e revistos nas fontes abaixo. Produção
 
 ## Recurso Neon e identidade
 
-Projeto `ancient-leaf-72055027`, branch exclusiva `br-weathered-mountain-a48o0map`, endpoint direto `ep-floral-voice-a40bufyv.us-east-1.aws.neon.tech`; schema `p3b_runtime_512_20261023`, runtime `p3b_runtime_512_runtime`. PG 17.11, V64–68/V70 atuais; nenhum DDL novo em R2, nenhum uso de banco local como prova.
+Projeto `<neon-project-id>`, branch exclusiva `<neon-branch-id>`, endpoint direto `<neon-endpoint>`; schema `p3b_runtime_512_20261023`, runtime `p3b_runtime_512_runtime`. PG 17.11, V64–68/V70 atuais; nenhum DDL novo em R2, nenhum uso de banco local como prova.
 
 API confirmou ADMIN/PG17; SQL confirmou owner `neondb_owner` sem SUPERUSER. Runtime sem SUPERUSER/BYPASSRLS/CREATEDB/CREATEROLE/schema CREATE/evidence UPDATE/catalog DELETE; authoring limitado às tabelas/colunas existentes. [Preparo](evidence/p3b/neon-preparation.json) fixa migrations, hashes e privilégios. A fixture verifica identidade, schema, versão e SSLSocket/peer JDBC TLS1.3 antes de Hibernate validate.
 

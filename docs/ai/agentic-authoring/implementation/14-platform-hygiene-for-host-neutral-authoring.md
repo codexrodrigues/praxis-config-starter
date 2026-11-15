@@ -129,7 +129,7 @@ Docs and derived artifacts:
 Minimum validation for this planning commit:
 
 ```bash
-cd /Users/rodrigo/Dev/pessoal/praxis-plataform/praxis-config-starter
+cd <monorepo-root>/praxis-config-starter
 git diff --check
 ```
 

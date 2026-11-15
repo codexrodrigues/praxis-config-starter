@@ -45,7 +45,7 @@ Run these locally before any remote gate.
 ### Config Starter Focal Gate
 
 ```bash
-cd /Users/rodrigo/Dev/pessoal/praxis-plataform/praxis-config-starter
+cd <monorepo-root>/praxis-config-starter
 
 mvn -Dtest=AgenticAuthoringPreviewServiceTest test
 ```
@@ -58,7 +58,7 @@ Expected:
 ### Browser/LLM Cockpit Gate
 
 ```bash
-cd /Users/rodrigo/Dev/pessoal/praxis-plataform/praxis-ui-angular
+cd <monorepo-root>/praxis-ui-angular
 
 AI_PROVIDER=openai \
 AI_ENV_FILE=../praxis-config-starter/.env.openai.local.sh \
@@ -81,7 +81,7 @@ Expected:
 ### Docs Gate
 
 ```bash
-cd /Users/rodrigo/Dev/pessoal/praxis-plataform/praxis-config-starter
+cd <monorepo-root>/praxis-config-starter
 
 git diff --check
 ```

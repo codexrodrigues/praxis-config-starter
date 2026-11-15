@@ -55,7 +55,7 @@ Run these locally before any remote gate.
 ### Repository Preflight
 
 ```bash
-cd /Users/rodrigo/Dev/pessoal/praxis-plataform
+cd <monorepo-root>
 
 git -C praxis-config-starter status --short --branch
 git -C praxis-api-quickstart status --short --branch
@@ -70,7 +70,7 @@ Expected:
 ### Quickstart Package Gate
 
 ```bash
-cd /Users/rodrigo/Dev/pessoal/praxis-plataform/praxis-api-quickstart
+cd <monorepo-root>/praxis-api-quickstart
 
 ./mvnw -q -DskipTests package
 jar tf target/praxis-api-quickstart-2.0.0-rc.9.jar | rg 'praxis-config-starter'
@@ -84,7 +84,7 @@ Expected:
 ### Local Host Startup
 
 ```bash
-cd /Users/rodrigo/Dev/pessoal/praxis-plataform/praxis-api-quickstart
+cd <monorepo-root>/praxis-api-quickstart
 
 SERVER_PORT=8091 \
 SPRING_PROFILES_ACTIVE=local \
@@ -104,7 +104,7 @@ Expected:
 ### Dynamic Form Browser Gate
 
 ```bash
-cd /Users/rodrigo/Dev/pessoal/praxis-plataform/praxis-ui-angular
+cd <monorepo-root>/praxis-ui-angular
 
 BACKEND_URL=http://localhost:8088 \
 ./tools/local-e2e/run-dynamic-form-domain-rules-runtime-local.sh
@@ -122,7 +122,7 @@ origin or use the lane's documented backend override.
 ### Focused Backend Validation Gate
 
 ```bash
-cd /Users/rodrigo/Dev/pessoal/praxis-plataform/praxis-api-quickstart
+cd <monorepo-root>/praxis-api-quickstart
 
 BACKEND_URL=http://localhost:8091 \
 ORIGIN=http://localhost:4003 \
@@ -137,7 +137,7 @@ Expected:
 ### Focused Workflow Action Gate
 
 ```bash
-cd /Users/rodrigo/Dev/pessoal/praxis-plataform/praxis-api-quickstart
+cd <monorepo-root>/praxis-api-quickstart
 
 BACKEND_URL=http://localhost:8091 \
 ORIGIN=http://localhost:4003 \
@@ -153,7 +153,7 @@ Expected:
 ### Focused Approval Policy Gate
 
 ```bash
-cd /Users/rodrigo/Dev/pessoal/praxis-plataform/praxis-api-quickstart
+cd <monorepo-root>/praxis-api-quickstart
 
 BACKEND_URL=http://localhost:8091 \
 ORIGIN=http://localhost:4003 \
@@ -169,7 +169,7 @@ Expected:
 ### Documentation Gate
 
 ```bash
-cd /Users/rodrigo/Dev/pessoal/praxis-plataform/praxis-config-starter
+cd <monorepo-root>/praxis-config-starter
 
 git diff --check
 ```

@@ -34,9 +34,9 @@ O ensaio remoto usa exclusivamente:
 
 | Recurso | Identidade |
 | --- | --- |
-| Projeto Neon | `ancient-leaf-72055027` |
-| Branch atribuída | `br-aged-bonus-a4rhfqwp` / `page-publication-p2-510-20261022` |
-| Endpoint direto | `ep-withered-rice-a48n0xi0.us-east-1.aws.neon.tech` |
+| Projeto Neon | `<neon-project-id>` |
+| Branch atribuída | `<neon-branch-id>` / `page-publication-p2-510-20261022` |
+| Endpoint direto | `<neon-endpoint>` |
 | Schema | `p2_page_510_20261022` |
 | Runtime | `p2_page_510_runtime` |
 | Owner | `neondb_owner`, usado somente no preparo do schema atribuído |

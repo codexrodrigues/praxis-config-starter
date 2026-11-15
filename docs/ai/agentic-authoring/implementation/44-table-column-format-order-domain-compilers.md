@@ -85,5 +85,5 @@ snapshot ou criar uma segunda fonte de verdade.
   estava implementada e testada.
 - Quickstart e corpus HTTP: não redefinem essa semântica e não exigem mudança
   para o gate focal.
-- Ergon: permanece congelado; nenhuma alteração é autorizada por este corte.
+- Hosts corporativos consumidores: permanecem congelados; nenhuma alteração é autorizada por este corte.
 

@@ -24,6 +24,6 @@ Os resultados são complementares e atribuídos às suas fontes; não são uma s
 
 Fonte final de produção/testes: `307e1079e08692279aa3b0b417441ff58a66b494`. O JAR foi apenas empacotado localmente, sem install/deploy/release. Detalhes e limites em [P3A-IMPLEMENTATION](../../P3A-IMPLEMENTATION.md).
 
-O banco foi exclusivamente a branch `br-holy-water-a4ihmkkj` do projeto `ancient-leaf-72055027`, schema `p3a_group_511_20261022`, runtime `p3a_group_511_runtime`. Os logs comprovam endpoint atribuído, PostgreSQL17.11, TLSverify-full/TLSv1.3 e peer. O preparo owner e a prova runtime são separados. Foram aplicadas apenas V64–V68/V70, sem DDL P3, mutação do pai/schema herdado ou reutilização do recurso P2.
+O banco foi exclusivamente a branch `<neon-branch-id>` do projeto `<neon-project-id>`, schema `p3a_group_511_20261022`, runtime `p3a_group_511_runtime`. Os logs comprovam endpoint atribuído, PostgreSQL17.11, TLSverify-full/TLSv1.3 e peer. O preparo owner e a prova runtime são separados. Foram aplicadas apenas V64–V68/V70, sem DDL P3, mutação do pai/schema herdado ou reutilização do recurso P2.
 
 Limites: sem prova de HTTP real Quickstart/Hero, browser/Angular, P3-B, migração integral ou SLA. As barreiras não representam observação pg_locks. O seed denso usa inserção runtime correlacionada e triggers ativos, não mil jornadas HTTP. 8MiB é orçamento de texto de workspace por prefixo comum, não heap nem conjunto total de registros; primeiro item oversized é retornado isoladamente e passa ao verifier.

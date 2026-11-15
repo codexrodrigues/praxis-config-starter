@@ -21,7 +21,7 @@ current user projection, active tenant or company, accessible tenants, active pr
 environment, navigation, resource links and safe security/runtime signals.
 
 Today, hosts can solve this locally with `/api/me/**`, host-specific menus, company
-switchers or static shell navigation. That approach does not scale to ErgonX,
+switchers or static shell navigation. That approach does not scale to large corporate applications,
 multi-tenant SaaS, ERP, public-sector, banking, HR or insurance hosts because
 Praxis AI, metadata and Angular runtimes cannot reliably ground requests in the
 same enterprise context.
@@ -46,7 +46,7 @@ well enough as a runtime contract.
 
 ## Boundary Decision
 
-Do not make `praxis-api-quickstart`, ErgonX, HADES, Angular shell state or a static
+Do not make `praxis-api-quickstart`, host-specific legacy engines, Angular shell state or a static
 frontend menu the canonical source of enterprise runtime context.
 
 The preferred platform direction is:
@@ -60,7 +60,7 @@ The preferred platform direction is:
 
 The open packaging decision remains whether the first implementation lives inside
 `praxis-config-starter` or in a future `praxis-enterprise-runtime-starter`. The
-contract must not depend on Ergon/HADES tables or any host-specific security model.
+contract must not depend on proprietary legacy tables or any host-specific security model.
 
 ## Proposed Contract Shape
 
@@ -122,9 +122,9 @@ Minimum payload semantics:
    - Add controller tests for redaction, effective context and tenant switching.
 
 3. Quickstart proof
-   - Implement a fake non-Ergon provider.
+   - Implement a fake host-neutral provider.
    - Prove tenant switching updates downstream config/metadata/resource calls.
-   - Add a focal smoke that does not require HADES or real corporate auth.
+   - Add a focal smoke that does not require proprietary legacy engines or real corporate auth.
 
 4. Angular consumption
    - Add a generic runtime context client in the canonical Angular owner.
@@ -138,13 +138,13 @@ Minimum payload semantics:
 
 - Starter unit/controller tests for context payload, tenant choices, switching,
   redaction and cache/ETag behavior if adopted.
-- Quickstart smoke proving a non-Ergon provider and downstream context propagation.
+- Quickstart smoke proving a host-neutral provider and downstream context propagation.
 - Angular service tests if a public runtime context client is introduced.
 - Documentation review for public contracts and examples.
 
 ## Non-Goals
 
-- No dependency on HADES, Ergon tables or legacy transaction SQL.
+- No dependency on proprietary legacy engines, host tables or legacy transaction SQL.
 - No replacement for host authentication or authorization.
 - No exposure of secrets, raw roles, private policy internals or sensitive user attributes.
 - No frontend-only static menu as the platform source of truth.

@@ -55,7 +55,7 @@ The current beta contract is intentionally narrow:
 Config-starter focal tests:
 
 ```bash
-cd /Users/rodrigo/Dev/pessoal/praxis-plataform/praxis-config-starter
+cd <monorepo-root>/praxis-config-starter
 
 mvn -q -Dtest=AgenticAuthoringProjectKnowledgeServiceTest test
 mvn -q -Dtest=AgenticAuthoringPlanServiceTest,AgenticAuthoringTurnEngineTest test
@@ -70,7 +70,7 @@ Result:
 Quickstart runtime proof with Neon:
 
 ```bash
-cd /Users/rodrigo/Dev/pessoal/praxis-plataform/praxis-api-quickstart
+cd <monorepo-root>/praxis-api-quickstart
 
 BACKEND_URL=http://localhost:8099 \
 TENANT_ID=desenv \
@@ -93,7 +93,7 @@ Observed result:
 Page Builder browser proof:
 
 ```bash
-cd /Users/rodrigo/Dev/pessoal/praxis-plataform/praxis-ui-angular
+cd <monorepo-root>/praxis-ui-angular
 
 AI_PROVIDER=openai \
 AI_ENV_FILE=../praxis-config-starter/.env.openai.local.sh \
@@ -116,7 +116,7 @@ Observed result:
 Docs gate:
 
 ```bash
-cd /Users/rodrigo/Dev/pessoal/praxis-plataform/praxis-config-starter
+cd <monorepo-root>/praxis-config-starter
 
 git diff --check
 ```

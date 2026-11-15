@@ -81,7 +81,7 @@ tenant-scoped and destructive.
 Config-starter contract gate:
 
 ```bash
-cd /Users/rodrigo/Dev/pessoal/praxis-plataform/praxis-config-starter
+cd <monorepo-root>/praxis-config-starter
 
 mvn -Dtest=AiApiContractOpenApiTest,AiContractSpecConsistencyTest,AiContractV11RetroCompatibilityTest test -q
 git diff --check
@@ -98,7 +98,7 @@ Result:
 Angular binding consumer:
 
 ```bash
-cd /Users/rodrigo/Dev/pessoal/praxis-plataform/praxis-ui-angular
+cd <monorepo-root>/praxis-ui-angular
 
 npx ng build praxis-ai
 git diff --check
@@ -112,7 +112,7 @@ Result:
 HTTP examples corpus:
 
 ```bash
-cd /Users/rodrigo/Dev/pessoal/praxis-plataform/praxisui-http-examples
+cd <monorepo-root>/praxisui-http-examples
 
 npm run verify:manifest
 npm run generate:llm-surface

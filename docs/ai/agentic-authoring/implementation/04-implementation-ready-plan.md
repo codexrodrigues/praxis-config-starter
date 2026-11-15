@@ -687,7 +687,7 @@ Use local-first validation before GitHub Actions.
 Canonical local lane for governed shared-rule cockpit/timeline:
 
 ```bash
-cd /Users/rodrigo/Dev/pessoal/praxis-plataform
+cd <monorepo-root>
 
 AI_PROVIDER=openai \
 AI_ENV_FILE=praxis-config-starter/.env.openai.local.sh \
@@ -701,7 +701,7 @@ input.
 Explicit macOS/Linux command for the same cockpit/timeline lane:
 
 ```bash
-cd /Users/rodrigo/Dev/pessoal/praxis-plataform/praxis-ui-angular
+cd <monorepo-root>/praxis-ui-angular
 
 node scripts/run-page-builder-agentic-authoring-e2e.js \
   --provider openai \
@@ -717,7 +717,7 @@ node scripts/run-page-builder-agentic-authoring-e2e.js \
 Full Page Builder stream gate:
 
 ```bash
-cd /Users/rodrigo/Dev/pessoal/praxis-plataform/praxis-config-starter
+cd <monorepo-root>/praxis-config-starter
 
 powershell.exe -NoProfile -ExecutionPolicy Bypass \
   -File ./tools/Invoke-PbAgenticFullE2E.ps1 \
@@ -731,7 +731,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass \
 Explicit macOS/Linux command for the full Page Builder stream gate:
 
 ```bash
-cd /Users/rodrigo/Dev/pessoal/praxis-plataform/praxis-ui-angular
+cd <monorepo-root>/praxis-ui-angular
 
 node scripts/run-page-builder-agentic-authoring-e2e.js \
   --provider openai \
@@ -746,7 +746,7 @@ node scripts/run-page-builder-agentic-authoring-e2e.js \
 Versioned Project Knowledge audit cockpit lane:
 
 ```bash
-cd /Users/rodrigo/Dev/pessoal/praxis-plataform/praxis-ui-angular
+cd <monorepo-root>/praxis-ui-angular
 
 AI_PROVIDER=openai \
 AI_ENV_FILE=../praxis-config-starter/.env.openai.local.sh \
@@ -767,7 +767,7 @@ testing the local UI against the hosted Render backend. Start the UI with an
 explicit proxy target:
 
 ```bash
-cd /Users/rodrigo/Dev/pessoal/praxis-plataform/praxis-ui-angular
+cd <monorepo-root>/praxis-ui-angular
 
 PAX_PROXY_TARGET=http://127.0.0.1:8088 \
 PAX_FILES_PROXY_TARGET=http://127.0.0.1:8088 \
@@ -780,7 +780,7 @@ and only the local browser/security flags needed for the smoke. Do not use
 API datasource to a local PostgreSQL instance:
 
 ```bash
-cd /Users/rodrigo/Dev/pessoal/praxis-plataform/praxis-api-quickstart
+cd <monorepo-root>/praxis-api-quickstart
 
 APP_SECURITY_CSRF_DISABLE=true \
 APP_SECURITY_READ_OPEN=true \

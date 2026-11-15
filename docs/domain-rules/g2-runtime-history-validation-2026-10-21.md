@@ -62,13 +62,13 @@ constructor/admission requirements and compiled, but was not executed.
 
 ## Validation and provenance
 
-Runtime: `/Users/rodrigo/.jdks/jdk-21.0.10+7/Contents/Home`;
-Maven: `/Users/rodrigo/.maven/current/bin/mvn`.
+Runtime: `<jdk-home>`;
+Maven: `mvn`.
 
 Final command, from the checkout root:
 
 ```sh
-JAVA_HOME=/Users/rodrigo/.jdks/jdk-21.0.10+7/Contents/Home /Users/rodrigo/.maven/current/bin/mvn -B -Dtest=DomainRuleSnapshotServiceTest,DomainRuleSnapshotControllerTest,DomainRuleHostStatusServiceTest,DomainRuleHostStatusControllerTest,DomainRuleSnapshotHeadReaderAdapterTest,DomainRuleSnapshotAutoConfigurationTest,DomainRuleRolloutServiceTest,DomainRuleRolloutControllerTest,DomainRuleRolloutPolicyServiceTest,DomainRuleRolloutPolicyControllerTest package
+JAVA_HOME=<jdk-home> mvn -B -Dtest=DomainRuleSnapshotServiceTest,DomainRuleSnapshotControllerTest,DomainRuleHostStatusServiceTest,DomainRuleHostStatusControllerTest,DomainRuleSnapshotHeadReaderAdapterTest,DomainRuleSnapshotAutoConfigurationTest,DomainRuleRolloutServiceTest,DomainRuleRolloutControllerTest,DomainRuleRolloutPolicyServiceTest,DomainRuleRolloutPolicyControllerTest package
 ```
 
 Result: BUILD SUCCESS, 103 tests, zero failures/errors/skips. Counts: snapshot service 45,

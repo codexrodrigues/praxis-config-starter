@@ -60,9 +60,9 @@ constructors and signatures. Existing embedded integration sources were not exec
 
 ## Remote PostgreSQL evidence
 
-Exclusive assignment: Neon project `ancient-leaf-72055027`, branch
-`br-small-butterfly-a43abtin`, endpoint
-`ep-late-lab-a4ixef5h.us-east-1.aws.neon.tech`, new database `payroll_g2_config`, PG17.11.
+Exclusive assignment: Neon project `<neon-project-id>`, branch
+`<neon-branch-id>`, endpoint
+`<neon-endpoint>`, new database `payroll_g2_config`, PG17.11.
 Owner `payroll_g2_config_owner` applies only official Flyway migrations; runtime
 `payroll_g2_config_runtime` has DML only, no superuser/createdb/createrole/schema CREATE.
 No parent database, inherited production rows, CREATE DATABASE/ROLE or global cleanup
@@ -103,8 +103,8 @@ the immediate unique ACTIVE index. These logs are historical failures, not passi
 
 ## Commands and results
 
-JDK `/Users/rodrigo/.jdks/jdk-21.0.10+7/Contents/Home`; Maven
-`/Users/rodrigo/.maven/current/bin/mvn`. No mvn install, embedded/local database, external
+JDK `<jdk-home>`; Maven
+`mvn`. No mvn install, embedded/local database, external
 LLM call, tag, merge, deployment or Maven publication was performed by this worker.
 
 Main focal plus remote gate: `mvn -B -Dtest=DomainRuleSnapshotServiceTest,DomainRuleSnapshotControllerTest,DomainRuleSnapshotAutoConfigurationTest,DomainRuleRolloutServiceTest,DomainRuleRolloutControllerTest,DomainRuleRolloutPolicyServiceTest,DomainRuleExecutionObservationServiceTest,JdbcDomainRuleSnapshotScopeLockTest,DomainRuleSnapshotPublicationNeonIT#realLifecycleConcurrencyAndAtomicityUnderRuntimePrivileges test`.

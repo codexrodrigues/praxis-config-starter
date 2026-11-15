@@ -116,7 +116,7 @@ A sandbox run must freeze facts, `nowUtc`, timezone and actor context once, then
 
 1. the workspace candidate through a bounded host compiler;
 2. the active immutable snapshot through the current last-known-good plan;
-3. an independent legacy oracle only where a migration host supplies one.
+3. an independent legacy baseline only where a migration host supplies one.
 
 The implemented run ledger persists immutable per-scenario decisions, exact snapshot/workspace
 fingerprints, plan/facts digests and comparison classification. It never stores raw facts or
@@ -137,14 +137,14 @@ author records the intended assertions; this is deliberate fail-closed beta beha
 Migration `V57` keeps provenance optional for existing generic workspaces. When supplied, Config
 validates the closed authority, eligibility and operation vocabularies, every digest and
 contradictory mutation/no-mutation claims. Only redacted references and digests are persisted: raw
-Oracle rows, facts, credentials, SQL, executable policy and effect payloads remain outside Config.
+Legacy baseline rows, facts, credentials, SQL, executable policy and effect payloads remain outside Config.
 An `operationMode` without state/effect evidence is not an operational proof; conversely, the
 portable synthetic corpus must not claim legacy parity merely because its fixtures contain the
 strings `CREATE` and `UPDATE`.
 
 Migration `V58` adds scoped idempotency, a canonical request hash, the independent baseline lane and
 the submitted-Test-Run binding. Stage policy is opt-in and server-owned; it does not globally force
-Oracle evidence at `SUBMIT`. A definition can govern `SUBMIT`, `PROMOTE`, `PUBLISH`, `SNAPSHOT`,
+Legacy baseline evidence at `SUBMIT`. A definition can govern `SUBMIT`, `PROMOTE`, `PUBLISH`, `SNAPSHOT`,
 `ACTIVATE` or a combination
 of those stages with this shape:
 

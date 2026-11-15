@@ -47,7 +47,7 @@ publication or hosted smoke.
 Config-starter focal gate passed:
 
 ```bash
-cd /Users/rodrigo/Dev/pessoal/praxis-plataform/praxis-config-starter
+cd <monorepo-root>/praxis-config-starter
 
 mvn -q -Dtest=VectorRankedProjectKnowledgeCandidateRetrieverTest,AgenticAuthoringProjectKnowledgeServiceTest,RagProjectKnowledgeDerivedIndexServiceTest,RagProjectKnowledgeMetadataTest test
 ```
@@ -69,7 +69,7 @@ Observed:
 Quickstart lightweight downstream gate passed:
 
 ```bash
-cd /Users/rodrigo/Dev/pessoal/praxis-plataform/praxis-api-quickstart
+cd <monorepo-root>/praxis-api-quickstart
 
 bash -n scripts/verify-domain-knowledge-change-set-runtime.sh
 mkdir -p target/scripts
@@ -84,10 +84,10 @@ smokes before any future Maven publication.
 Local install/package gate passed after the lightweight preflight:
 
 ```bash
-cd /Users/rodrigo/Dev/pessoal/praxis-plataform/praxis-config-starter
+cd <monorepo-root>/praxis-config-starter
 mvn -q -DskipTests install
 
-cd /Users/rodrigo/Dev/pessoal/praxis-plataform/praxis-api-quickstart
+cd <monorepo-root>/praxis-api-quickstart
 mvn -q clean package -DskipTests -Dpraxis.config.version=0.1.0-rc.5
 ```
 
@@ -102,7 +102,7 @@ Observed:
 Neon-backed vector runtime gates passed after local package:
 
 ```bash
-cd /Users/rodrigo/Dev/pessoal/praxis-plataform/praxis-config-starter
+cd <monorepo-root>/praxis-config-starter
 
 PORT=8099 \
 PROVIDER=openai \
@@ -125,7 +125,7 @@ Observed:
 Vector revert smoke:
 
 ```bash
-cd /Users/rodrigo/Dev/pessoal/praxis-plataform/praxis-api-quickstart
+cd <monorepo-root>/praxis-api-quickstart
 
 BACKEND_URL=http://localhost:8099 \
 TENANT_ID=desenv \
@@ -151,7 +151,7 @@ Observed:
 Vector supersession smoke:
 
 ```bash
-cd /Users/rodrigo/Dev/pessoal/praxis-plataform/praxis-api-quickstart
+cd <monorepo-root>/praxis-api-quickstart
 
 BACKEND_URL=http://localhost:8099 \
 TENANT_ID=desenv \
@@ -189,7 +189,7 @@ artifact exists there.
 Targeted regression after the fix passed:
 
 ```bash
-cd /Users/rodrigo/Dev/pessoal/praxis-plataform/praxis-config-starter
+cd <monorepo-root>/praxis-config-starter
 
 mvn -q -Dtest=AgenticAuthoringChartCapabilityCatalogTest,AgenticAuthoringFormCapabilityCatalogTest,AgenticAuthoringTableCapabilityCatalogTest,AgenticAuthoringDryRunServiceTest test
 ```
@@ -230,7 +230,7 @@ Run these locally before any remote gate.
 ### Config Starter Focal Gate
 
 ```bash
-cd /Users/rodrigo/Dev/pessoal/praxis-plataform/praxis-config-starter
+cd <monorepo-root>/praxis-config-starter
 
 mvn -q -Dtest=VectorRankedProjectKnowledgeCandidateRetrieverTest,AgenticAuthoringProjectKnowledgeServiceTest,RagProjectKnowledgeDerivedIndexServiceTest,RagProjectKnowledgeMetadataTest test
 git diff --check
@@ -245,7 +245,7 @@ Expected:
 ### Local Starter Install Gate
 
 ```bash
-cd /Users/rodrigo/Dev/pessoal/praxis-plataform/praxis-config-starter
+cd <monorepo-root>/praxis-config-starter
 
 mvn -q -DskipTests install
 ```
@@ -258,7 +258,7 @@ Expected:
 ### Quickstart Package Gate
 
 ```bash
-cd /Users/rodrigo/Dev/pessoal/praxis-plataform/praxis-api-quickstart
+cd <monorepo-root>/praxis-api-quickstart
 
 mvn -q clean package -DskipTests -Dpraxis.config.version=0.1.0-rc.5
 ```
@@ -272,7 +272,7 @@ Expected:
 ### Local Quickstart Startup Gate
 
 ```bash
-cd /Users/rodrigo/Dev/pessoal/praxis-plataform/praxis-config-starter
+cd <monorepo-root>/praxis-config-starter
 
 PORT=8099 \
 PROVIDER=openai \
@@ -294,7 +294,7 @@ Expected:
 ### Vector Revert Runtime Gate
 
 ```bash
-cd /Users/rodrigo/Dev/pessoal/praxis-plataform/praxis-api-quickstart
+cd <monorepo-root>/praxis-api-quickstart
 
 BACKEND_URL=http://localhost:8099 \
 TENANT_ID=desenv \
@@ -316,7 +316,7 @@ Expected:
 ### Vector Supersession Runtime Gate
 
 ```bash
-cd /Users/rodrigo/Dev/pessoal/praxis-plataform/praxis-api-quickstart
+cd <monorepo-root>/praxis-api-quickstart
 
 BACKEND_URL=http://localhost:8099 \
 TENANT_ID=desenv \

@@ -94,7 +94,7 @@ Release e Gate de Authoring
 
 Comandos de Validacao Local
 - No Windows, use Maven instalado quando `mvn` nao estiver no PATH:
-  - `D:\Developer\maven\apache-maven-3.9.6\bin\mvn.cmd`
+  - `<maven-home>\bin\mvn.cmd`
 - Mudancas docs-only:
   - leitura final do arquivo alterado;
   - `git diff --check`.

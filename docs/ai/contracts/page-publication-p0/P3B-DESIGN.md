@@ -180,7 +180,7 @@ Matriz mínima:
 
 Worktree `config-page-p3b-512`, branch `codex/page-runtime-p3b-512`, base `724f92ff`. Maven exclusivo `/tmp/praxis-page-p3b-512-m2`, target do novo worktree. Nenhum build iniciado neste checkpoint.
 
-Neon reservado exclusivamente: projeto `ancient-leaf-72055027` (praxis-config), branch `br-weathered-mountain-a48o0map`, nome `page-runtime-p3b-512-20261023`, endpoint `ep-floral-voice-a40bufyv.us-east-1.aws.neon.tech`, PG17 segundo control plane, compute 0.25–1 CU/autosuspend300. Schema atribuído `p3b_runtime_512_20261023`, runtime `p3b_runtime_512_runtime`; parent homolog `br-empty-sea-a4kvwyqz` somente leitura. P2/P3-A não são reutilizáveis.
+Neon reservado exclusivamente: projeto `<neon-project-id>` (praxis-config), branch `<neon-branch-id>`, nome `page-runtime-p3b-512-20261023`, endpoint `<neon-endpoint>`, PG17 segundo control plane, compute 0.25–1 CU/autosuspend300. Schema atribuído `p3b_runtime_512_20261023`, runtime `p3b_runtime_512_runtime`; parent homolog `<neon-branch-id>` somente leitura. P2/P3-A não são reutilizáveis.
 
 Nenhuma conexão SQL, criação de schema/role ou migração foi realizada para este desenho. Preflight operacional de TLS verify-full, versão e identidades reais permanece gate antes de mutar exclusivamente o schema atribuído. Credenciais serão privadas e jamais versionadas. O recurso reservado não representa autorização para modificar parent/public/herdado ou publicar qualquer ambiente.
 

@@ -24,7 +24,7 @@ O ensaio final usa `PageCreationPostgresIT,PageCreationHttpTest` com `-Dp2.evide
 
 ## Identidade e privilégios
 
-Projeto `ancient-leaf-72055027`, branch `br-aged-bonus-a4rhfqwp` (`page-publication-p2-510-20261022`), endpoint direto `ep-withered-rice-a48n0xi0.us-east-1.aws.neon.tech`, schema exclusivo `p2_page_510_20261022`. PostgreSQL 17.11, TLS verify-full/TLSv1.3. Runtime `p2_page_510_runtime` sem superuser/createdb/createrole/bypassrls; owner `neondb_owner` somente no preparo. A branch pai `br-empty-sea-a4kvwyqz` permaneceu sem mutação.
+Projeto `<neon-project-id>`, branch `<neon-branch-id>` (`page-publication-p2-510-20261022`), endpoint direto `<neon-endpoint>`, schema exclusivo `p2_page_510_20261022`. PostgreSQL 17.11, TLS verify-full/TLSv1.3. Runtime `p2_page_510_runtime` sem superuser/createdb/createrole/bypassrls; owner `neondb_owner` somente no preparo. A branch pai `<neon-branch-id>` permaneceu sem mutação.
 
 A fixture aplica somente V64/V65/V66/V67/V68/V70 no schema atribuído. Não é prova de upgrade integral de todos os módulos. Conexões independentes verificam persistência/rollback. UPDATE em DRAFT é permitido; UPDATE body/ETag/state em RELEASED é recusado pelo trigger. DELETE/TRUNCATE com runtime são recusados por ACL: isso não é apresentado como execução dos triggers por owner. O DDL e a introspecção complementam essa limitação. JPA real congela, faz flush duas vezes, clear/read e usa review/head sem nova escrita no draft RELEASED.
 

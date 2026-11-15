@@ -37,8 +37,8 @@ well as identity and ETag. This value is not accepted from the public request.
 The host must enforce revocation at its own transaction boundary. Config alone
 does not provide an atomic commit spanning the Config and domain databases.
 
-The H4 local evidence and operational limits are recorded in the Ergon
-`docs/rules/ontology/g3/governed-functions-h4` checkpoint. Public publication,
+The H4 local evidence and operational limits are recorded in the corporate consumer
+checkpoint. Public publication,
 deployment and operational acceptance are separate gates.
 
 The deployment gate must coordinate V73 and every active-head consumer before

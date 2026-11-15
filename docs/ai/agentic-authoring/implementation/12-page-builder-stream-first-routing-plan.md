@@ -144,7 +144,7 @@ Definition of Done:
 Expected validation:
 
 ```bash
-cd /Users/rodrigo/Dev/pessoal/praxis-plataform/praxis-ui-angular
+cd <monorepo-root>/praxis-ui-angular
 
 git status --short
 ```
@@ -260,7 +260,7 @@ Implemented guard:
 Local validation:
 
 ```bash
-cd /Users/rodrigo/Dev/pessoal/praxis-plataform/praxis-ui-angular
+cd <monorepo-root>/praxis-ui-angular
 
 npx ng test praxis-page-builder --watch=false --browsers=ChromeHeadless \
   --include=projects/praxis-page-builder/src/lib/ai/page-builder-agentic-authoring-turn-flow.spec.ts \
@@ -316,7 +316,7 @@ Implemented proof:
 Local validation:
 
 ```bash
-cd /Users/rodrigo/Dev/pessoal/praxis-plataform/praxis-ui-angular
+cd <monorepo-root>/praxis-ui-angular
 
 npx ng test praxis-page-builder --watch=false --browsers=ChromeHeadless \
   --include=projects/praxis-page-builder/src/lib/dynamic-page-builder.component.spec.ts \

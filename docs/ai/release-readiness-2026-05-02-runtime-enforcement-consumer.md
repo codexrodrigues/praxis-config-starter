@@ -61,7 +61,7 @@ semantic decisions, and runtimes consume derived, auditable projections.
 Quickstart package gate:
 
 ```bash
-cd /Users/rodrigo/Dev/pessoal/praxis-plataform/praxis-api-quickstart
+cd <monorepo-root>/praxis-api-quickstart
 
 ./mvnw -q -DskipTests package
 ```
@@ -75,7 +75,7 @@ Observed:
 Local quickstart startup used the configured Neon datasource:
 
 ```bash
-cd /Users/rodrigo/Dev/pessoal/praxis-plataform/praxis-api-quickstart
+cd <monorepo-root>/praxis-api-quickstart
 
 SERVER_PORT=8091 \
 SPRING_PROFILES_ACTIVE=local \
@@ -95,7 +95,7 @@ Observed:
 Dynamic-form browser proof:
 
 ```bash
-cd /Users/rodrigo/Dev/pessoal/praxis-plataform/praxis-ui-angular
+cd <monorepo-root>/praxis-ui-angular
 
 BACKEND_URL=http://localhost:8088 \
 ./tools/local-e2e/run-dynamic-form-domain-rules-runtime-local.sh
@@ -111,7 +111,7 @@ Observed:
 Backend validation proof:
 
 ```bash
-cd /Users/rodrigo/Dev/pessoal/praxis-plataform/praxis-api-quickstart
+cd <monorepo-root>/praxis-api-quickstart
 
 BACKEND_URL=http://localhost:8091 \
 ORIGIN=http://localhost:4003 \
@@ -128,7 +128,7 @@ Observed:
 Workflow action proof:
 
 ```bash
-cd /Users/rodrigo/Dev/pessoal/praxis-plataform/praxis-api-quickstart
+cd <monorepo-root>/praxis-api-quickstart
 
 BACKEND_URL=http://localhost:8091 \
 ORIGIN=http://localhost:4003 \
@@ -148,7 +148,7 @@ Observed:
 Approval policy proof:
 
 ```bash
-cd /Users/rodrigo/Dev/pessoal/praxis-plataform/praxis-api-quickstart
+cd <monorepo-root>/praxis-api-quickstart
 
 BACKEND_URL=http://localhost:8091 \
 ORIGIN=http://localhost:4003 \

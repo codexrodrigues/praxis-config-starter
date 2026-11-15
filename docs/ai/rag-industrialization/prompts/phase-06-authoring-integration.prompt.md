@@ -1,6 +1,6 @@
 # Prompt para Chat Delegado: Fase 06
 
-Voce esta trabalhando no monorepo Praxis em `/Users/rodrigo/Dev/pessoal/praxis-plataform`.
+Voce esta trabalhando no monorepo Praxis em `<monorepo-root>`.
 
 Leia primeiro:
 

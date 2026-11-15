@@ -259,7 +259,7 @@ summary or knowledge summary text in the cockpit status.
 The versioned managed local lane for this proof is:
 
 ```bash
-cd /Users/rodrigo/Dev/pessoal/praxis-plataform/praxis-ui-angular
+cd <monorepo-root>/praxis-ui-angular
 
 AI_PROVIDER=openai \
 AI_ENV_FILE=../praxis-config-starter/.env.openai.local.sh \

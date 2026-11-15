@@ -40,11 +40,11 @@ A operação dos snapshots vem de seu payload verificado. Heads/eventos derivam 
 
 Payloads, hashes, aprovações, IDs, revisões, ETags e vínculos históricos são preservados. A migração é transacional: falha de verificação ou backfill reverte todo o acréscimo. Preservação histórica não concede prontidão de execução nem aprovação nova a snapshots antigos.
 
-Flyway com discovery no classpath inclui a migração Java. Instaladores que extraem apenas SQL devem adicionar ao mesmo Flyway as instâncias fornecidas por `ConfigMigrationInventory.fromSelectedArtifact(pathDoJar)`. O inventário recusa artefato ausente ou diferente daquele carregado; não usa uma versão implícita do classpath. O instalador Ergon foi preparado para consumir essa API. Startup HTTP continua sem instalar schema e com JPA `validate`.
+Flyway com discovery no classpath inclui a migração Java. Instaladores que extraem apenas SQL devem adicionar ao mesmo Flyway as instâncias fornecidas por `ConfigMigrationInventory.fromSelectedArtifact(pathDoJar)`. O inventário recusa artefato ausente ou diferente daquele carregado; não usa uma versão implícita do classpath. O instalador do host corporativo consumidor foi preparado para consumir essa API. Startup HTTP continua sem instalar schema e com JPA `validate`.
 
 ## Validação e adoção
 
-A prova de migração usa PostgreSQL Neon real em uma branch descartável filha direta da base Ergon atribuída, com expiração, banco próprio sintético e exclusão verificada. O teste `DomainRuleOperationScopeNeonIT` verifica histórico corrompido, backfill impossível, preservação de conteúdo/head, coexistência de versões e heads, unicidade por operação e referências cruzadas de rollouts/probes/eventos. Não usa Docker nem representa ativação operacional do Ergon.
+A prova de migração usa PostgreSQL remoto real em uma branch descartável isolada filha da base de homologação atribuída, com expiração, banco próprio sintético e exclusão verificada. O teste `DomainRuleOperationScopeNeonIT` verifica histórico corrompido, backfill impossível, preservação de conteúdo/head, coexistência de versões e heads, unicidade por operação e referências cruzadas de rollouts/probes/eventos. Não usa Docker nem representa ativação operacional de um host em produção.
 
 O histórico sintético não mede o volume, a duração dos locks nem a janela de migração do banco operacional. O inventário e o ensaio do corte com cardinalidades reais continuam no gate G5, antes da promoção.
 

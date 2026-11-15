@@ -22,7 +22,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   scoped idempotency and canonical request hashing, an independent redacted
   baseline result per scenario, immutable submission receipt binding, and
   opt-in server-owned evidence gates for `SUBMIT` and `PROMOTE`.
-- Optional, sanitized Test Run provenance for synthetic, active-snapshot and legacy-oracle
+- Optional, sanitized Test Run provenance for synthetic, active-snapshot and legacy-baseline
   baselines, plus validated CREATE/UPDATE before/after, mutation, cleanup and effect-ledger
   evidence in migration `V57`.
 - Opt-in GitHub release gate for the versioned assistant consistency corpus,

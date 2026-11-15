@@ -6,125 +6,102 @@
 ![PostgreSQL](https://img.shields.io/badge/PostgreSQL-pgvector-blue)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 
-`praxis-config-starter` is the canonical configuration, semantic decision, and AI-governance control plane for **Praxis Platform** Spring Boot hosts.
+`praxis-config-starter` é o plano de controle (**PAP — Policy Administration Point**) canônico de configuração, decisões semânticas e governança de IA para hosts Spring Boot da [**Praxis Platform**](https://praxisui.dev/).
 
-**Praxis** is a **semantically oriented platform for AI-native enterprise applications**, where **resources, rules, actions, data, and policies are described once** and can be operated across **traditional interfaces, generative interfaces, AI agents, and integrations** — building applications that are, by definition, readable and operable by AI rather than bolting AI onto the side of the application.
+A **Praxis** é uma **plataforma semanticamente orientada para aplicações corporativas AI-native**, em que **recursos, regras, ações, dados e políticas são descritos uma vez** e operados uniformemente por **interfaces tradicionais, interfaces generativas, agentes de IA e integrações** — construindo aplicações legíveis e operáveis por IA por design, em vez de colar IA lateralmente ao sistema.
 
-Within that platform architecture, `praxis-config-starter` owns persistence and runtime semantics for:
+Dentro dessa arquitetura, `praxis-config-starter` é dono da persistência e da semântica de runtime para:
 
-- `ui_user_config`: tenant, user, environment, version, ETag, executable JSON configuration state,
-  and an optional server-attested semantic authoring source aligned to that same revision.
-- `ai_registry`: governed component definitions, templates, and executable authoring manifests.
-- `api_metadata`: ingested API catalog metadata used for search and AI grounding.
-- `/api/praxis/config/**`: configuration, registry, AI context, authoring, stream, and domain-decision APIs.
-- `/api/praxis/runtime/context`, `/api/praxis/runtime/tenants`, `/api/praxis/runtime/navigation`, context switches, and security/runtime events: safe enterprise runtime projections for corporate shells and AI grounding.
-- AI provider orchestration, RAG/project-knowledge retrieval, signed stream access, and governed authoring diagnostics.
+- **`ui_user_config`:** estado JSON executável por tenant, usuário, ambiente, versão e `ETag`, além de fonte semântica de autoria atestada pelo servidor na mesma revisão.
+- **`ai_registry`:** definições governadas de componentes, templates e manifestos executáveis de autoria.
+- **`api_metadata`:** metadados ingeridos do catálogo de APIs para busca estruturada e *grounding* de IA.
+- **`/api/praxis/config/**`:** APIs de configuração, registry, contexto de IA, autoria agêntica, streaming e decisões governadas de domínio.
+- **`/api/praxis/runtime/context`, `/api/praxis/runtime/tenants`, `/api/praxis/runtime/navigation`**, trocas de contexto e eventos de segurança/runtime: projeções corporativas seguras para shells de UI e grounding de IA.
+- **Orquestração de provedores de IA**, recuperação RAG/*Project Knowledge*, acesso assinado a streams SSE e diagnósticos de autoria governada.
 
-`praxis-config-starter` does not define backend resource semantics. That belongs to
-[`praxis-metadata-starter`](https://github.com/codexrodrigues/praxis-metadata-starter).
-It also does not render UI. Runtime rendering belongs to
-[`praxis-ui-angular`](https://github.com/codexrodrigues/praxis-ui-angular).
-The public Praxis UI site, examples, and documentation are available at
-[praxisui.dev](https://praxisui.dev/).
+`praxis-config-starter` não define semântica de recursos de domínio (papel de [`praxis-metadata-starter`](https://github.com/codexrodrigues/praxis-metadata-starter)) nem renderiza UI (papel de [`praxis-ui-angular`](https://github.com/codexrodrigues/praxis-ui-angular)). Documentação pública, exemplos e playgrounds ficam em [praxisui.dev](https://praxisui.dev/).
 
-## Source Of Truth Boundaries
+## Fronteiras no Ecossistema Praxis (Source of Truth)
 
-| Concern | Canonical owner |
+| Responsabilidade / Plano | Dono Canônico |
 | --- | --- |
-| Backend resource semantics, `x-ui`, `/schemas/filtered`, discovery, and capabilities | [`praxis-metadata-starter`](https://github.com/codexrodrigues/praxis-metadata-starter) |
-| Runtime configuration, enterprise context projection, AI registry, API metadata, templates, stream auth, and governed decision control plane (`decisionKind = BUSINESS` & `decisionKind = AUTHORIZATION`) | `praxis-config-starter` |
-| Deterministic 5-state business rule evaluation (`decisionKind = BUSINESS`, `RuleSet`, JSON Logic, `RuleParameterTemplate`, Step 12 of mutation pipeline) | `praxis-rules-engine` |
-| Lightweight authorization contracts, 15-step PEP runtime, OPA/Rego sidecar adapter, and Spring auto-configuration (`decisionKind = AUTHORIZATION`, `ACCESS`, `DATA_SCOPE` Kleene 3VL, `FIELD_USE`, `FIELD_WRITE`, `MASK`, `OBLIGATIONS`, Steps 1–11 & 13–15) | `praxis-authz-contracts`, `praxis-authz-enforcement-core`, `praxis-authz-opa`, `praxis-authz-starter` |
-| Governed decision workstation (**Business Rules Lens** & **Access & Data Protection Lens**) | `praxis-rules-studio` |
-| Angular runtime rendering, materializers, editors, and host integration APIs | [`praxis-ui-angular`](https://github.com/codexrodrigues/praxis-ui-angular) |
-| Public site, examples, playgrounds, and platform documentation | [praxisui.dev](https://praxisui.dev/) |
-| Public operational proof and downstream HTTP validation | [`praxis-api-quickstart`](https://github.com/codexrodrigues/praxis-api-quickstart) |
+| Semântica de recursos backend, `x-ui`, `/schemas/filtered`, discovery e capabilities | [`praxis-metadata-starter`](https://github.com/codexrodrigues/praxis-metadata-starter) |
+| Configuração em runtime, projeção de contexto corporativo, `ai_registry`, `api_metadata`, templates, autenticação de stream e plano de controle (PAP) de decisões governadas (`decisionKind = BUSINESS` e `decisionKind = AUTHORIZATION`) | **`praxis-config-starter`** (este repositório) / [`praxis-config-contracts`](https://github.com/codexrodrigues/praxis-config-contracts) |
+| Avaliação determinística de regras de negócio em 5 estados (`decisionKind = BUSINESS`, `RuleSet`, JSON Logic, `RuleParameterTemplate`, executada no Passo 12 sobre estado real não mascarado) | [`praxis-rules-engine`](https://github.com/codexrodrigues/praxis-rules-engine) |
+| Contratos neutros, pipeline PEP de 15 etapas, compilador/adaptador OPA Rego v1 e auto-configuração Spring Boot de autorização e proteção de dados (`decisionKind = AUTHORIZATION`, `0.1.0-beta.1` no Maven Central) | [`praxis-authz-contracts`](https://github.com/codexrodrigues/praxis-authz-contracts) · [`praxis-authz-enforcement-core`](https://github.com/codexrodrigues/praxis-authz-enforcement-core) · [`praxis-authz-opa`](https://github.com/codexrodrigues/praxis-authz-opa) · [`praxis-authz-starter`](https://github.com/codexrodrigues/praxis-authz-starter) |
+| Estação de autoria e simulação com aprovação 4-olhos (**Lente de Regras de Negócio** e **Lente de Acesso e Proteção de Dados**) | [`praxis-policy-studio`](https://github.com/codexrodrigues/praxis-policy-studio) |
+| Renderização Angular metadata-driven, materializadores, editores e APIs de integração de host | [`praxis-ui-angular`](https://github.com/codexrodrigues/praxis-ui-angular) |
+| Site oficial público, exemplos, playgrounds e documentação da plataforma | [praxisui.dev](https://praxisui.dev/) |
+| Host operacional completo e provas HTTP ponta a ponta | [`praxis-api-quickstart`](https://github.com/codexrodrigues/praxis-api-quickstart) |
 
-The classpath AI registry snapshot at `src/main/resources/ai-registry/registry-snapshot.json`
-is a derived bootstrap artifact. Its canonical publication input is
-`praxis-ui-angular/dist/praxis-component-registry-ingestion.json`; release cuts must regenerate and
-validate the Angular corpus first, copy that artifact into the starter, and let
-`AiRegistrySnapshotContractTest` lock the resulting hash, release identity, manifest coverage, and
-chunk counts.
+### Do Plano de Controle até o OPA e o Código de Negócio (Ganhos de Mercado, Tokens e Velocidade)
 
-Registry publication is fail-closed. `RegistryIngestionService` preflights the complete request
-before the first repository write, vector-store purge/upsert, or embedding call. Every explicit
-`components[].chunks[].content` is measured as UTF-8 and must respect the provider-neutral
-8,000-byte boundary published by the Angular
-`tools/ai-registry/registry-ingestion-contract.json`. An oversized chunk rejects the whole batch
-with a sanitized diagnostic containing only `componentId`, `chunkIndex`, `chunkKind`, observed
-bytes, and the maximum. Content is never truncated, logged in the diagnostic, skipped, or accepted
-as a partial-ready release. The classpath bootstrap runs the same preflight before readiness checks
-or snapshot metadata publication, so an invalid snapshot leaves `succeeded=false` and preserves the
-previous canonical release unchanged.
+Enquanto soluções de mercado fragmentam configuração de UI, catálogo de APIs para IA, fluxos de aprovação *maker-checker* de regras funcionais e bundles de segurança OPA em ferramentas desconexas (e sem rastreabilidade criptográfica), o `praxis-config-starter` unifica o **PAP (Policy Administration Point)** em cima de snapshots imutáveis:
 
-Assisted repository exploration is available through [CodeWiki](https://codewiki.google/github.com/codexrodrigues/praxis-config-starter/).
-CodeWiki is complementary navigation for code reading; the repository docs and source remain normative.
+- **Reconciliação Governada para OPA (`ConfigMaterializationToOpaReconciler`):** No plano `decisionKind = AUTHORIZATION`, cabeças aprovadas de `DomainRuleMaterialization` são compiladas deterministicamente por [`praxis-authz-opa`](https://github.com/codexrodrigues/praxis-authz-opa) em `OpaBundleArtifact`, verificadas por corpus positivo/negativo anti-`denyAll` e sincronizadas com o [`praxis-authz-starter`](https://github.com/codexrodrigues/praxis-authz-starter) no startup e em rotações seguras;
+- **Economia de Tokens de IA e Velocidade Corporativa:** Ao concentrar grounding de APIs (`/api/praxis/config/ai-context/**`), catálogo semântico e decisões publicadas em um único control plane versionado, agentes de IA consultam apenas o recorte exato do recurso — evitando ler repositórios inteiros de regras ou reescrever código Java/Rego a cada alteração funcional ou normativa.
 
-## Relationship With Praxis Metadata Starter
+## Relacionamento com o `praxis-metadata-starter`
 
-`praxis-metadata-starter` and `praxis-config-starter` are complementary backend starters, not substitutes.
+`praxis-metadata-starter` e `praxis-config-starter` são starters backend complementares, nunca substitutos:
 
-`praxis-metadata-starter` is the canonical source for resource-oriented metadata:
+`praxis-metadata-starter` é a fonte canônica para metadados orientados a recursos:
+- chaves de recurso e controllers semânticos;
+- vocabulário `x-ui` e anotações de schema;
+- saída estrutural em `/schemas/filtered`;
+- descoberta de superfícies, ações e capacidades;
+- modelo de resolução de operações e schemas consumido por runtimes UI e hosts.
 
-- resource keys and resource controllers;
-- `x-ui` vocabulary and schema annotations;
-- `/schemas/filtered` structural schema output;
-- resource surfaces, actions, and capabilities discovery;
-- the operation/schema resolution model consumed by Praxis UI runtimes and hosts.
+`praxis-config-starter` consome e enriquece essa fronteira de metadados com estado governado em runtime:
+- configuração persistida de UI por tenant, ambiente, usuário, recurso e componente;
+- projeção segura de contexto corporativo para shells e grounding de IA;
+- ingestão de metadados de API usada por busca, RAG e contexto de autoria;
+- definições de `ai_registry`, manifestos de autoria, templates e diagnósticos;
+- acesso a streaming via cookie ou URL assinada para fluxos de autoria compatíveis com browser;
+- decisões governadas de domínio e workflows de materialização sob `/api/praxis/config/**`;
+- workspaces de mudança do Rules Studio com concorrência por `ETag` forte e cenários reutilizáveis de 5 estados documentados em [`docs/domain-rules/change-workspaces-v1.md`](docs/domain-rules/change-workspaces-v1.md) (mantendo `RESOURCE_KEY` semântico distinto de `RESOURCE_PATH` HTTP para evitar inferência de URL).
 
-`praxis-config-starter` consumes and enriches that metadata boundary with governed runtime state:
+Quando os dois starters divergirem, trate `praxis-metadata-starter` como autoritativo para semântica de recursos/schemas e `praxis-config-starter` como autoritativo para configuração, IA, autoria e persistência.
 
-- persisted UI configuration per tenant, environment, user, resource, and component;
-- safe enterprise runtime context projection for corporate shells and AI grounding;
-- API metadata ingestion used by search, RAG, and AI authoring context;
-- AI registry definitions, authoring manifests, templates, and diagnostics;
-- signed or cookie-based stream access for browser-compatible authoring flows;
-- governed domain decisions and materialization workflows under `/api/praxis/config/**`.
-- Rules Studio change workspaces with strong ETag concurrency and reusable five-state outcome
-  scenarios, documented in [`docs/domain-rules/change-workspaces-v1.md`](docs/domain-rules/change-workspaces-v1.md).
-  The public `DomainRuleChangeWorkspaceContract` keeps its semantic `RESOURCE_KEY` distinct from
-  the canonical HTTP `RESOURCE_PATH`, allowing cross-resource action preconditions without URL inference.
+## Como se Encaixa no Ecossistema
 
-In a typical host, `praxis-metadata-starter` explains what backend resources are and which UI/schema capabilities they expose. `praxis-config-starter` stores how a tenant or user configures those capabilities, how AI tools reason over them, and how governed authoring changes are validated before they become runtime configuration.
-
-When the two starters disagree, treat `praxis-metadata-starter` as authoritative for resource/schema semantics and `praxis-config-starter` as authoritative for configuration, AI, authoring, and persistence semantics. Public examples and guides on [praxisui.dev](https://praxisui.dev/) should reflect both boundaries without redefining either one.
-
-## How It Fits
-
-`praxis-config-starter` sits between backend metadata, UI runtime, persistent configuration, and governed AI authoring. It does not replace the metadata starter or the Angular runtime; it gives hosts a canonical place to store runtime configuration and govern how AI-assisted changes become configuration.
+`praxis-config-starter` conecta metadados de recursos, motores de decisão (`BUSINESS` e `AUTHORIZATION`), UI Angular e persistência governada:
 
 ```mermaid
 flowchart LR
-    metadata["praxis-metadata-starter<br/>Resource semantics, x-ui, schemas, actions"]
-    host["Spring Boot host<br/>Application resources and security"]
-    config["praxis-config-starter<br/>Config, AI registry, authoring, domain decisions"]
-    db[("PostgreSQL + pgvector<br/>Config, API metadata, registry, RAG, domain knowledge")]
-    angular["praxis-ui-angular<br/>Runtime components and editors"]
-    site["praxisui.dev<br/>Public docs, examples, playgrounds"]
-    quickstart["praxis-api-quickstart<br/>Operational proof host"]
+    metadata["praxis-metadata-starter<br/>Semântica, x-ui, schemas, ações"]
+    host["Host Spring Boot<br/>Recursos e segurança da aplicação"]
+    config["praxis-config-starter (PAP)<br/>Config, AI registry, autoria e decisões"]
+    rules["praxis-rules-engine (BUSINESS)<br/>JSON Logic 5 estados · Passo 12"]
+    authz["praxis-authz-* + OPA (AUTHORIZATION)<br/>PEP 15 etapas, Kleene 3VL, Máscaras · 0.1.0-beta.1"]
+    studio["praxis-policy-studio<br/>Lente Negócio & Lente Authz"]
+    db[("PostgreSQL + pgvector<br/>Config, API metadata, registry, RAG")]
+    angular["praxis-ui-angular<br/>Componentes e editores"]
+    site["praxisui.dev<br/>Docs e playgrounds"]
+    quickstart["praxis-api-quickstart<br/>Host de prova operacional"]
 
-    metadata -->|"publishes /schemas and discovery"| host
-    config -->|"auto-configures /api/praxis/config/** and /api/praxis/runtime/**"| host
-    host -->|"serves metadata and config APIs"| angular
-    angular -->|"reads and writes runtime config"| config
-    config -->|"persists governed state"| db
-    site -->|"documents examples and recipes"| angular
-    site -->|"explains platform boundaries"| metadata
-    site -->|"explains platform boundaries"| config
-    quickstart -->|"validates real host integration"| metadata
-    quickstart -->|"validates real host integration"| config
+    metadata -->|"publica /schemas e discovery"| host
+    config -->|"auto-configura /api/praxis/config/** e /runtime/**"| host
+    config -->|"publica PublishedRuleSnapshot"| rules
+    config -->|"reconcilia materializações para OPA"| authz
+    studio -->|"autoria, simulação e aprovação 4-olhos"| config
+    authz -->|"impõe PEP 15 etapas e Zero-Blueprint"| host
+    host -->|"serve metadados, config e runtime protegido"| angular
+    angular -->|"lê e salva configurações ETag"| config
+    config -->|"persiste estado governado"| db
+    site -->|"documenta exemplos e receitas"| angular
+    quickstart -->|"valida integração real ponta a ponta"| host
 ```
 
 ```mermaid
 flowchart TD
-    schemas["Resource schemas and x-ui<br/>from praxis-metadata-starter"]
-    apiCatalog["/api/praxis/config/api-catalog/**<br/>Ingested API metadata"]
-    registry["/api/praxis/config/ai-registry/**<br/>Component definitions and templates"]
-    uiConfig["/api/praxis/config/ui<br/>Tenant and user runtime config"]
-    runtimeContext["/api/praxis/runtime/**<br/>Safe enterprise runtime projections"]
-    context["/api/praxis/config/ai-context/**<br/>Merged AI context"]
-    runtime["Praxis UI runtime<br/>Forms, tables, pages, editors"]
+    schemas["Schemas de recursos e x-ui<br/>via praxis-metadata-starter"]
+    apiCatalog["/api/praxis/config/api-catalog/**<br/>Metadados de API ingeridos"]
+    registry["/api/praxis/config/ai-registry/**<br/>Definições e templates"]
+    uiConfig["/api/praxis/config/ui<br/>Configuração de UI por tenant/usuário"]
+    runtimeContext["/api/praxis/runtime/**<br/>Projeções seguras de runtime corporativo"]
+    context["/api/praxis/config/ai-context/**<br/>Contexto AI consolidado"]
+    runtime["Runtime Praxis UI<br/>Forms, tabelas, páginas, editores"]
 
     schemas --> context
     apiCatalog --> context
@@ -132,55 +109,46 @@ flowchart TD
     uiConfig --> context
     runtimeContext --> context
     context --> runtime
-    runtime -->|"save or delete config with ETag"| uiConfig
-    runtime -->|"request grounded suggestions"| context
+    runtime -->|"salva/remove config com ETag"| uiConfig
+    runtime -->|"solicita sugestões fundamentadas"| context
 ```
 
 ```mermaid
 sequenceDiagram
-    participant User
+    participant User as Usuário
     participant UI as Praxis UI
     participant Config as praxis-config-starter
     participant Metadata as praxis-metadata-starter
-    participant AI as AI provider
+    participant AI as Provedor de IA
     participant DB as PostgreSQL + pgvector
 
-    User->>UI: Ask for a page or component change
-    UI->>Config: Start authoring turn
-    Config->>Metadata: Resolve resource schemas and capabilities
-    Config->>DB: Load UI config, registry, API metadata, and domain knowledge
-    Config->>AI: Request governed plan or patch
-    AI-->>Config: Structured proposal
-    Config->>Config: Validate, compile, preview, and audit
-    Config-->>UI: Stream turn events and preview
-    User->>UI: Approve apply
-    UI->>Config: Apply governed patch
-    Config->>DB: Persist runtime configuration and audit trail
+    User->>UI: Solicita criação ou ajuste em página/componente
+    UI->>Config: Inicia turno de autoria
+    Config->>Metadata: Resolve schemas e capacidades do recurso
+    Config->>DB: Carrega UI config, registry, API metadata e conhecimento
+    Config->>AI: Solicita plano ou patch estruturado
+    AI-->>Config: Proposta estruturada
+    Config->>Config: Valida, compila, gera prévia e audita
+    Config-->>UI: Stream de eventos de turno e prévia
+    User->>UI: Aprova aplicação
+    UI->>Config: Aplica patch governado
+    Config->>DB: Persiste configuração em runtime e trilha de auditoria
 ```
 
-## When To Use It
+## Quando Usar
 
-Use this starter when a Spring Boot host needs:
+Adote este starter quando um host Spring Boot precisar de:
+- configuração remota para componentes `@praxisui/*` com leitura/escrita por tenant e usuário controlada por `ETag`;
+- registro de IA governado para templates de componentes e manifestos de autoria;
+- ingestão de catálogo de APIs para *grounding* e recuperação vetorial (RAG);
+- roteamento para provedores OpenAI, Gemini, APIs compatíveis xAI/OpenAI e modo `mock`, com *Server-Sent Events* (SSE);
+- workflows governados de regras de negócio (`decisionKind = BUSINESS`), políticas de autorização (`decisionKind = AUTHORIZATION`) e conhecimento de domínio (*Domain Knowledge*).
 
-- remote configuration for Praxis UI components;
-- tenant/user scoped settings with ETag-aware reads;
-- a governed AI registry for component templates and authoring manifests;
-- API catalog ingestion for AI grounding and retrieval;
-- AI provider routing for OpenAI, Gemini, xAI-compatible OpenAI APIs, and mock mode;
-- Server-Sent Events for browser-compatible AI authoring streams;
-- governed domain-rule and domain-knowledge change workflows.
+Planos de edição de componentes distinguem tipos de operação da cardinalidade de alvos afetados: a seleção semântica lista cada `operationId` do manifesto uma vez, enquanto o plano de materialização pode repeti-lo por alvo fundamentado até o orçamento do turno.
 
-Do not use it as a replacement for the resource/schema contract published by `praxis-metadata-starter`.
+## Instalação
 
-Component edit plans distinguish operation kinds from affected-target cardinality. A semantic
-selection contains each manifest `operationId` once, while the materialization plan may repeat that
-declared `operationId` once per grounded target, up to the bounded plan budget. This lets one
-governed turn update or hide several columns without inventing batch payloads or applying only the
-first target.
-
-## Installation
-
-Add the dependency to the consuming Spring Boot host and use the latest version from Maven Central.
+Adicione a dependência ao host Spring Boot consumindo a versão publicada no Maven Central:
 
 ```xml
 <dependency>
@@ -190,34 +158,17 @@ Add the dependency to the consuming Spring Boot host and use the latest version 
 </dependency>
 ```
 
-Minimum runtime expectations:
+Requisitos mínimos de runtime:
+- **Java 21+** (exigido pelo contrato canônico de snapshot do `praxis-rules-engine`)
+- **Spring Boot 3.5+**
+- **Swagger Jakarta 2.2.47** (preparo `rc.158`, sem annotations não Jakarta trazidas pelo SDK OpenAI; confira a árvore efetiva do host)
+- **PostgreSQL 14+** e extensão **`pgvector`** quando busca vetorial/RAG estiver habilitada
 
-- Java 21+ (required by the canonical `praxis-rules-engine` snapshot contract)
-- Spring Boot 3.5+
-- Preparação rc.158: Swagger Jakarta 2.2.47, sem annotations não Jakarta trazidas pelo SDK OpenAI. Confira a árvore efetiva do host; disponibilidade Central e adoção são gates separados.
-- PostgreSQL 14+
-- `pgvector` when vector search/RAG is enabled
+Hosts que publicam snapshots `RuleSet` apoiados em Java devem fornecer um `DomainRuleImplementationCatalog` (padrão *deny-all*, escopado por tenant/ambiente/host, jamais derivado do próprio snapshot publicado); extensões Java de cliente exigem o contrato assinado/allowlisted `RuleExtensionTrust` (`praxis-rules-engine` contrato `1.2`).
 
-Hosts that publish Java-backed RuleSet snapshots must provide a
-`DomainRuleImplementationCatalog`. The default is deny-all. The catalog is an
-external supply-chain capability scoped by tenant, environment and owner host;
-it must never be derived from the snapshot being published. Customer Java
-extensions additionally require the signed/allowlisted `RuleExtensionTrust`
-contract from `praxis-rules-engine` contract `1.2`.
+Hosts que carregam o snapshot ativo em processo consomem o contrato neutro `PublishedRuleSnapshotHeadReader` de [`praxis-config-contracts`](https://github.com/codexrodrigues/praxis-config-contracts). Ausência de cabeça retorna vazio, enquanto falhas de integridade, escopo ou acesso falham explicitamente sem fallback inferido. Veja [Plano de controle de snapshots v1](docs/domain-rules/snapshot-control-plane-v1.md), [Histórico de aplicação de materializações](docs/domain-rules/materialization-application-history.md) e [Resolução operacional de políticas](docs/domain-rules/operational-policy-resolution.md).
 
-Hosts that load the currently active snapshot in-process consume the
-framework-neutral `PublishedRuleSnapshotHeadReader` from
-`praxis-config-contracts`. The Starter auto-configures its governed adapter;
-hosts may replace it with an authenticated remote adapter without importing
-Starter DTOs. Missing heads return empty, while integrity, scope and access
-failures remain explicit and never activate inferred fallback content. See
-[Rule snapshot control plane v1](docs/domain-rules/snapshot-control-plane-v1.md).
-Materialization persistence and retention are documented in
-[Materialization application history](docs/domain-rules/materialization-application-history.md).
-Embedded hosts resolve authoritative operational evidence through
-[Operational policy resolution](docs/domain-rules/operational-policy-resolution.md).
-
-## Minimal Configuration
+## Configuração Mínima
 
 ```yaml
 spring:
@@ -244,40 +195,17 @@ praxis:
         mode: cookie
 ```
 
-The squashed baseline is a limited bootstrap convenience for the compact
-configuration, API metadata, UI registry and RuleSet snapshot-store surfaces it
-explicitly declares. It is not a complete clean-install schema for every
-Config Starter capability. In particular, governed rule definitions,
-materializations, domain knowledge, federation and later AI authoring stores
-still require `classpath:db/migration` (or a separately verified, host-owned
-full baseline). This includes IAM-bound definition approvals introduced by V36;
-the reduced baseline alone cannot publish governed snapshots from definitions.
-
-Use the limited squashed baseline only when the host has verified that it needs
-no tables outside that declared subset:
+O baseline compacto (`classpath:db/baseline`) é uma conveniência limitada às superfícies básicas de configuração, metadados de API, registry de UI e snapshot-store declaradas nele — não substitui `classpath:db/migration` quando o host utilizar definições governadas de regras, aprovações IAM (`V36`), materializações, *Domain Knowledge*, federação e stores avançados de autoria IA:
 
 ```properties
 spring.flyway.locations=classpath:db/baseline
 ```
 
-## AI Provider Configuration
+## Configuração de Provedores de IA
 
-Provider credentials must come from environment variables or host-owned secret management.
-Do not commit real API keys.
+Credenciais de provedores devem vir exclusivamente de variáveis de ambiente ou gerenciador de segredos do host — nunca versione chaves reais.
 
-Governed composer audio uses `POST /api/praxis/config/ai/transcriptions` and the
-dedicated `praxis.ai.transcription.provider` / `praxis.ai.transcription.model`
-selection. Hosts can query `GET /api/praxis/config/ai/transcriptions/capabilities`
-with the same principal scope before offering capture. Its `{ "available": boolean }`
-response reports local provider support and effective credential configuration;
-it makes no provider call and does not certify connectivity, credential validity,
-quota or additional permissions. Transcription configuration lookup failures return
-`false` without sensitive details and block POST; only a successful lookup without an applicable stored credential
-permits the adapter credential fallback (including legitimate configuration absence). Host identity admission runs first: the
-quickstart enterprise binding requires the current session/membership and context-version
-stamp, with 401/403/409/503 for session/scope/version/source rejection. Do not infer audio
-availability from chat status or expose provider credentials to the browser.
-
+Áudio no compositor governado utiliza `POST /api/praxis/config/ai/transcriptions` e a seleção dedicada `praxis.ai.transcription.provider` / `praxis.ai.transcription.model`. Hosts podem consultar `GET /api/praxis/config/ai/transcriptions/capabilities` com o mesmo escopo de principal antes de oferecer captura; sua resposta `{ "available": boolean }` reporta suporte local e credencial configurada (sem chamar o provedor externo nem certificar cota), falhando fechado (`false`) em erro de lookup. A admissão de identidade corporativa do host roda antes (retornando `401/403/409/503` em rejeição de sessão/escopo/versão/fonte). Não infira disponibilidade de áudio a partir do status do chat nem exponha credenciais ao navegador.
 
 ```yaml
 spring:
@@ -304,421 +232,160 @@ praxis:
       provider: ${PRAXIS_AI_EMBEDDING_PROVIDER:mock}
 ```
 
-For local browser `EventSource` flows where custom request headers cannot be attached, configure
-signed stream URLs in the host and provide a stable local token secret:
+Para fluxos locais de navegador via `EventSource` que não permitem headers customizados, habilite URLs assinadas de stream com segredo estável (substitua por segredo de produção gerenciado fora do repositório):
 
 ```properties
 praxis.ai.stream.auth.mode=signed-url-token
 praxis.ai.stream.auth.token-secret=${PRAXIS_AI_STREAM_AUTH_TOKEN_SECRET}
 ```
 
-Use a production-grade secret in deployed environments and rotate it through the host's normal secret process.
+## Configuração de Runtime de Autoria e Indexação
 
-## Authoring and Indexing Runtime Configuration
+Caches locais de autoria agêntica têm escopo estritamente limitado para performance e não são fonte da verdade (`ai_registry`, `api_metadata`, metadados de runtime e eventos persistidos continuam canônicos).
 
-Agentic authoring keeps bounded host-local caches only for performance. These caches must not be treated as a
-source of truth: `ai_registry`, `api_metadata`, runtime metadata and persisted turn events remain canonical.
+A resolução de intenção é estritamente **semântica primeiro e *fail-closed***:
+- A intenção do usuário é classificada pelo contrato estruturado da LLM (`AgenticAuthoringLlmIntentResolution`: `semanticIntentClass`, `operationKind`, `artifactKind`, `changeKind`, `requiresGovernedAuthoring`, `localEditorialComposition`, `semanticRefinement`, `queryConstraints`, `visualizationDecision`, `consultativeRetrievalPlan`) ou por tokens assinados pelo servidor (`semanticDecision`, `governedResourceConfirmation`, `contextualPreviewAction`).
+- Fallbacks lexicais por palavras-chave sobre prompts crus são proibidos; falhas no provedor (`provider_error`) ou intenções não resolvidas (`resolved=false`) falham fechado sem mutar configuração nem memória de decisão da sessão (`activeSemanticDecision`).
+- Autoria governada de recursos (`requiresGovernedAuthoring=true` ou `selectedResourcePath` não vazio) sempre prevalece sobre `localEditorialComposition`.
 
-Intent resolution is strictly **semantic-first and fail-closed**:
-- User intent is classified through the structured LLM contract (`AgenticAuthoringLlmIntentResolution`, including `semanticIntentClass`, `operationKind`, `artifactKind`, `changeKind`, `requiresGovernedAuthoring`, `localEditorialComposition`, `semanticRefinement`, `queryConstraints`, `visualizationDecision`, and `consultativeRetrievalPlan`) or through server-signed continuation tokens (`semanticDecision`, `governedResourceConfirmation`, `contextualPreviewAction`).
-- Lexical keyword fallbacks over raw user prompts are prohibited. When the LLM provider fails (`provider_error`) or cannot resolve an actionable intent (`resolved=false`), the turn fails closed without executing mutations, synthesizing unauthorized quick replies, or mutating prior session decision memory (`activeSemanticDecision`).
-- Governed resource authoring (`requiresGovernedAuthoring=true` or non-blank `selectedResourcePath`) always takes precedence over `localEditorialComposition`.
-
-| Property | Default | Notes |
+| Propriedade | Padrão | Observações |
 | --- | --- | --- |
-| `praxis.ai.authoring.component-capabilities.cache-ttl-ms` | `600000` | TTL for component capability discovery. Registry bootstrap and committed component-definition changes refresh or invalidate this cache explicitly, so normal turns reuse the governed projection without minute-by-minute reloads. Use `0` to disable local caching when validating registry changes without restarting the host. |
-| `praxis.ai.authoring.component-capabilities.registry-load-timeout-ms` | `30000` | Maximum time allowed for the focal AI Registry projection. A timeout is reported as degraded provenance and never stored for the normal cache TTL. |
-| `praxis.ai.authoring.component-capabilities.degraded-retry-ms` | `5000` | Short retry window used after registry timeout or failure. During this window the service exposes last-known-good data when available, otherwise an observable built-in fallback. |
-| `praxis.ai.authoring.component-capabilities.preload-timeout-ms` | `35000` | Authoring-turn preload budget. The effective value is aligned to at least the registry load timeout plus one second, leaving a bounded handoff margin between repository loading and turn materialization. |
-| `praxis.ai.authoring.consultative.api-catalog.compact-cache-ttl-ms` | `60000` | TTL for compact API catalog projections used during consultative answers. Use `0` to force fresh projection per request. |
-| `praxis.ai.authoring.consultative.api-catalog.compact-cache-max-entries` | `256` | Maximum compact projection entries retained per starter instance. Older entries are evicted before expired entries can accumulate unbounded. |
-| `praxis.ai.authoring.consultative.api-catalog.api-metadata-cache-ttl-ms` | `60000` | TTL for `api_metadata` lookups used by the consultative catalog projection. Use `0` when validating metadata ingestion changes interactively. |
-| `praxis.ai.retry.max-attempts` | `2` | Maximum provider attempts for one canonical embedding call, including the initial call. Only transport, timeout, rate-limit, capacity and server failures are retried; quota, authentication, client and unknown failures remain fail-closed. |
-| `praxis.ai.retry.initial-delay-ms` | `500` | Initial bounded delay before retrying a transient embedding failure. Later attempts use exponential backoff. |
-| `praxis.ai.retry.max-delay-ms` | `2000` | Maximum retry delay budget for embeddings. A provider `Retry-After` beyond this budget is not ignored or shortened: the call fails and the persisted catalog can be recovered through the canonical reconcile operation. |
-| `praxis.api-metadata.rag-publication.enabled` | `true` | Enables publication of derived API metadata RAG documents by the managed indexing worker. Disable only when the structured `api_metadata` corpus must persist without vector indexing. |
-| `praxis.api-metadata.indexing.worker-count` | `1` | Number of managed API Catalog indexing workers. Work is isolated and coalesced by tenant, environment, service and release. |
-| `praxis.api-metadata.indexing.queue-capacity` | `32` | Bounded number of distinct release scopes waiting for indexing. Saturation is persisted as `FAILED` with `INDEXING_QUEUE_SATURATED`. |
-| `praxis.api-metadata.indexing.coalesce-delay-ms` | `750` | Quiet period used to combine rapid chunk uploads for the same release into the newest persisted generation. |
-| `praxis.api-metadata.indexing.shutdown-timeout-seconds` | `10` | Graceful shutdown budget for indexing workers; interrupted `PENDING`/`PROCESSING` work is recovered on the next application start. |
+| `praxis.ai.authoring.component-capabilities.cache-ttl-ms` | `600000` | TTL de descoberta de capacidades de componentes (atualizado/invalidado no bootstrap e alterações do registry; use `0` para desabilitar cache local em testes interativos). |
+| `praxis.ai.authoring.component-capabilities.registry-load-timeout-ms` | `30000` | Timeout máximo da projeção focal do AI Registry (reporta proveniência degradada sem gravar pelo TTL normal). |
+| `praxis.ai.authoring.component-capabilities.degraded-retry-ms` | `5000` | Janela curta de retentativa após timeout ou falha de carga do registry. |
+| `praxis.ai.authoring.component-capabilities.preload-timeout-ms` | `35000` | Orçamento de pré-carga do turno (alinhado a pelo menos `registry-load-timeout-ms + 1s`). |
+| `praxis.ai.authoring.consultative.api-catalog.compact-cache-ttl-ms` | `60000` | TTL de projeções compactas do catálogo de APIs para respostas consultivas (`0` força projeção nova). |
+| `praxis.ai.authoring.consultative.api-catalog.compact-cache-max-entries` | `256` | Máximo de entradas compactas retidas em cache por instância. |
+| `praxis.ai.authoring.consultative.api-catalog.api-metadata-cache-ttl-ms` | `60000` | TTL para consultas a `api_metadata` na projeção consultiva. |
+| `praxis.ai.retry.max-attempts` | `2` | Máximo de tentativas por chamada canônica de *embedding* (apenas falhas transitórias de transporte/timeout/rate-limit/capacidade sofrem retry; cota, autenticação e erros de cliente falham fechado). |
+| `praxis.ai.retry.initial-delay-ms` | `500` | Atraso inicial limitado antes da retentativa de embedding. |
+| `praxis.ai.retry.max-delay-ms` | `2000` | Teto de atraso para retentativa (um `Retry-After` superior falha imediatamente permitindo recuperação via `reconcile`). |
+| `praxis.api-metadata.rag-publication.enabled` | `true` | Habilita publicação de documentos RAG derivados de `api_metadata` pelo worker gerenciado. |
+| `praxis.api-metadata.indexing.worker-count` | `1` | Número de workers de indexação do API Catalog (isolados por tenant, ambiente, serviço e release). |
+| `praxis.api-metadata.indexing.queue-capacity` | `32` | Limite de escopos distintos aguardando indexação (saturação persiste `FAILED` com `INDEXING_QUEUE_SATURATED`). |
+| `praxis.api-metadata.indexing.coalesce-delay-ms` | `750` | Janela de coalescência para combinar uploads rápidos de chunks da mesma release. |
+| `praxis.api-metadata.indexing.shutdown-timeout-seconds` | `10` | Orçamento de encerramento gracioso dos workers; trabalho `PENDING`/`PROCESSING` interrompido é retomado no próximo boot. |
 
-## UI Config Identity Semantics
+## Semântica de Identidade em UI Config (`/api/praxis/config/ui`)
 
-`/api/praxis/config/ui` normalizes logical identity at the service boundary before lookup, upsert
-or delete. `tenantId`, `componentType` and `componentId` are trimmed and required; `X-User-ID`,
-`X-Env` and `X-Updated-By` are trimmed and blank values are treated as absent. A blank environment
-therefore targets the global environment scope (`environment IS NULL`) instead of creating a distinct
-empty-string scope.
+`/api/praxis/config/ui` normaliza a identidade lógica na fronteira do serviço antes de buscar, atualizar ou remover: `tenantId`, `componentType` e `componentId` são obrigatórios e passam por `trim()`; `X-User-ID`, `X-Env` e `X-Updated-By` em branco são tratados como ausentes (portanto ambiente em branco aponta para o escopo global `environment IS NULL`).
 
-Identity values are validated against the `ui_user_config` schema before repository or PostgreSQL
-atomic-upsert paths run: tenant, user, updater and component id are limited to 255 characters;
-component type and environment are limited to 64 characters. Invalid identity input returns a
-deterministic `400 Bad Request` response. `scope=user` still requires a nonblank `X-User-ID`; tenant
-scope ignores user identity for persistence.
+Os limites de coluna em `ui_user_config` são validados antes do repositório ou *upsert* atômico PostgreSQL: tenant, usuário, updater e componentId até `255` caracteres; tipo de componente e ambiente até `64` caracteres (`400 Bad Request` para entradas inválidas). `scope=user` exige `X-User-ID` não vazio; escopo `tenant` ignora identidade de usuário na persistência.
 
-For governed page authoring, `page-apply` persists the executable page in `payload` and the terminal
-`UiCompositionPlan` in the sibling `authoringSource` response field, with canonical hashes and
-server-owned lineage. Generic PUT requests cannot supply a replacement source. When such a write
-changes the executable payload, the previous source is cleared in the same revision so editors never
-reopen stale semantics; an identical payload may retain its existing source.
+Na autoria governada de páginas, `page-apply` persiste a página executável em `payload` e o `UiCompositionPlan` terminal no campo irmão `authoringSource` com hashes canônicos e linhagem do servidor. Escritas genéricas via `PUT` não podem enviar `authoringSource` substituto e limpam a origem anterior na mesma revisão sempre que o payload executável mudar (evitando que editores reabram semântica obsoleta).
 
-## UI Config Conditional Requests
+## Requisições Condicionais em UI Config
 
-`/api/praxis/config/ui` publishes HTTP ETag semantics for cached reads and guarded writes. GET
-responses expose the current entity tag in the `ETag` header and response body. Clients may send
-`If-None-Match` with `*`, a quoted entity tag, a weak quoted entity tag, or a comma-separated list
-of quoted validators. When any validator weakly matches the current configuration ETag, the read
-returns `304 Not Modified` with the current `ETag`.
+`/api/praxis/config/ui` publica semântica HTTP `ETag` para leituras em cache e escritas protegidas:
+- `GET` expõe o validador no header `ETag` e no corpo; clientes podem enviar `If-None-Match` (`*`, ETag forte/fraca entre aspas ou lista separada por vírgula) recebendo `304 Not Modified` quando compatível.
+- `PUT` e `DELETE` aceitam `If-Match` com `*` (exige registro existente; ausência retorna `412 Precondition Failed`) ou lista de ETags fortes entre aspas; validadores fracos não satisfazem `If-Match` e tokens malformados retornam `400 Bad Request`.
 
-PUT and DELETE accept `If-Match` with `*` or a comma-separated list of quoted entity tags. Wildcard
-requires that the targeted configuration already exists; missing targets still return `412
-Precondition Failed`. Strong validators must match the current ETag before the mutation proceeds;
-weak validators are syntactically accepted but do not satisfy `If-Match`. Malformed conditional
-headers, including unquoted raw tokens, return `400 Bad Request`.
+## Semântica de Revisão do AI Registry
 
-## AI Registry Revision Semantics
+`ai_registry.version` e `ai_registry.etag` atuam como tokens de atualização: inserções iniciam em `version=1`, avançando apenas quando muda o estado material persistido (payload, embedding, tags, origem, referência ou status). Reingestões idênticas preservam ambos os tokens.
 
-`ai_registry.version` and `ai_registry.etag` are freshness tokens for governed registry records.
-Inserts start at `version=1` with a generated `etag`. Component definitions, templates and snapshot
-metadata increment `version` and rotate `etag` only when persisted material state changes: payload,
-embedding, tags, source, source reference or status. Reingesting identical material keeps the stable
-registry identity tuple and preserves both tokens.
+Upserts de templates persistem o documento canônico mesmo se a geração de embedding falhar de forma normalizada (mantendo busca por chave exata, porém excluindo das buscas vetoriais até um próximo upsert bem-sucedido). Leituras e upserts de templates expõem `revision.version`, `revision.etag` e `revision.configSha256` (calculado apenas do `configJson` canônico; `GET` de template publica também o header HTTP `ETag`).
 
-Template upserts persist the canonical document when embedding generation fails with a
-normalized provider failure or unavailable provider configuration. Such records remain available
-by exact key, but semantic searches exclude them until a later upsert successfully generates the
-embedding. This is an on-upsert retry, not a background recovery job. A changed document clears
-its stale embedding if regeneration fails. An identical document with an existing embedding skips
-regeneration and preserves its revision. Retrying an identical unindexed document preserves its
-tags and provenance; successful embedding recovery advances the material revision, while another
-failure without a material change does not. Document replacement keeps the existing replacement
-policy for provenance. Validation and persistence errors still fail the request.
+Um documento intermediário `praxis.ui-composition-plan` pode carregar `templateRef` exato (`registryKey + configSha256`): a prévia resolve estritamente o template ativo exato, valida `configJson.authoringPlan`, registra evidência de revisão e expande antes do compilador puro, falhando fechado para referências inativas ou divergentes (renderização da página compilada não requer acesso posterior ao registry). Consulte o desenho de referência em [`docs/ai/agentic-authoring/implementation/43-governed-page-template-reference.md`](docs/ai/agentic-authoring/implementation/43-governed-page-template-reference.md).
 
-Template reads and upserts expose this existing evidence as `revision.version` and `revision.etag`.
-They also expose `revision.configSha256`, computed from canonical `configJson` only, so callers can
-distinguish a registry metadata revision from a change to the configured template document. A
-recipe may materialize executable artifacts and retain editorial evidence inside that document, so
-`configSha256` must not be presented as an artifact-only digest. Template GET responses publish the
-registry token in the HTTP `ETag` header. Other AI Registry endpoints do not implicitly acquire
-conditional-request semantics from this template-specific contract.
+## Semântica de Escopo e Indexação em API Metadata
 
-An intermediate `praxis.ui-composition-plan` may now carry an exact `templateRef` with
-`registryKey + configSha256`. The authoring preview resolves only the active exact template,
-validates `configJson.authoringPlan`, records revision evidence, and expands it before the existing
-pure compiler. Non-empty overrides, missing or stale content, inactive records and malformed
-references fail closed. The persisted runtime artifact remains the expanded
-`WidgetPageDefinition`; registry access is not required to render an already compiled page.
+`api_metadata` é o corpus estruturado canônico de grounding de APIs com identidade isolada por `(tenant, environment, serviceKey, releaseId, path, method)`. A ingestão reconcilia endpoints movidos por `operationId` somente dentro do mesmo escopo, e a recuperação RAG/vetorial nunca faz fallback entre tenants.
 
-See the governed reference design and phase gates in
-[`docs/ai/agentic-authoring/implementation/43-governed-page-template-reference.md`](docs/ai/agentic-authoring/implementation/43-governed-page-template-reference.md).
+Nos fluxos de criação governada de formulários/páginas (`/minimal-form-plan` e `/page-preview`), a ausência do schema `/schemas/filtered` selecionado falha fechado sem permitir que a LLM invente campos. Para saídas estruturadas do provedor LLM (`MinimalFormPlan`), o JSON Schema empacotado permanece como contrato canônico validado após decodificação.
 
-## API Metadata Scope Semantics
+A ingestão (`POST /api/praxis/config/api-catalog/ingest`) persiste as linhas canônicas em transação curta e retorna `202 Accepted`; o worker gerenciado materializa os índices em segundo plano e o cliente acompanha via `GET /api/praxis/config/api-catalog/rag/status?serviceKey=...&releaseId=...` (`PENDING`/`PROCESSING` → `READY` ou `FAILED` com código/mensagem sanitizada) ou dispara reconstrução idempotente com `POST /api/praxis/config/api-catalog/rag/reconcile`. Mudanças no perfil efetivo de embeddings invalidam vetores de perfis anteriores; publicações do AI Registry e Domain Catalog expurgam documentos vetoriais de releases superadas (inspecionável sem deleção em `GET /api/praxis/config/ai-registry/releases/{releaseId}/cleanup-plan`). Os metadados vetoriais excluem propositalmente o `jsonSchema` completo, hidratando-o do registro ativo após ranquear os chunks, e a reordenação híbrida (BM25 + RRF) atua apenas sobre o pool retornado pela busca vetorial escopada. Filtros `tags` aceitam separadores `,`, `;` ou `|` com correspondência case-insensitive `AND`.
 
-`api_metadata` is the canonical structured API grounding corpus persisted by the config starter.
-Its identity is scoped by tenant, environment, service key, release id, path and method. Ingestion
-reconciles moved endpoints by `operationId` only inside that same scope, so one tenant, environment
-or release cannot overwrite another structured API corpus.
+## Principais Superfícies HTTP
 
-The API RAG/vector document remains a derived retrieval projection over this structured source. RAG
-metadata carries the same tenant, environment and release identity for deterministic replay and
-cleanup, but it must not become the authority for schemas, endpoints or business resource semantics.
-Scoped API candidate retrieval fails closed when no tenant/environment result is available; it must
-not retry against an unscoped corpus that could include another tenant's API evidence.
-
-The official Quickstart authoring smoke bootstraps its own scoped `api_metadata` evidence from the
-Quickstart OpenAPI before resolving intent. The bootstrap includes the minimum cross-domain corpus
-used by the complete suite, rather than only the first scenario, so later authoring decisions remain
-grounded and compete against the same reproducible evidence. This keeps the release proof valid on an
-empty database and exercises the canonical ingestion endpoint instead of relying on manually seeded rows.
-
-For a resolved canonical create-form intent, both `/minimal-form-plan` and `/page-preview` retrieve the
-selected `/schemas/filtered` request schema and materialize fields deterministically. If that schema is
-unavailable, planning fails closed; an LLM response must not substitute invented host fields.
-
-When an authoring path still requires provider-generated `MinimalFormPlan`, the bundled JSON Schema
-remains the canonical validation contract. The starter derives an in-memory strict Structured Outputs
-projection for the provider, represents optional properties as nullable transport values and encodes
-free-form JSON values as JSON text. The response is decoded back to the canonical document before
-deterministic completion and validation. Provider restrictions therefore never redefine the public
-contract. A supplied invalid or ineligible intent is rejected before this provider call.
-
-API catalog ingestion validates and persists the canonical `api_metadata` rows in a short transaction.
-`POST /api/praxis/config/api-catalog/ingest` then returns `202 Accepted`; this means the metadata was
-accepted, not that derived indexes are ready. A bounded managed worker coalesces rapid uploads by
-`(tenant, environment, serviceKey, releaseId)` and materializes both the legacy
-`api_metadata.embedding` fallback and the canonical RAG corpus outside the HTTP transaction.
-
-Callers must poll `GET /api/praxis/config/api-catalog/rag/status?serviceKey=...&releaseId=...` with the
-same `X-Tenant-ID` and `X-Env`. `PENDING` and `PROCESSING` are non-terminal; `READY` is returned only
-when expected, legacy-indexed, published and searchable counts agree. `FAILED` includes a stable
-`failureCode` and sanitized `failureMessage`; embedding failures may additionally identify only the
-canonical provider and normalized failure kind, never the provider response body. An idempotent
-asynchronous rebuild can be requested with
-`POST /api/praxis/config/api-catalog/rag/reconcile?serviceKey=...&releaseId=...`; its `202` response must
-also be followed through the status endpoint. Provider or vector-store failures never roll back the
-canonical rows, and persisted unfinished work is resumed after restart.
-
-API Metadata vectors carry the same `serviceKey` as the canonical rows. Replacement and readiness are
-therefore isolated by `(tenant, environment, serviceKey, releaseId)`, while retrieval may still search
-across services when the caller does not request a service scope. Corpus replacement and the `READY`
-transition run under the persisted indexing-state row lock. A revision superseded after embedding but
-before publication cannot delete or publish vectors; this keeps concurrent hosts from interleaving two
-release replacements. The first scoped replacement also removes legacy API Metadata vectors without a
-`serviceKey`, because those derived rows cannot be attributed safely.
-
-The derived index is governed by its effective embedding profile (provider, model, dimensions and
-retrieval-format version). Changing any of those values deliberately makes prior vectors ineligible
-for retrieval and makes readiness report the corpus as unreconciled. Rebuild the affected release
-from canonical `api_metadata`, registry or Project Knowledge evidence; never mix vector spaces or
-copy vectors across profiles. With `gemini-embedding-2`, Praxis uses distinct document and query
-instructions for asymmetric retrieval.
-
-Registry and Domain Catalog vectors follow replacement semantics. After a successful publication,
-documents from superseded releases in the same canonical scope are purged. Component vector
-metadata intentionally excludes the full `jsonSchema`; retrieval ranks compact chunks and hydrates
-the authoritative schema from the active `ai_registry` record. This keeps `vector_store` a bounded
-derived index instead of a second, release-accumulating copy of canonical payloads.
-
-Before any destructive maintenance, operators can inspect the component-vector candidates of an
-active governed intelligence release with
-`GET /api/praxis/config/ai-registry/releases/{releaseId}/cleanup-plan`. The response groups candidates
-by superseded release and never deletes data. The endpoint fails closed unless the selected release
-is `ACTIVE` and its backend-observed component corpus release id is available; cleanup execution
-remains a separate, explicitly governed operation. The governed publication id and the physical
-component corpus release id are deliberately distinct identities: the former traces one atomic
-publication attempt, while the latter scopes the vector documents that must be retained.
-
-API metadata `tags` filters are normalized as comma, semicolon or pipe separated tokens and matched
-case-insensitively as an AND set. Structured retrieval and RAG retrieval must both preserve method,
-tenant, environment and release filters; when RAG is available, nonmatching tagged candidates are
-discarded instead of falling back to a legacy or unscoped corpus.
-
-API metadata retrieval uses a hybrid rank only after the governed vector search has resolved the
-candidate pool. A generic BM25 lexical rank and reciprocal-rank fusion can reorder those semantic
-candidates, but cannot add endpoints, expand tenant/environment/release scope, replace the original
-vector similarity score or decide user intent. Queries without lexical evidence retain vector order.
-
-## Key HTTP Surfaces
-
-| Surface | Purpose |
+| Superfície | Finalidade |
 | --- | --- |
-| `/api/praxis/config/ui` | Read, write, and delete tenant/user scoped UI configuration. Hosts can register `UiConfigWriteAuthorizer` to authorize governed writes from server-side identity and capability policy. |
-| `/api/praxis/config/api-catalog/**` | Ingest and search API metadata for grounding and retrieval. |
-| `/api/praxis/config/ai-registry/**` | Manage component definitions, templates, and authoring manifest projections. Template reads/upserts expose governed revision evidence; template GET also publishes the matching HTTP `ETag`. |
-| `/api/praxis/config/ai-context/**` | Build AI context from component metadata, runtime state, templates, and schema hints. |
-| `/api/praxis/config/ai/patch` | Generate structured configuration patches from governed AI context. |
-| `/api/praxis/config/ai/authoring/**` | Validate, compile, preview, apply, stream, replay, and cancel agentic authoring turns. |
-| `/api/praxis/config/domain-rules/**` | Govern shared business rules and semantic decisions, including immutable publication without head selection, conditional explicit activation/bootstrap and rollback-by-selection. |
-| `GET /api/praxis/config/domain-rules/snapshots` | List scoped versions with current admission state, including `RUNTIME_INCOMPATIBLE`; every non-`READY` version is `UNAVAILABLE`. |
-| `POST /api/praxis/config/domain-rules/snapshots` | Publish immutable approved content only; response ETag is its content hash. No head is created or changed. |
-| `POST /api/praxis/config/domain-rules/snapshots/{snapshotKey}/activate` | Select newer content with strong `If-Match`; bootstrap uses `If-None-Match: *` with a ready rollout under a governed REQUIRED policy. |
-| `POST /api/praxis/config/domain-rules/snapshots/{snapshotKey}/rollback` | Move the scoped head to an older verified publication with strong `If-Match`. |
-| `GET /api/praxis/config/domain-rules/snapshots/head/status` | Re-evaluate current readiness with `200`/`no-store` and preserve the head ETag for CAS; expose recovery states without snapshot content. |
-| `POST /api/praxis/config/domain-rules/snapshots/execution-observations` | Ingest a bounded idempotent batch of redacted evidence from an authenticated runtime host. |
-| `GET /api/praxis/config/domain-rules/snapshots/{snapshotKey}/execution-summary` | Read safe outcome/host-count/time aggregates without facts, payloads or individual host identities. |
-| `POST /api/praxis/config/domain-rules/snapshots/host-status` | Replace the authenticated host's latest redacted heartbeat without accepting scope or host identity in the body. |
-| `GET /api/praxis/config/domain-rules/snapshots/head/host-status-summary` | Compare fresh host reports with the active head and its approved runtime coordinates, returning only aligned/snapshot-drifted/incompatible/unavailable/stale aggregates. |
-| `POST /api/praxis/config/domain-rules/snapshots/rollouts` | Create an observational candidate-preload rollout bound to the current strong head ETag. |
-| `POST /api/praxis/config/domain-rules/snapshots/rollouts/{rolloutId}/probes` | Replace the authenticated host's monotonic redacted candidate probe without changing its active runtime heartbeat. |
-| `GET /api/praxis/config/domain-rules/snapshots/rollouts/pending?ruleSetKey=...` | Let an authenticated execution observer discover the newest non-expired candidate still bound to the unchanged active head. |
-| `GET /api/praxis/config/domain-rules/snapshots/rollouts/{rolloutId}/readiness` | Return server-derived candidate quorum counts without host identities. |
-| `POST /api/praxis/config/domain-rules/snapshots/rollouts/{rolloutId}/cancel` | Close an observational rollout without mutating the active RuleSet head. |
-| `POST /api/praxis/config/domain-rules/snapshots/rollout-policies` | Author the next immutable `DRAFT` policy version as `RULE_DEFINITION_AUTHOR`. |
-| `GET /api/praxis/config/domain-rules/snapshots/rollout-policies?ruleSetKey=...` | Read the active policy, version catalog and independent policy-head ETag as `RULE_SNAPSHOT_READER`. |
-| `POST /api/praxis/config/domain-rules/snapshots/rollout-policies/{policyId}/approve` | Approve one exact draft through a distinct `RULE_DEFINITION_APPROVER`. |
-| `POST /api/praxis/config/domain-rules/snapshots/rollout-policies/{policyId}/activate` | Select an approved policy with `RULE_SNAPSHOT_OPERATOR` and strong policy-head `If-Match`; open rollouts block the transition. |
-| `GET /api/praxis/config/domain-rules/snapshots/rollout-policies/timeline?ruleSetKey=...` | Read the safe append-only policy lifecycle without policy payload duplication. |
-| `/api/praxis/config/domain-knowledge/**` | Govern domain knowledge change sets and evidence lifecycle. |
-| `GET /api/praxis/runtime/context` | Return selection state and opaque selection version; only `ready` carries the host-confirmed effective context and context version. Private authorization internals remain host-owned. |
-| `GET /api/praxis/runtime/context/choices` | Discover bounded host-authorized choices through opaque choice references and a session/query-bound cursor. |
-| `PUT /api/praxis/runtime/context` | Submit `choiceRef` and `expectedSelectionVersion`; return the same canonical context projection after host-authorized selection. Default providers fail closed when host authority is unavailable. |
-| `GET /api/praxis/runtime/tenants` | Return host-provided accessible tenant/company choices for corporate shells. Without a host provider, the default fails closed with `503 RUNTIME_PROVIDER_UNAVAILABLE`. |
-| `GET /api/praxis/runtime/navigation` | Return host-provided navigation nodes for corporate shells, with optional canonical Praxis refs such as `resourceKey`, `surfaceRef`, `actionRef`, `moduleKey`, and `capabilityRef`. Without a host provider, the default fails closed with `503 RUNTIME_PROVIDER_UNAVAILABLE`; Config page navigation requires explicit host delegation. |
-| `GET /api/praxis/runtime/security-events` | Return host-provided safe runtime/security signals for corporate shells. Without a host provider, the default fails closed with `503 RUNTIME_PROVIDER_UNAVAILABLE`. Responses never expose raw roles, policies, tokens, prompts, SQL or private audit internals. |
+| `/api/praxis/config/ui` | Leitura, gravação e remoção de UI config por tenant/usuário; hosts podem registrar `UiConfigWriteAuthorizer` para autorizar escritas por identidade e capacidade do servidor. |
+| `/api/praxis/config/api-catalog/**` | Ingestão e busca de `api_metadata` para grounding e RAG. |
+| `/api/praxis/config/ai-registry/**` | Gestão de definições de componentes, templates (`ETag` + `revision`) e projeções de manifestos. |
+| `/api/praxis/config/ai-context/**` | Montagem de contexto de IA combinando catálogo de componentes, runtime, templates e dicas de schema. |
+| `/api/praxis/config/ai/patch` | Geração de patches estruturados a partir do contexto governado de IA. |
+| `/api/praxis/config/ai/authoring/**` | Validação, compilação, prévia, aplicação, stream SSE, replay e cancelamento de turnos de autoria agêntica. |
+| `/api/praxis/config/domain-rules/**` | Governança compartilhada de regras de negócio e decisões semânticas (publicação imutável sem seleção de cabeça, ativação explícita e rollback). |
+| `GET /api/praxis/config/domain-rules/snapshots` | Lista versões escopadas e estado atual de admissão (incluindo `RUNTIME_INCOMPATIBLE`; versões diferentes de `READY` ficam `UNAVAILABLE`). |
+| `POST /api/praxis/config/domain-rules/snapshots` | Publica apenas conteúdo aprovado imutável (ETag = hash do conteúdo; nenhuma cabeça é criada ou alterada). |
+| `POST /api/praxis/config/domain-rules/snapshots/{snapshotKey}/activate` | Seleciona conteúdo mais novo com `If-Match` forte (ou bootstrap `If-None-Match: *` com rollout pronto sob política `REQUIRED`). |
+| `POST /api/praxis/config/domain-rules/snapshots/{snapshotKey}/rollback` | Move a cabeça escopada para uma publicação anterior verificada usando `If-Match` forte. |
+| `GET /api/praxis/config/domain-rules/snapshots/head/status` | Reavalia prontidão com `200`/`no-store` preservando ETag da cabeça para CAS sem expor conteúdo do snapshot. |
+| `POST /api/praxis/config/domain-rules/snapshots/execution-observations` | Ingere lote limitado e idempotente de evidências redigidas de um host autenticado. |
+| `GET /api/praxis/config/domain-rules/snapshots/{snapshotKey}/execution-summary` | Lê agregados seguros de desfecho/contagem/tempo sem fatos, payloads ou identidades individuais de host. |
+| `POST /api/praxis/config/domain-rules/snapshots/host-status` | Substitui o heartbeat redigido mais recente do host autenticado sem aceitar escopo ou identidade no corpo. |
+| `GET /api/praxis/config/domain-rules/snapshots/head/host-status-summary` | Compara relatos frescos de hosts com a cabeça ativa e coordenadas de runtime (`aligned`, `snapshot-drifted`, `incompatible`, `unavailable`, `stale`). |
+| `POST /api/praxis/config/domain-rules/snapshots/rollouts` | Cria rollout observacional de pré-carga vinculado à ETag forte atual da cabeça. |
+| `POST /api/praxis/config/domain-rules/snapshots/rollouts/{rolloutId}/probes` | Atualiza a sonda monotônica redigida de candidato do host sem alterar o heartbeat ativo. |
+| `GET /api/praxis/config/domain-rules/snapshots/rollouts/pending?ruleSetKey=...` | Permite ao observador autenticado descobrir o candidato não expirado mais recente vinculado à cabeça inalterada. |
+| `GET /api/praxis/config/domain-rules/snapshots/rollouts/{rolloutId}/readiness` | Retorna contagens de quórum de candidato derivadas no servidor sem identidades de host. |
+| `POST /api/praxis/config/domain-rules/snapshots/rollouts/{rolloutId}/cancel` | Encerra um rollout observacional sem alterar a cabeça ativa do `RuleSet`. |
+| `POST /api/praxis/config/domain-rules/snapshots/rollout-policies` | Cria nova versão imutável `DRAFT` de política de rollout como `RULE_DEFINITION_AUTHOR`. |
+| `GET /api/praxis/config/domain-rules/snapshots/rollout-policies?ruleSetKey=...` | Lê a política ativa, catálogo de versões e ETag independente como `RULE_SNAPSHOT_READER`. |
+| `POST /api/praxis/config/domain-rules/snapshots/rollout-policies/{policyId}/approve` | Aprova rascunho exato por meio de `RULE_DEFINITION_APPROVER` distinto. |
+| `POST /api/praxis/config/domain-rules/snapshots/rollout-policies/{policyId}/activate` | Seleciona política aprovada como `RULE_SNAPSHOT_OPERATOR` e `If-Match` forte (rollouts abertos bloqueiam a transição). |
+| `GET /api/praxis/config/domain-rules/snapshots/rollout-policies/timeline?ruleSetKey=...` | Lê a timeline *append-only* segura da política sem duplicação de payload. |
+| `/api/praxis/config/domain-knowledge/**` | Governa *change sets* de Conhecimento de Domínio e ciclo de evidências. |
+| `GET /api/praxis/runtime/context` | Retorna estado de seleção e versão opaca; somente `ready` traz o contexto efetivo confirmado pelo host. |
+| `GET /api/praxis/runtime/context/choices` | Descobre escolhas autorizadas limitadas via referências opacas e cursor vinculado a sessão/consulta. |
+| `PUT /api/praxis/runtime/context` | Submete `choiceRef` e `expectedSelectionVersion`, retornando a mesma projeção canônica após seleção autorizada. |
+| `GET /api/praxis/runtime/tenants` | Retorna tenants/empresas acessíveis providos pelo host (`503 RUNTIME_PROVIDER_UNAVAILABLE` sem provider). |
+| `GET /api/praxis/runtime/navigation` | Retorna nós de navegação do shell corporativo com referências opcionais (`resourceKey`, `surfaceRef`, `actionRef`, `moduleKey`, `capabilityRef`). |
+| `GET /api/praxis/runtime/security-events` | Retorna sinais seguros de runtime/segurança sem nunca expor roles crus, políticas, tokens, prompts, SQL ou auditoria interna. |
 
-## Documentation
+## Documentação e Fluxo de Aprovação 4-Olhos
 
-Start with these repository documents:
+Documentos essenciais neste repositório:
+- [Contratos de IA](docs/ai/contracts/README.md)
+- [Streaming de autoria agêntica](docs/ai/agentic-authoring-streaming.md)
+- [Guia de memória e PII](docs/ai/memory-and-pii.md)
+- [Plano de controle de snapshots de regras v1](docs/domain-rules/snapshot-control-plane-v1.md)
+- [Observações de execução de regras v1](docs/domain-rules/execution-observations-v1.md)
+- [Status de host em domain-rules v1](docs/domain-rules/host-status-v1.md)
+- [Prontidão de ativação escalonada v1](docs/domain-rules/staged-activation-readiness-v1.md)
+- [Workspaces de mudança do Rules Studio v1](docs/domain-rules/change-workspaces-v1.md)
+- [Checklist de release para enforcement em runtime](docs/ai/runtime-enforcement-consumer-release-checklist-2026-05-02.md)
+- [Contrato do Catálogo de Domínio](docs/domain-catalog/domain-catalog-contract-v0.2.md)
+- [Processo de Release](RELEASING.md)
 
-- [AI contract docs](docs/ai/contracts/README.md)
-- [Agentic authoring streaming](docs/ai/agentic-authoring-streaming.md)
-- [Memory and PII guidance](docs/ai/memory-and-pii.md)
-- [Rule snapshot control plane v1](docs/domain-rules/snapshot-control-plane-v1.md)
-- [Rule execution observations v1](docs/domain-rules/execution-observations-v1.md)
-- [Domain-rule host status v1](docs/domain-rules/host-status-v1.md)
-- [Staged activation readiness v1](docs/domain-rules/staged-activation-readiness-v1.md)
-- [Rules Studio change workspaces v1](docs/domain-rules/change-workspaces-v1.md)
+A publicação de `RuleSet` segue fluxo *maker-checker* estrito: solicite `POST /api/praxis/config/domain-rules/snapshots/composition-manifest`, obtenha duas aprovações segregadas via `POST /api/praxis/config/domain-rules/snapshots/composition-approvals` por aprovadores autenticados distintos e submeta o candidato inalterado com esse digest por outro publicador autenticado. Em modo corporativo o host deve mapear os papéis IAM `RULE_DEFINITION_READER`, `RULE_DEFINITION_AUTHOR`, `RULE_DEFINITION_APPROVER`, `RULE_COMPOSITION_APPROVER`, `RULE_SNAPSHOT_PUBLISHER`, `RULE_SNAPSHOT_OPERATOR` e `RULE_SNAPSHOT_READER` (além de `RULE_EXECUTION_OBSERVER` para hosts que publicam observações/sondas) — atores enviados no corpo da requisição jamais substituem o principal e o escopo resolvidos no servidor.
 
-RuleSet publication is a governed maker-checker flow: first request
-`POST /api/praxis/config/domain-rules/snapshots/composition-manifest`, obtain two
-segregated approvals by having each authenticated approver call
-`POST /api/praxis/config/domain-rules/snapshots/composition-approvals`, then have
-a different authenticated publisher submit the unchanged candidate with that
-digest. In corporate mode the host must map the IAM roles
-`RULE_DEFINITION_READER`, `RULE_DEFINITION_AUTHOR`, `RULE_DEFINITION_APPROVER`,
-`RULE_COMPOSITION_APPROVER`, `RULE_SNAPSHOT_PUBLISHER`,
-`RULE_SNAPSHOT_OPERATOR` and `RULE_SNAPSHOT_READER`; actor names sent in request
-bodies are not accepted. Definition, capability, safe timeline and materialization
-reads require `RULE_DEFINITION_READER`; snapshot, rollout and operational status
-reads require `RULE_SNAPSHOT_READER`. Both families resolve tenant/environment
-from the authenticated principal before querying the store. `X-Tenant-ID` and
-`X-Env` remain optional routing hints; in corporate mode they never replace or
-expand the server-resolved scope. Composition-manifest preparation requires the
-authenticated `RULE_SNAPSHOT_PUBLISHER` and uses that same server-resolved scope.
-Hosts that publish execution observations or candidate probes additionally map
-`RULE_EXECUTION_OBSERVER`. Structural simulation requires `RULE_DEFINITION_AUTHOR`; caller hints
-never widen the resolved scope.
-Rules Studio workspaces require a current, fully passing, idempotently recorded Test Run before
-submission. The run may carry an independent redacted baseline lane and governed operational
-CREATE/UPDATE evidence; the accepted run id is bound to the submitted workspace. A different
-authenticated `RULE_DEFINITION_APPROVER` then appends an immutable review for that exact workspace
-revision; this review does not publish or activate the underlying rule.
-The same server-side identity boundary applies to legacy publication and
-materialization endpoints: draft creation uses `RULE_DEFINITION_AUTHOR`,
-application/publication uses `RULE_SNAPSHOT_PUBLISHER`, and failure,
-supersession or reversion uses `RULE_SNAPSHOT_OPERATOR`. Creating a
-materialization accepts only `draft` or `pending_review`; this technical draft
-step neither requires nor claims business homologation.
-Backend-owned reactive calculations are materialized explicitly as
-`backend_determination/resource-reactive-determination`. The Config Starter
-compiles their closed, idempotent, non-persisting operation contract and keeps
-the payload tenant scoped; it does not publish that payload in
-`/schemas/filtered` or accept raw HTTP coordinates from authoring clients. Host
-endpoints consume only `applied` decisions server-side; Metadata may publish a
-separate static, tenant-neutral structural binding, never the Config payload.
-Hosts resolve the decision by exact target coordinates through
-`GET /api/praxis/config/domain-rules/materializations` with `status=applied`.
-Existing-coverage admission for this artifact is scoped to that same exact
-`targetLayer + targetArtifactType + targetArtifactKey` coordinate: distinct
-reactive determinations may coexist on one resource, while a duplicate target
-remains blocked for governance review.
-Definition approval is append-only, rejects self-approval and is tied to the
-exact canonical definition hash. The Config Starter rejects source, composition
-or catalog drift and never treats
-caller-declared Java coordinates as an admission catalog.
-- [Runtime enforcement release checklist](docs/ai/runtime-enforcement-consumer-release-checklist-2026-05-02.md)
-- [Domain catalog contract](docs/domain-catalog/domain-catalog-contract-v0.2.md)
-- [Release process](RELEASING.md)
+Workspaces do [`praxis-policy-studio`](https://github.com/codexrodrigues/praxis-policy-studio) exigem um *Test Run* atual, aprovado e gravado com idempotência antes da submissão, vinculado à revisão exata do workspace. Determinações reativas pertencentes ao backend são materializadas explicitamente como `backend_determination/resource-reactive-determination` e consumidas apenas quando `status=applied`, mantendo unicidade por `targetLayer + targetArtifactType + targetArtifactKey`.
 
-The public operational host for end-to-end validation is
-[`praxis-api-quickstart`](https://github.com/codexrodrigues/praxis-api-quickstart).
+O host operacional público de referência para validação ponta a ponta é o [`praxis-api-quickstart`](https://github.com/codexrodrigues/praxis-api-quickstart).
 
-## Development
+## Desenvolvimento e Verificação
 
-Run the starter smoke profile:
+Execute o perfil smoke do starter:
 
 ```powershell
 mvn -B -P ci-smoke-unit -T 1C clean verify
 ```
 
-For changes that affect AI authoring, streaming, release gates, or quickstart integration, run the downstream smoke described in [RELEASING.md](RELEASING.md) and the workflow `.github/workflows/agentic-authoring-smoke.yml`.
+Para mudanças que impactam autoria de IA, streaming, gates de release ou integração com o quickstart, siga [RELEASING.md](RELEASING.md) e o workflow `.github/workflows/agentic-authoring-smoke.yml`. Arquivos locais de credenciais como `.env.openai.local.ps1` são ignorados pelo Git; nunca comite chaves reais de provedores.
 
-Local AI credential files such as `.env.openai.local.ps1` are intentionally ignored by Git. Keep real provider keys out of commits and rotate any key that was copied outside the local development environment.
+`GET /api/praxis/config/domain-rules/definitions/capabilities` projeta por definição somente as ações autorizadas pelo principal e escopo resolvidos no servidor (incluindo `CREATE_NEW_VERSION`), sem inferência no cliente.
 
-`GET /api/praxis/config/domain-rules/definitions/capabilities` projeta, por definição,
-somente as ações autorizadas pelo principal e pelo escopo resolvidos no servidor. O primeiro
-contrato aditivo é `CREATE_NEW_VERSION`; consumidores não devem inferir essa autorização a
-partir do status, de headers do browser ou de configuração local.
+### Parâmetros governados (`Engine` contrato `1.6`)
 
-### Parâmetros governados (Engine contract 1.6; candidato de desenvolvimento)
-
-`GET /api/praxis/config/domain-rules/definitions/{definitionId}/parameters` exige
-`RULE_DEFINITION_READER` no escopo resolvido pelo servidor, com os mesmos headers
-`X-Tenant-ID` e `X-Env` da definição. Projeta `praxis.domain-rule-parameter-catalog.v1`:
-identidade/versionamento da definição e template, restrições tipadas, unidade,
-default, valor declarado, valor efetivo e origem `DECLARED`/`DEFAULT`.
-Ausência de template retorna catálogo vazio. Ausência de default/valor declarado
-omite a propriedade; JSON `null` explícito permanece `null`.
-
-A fonte é `definition.parameterTemplate`, exatamente o `RuleParameterTemplate`
-do Engine; os valores ficam em `parameters.parameterValues`. Nenhum outro campo de
-`parameters` vira editável por inferência. O template publica identidade namespaced,
-versão string exata, executor JSON Logic, resultado negativo, facts obrigatórios e
-parâmetros escalares ligados a literais por JSON Pointer. Tipos, limites inclusivos,
-enum, nullable, required, readOnly e defaults são validados pelo resolver puro do
-Engine. Java executors não são parametrizáveis neste contrato.
-
-Ao criar ou salvar workspace, `condition` pode ser omitida/null para derivação no
-servidor; se fornecida, deve corresponder à expressão derivada. Em workspace com
-template, metadados estruturais de `parameters` são imutáveis. Os fingerprints,
-ETags, revisões e gates de evidência existentes incluem template/valores; salvar
-invalida evidência da revisão anterior. Não há avaliador paralelo no Config/browser.
-A materialização executável desse contrato é o RuleSet snapshot governado. Rotas
-genéricas de materialização/publicação/aplicação rejeitam fontes com template:
-adapters de form/option-source/paleta não preservam todos os outcomes e facts
-obrigatórios do Engine. Rejeitar/retirar artefatos antigos continua possível.
-Na composição, cada binding `PARAMETERIZE` exige uma fonte aprovada única com
-`bindingKey == ruleKey`, template e valores canonicamente iguais. Alterar schema
-no payload do snapshot não contorna a aprovação da fonte.
+`GET /api/praxis/config/domain-rules/definitions/{definitionId}/parameters` exige `RULE_DEFINITION_READER` no escopo resolvido no servidor com `X-Tenant-ID` e `X-Env`, projetando `praxis.domain-rule-parameter-catalog.v1` a partir de `definition.parameterTemplate` (`RuleParameterTemplate` do [`praxis-rules-engine`](https://github.com/codexrodrigues/praxis-rules-engine)) e `parameters.parameterValues`. Valores escalares são ligados a literais por JSON Pointer; executores Java puros não são parametrizáveis neste contrato, e cada binding `PARAMETERIZE` na composição exige fonte aprovada única com `bindingKey == ruleKey`, template e valores canonicamente idênticos.
 
 Validação focal sem banco:
+
 ```bash
 mvn -Dtest=DomainRuleParametersTest,DomainRuleChangeWorkspaceServiceTest,DomainRuleControllerTest,DomainRuleServiceTest,DomainRuleSnapshotServiceTest test
 ```
-O incremento usa Engine `0.1.0-beta.17` e prepara Config `0.1.0-rc.166`
-como candidatos de fonte. Instale-os somente em um repositório Maven isolado para
-prova pré-release; isso não comprova consumo publicado no Maven Central. A prova
-persistente/HTTP requer Neon remoto exclusivo, papéis separados e o host Quickstart.
 
-`GET /api/praxis/config/domain-rules/definitions/{definitionId}/facts` projeta o
-vocabulário versionado de facts da definição. O catálogo contém tipo, nulabilidade,
-textos localizados, provider, evidências, sensibilidade e política de redaction;
-continua submetido ao escopo e ao papel `RULE_DEFINITION_READER`. O documento fonte
-fica em `definition.factCatalog`, participa do fingerprint imutável da definição e
-é validado antes da persistência.
+`GET /api/praxis/config/domain-rules/definitions/{definitionId}/facts` projeta o vocabulário versionado `definition.factCatalog` submetido ao mesmo papel `RULE_DEFINITION_READER` e incluído no fingerprint imutável da definição. O assistente pode descobrir decisões pela tool interna *read-only* `searchDomainRules` de forma consultiva (`canApply=false`), exigindo releitura atestada e os gates canônicos para qualquer mutação.
 
-O assistente pode descobrir decisões existentes pela tool interna read-only
-`searchDomainRules`, escolhida semanticamente pelo LLM e limitada ao escopo e à autoridade
-`RULE_DEFINITION_READER` resolvidos no servidor. A busca retorna apenas identidades seguras;
-o turno termina consultivamente com `canApply=false`, evidencia `domainRuleSearch` e quick replies
-que carregam a referência exata de seleção. Explicação e qualquer comando continuam exigindo
-releitura atestada e os gates canônicos do ciclo de vida.
+## Licença
 
-## License
+Distribuído sob a licença Apache License 2.0. Consulte [LICENSE](LICENSE).
 
-Apache License 2.0. See [LICENSE](LICENSE).
+## Fundação de UI Layout Workspace e Evolução
 
-## UI Layout Workspace & Evolution Foundation
-
-The [UI layout workspace foundation](docs/ui-layout-workspace-foundation.md)
-documents the native baseline/working codec and lifecycle integration. The
-official auto-configuration requires host-owned authority and dependencies;
-governed B0/C0/B1 rebase remains pending.
-
-The [lifecycle validation context](docs/ai/contracts/ui-layout-validation-attempt.md)
-propagates one server-owned monotonic budget through validation, nested evidence
-reads and actual beforeCommit. Host budget policy is mandatory, with no operational
-default. Enforcement is cooperative; executor cancellation and effective database
-transaction timeouts remain pending.
-
-The [historical evidence Java service](docs/ui-layout-historical-evidence.md)
-recovers pinned B0/C0 from an exact frozen release with separate operation and
-content admission. It has no historical HTTP endpoint and does not perform rebase.
-
-The [evolution readiness Java service](docs/ui-layout-evolution-readiness.md)
-compares historical/current composition and contract descriptors, requiring separate current
-evidence access. It reports missing intent provenance and fencing; application remains disabled.
-
-P3.2h.5b strengthens Table native revision admission with authored presence and exact
-B0/patch/C0 document reproduction. See [workspace boundary](docs/ui-layout-authoring-workspace.md).
-Host authorization/schema validators remain mandatory; this does not implement upgrade/apply.
-
-P3.2h.5c.1 adds consultative historical native Table document-relation diagnosis.
-A reproduced relation does not attest source provenance, schema compatibility or
-apply authority. See [readiness boundary](docs/ui-layout-evolution-readiness.md).
-
-The internal metadata capture value/codec validates exact UTF-8 content, binding,
-assembly input integrity and current read access. See
-[internal capture boundary](docs/ai/contracts/ui-layout-metadata-capture-internal.md).
-
-Append-only storage uses V66/V67/V68, preserving historical observations without backfill.
-See [storage boundary and PostgreSQL gates](docs/ai/contracts/ui-layout-metadata-capture-storage-internal.md).
-
-The canonical draft writer composes correlated capture and stored replay in the Config transaction.
-The beta Java SPI requires host admission, Config JDBC and full DocumentAssembly inputs for
-SchemaProjection; incomplete historical operation captures are denied, never reconstructed.
-See [metadata writer contract](docs/ai/contracts/ui-layout-baseline-metadata-writer.md).
-Operational PostgreSQL/producer/Table-delivery proof remains pending.
+A [fundação de workspace de layout UI](docs/ui-layout-workspace-foundation.md), o [contexto de validação de ciclo de vida](docs/ai/contracts/ui-layout-validation-attempt.md), o [serviço Java de evidência histórica](docs/ui-layout-historical-evidence.md), o [serviço Java de prontidão de evolução](docs/ui-layout-evolution-readiness.md), a [fronteira de workspace (`P3.2h.5b`)](docs/ui-layout-authoring-workspace.md), a [fronteira interna de captura de metadados](docs/ai/contracts/ui-layout-metadata-capture-internal.md), o [armazenamento append-only V66/V67/V68](docs/ai/contracts/ui-layout-metadata-capture-storage-internal.md) e o [contrato de gravador de metadados de baseline](docs/ai/contracts/ui-layout-baseline-metadata-writer.md) estabelecem a base de captura UTF-8, orçamentos cooperativos de ciclo de vida e admissão histórica de layouts Tabela B0/patch/C0 (permanecendo *rebase* automático B0/C0/B1 e provas operacionais completas como etapas específicas de evolução).
 
 ## Política de CI e publicação
 

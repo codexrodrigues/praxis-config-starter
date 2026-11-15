@@ -1,12 +1,12 @@
 # Contratos candidatos da ontologia — preparação de G1
 
-Data: 04/11/2026. Status: **G1 aprovado como contrato candidato; G2 pode iniciar**, após a [correção dos seis achados](../../../praxis-ergon-showcase/docs/rules/ontology/curated/completion/remediation/README.md) e 900 testes focais (seção 10). A cobertura consta na [curadoria completa](../../../praxis-ergon-showcase/docs/rules/ontology/curated/completion/README.md). Complementa o [blueprint](C:/Users/rodrigo.moreira/.gemini/antigravity/brain/6fa001e2-f9ef-4b40-bbe7-2369a4d1945c/praxis-ontology-first-principles-blueprint.md). Não registra v2 no serviço nem modifica contratos ativos. G2–G5 seguem pendentes de implementação e prova.
+Data: 04/11/2026. Status: **G1 aprovado como contrato candidato; G2 pode iniciar**, após a correção dos seis achados no host corporativo de referência e 900 testes focais (seção 10). A cobertura consta na curadoria completa do host. Complementa o blueprint ontológico de primeiros princípios. Não registra v2 no serviço nem modifica contratos ativos. G2–G5 seguem pendentes de implementação e prova.
 
 ## 1. Resultado verificável e limites
 
-Foram materializados o [schema candidato](contracts/praxis-domain-rule-fact-catalog-v2.candidate.schema.json), uma [fixture de catálogo](contracts/examples/ontology-facts-v2.candidate.json), os [valores correspondentes](contracts/examples/ontology-facts-v2.values.json), um [fragmento de grafo com dois bindings de determinação](contracts/examples/determination-v02.candidate.json) e [testes JUnit](../../src/test/java/org/praxisplatform/config/service/DomainRuleFactCatalogCandidateContractTest.java). As fixtures são sintéticas e escritas deliberadamente; não documentam regras de negócio Ergon.
+Foram materializados o [schema candidato](contracts/praxis-domain-rule-fact-catalog-v2.candidate.schema.json), uma [fixture de catálogo](contracts/examples/ontology-facts-v2.candidate.json), os [valores correspondentes](contracts/examples/ontology-facts-v2.values.json), um [fragmento de grafo com dois bindings de determinação](contracts/examples/determination-v02.candidate.json) e [testes JUnit](../../src/test/java/org/praxisplatform/config/service/DomainRuleFactCatalogCandidateContractTest.java). As fixtures são sintéticas e escritas deliberadamente; não documentam regras de negócio de clientes ou hosts específicos.
 
-O [inventário Ergon](../../../praxis-ergon-showcase/docs/rules/ontology/README.md) contabiliza 1.056 pontos de escrita em 20 arquivos examinados, 18 famílias/274 bindings de produto e 38 definições/50 chamadas operacionais. Inclui construções inline, lifecycle, previews, adaptadores de campos customizados e diagnósticos, discriminados no JSON. Pontos de escrita não equivalem a fatos únicos nem a cobertura de todos os ramos de execução.
+O inventário do host corporativo de referência contabiliza 1.056 pontos de escrita em 20 arquivos examinados, 18 famílias/274 bindings de produto e 38 definições/50 chamadas operacionais. Inclui construções inline, lifecycle, previews, adaptadores de campos customizados e diagnósticos, discriminados no JSON. Pontos de escrita não equivalem a fatos únicos nem a cobertura de todos os ramos de execução.
 
 **Curadoria completa:** os 39 perfis das quatro famílias de chefias foram complementados por 49 perfis das 14 famílias restantes e 38 operacionais: **126 perfis**, com schemas, bindings e fixtures. Há destino para 575 paths de produto/fábrica, 50 chamadas operacionais e todos os 1.056 pontos do censo. O pacote inclui 36 projeções do compilador de determinações e extensão tipada de campos customizados. O inventário da seção 6.1 foi conferido por SELECT em `ps3b_config`, em 04/11/2026 às 11:30:23 UTC: três definições de prova e zero snapshots/heads. O destino de cada definição consta no pacote; nenhum dado foi alterado.
 
@@ -83,11 +83,11 @@ Casos concretos a fechar antes de G1:
 | `effectiveParametroConta/effectiveStatutoryRule/politica` | Seleção de política e overrides não são conceitos 1-hop. Projetar candidatos primitivos, preservar precedência no dono da decisão e provar customização. |
 | `existing*/active*` | Coleções conhecidas migram para neighborhood; não usar filtro textual de prefixo para definir o que é conceito. |
 
-A fonte legada `v7x/aps/fontes_ergon/pck_ferias.pkb:565–577` confirma o caso em que `PERMITE_FER_ESTE_PER` igual a S/N sobrepõe os quatro parâmetros de período. Isso impede substituir a seleção efetiva por uma simples renomeação de raiz. A leitura focal comprova esse trecho, não toda a paridade de férias.
+Cenário corporativo de referência confirma o caso em que um parâmetro booleano de janela ativa (`S`/`N`) sobrepõe os quatro parâmetros de período. Isso impede substituir a seleção efetiva por uma simples renomeação de raiz. A leitura focal comprova esse trecho, não toda a paridade do módulo.
 
 O corte beta altera `DomainRuleSetDescriptor` e suas fábricas. Migrar também `DomainRuleSetCatalogProvider.ofDefinitions/of`: hoje essas rotas sintetizam descritores sem bindings. Exigir informação explícita quando houver conceitos; manter conveniência vazia apenas para escopos comprovadamente sem conceitos. Não acrescentar overload que esconda o requisito.
 
-Consumidores encontrados: `ErgonDomainRuleSetCatalogProvider`, `QuickstartDomainRuleSetCatalogConfiguration` e `SemanticDomainCatalogServiceTest`, além das fábricas internas. Os testes de integração devem cobrir todas as entradas da SPI, não só o construtor principal.
+Consumidores encontrados: provedores corporativos de catálogo de regras, `QuickstartDomainRuleSetCatalogConfiguration` e `SemanticDomainCatalogServiceTest`, além das fábricas internas. Os testes de integração devem cobrir todas as entradas da SPI, não só o construtor principal.
 
 ## 4. Determinações e targets dos bindings
 
@@ -121,7 +121,7 @@ Reparo: derivar novamente de releases elegíveis imutáveis, sem alterar seus by
 
 ## 6. Coordenada do host e ativação
 
-Fixar como **coordenada candidata do corte incompatível** `ergon-policy-studio/2.0`. A constante em produção permanece `ergon-policy-studio/1.0`; a troca só ocorrerá com todas as famílias, regras operacionais, schemas, registry e composições migrados. Esta coordenada não decide major Maven/npm.
+Fixar como **coordenada candidata do corte incompatível** `corporate-policy-studio/2.0`. A constante em produção permanece `corporate-policy-studio/1.0`; a troca só ocorrerá com todas as famílias, regras operacionais, schemas, registry e composições migrados. Esta coordenada não decide major Maven/npm.
 
 Reutilizar `PublishedRuleSnapshot.requiredHostContractVersion` com comparação exata, acrescida da comparação estrutural e da validação de executores/AST. Token correto com folha antiga continua incompatível. Contrato declarado por cliente não certifica provider instalado.
 
@@ -140,22 +140,22 @@ Rollback segue a recuperação canônica: ETag atual forte, snapshot anterior ve
 
 ### 6.1. Inventário operacional do ambiente e escopo de governança verificado
 
-1. **Mapeamento Neon e bancos separados no Ergon:**
-   - `ErgonPersistenceConfiguration.ConfigStore.configDataSource` exige banco (`current_database()`) e usuário (`current_user`) distintos entre domínio (`SPRING_DATASOURCE_*`) e Config (`CONFIG_DATASOURCE_*`), abortando o startup caso coincidam.
-   - O projeto Neon `praxis-config` (`ancient-leaf-72055027`, branch `production` / `br-aged-lake-a4eb715l`, database `neondb`) atende ao `praxis-api-quickstart` (14 definições `desenv`/`local`); não é utilizado pelo Ergon.
-   - O `praxis-ergon-showcase` utiliza o projeto Neon `holy-mouse-40140108`:
-     - `main` (`br-bitter-bonus-b7i0vfko`, database `neondb`, 16 tabelas em `public`);
-     - `issue-305-host-proof-20261027` (`br-super-sound-b7urizmd`, database `neondb`, 16 tabelas em `public` + 32 em `praxis_bulk`, branch base sem TTL);
-     - `ps3b-gate-20261103` (`br-purple-dust-b70ss3dj`), que separa o database de domínio **`ps3b_ergon`** (`public` com 30 tabelas até V10 + `praxis_bulk` com 32 tabelas) e o database Config **`ps3b_config`** (`public` com 66 tabelas Config + `ps3b_tx_probe`).
+1. **Mapeamento de banco de dados remoto e bancos separados no host corporativo:**
+   - A configuração de persistência do host (`ConfigStore`) exige banco (`current_database()`) e usuário (`current_user`) distintos entre domínio (`SPRING_DATASOURCE_*`) e Config (`CONFIG_DATASOURCE_*`), abortando o startup caso coincidam.
+   - O projeto remoto `praxis-config` (`<neon-config-project-id>`, branch `<neon-config-branch-id>`, database `neondb`) atende ao `praxis-api-quickstart` (14 definições `desenv`/`local`); não é utilizado pelo host corporativo.
+   - O host corporativo de referência utiliza projeto PostgreSQL remoto dedicado (`<neon-host-project-id>`):
+     - `main` (`<neon-host-branch-main>`, database `neondb`, 16 tabelas em `public`);
+     - `issue-305-host-proof-20261027` (`<neon-host-branch-proof>`, database `neondb`, 16 tabelas em `public` + 32 em `praxis_bulk`, branch base sem TTL);
+     - `ps3b-gate-20261103` (`<neon-host-branch-gate>`), que separa o database de domínio **`ps3b_domain`** (`public` com 30 tabelas até V10 + `praxis_bulk` com 32 tabelas) e o database Config **`ps3b_config`** (`public` com 66 tabelas Config + `ps3b_tx_probe`).
 2. **Escopo de governança e estado atual de definições/snapshots/heads:**
-   - No Ergon, `tenantId` Config = código decimal do órgão (`empCodigo`) em String (`"1"`, `"2"`, `"3"`, `"7"`), `serviceKey` / `ownerServiceKey` = `"praxis-ergon-showcase"`, e `environment` vem da autoridade `ERGON_CONFIG_SCOPE:<organization>:<environment>` validada por `ErgonConfigAccess`.
-   - Em `ps3b_config`, existem **0 snapshots** em `domain_rule_snapshot`, **0 heads ativos** em `domain_rule_snapshot_head` e **3 definições aprovadas de prova** em `domain_rule_definition` (`tenant_id='2'`, `environment='stage'`, `service_key='praxis-ergon-showcase'`, incluindo `customer.orgao2.replace.chefia.erg-01154`).
-   - A ausência de snapshots/heads ativos persistidos é esperada: o Ergon opera em memória com as 18 famílias (`productRuleSet` e `orgao2FactoryRuleSet` em `ErgonRuleEngineFacade`), `scenarios.json` e o fluxo de preparação/admissão (`ErgonPolicyComposition.prepare` / `admitGovernedSnapshot`).
+   - No host corporativo de referência, `tenantId` Config = identificador organizacional em String (`"1"`, `"2"`, `"3"`, `"7"`), `serviceKey` / `ownerServiceKey` = `"corporate-hr-service"`, e `environment` vem da autoridade `CORP_CONFIG_SCOPE:<organization>:<environment>` validada pelo provedor de acesso do host.
+   - Em `ps3b_config`, existem **0 snapshots** em `domain_rule_snapshot`, **0 heads ativos** em `domain_rule_snapshot_head` e **3 definições aprovadas de prova** em `domain_rule_definition` (`tenant_id='2'`, `environment='stage'`, `service_key='corporate-hr-service'`, incluindo `customer.orgao2.replace.leadership.rule-01`).
+   - A ausência de snapshots/heads ativos persistidos é esperada: o host corporativo opera em memória com as 18 famílias (`productRuleSet` e `tenantRuleSet` na fachada de regras do host), `scenarios.json` e o fluxo de preparação/admissão (`prepare` / `admitGovernedSnapshot`).
 3. **Instaladores de migração e política de branches:**
    - Domínio (`public`): `src/main/resources/db/migration/V5__*.sql` a `V10__*.sql` (`spring.flyway.enabled=false`, `ddl-auto=validate`).
    - Lote (`praxis_bulk`): `InstallBulkStorage.java`.
    - Config (`public` no banco Config separado): `InstallConfigStorage.java` (com `CONFIG_MIGRATION_USERNAME` distinto de `CONFIG_DATASOURCE_USERNAME`).
-   - Testes que exijam Neon real para o Ergon devem usar branch descartável apenas no projeto `holy-mouse-40140108` (com TTL ≤ 24h, derivada da branch base atribuída e removida após captura das evidências).
+   - Testes que exijam banco remoto real para o host corporativo devem usar branch descartável apenas no projeto isolado (`<neon-host-project-id>`, com TTL ≤ 24h, derivada da branch base atribuída e removida após captura das evidências).
 
 ## 7. Mapa de consumidores e derivados
 
@@ -164,10 +164,10 @@ Rollback segue a recuperação canônica: ETag atual forte, snapshot anterior ve
 | Config | `dto/DomainRuleFactDescriptor.java`, `DomainRuleFactCatalogResponse.java`, `DomainRuleService.java`, catálogo confiável de implementação, verificador de snapshots/rollouts, OpenAPI e schemas empacotados/documentais. |
 | Engine | Contratos/planner/compiler de snapshot, validação estrutural pura, AST local e contratos de executores; manter dependências neutras. |
 | Metadata | `DomainRuleSetDescriptor.java`, `DomainRuleSetCatalogProvider.java`, `SemanticDomainCatalogService.java` e integração com compilação canônica de determinações. |
-| Ergon | Providers e construções inline/posicionais inventariadas, regras/templates/executores, `ErgonPolicyComposition`, facade e catálogo; inclui previews e lifecycle. |
+| Host corporativo | Providers e construções inline/posicionais inventariadas, regras/templates/executores, composição de políticas, facade e catálogo; inclui previews e lifecycle. |
 | Quickstart | `src/main/java/com/example/praxis/apiquickstart/config/QuickstartDomainRuleSetCatalogConfiguration.java` e testes/downstream afetados. |
 | Angular Core | `projects/praxis-core/src/lib/models/domain-rule.model.ts` e `services/domain-rule.service.ts`; projeção estrutural reutilizável e testes. |
-| Rules Studio | Repositório `praxis-rules-studio`: `src/app/core/projection-catalog.service.ts`; em `features/catalog`: `catalog-presentation.ts`, `catalog-workspace.component.html`, `scenario-facts-editor.component.*`, `scenario-sandbox.facade.ts` e `workspace-authoring.facade.ts`. |
+| Policy Studio | Repositório `praxis-policy-studio`: `src/app/core/projection-catalog.service.ts`; em `features/catalog`: `catalog-presentation.ts`, `catalog-workspace.component.html`, `scenario-facts-editor.component.*`, `scenario-sandbox.facade.ts` e `workspace-authoring.facade.ts`. |
 | Derivados | AI-RESOURCE-BLUEPRINT, GUIA-00, guias de domínio, exemplos/HTTP corpus, docs públicas e skills fontes em praxis-codex-skills conforme impacto. Não alterar skills instaladas como substituto da fonte. |
 
 Studio hoje trata `nullable` como `required` em superfícies e monta drafts por path plano. A migração deve separar ausência de null, selecionar operação, editar árvores/items/mapas e preservar governança no round-trip. Atualizar só o tipo TypeScript não basta. Não fabricar cenários ALLOW/DENY por rótulo/tipo como evidência de paridade.
@@ -176,7 +176,7 @@ Classificação: alteração arquitetural/transversal de contrato público, inco
 
 ## 8. Registro histórico do aceite de G1 — superado pela revisão
 
-**Aceite anterior de G1, superado pelos seis achados G1-R01–G1-R06.** O [pacote completo](../../../praxis-ergon-showcase/docs/rules/ontology/curated/completion/README.md) e o [recibo histórico](../../../praxis-ergon-showcase/docs/rules/ontology/curated/completion/verification.json) registram a execução anterior. A seção 9 conserva a revisão que reabriu G1; a seção 10 registra as correções e o novo aceite. O recibo histórico não foi alterado.
+**Aceite anterior de G1, superado pelos seis achados G1-R01–G1-R06.** O pacote completo de curadoria e o recibo histórico no host registram a execução anterior. A seção 9 conserva a revisão que reabriu G1; a seção 10 registra as correções e o novo aceite. O recibo histórico não foi alterado.
 
 | Condição de G1 | Resultado e evidência |
 | --- | --- |
@@ -192,10 +192,10 @@ Execução final: **287 testes no Config + 301 no host = 588**, zero falhas, err
 
 ```powershell
 # Config, JDK 21 / Maven 3.9.6
-mvn -B "-Dtest=DomainRuleG1SupplementContractTest,DomainRuleG1BoundaryContractTest,DomainRuleG1CompletionContractTest,DomainRuleFactCatalogCandidateContractTest,DomainRuleCuratedHostCandidateContractTest,DomainCatalogContractSynchronizationTest" "-Dontology.g1.host-contracts=D:/Developer/praxis-plataform/praxis-ergon-showcase/docs/rules/ontology/curated" test
+mvn -B "-Dtest=DomainRuleG1SupplementContractTest,DomainRuleG1BoundaryContractTest,DomainRuleG1CompletionContractTest,DomainRuleFactCatalogCandidateContractTest,DomainRuleCuratedHostCandidateContractTest,DomainCatalogContractSynchronizationTest" "-Dontology.g1.host-contracts=<host-repo-root>/docs/rules/ontology/curated" test
 
 # Host, compilador separado por limitação Lombok observada no processo Maven
-mvn -B "-Dmaven.compiler.fork=true" "-Dmaven.compiler.executable=D:/Developer/JAVA/graalvm-jdk-21.0.2+13.1/bin/javac.exe" "-Dtest=OntologyG1CompletionContractTest,OntologyCuratedLeadershipContractTest,OperationalRuleSetTest,ErgonReactiveDeterminationMetadataTest" test
+mvn -B "-Dmaven.compiler.fork=true" "-Dmaven.compiler.executable=<jdk-home>/bin/javac.exe" "-Dtest=OntologyG1CompletionContractTest,OntologyCuratedLeadershipContractTest,OperationalRuleSetTest,CorporateReactiveDeterminationMetadataTest" test
 ```
 
 Os testes são focais e não iniciam Spring/JDBC/Flyway. O build padrão do host, suite integral, paridade completa de negócio, HTTP em execução e instalação de consumidor pelo registry público não foram certificados. A leitura Neon está registrada separadamente; nenhuma escrita, instalação, migração, branch, head ou snapshot foi alterado. Artefatos derivados de produção serão atualizados no corte real, sem apresentar o candidato documental como contrato já suportado.
@@ -204,7 +204,7 @@ Os testes são focais e não iniciam Spring/JDBC/Flyway. O build padrão do host
 
 ## 9. Revisão de integridade antes de G2 — 04/11/2026
 
-**Decisão histórica da revisão: G1 reaberto / CHANGES REQUESTED; resolvida na seção 10.** O [parecer](D:/Developer/praxis-plataform/praxis-ergon-showcase/docs/rules/ontology/curated/completion/review/README.md) reproduz identidade incorreta de ação, retificação monetária com representação incoerente, dupla recomposição de saldo, excesso de orçamento com 300 linhas de parâmetros, nulabilidade inadequada em coleção persistida e texto corrompido em seis catálogos.
+**Decisão histórica da revisão: G1 reaberto / CHANGES REQUESTED; resolvida na seção 10.** O parecer técnico de revisão no host reproduz identidade incorreta de ação, retificação monetária com representação incoerente, dupla recomposição de saldo, excesso de orçamento com 300 linhas de parâmetros, nulabilidade inadequada em coleção persistida e texto corrompido em seis catálogos.
 
 Corrigir contratos e bindings, adicionar regressões independentes por cenário e reexecutar os gates focais antes de novo aceite. As 13 sondas desta revisão são observações de contracasos/controles; não são uma aprovação adicional. Os 588 testes anteriores continuam históricos. Não promover helpers de testes a uma segunda implementação de validação em produção.
 
@@ -212,9 +212,9 @@ A correção deve definir transformação monetária verificável, origem primit
 
 ## 10. Correções G1-R01–G1-R06 e novo aceite — 04/11/2026
 
-**G1 aprovado no escopo de especificação candidata**, com [900 testes focais e recibo próprio](../../../praxis-ergon-showcase/docs/rules/ontology/curated/completion/remediation/verification.json): 370 no Config e 530 no host, sem falhas, erros ou ignorados. Os 588 anteriores permanecem históricos. As execuções finais usaram fontes copiadas para diretórios de build isolados; a propriedade `ontology.g1.host-contracts` apontou explicitamente para o host dessa cópia.
+**G1 aprovado no escopo de especificação candidata**, com 900 testes focais e recibo próprio: 370 no Config e 530 no host, sem falhas, erros ou ignorados. Os 588 anteriores permanecem históricos. As execuções finais usaram fontes copiadas para diretórios de build isolados; a propriedade `ontology.g1.host-contracts` apontou explicitamente para o host dessa cópia.
 
-As soluções e regressões estão no [registro completo](../../../praxis-ergon-showcase/docs/rules/ontology/curated/completion/remediation/README.md): identidade por `WorkflowAction.id` e constantes por chamada/etapa; representação decimal única `praxis-decimal`; origem primitiva do saldo nas 50 chamadas; recorte relacional completo com orçamento conjunto; nulabilidade a partir da origem persistida; restauração fiel de 3.795 ocorrências UTF-8. O documento também registra pré-condição/NEW para comandos de tempo/licença, a rejeição de uma ação válida de outra chamada e a preservação dos códigos atômicos.
+As soluções e regressões estão no registro completo da remediação: identidade por `WorkflowAction.id` e constantes por chamada/etapa; representação decimal única `praxis-decimal`; origem primitiva do saldo nas 50 chamadas; recorte relacional completo com orçamento conjunto; nulabilidade a partir da origem persistida; restauração fiel de 3.795 ocorrências UTF-8. O documento também registra pré-condição/NEW para comandos de tempo/licença, a rejeição de uma ação válida de outra chamada e a preservação dos códigos atômicos.
 
 A capacidade de todos os 126 perfis tem referência automatizada de limite e limite+1; duas extensões sintéticas por órgão foram testadas junto às quatro coleções de Vínculo. Isso define o envelope do candidato e a rejeição integral de excesso, sem prometer capacidade ilimitada ou desempenho em banco. Casos de carga que excedam o envelope exigem contrato de agregado neutro ou executor governado antes da admissão em G3/G4.
 
@@ -224,9 +224,9 @@ G2 pode iniciar sua implementação metadata-driven. G3–G5 conservam paridade 
 
 ## 11. Entrega do candidato Metadata G2 — 04/11/2026
 
-O [registro G2](../../../praxis-ergon-showcase/docs/rules/ontology/g2/README.md)
+O registro G2 do host
 documenta a publicação canônica das determinações e dos bindings conceituais,
-com 642 testes locais: 94 Metadata, 532 Ergon e 16 Quickstart. O formato de catálogo
+com 642 testes locais: 94 Metadata, 532 do host corporativo e 16 Quickstart. O formato de catálogo
 v0.2 do Config permanece inalterado; seu schema é confrontado com a cópia de teste
 do produtor. Esta etapa não implementa ingestão, projeção, admissão ou Studio v2.
 

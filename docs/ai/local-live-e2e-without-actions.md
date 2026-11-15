@@ -149,8 +149,8 @@ and persisted validation report through the quickstart host:
 ```powershell
 cd praxis-config-starter
 
-$env:JAVA_HOME='D:\Developer\JAVA\openjdk-21_windows-x64_bin\jdk-21'
-$env:Path="$env:JAVA_HOME\bin;D:\Developer\maven\apache-maven-3.9.6\bin;$env:Path"
+$env:JAVA_HOME='<jdk-home>'
+$env:Path="$env:JAVA_HOME\bin;<maven-home>\bin;$env:Path"
 mvn.cmd clean install -DskipTests
 
 cd ..\praxis-api-quickstart
