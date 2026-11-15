@@ -6,7 +6,7 @@ param(
     [string] $QuickstartRoot = "",
     [string] $JarPath = "",
     [string] $EnvFile = ".env.openai.local.ps1",
-    [string] $JavaHome = "D:\Developer\JAVA\openjdk-21_windows-x64_bin\jdk-21",
+    [string] $JavaHome = $env:JAVA_HOME,
     [string] $EmbeddingProvider = "",
     [string] $Origin = "http://localhost:4200",
     [string] $TenantId = "agentic-authoring-e2e",

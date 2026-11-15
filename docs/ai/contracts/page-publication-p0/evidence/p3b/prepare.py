@@ -4,10 +4,10 @@ from psycopg import sql
 root=pathlib.Path('${PRIVATE_ASSIGNMENT}')
 evidence=pathlib.Path('/tmp/praxis-page-p3b-512-evidence')
 url=json.loads((root/'owner.json').read_text())['url'];parts=urllib.parse.urlparse(url)
-assert parts.hostname=='ep-floral-voice-a40bufyv.us-east-1.aws.neon.tech'
+assert parts.hostname=='[neon-endpoint]'
 role='p3b_runtime_512_runtime';schema='p3b_runtime_512_20261023'
 control=json.loads((evidence/'control-plane.json').read_text())
-assert control['project']['permission']=='ADMIN' and control['branch']['id']=='br-weathered-mountain-a48o0map'
+assert control['project']['permission']=='ADMIN' and control['branch']['id']=='[neon-branch-id]'
 assert control['endpoint']['host']==parts.hostname and control['project']['pgVersion']==17
 manifest={'projectId':control['project']['id'],'branchId':control['branch']['id'],'endpoint':parts.hostname,'schema':schema,'runtime':role,'tlsMode':'verify-full','caBundleSha256':hashlib.sha256(pathlib.Path(certifi.where()).read_bytes()).hexdigest(),'migrations':[]}
 password=secrets.token_urlsafe(36)

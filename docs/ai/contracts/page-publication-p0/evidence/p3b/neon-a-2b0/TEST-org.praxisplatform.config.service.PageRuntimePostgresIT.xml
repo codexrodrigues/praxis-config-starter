@@ -1,7 +1,7 @@
 <testsuite xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="https://maven.apache.org/surefire/maven-surefire-plugin/xsd/surefire-test-report.xsd" version="3.0.2" name="org.praxisplatform.config.service.PageRuntimePostgresIT" time="367.076" tests="3" errors="0" skipped="0" failures="0" flakes="0">
   <testcase name="publishedCatalogAndMenuShareTheHeadButUrlAndMenuKeepDistinctGrants" classname="org.praxisplatform.config.service.PageRuntimePostgresIT" time="143.742">
     <system-out>Standard Commons Logging discovery in action with spring-jcl: please remove commons-logging.jar from classpath in order to avoid potential conflicts
-P3-B Neon project=ancient-leaf-72055027 branch=br-weathered-mountain-a48o0map endpoint=ep-floral-voice-a40bufyv.us-east-1.aws.neon.tech role=p3b_runtime_512_runtime schema=p3b_runtime_512_20261023 PostgreSQL=17.11 (11592b3) TLS=TLSv1.3 peer=CN=*.us-east-1.aws.neon.tech
+P3-B Neon project=[neon-project-id] branch=[neon-branch-id] endpoint=[neon-endpoint] role=p3b_runtime_512_runtime schema=p3b_runtime_512_20261023 PostgreSQL=17.11 (11592b3) TLS=TLSv1.3 peer=CN=*.us-east-1.aws.neon.tech
 08:59:49.558 [main] INFO org.hibernate.Version -- HHH000412: Hibernate ORM core version 6.6.53.Final
 08:59:49.581 [main] INFO org.hibernate.cache.internal.RegionFactoryInitiator -- HHH000026: Second-level cache disabled
 08:59:51.846 [main] INFO org.hibernate.orm.connections.pooling -- HHH10001005: Database info:

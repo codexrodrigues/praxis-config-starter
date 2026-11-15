@@ -25,7 +25,7 @@ import org.praxisplatform.rules.violation.RuleErrorCatalog;
  * registros manuais e cadeias centralizadas de {@code if/else} em classes de preload/configuração,
  * além de canonizar os {@link DomainRuleProductProfile}s via {@link PraxisRulePlanCompiler}
  * (garantindo paridade com {@code DomainRuleSnapshotService.prepareComposition}) e projetar
- * metadados semânticos para o {@code DomainRuleSetCatalogProvider} e o {@code praxis-rules-studio}.
+ * metadados semânticos para o {@code DomainRuleSetCatalogProvider} e o {@code praxis-policy-studio}.
  *
  * @param <O> enum de operações governadas da família
  */

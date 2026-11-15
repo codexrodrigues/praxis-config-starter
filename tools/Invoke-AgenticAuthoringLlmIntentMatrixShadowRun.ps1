@@ -2,8 +2,8 @@ param(
     [ValidateSet("openai", "gemini")]
     [string] $Provider = "openai",
     [string] $EnvFile = ".env.openai.local.ps1",
-    [string] $JavaHome = "D:\Developer\JAVA\openjdk-21_windows-x64_bin\jdk-21",
-    [string] $MavenHome = "D:\Developer\maven\apache-maven-3.9.6",
+    [string] $JavaHome = $env:JAVA_HOME,
+    [string] $MavenHome = $env:MAVEN_HOME,
     [switch] $FailOnDivergence,
     [switch] $FailOnProviderUnavailable,
     [double] $MinAccuracy = -1.0

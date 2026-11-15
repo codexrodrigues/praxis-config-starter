@@ -77,7 +77,7 @@ OpenJDK 64-Bit Server VM warning: Sharing is only supported for boot loader clas
 [INFO] Running org.praxisplatform.config.service.UiLayoutHistoricalEvidenceServiceTest
 [INFO] Tests run: 25, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.061 s -- in org.praxisplatform.config.service.UiLayoutHistoricalEvidenceServiceTest
 [INFO] Running org.praxisplatform.config.service.PageCreationPostgresIT
-P2 Neon project=ancient-leaf-72055027 branch=br-aged-bonus-a4rhfqwp role=p2_page_510_runtime schema=p2_page_510_20261022 PostgreSQL=17.11 (11592b3) clientTLS=TLSv1.3 peer=CN=*.us-east-1.aws.neon.tech
+P2 Neon project=[neon-project-id] branch=[neon-branch-id] role=p2_page_510_runtime schema=p2_page_510_20261022 PostgreSQL=17.11 (11592b3) clientTLS=TLSv1.3 peer=CN=*.us-east-1.aws.neon.tech
 20:17:58.927 [main] INFO org.hibernate.Version -- HHH000412: Hibernate ORM core version 6.6.53.Final
 20:17:58.948 [main] INFO org.hibernate.cache.internal.RegionFactoryInitiator -- HHH000026: Second-level cache disabled
 20:18:01.193 [main] INFO org.hibernate.orm.connections.pooling -- HHH10001005: Database info:

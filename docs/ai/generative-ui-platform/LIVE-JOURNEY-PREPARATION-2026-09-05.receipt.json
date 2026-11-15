@@ -1,7 +1,7 @@
 {
   "recordedAt": "2026-09-05T20:40:33.642843+00:00",
   "classification": "transversal",
-  "cutDirectory": "/Users/rodrigo/Dev/pessoal/praxis-plataform/.worktrees/free-authoring-live-20260905",
+  "cutDirectory": "<workspace-root>",
   "repositories": {
     "praxis-config-starter": {
       "head": "5c6cd02b13bbbaac4a25ed0121f4b72516c6ccf6",

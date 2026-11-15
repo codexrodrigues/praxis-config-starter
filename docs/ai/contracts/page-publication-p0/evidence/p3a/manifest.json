@@ -3,9 +3,9 @@
   "sourceTree": "a113f1f0e895d11f1138c199b326303b4de134f7",
   "baseCommit": "78e914fdc1f03c7abf7e201fd2d2a79fc561f26f",
   "neon": {
-    "projectId": "ancient-leaf-72055027",
-    "branchId": "br-holy-water-a4ihmkkj",
-    "endpoint": "ep-hidden-bread-a4x3zddv.us-east-1.aws.neon.tech",
+    "projectId": "[neon-project-id]",
+    "branchId": "[neon-branch-id]",
+    "endpoint": "[neon-endpoint]",
     "schema": "p3a_group_511_20261022",
     "username": "p3a_group_511_runtime"
   },
@@ -3234,7 +3234,7 @@
       "bytes": 7504691
     },
     "classpathOrigin": "Actual successful unit XML at the same source; dependency hashes before package",
-    "classpathXmlPath": "/Users/rodrigo/Dev/pessoal/praxis-plataform/praxis-config-starter/.worktrees/config-page-p3a-511/target/surefire-reports/TEST-org.praxisplatform.config.service.UiLayoutPageGroupSnapshotContractTest.xml",
+    "classpathXmlPath": "[workspace-root]/praxis-config-starter/.worktrees/config-page-p3a-511/target/surefire-reports/TEST-org.praxisplatform.config.service.UiLayoutPageGroupSnapshotContractTest.xml",
     "classpathXmlSha256": "99ba2bddb8bd29a6fd30681ed23adb007d48ee1ca6f870f4ed4bdbe32c3513a4",
     "unitGate": {
       "name": "org.praxisplatform.config.service.UiLayoutPageGroupSnapshotContractTest",

@@ -32,7 +32,7 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.util.ClassUtils;
 
 /**
- * Auto-configuração zero-boilerplate da superfície de governança do {@code praxis-rules-studio} e
+ * Auto-configuração zero-boilerplate da superfície de governança do {@code praxis-policy-studio} e
  * da ponte semântica {@code /schemas/domain} ({@code PLAT-EVO-08}).
  *
  * <p>Habilita automaticamente para qualquer host que registre {@link GovernedRuleFamilyDescriptor}s:

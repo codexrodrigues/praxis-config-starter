@@ -36,7 +36,7 @@ import org.springframework.web.server.ResponseStatusException;
 
 /**
  * Controlador HTTP canônico auto-configurado pelo {@code praxis-config-starter} para o
- * {@code praxis-rules-studio} ({@code /api/praxis/rules-studio/rule-sets/**}, com alias de
+ * {@code praxis-policy-studio} ({@code /api/praxis/rules-studio/rule-sets/**}, com alias de
  * transição {@code /api/praxis/policy-studio/rule-sets/**}).
  *
  * <p>Permite que qualquer host consumidor publique composição 4-olhos Maker-Checker, publicação de

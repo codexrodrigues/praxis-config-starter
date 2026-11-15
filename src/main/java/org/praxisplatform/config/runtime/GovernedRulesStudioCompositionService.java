@@ -62,7 +62,7 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
 /**
- * Motor canônico de composição e preload de candidatos para o {@code praxis-rules-studio},
+ * Motor canônico de composição e preload de candidatos para o {@code praxis-policy-studio},
  * suportado integralmente pela plataforma ({@code praxis-config-starter}) a partir do
  * {@link GovernedRuleFamilyRegistry}.
  *

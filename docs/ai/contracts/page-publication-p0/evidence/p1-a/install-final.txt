@@ -22,20 +22,20 @@
 [INFO] Tests are skipped.
 [INFO] 
 [INFO] --- jar:3.4.2:jar (default-jar) @ praxis-config-starter ---
-[INFO] Building jar: /Users/rodrigo/Dev/pessoal/praxis-plataform/.worktrees/config-page-p1-508/target/praxis-config-starter-0.1.0-rc.166.jar
+[INFO] Building jar: [workspace-root]/target/praxis-config-starter-0.1.0-rc.166.jar
 [INFO] 
 [INFO] --- spring-boot:3.5.15:repackage (repackage) @ praxis-config-starter ---
 [INFO] 
 [INFO] --- source:3.3.1:jar-no-fork (attach-sources) @ praxis-config-starter ---
-[INFO] Building jar: /Users/rodrigo/Dev/pessoal/praxis-plataform/.worktrees/config-page-p1-508/target/praxis-config-starter-0.1.0-rc.166-sources.jar
+[INFO] Building jar: [workspace-root]/target/praxis-config-starter-0.1.0-rc.166-sources.jar
 [INFO] 
 [INFO] --- javadoc:3.6.3:jar (attach-javadocs) @ praxis-config-starter ---
 [INFO] Skipping javadoc generation
 [INFO] 
 [INFO] --- install:3.1.4:install (default-install) @ praxis-config-starter ---
-[INFO] Installing /Users/rodrigo/Dev/pessoal/praxis-plataform/.worktrees/config-page-p1-508/pom.xml to /tmp/praxis-page-p1-508-m2/io/github/codexrodrigues/praxis-config-starter/0.1.0-rc.166/praxis-config-starter-0.1.0-rc.166.pom
-[INFO] Installing /Users/rodrigo/Dev/pessoal/praxis-plataform/.worktrees/config-page-p1-508/target/praxis-config-starter-0.1.0-rc.166.jar to /tmp/praxis-page-p1-508-m2/io/github/codexrodrigues/praxis-config-starter/0.1.0-rc.166/praxis-config-starter-0.1.0-rc.166.jar
-[INFO] Installing /Users/rodrigo/Dev/pessoal/praxis-plataform/.worktrees/config-page-p1-508/target/praxis-config-starter-0.1.0-rc.166-sources.jar to /tmp/praxis-page-p1-508-m2/io/github/codexrodrigues/praxis-config-starter/0.1.0-rc.166/praxis-config-starter-0.1.0-rc.166-sources.jar
+[INFO] Installing [workspace-root]/pom.xml to /tmp/praxis-page-p1-508-m2/io/github/codexrodrigues/praxis-config-starter/0.1.0-rc.166/praxis-config-starter-0.1.0-rc.166.pom
+[INFO] Installing [workspace-root]/target/praxis-config-starter-0.1.0-rc.166.jar to /tmp/praxis-page-p1-508-m2/io/github/codexrodrigues/praxis-config-starter/0.1.0-rc.166/praxis-config-starter-0.1.0-rc.166.jar
+[INFO] Installing [workspace-root]/target/praxis-config-starter-0.1.0-rc.166-sources.jar to /tmp/praxis-page-p1-508-m2/io/github/codexrodrigues/praxis-config-starter/0.1.0-rc.166/praxis-config-starter-0.1.0-rc.166-sources.jar
 [INFO] ------------------------------------------------------------------------
 [INFO] BUILD SUCCESS
 [INFO] ------------------------------------------------------------------------

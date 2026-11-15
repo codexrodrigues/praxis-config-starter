@@ -36,7 +36,7 @@ import org.springframework.boot.ApplicationRunner;
 import org.springframework.util.StringUtils;
 
 /**
- * Seeder canônico de plataforma para o {@code praxis-rules-studio}, derivado exclusivamente de
+ * Seeder canônico de plataforma para o {@code praxis-policy-studio}, derivado exclusivamente de
  * {@link GovernedRuleFamilyRegistry}.
  *
  * <p>Elimina classes manuais {@code *RulesStudioDefinitionSeed} nos hosts consumidores ao publicar

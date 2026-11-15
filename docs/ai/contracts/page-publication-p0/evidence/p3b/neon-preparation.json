@@ -1,7 +1,7 @@
 {
-  "projectId": "ancient-leaf-72055027",
-  "branchId": "br-weathered-mountain-a48o0map",
-  "endpoint": "ep-floral-voice-a40bufyv.us-east-1.aws.neon.tech",
+  "projectId": "[neon-project-id]",
+  "branchId": "[neon-branch-id]",
+  "endpoint": "[neon-endpoint]",
   "schema": "p3b_runtime_512_20261023",
   "runtime": "p3b_runtime_512_runtime",
   "tlsMode": "verify-full",

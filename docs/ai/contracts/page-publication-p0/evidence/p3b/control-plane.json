@@ -1,20 +1,20 @@
 {
   "project": {
-    "id": "ancient-leaf-72055027",
+    "id": "[neon-project-id]",
     "name": "praxis-config",
     "pgVersion": 17,
     "permission": "ADMIN"
   },
   "branch": {
-    "id": "br-weathered-mountain-a48o0map",
+    "id": "[neon-branch-id]",
     "name": "page-runtime-p3b-512-20261023",
-    "parentId": "br-empty-sea-a4kvwyqz",
+    "parentId": "[neon-branch-id]",
     "state": "ready"
   },
   "endpoint": {
-    "id": "ep-floral-voice-a40bufyv",
-    "host": "ep-floral-voice-a40bufyv.us-east-1.aws.neon.tech",
-    "branchId": "br-weathered-mountain-a48o0map",
+    "id": "[neon-endpoint-id]",
+    "host": "[neon-endpoint]",
+    "branchId": "[neon-branch-id]",
     "type": "read_write",
     "state": "idle",
     "minCu": 0.25,

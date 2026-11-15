@@ -3,9 +3,9 @@
   "sourceTree": "186ce0581623904dd74a37ef2799ce36609f3449",
   "baseCommit": "468f9de696330be2ee16d181c5145cfe849dc29b",
   "neon": {
-    "projectId": "ancient-leaf-72055027",
-    "branchId": "br-aged-bonus-a4rhfqwp",
-    "endpoint": "ep-withered-rice-a48n0xi0.us-east-1.aws.neon.tech",
+    "projectId": "[neon-project-id]",
+    "branchId": "[neon-branch-id]",
+    "endpoint": "[neon-endpoint]",
     "schema": "p2_page_510_20261022",
     "username": "p2_page_510_runtime"
   },
@@ -210,7 +210,7 @@
     },
     {
       "path": "concurrency-pinned/xml/TEST-org.praxisplatform.config.service.PageCreationPostgresIT.xml",
-      "rawPath": "/Users/rodrigo/Dev/pessoal/praxis-plataform/praxis-config-starter/.worktrees/config-page-p2-510/target/surefire-reports/TEST-org.praxisplatform.config.service.PageCreationPostgresIT.xml",
+      "rawPath": "[workspace-root]/praxis-config-starter/.worktrees/config-page-p2-510/target/surefire-reports/TEST-org.praxisplatform.config.service.PageCreationPostgresIT.xml",
       "rawSha256": "4e278d3148936cd54a89a6cb7ff76d7311245bb4eac931e9ae0e59de6a7ee2b7",
       "sanitizedSha256": "5172f6e91b287ba9c8dc98a1921e67b89911e0e816f7201453f1daf5a7769b58",
       "removed": "entire properties block; local absolute paths replaced"

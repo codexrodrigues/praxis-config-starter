@@ -1,5 +1,5 @@
 {
-  "host": "ep-floral-voice-a40bufyv.us-east-1.aws.neon.tech",
+  "host": "[neon-endpoint]",
   "port": 5432,
   "verifyHostname": true,
   "verifyMode": "CERT_REQUIRED",

@@ -3,7 +3,7 @@ param(
     [int] $Port = 8088,
     [string] $QuickstartRoot = "",
     [string] $JarPath = "",
-    [string] $JavaHome = "D:\Developer\JAVA\openjdk-21_windows-x64_bin\jdk-21",
+    [string] $JavaHome = $env:JAVA_HOME,
     [string] $Origin = "http://localhost:4200",
     [string] $TenantId = "domain-catalog-v2-smoke",
     [string] $Environment = "local",

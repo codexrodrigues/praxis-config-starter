@@ -36,7 +36,7 @@ import org.springframework.web.server.ResponseStatusException;
  * ({@link GovernedRuleFamilyDescriptor}) publicadas como beans Spring no host aplicativo.
  *
  * <p>Suporta tanto famílias com chaves de operação globais exclusivas (ex.:
- * {@code "ergon.vinculos:create"}) quanto múltiplas famílias compartilhando verbos genéricos (ex.:
+ * {@code "workforce.vinculos:create"}) quanto múltiplas famílias compartilhando verbos genéricos (ex.:
  * {@code "validate"} ou {@code "EVALUATE"}), indexando de forma determinística pelo par composto
  * {@code (familyKey, operationKey)} e preservando semântica HTTP fail-closed idêntica ao plano de
  * controle de rollout ({@code 400}, {@code 403}, {@code 404}, {@code 409} e código canônico

@@ -209,7 +209,7 @@ class AgenticAuthoringAutoConfigurationTest {
         contextRunner
                 .withPropertyValues(
                         "praxis.ai.authoring.dry-run-enabled=true",
-                        "praxis.ai.authoring.artifacts-dir=D:/Developer/praxis-plataform/docs/ai/agentic-authoring/proofs",
+                        "praxis.ai.authoring.artifacts-dir=target/agentic-authoring/proofs",
                         "praxis.ai.authoring.report-path=build/agentic-authoring/dry-run-report.json"
                 )
                 .run(context -> {

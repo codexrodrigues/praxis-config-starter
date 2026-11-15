@@ -26,7 +26,7 @@
 [INFO] -------------------------------------------------------
 [INFO] Running org.praxisplatform.config.service.PageCreationPostgresIT
 Standard Commons Logging discovery in action with spring-jcl: please remove commons-logging.jar from classpath in order to avoid potential conflicts
-P2 Neon project=ancient-leaf-72055027 branch=br-aged-bonus-a4rhfqwp role=p2_page_510_runtime schema=p2_page_510_20261022 PostgreSQL=17.11 (11592b3) clientTLS=TLSv1.3 peer=CN=*.us-east-1.aws.neon.tech
+P2 Neon project=[neon-project-id] branch=[neon-branch-id] role=p2_page_510_runtime schema=p2_page_510_20261022 PostgreSQL=17.11 (11592b3) clientTLS=TLSv1.3 peer=CN=*.us-east-1.aws.neon.tech
 20:45:20.566 [main] INFO org.hibernate.Version -- HHH000412: Hibernate ORM core version 6.6.53.Final
 20:45:20.583 [main] INFO org.hibernate.cache.internal.RegionFactoryInitiator -- HHH000026: Second-level cache disabled
 20:45:22.835 [main] INFO org.hibernate.orm.connections.pooling -- HHH10001005: Database info:
