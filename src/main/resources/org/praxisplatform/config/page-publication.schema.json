@@ -868,6 +868,1572 @@
       ],
       "additionalProperties": false
     },
+    "crudWidget": {
+      "type": "object",
+      "properties": {
+        "key": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}(?![\\s\\S])",
+          "minLength": 36,
+          "maxLength": 36
+        },
+        "definition": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "const": "praxis-crud"
+            },
+            "inputs": {
+              "type": "object",
+              "properties": {
+                "metadata": {
+                  "type": "object"
+                },
+                "crudId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 255,
+                  "pattern": "^(?![\\s\\S]*[\\u0000-\\u001f\\u007f\\u2028\\u2029])[^\\u0009-\\u000d\\u0020\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000\\ufeff](?:[\\s\\S]*[^\\u0009-\\u000d\\u0020\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000\\ufeff])?(?![\\s\\S])"
+                },
+                "componentInstanceId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 255,
+                  "pattern": "^(?![\\s\\S]*[\\u0000-\\u001f\\u007f\\u2028\\u2029])[^\\u0009-\\u000d\\u0020\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000\\ufeff](?:[\\s\\S]*[^\\u0009-\\u000d\\u0020\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000\\ufeff])?(?![\\s\\S])"
+                },
+                "tableConfigPersistenceStrategy": {
+                  "enum": [
+                    "local-first",
+                    "remote",
+                    "volatile"
+                  ]
+                },
+                "context": {
+                  "type": [
+                    "object",
+                    "null"
+                  ]
+                },
+                "filterCriteria": {
+                  "type": [
+                    "object",
+                    "null"
+                  ]
+                },
+                "authoringCapability": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "maxLength": 255
+                },
+                "showResourceIdentityKey": {
+                  "type": "boolean"
+                },
+                "filterTeleport": {
+                  "type": "boolean"
+                },
+                "disableAutoDrawer": {
+                  "type": "boolean"
+                },
+                "hostManagedChrome": {
+                  "type": "boolean"
+                }
+              },
+              "additionalProperties": false,
+              "required": [
+                "metadata"
+              ]
+            }
+          },
+          "required": [
+            "id",
+            "inputs"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "key",
+        "definition"
+      ],
+      "additionalProperties": false
+    },
+    "filterWidget": {
+      "type": "object",
+      "properties": {
+        "key": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}(?![\\s\\S])",
+          "minLength": 36,
+          "maxLength": 36
+        },
+        "definition": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "const": "praxis-filter"
+            },
+            "inputs": {
+              "type": "object",
+              "properties": {
+                "presentation": {
+                  "type": "object"
+                },
+                "resourcePath": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "maxLength": 1024
+                },
+                "endpointKey": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "maxLength": 255
+                },
+                "apiUrlEntry": {
+                  "type": [
+                    "object",
+                    "null"
+                  ]
+                },
+                "fieldMetadata": {
+                  "type": "array"
+                },
+                "filterId": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "maxLength": 255
+                },
+                "formId": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "maxLength": 255
+                },
+                "componentInstanceId": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "maxLength": 255
+                },
+                "alwaysVisibleFields": {
+                  "type": "array"
+                },
+                "selectedFieldIds": {
+                  "type": "array"
+                },
+                "value": {
+                  "type": [
+                    "object",
+                    "null"
+                  ]
+                },
+                "persistenceKey": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "maxLength": 255
+                },
+                "disablePersistence": {
+                  "type": "boolean"
+                },
+                "changeDebounceMs": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "tags": {
+                  "type": "array"
+                },
+                "allowSaveTags": {
+                  "type": "boolean"
+                },
+                "placeBooleansInActions": {
+                  "type": "boolean"
+                },
+                "advancedOpenMode": {
+                  "enum": [
+                    "dialog",
+                    "drawer",
+                    "inline"
+                  ]
+                },
+                "showFilterSettings": {
+                  "type": "boolean"
+                },
+                "showAdvancedButton": {
+                  "type": "boolean"
+                },
+                "showAddButton": {
+                  "type": "boolean"
+                },
+                "showClearButton": {
+                  "type": "boolean"
+                },
+                "showSearchButton": {
+                  "type": "boolean"
+                }
+              },
+              "additionalProperties": false,
+              "anyOf": [
+                {
+                  "required": [
+                    "presentation"
+                  ]
+                },
+                {
+                  "required": [
+                    "fieldMetadata"
+                  ]
+                },
+                {
+                  "required": [
+                    "resourcePath"
+                  ],
+                  "properties": {
+                    "resourcePath": {
+                      "type": "string",
+                      "minLength": 1,
+                      "pattern": "^[\\s\\S]*\\S[\\s\\S]*$"
+                    }
+                  }
+                }
+              ]
+            }
+          },
+          "required": [
+            "id",
+            "inputs"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "key",
+        "definition"
+      ],
+      "additionalProperties": false
+    },
+    "analyticsPresentationWidget": {
+      "type": "object",
+      "properties": {
+        "key": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}(?![\\s\\S])",
+          "minLength": 36,
+          "maxLength": 36
+        },
+        "definition": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "const": "praxis-analytics-presentation"
+            },
+            "inputs": {
+              "type": "object",
+              "properties": {
+                "analytics": {
+                  "type": "object"
+                },
+                "projectionId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 255,
+                  "pattern": "^(?![\\s\\S]*[\\u0000-\\u001f\\u007f\\u2028\\u2029])[^\\u0009-\\u000d\\u0020\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000\\ufeff](?:[\\s\\S]*[^\\u0009-\\u000d\\u0020\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000\\ufeff])?(?![\\s\\S])"
+                },
+                "availableFamilies": {
+                  "type": "array",
+                  "items": {
+                    "enum": [
+                      "chart",
+                      "analytic-table",
+                      "kpi"
+                    ]
+                  }
+                },
+                "preferredFamily": {
+                  "enum": [
+                    "chart",
+                    "analytic-table",
+                    "kpi",
+                    null
+                  ]
+                },
+                "queryContext": {
+                  "type": [
+                    "object",
+                    "null"
+                  ]
+                },
+                "title": {
+                  "type": [
+                    "string",
+                    "object",
+                    "null"
+                  ]
+                },
+                "subtitle": {
+                  "type": [
+                    "string",
+                    "object",
+                    "null"
+                  ]
+                }
+              },
+              "additionalProperties": false,
+              "required": [
+                "analytics"
+              ]
+            }
+          },
+          "required": [
+            "id",
+            "inputs"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "key",
+        "definition"
+      ],
+      "additionalProperties": false
+    },
+    "filesUploadWidget": {
+      "type": "object",
+      "properties": {
+        "key": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}(?![\\s\\S])",
+          "minLength": 36,
+          "maxLength": 36
+        },
+        "definition": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "const": "praxis-files-upload"
+            },
+            "inputs": {
+              "type": "object",
+              "properties": {
+                "config": {
+                  "type": "object"
+                },
+                "filesUploadId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 255,
+                  "pattern": "^(?![\\s\\S]*[\\u0000-\\u001f\\u007f\\u2028\\u2029])[^\\u0009-\\u000d\\u0020\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000\\ufeff](?:[\\s\\S]*[^\\u0009-\\u000d\\u0020\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000\\ufeff])?(?![\\s\\S])"
+                },
+                "componentInstanceId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 255,
+                  "pattern": "^(?![\\s\\S]*[\\u0000-\\u001f\\u007f\\u2028\\u2029])[^\\u0009-\\u000d\\u0020\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000\\ufeff](?:[\\s\\S]*[^\\u0009-\\u000d\\u0020\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000\\ufeff])?(?![\\s\\S])"
+                },
+                "baseUrl": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 1024,
+                  "pattern": "^(?![\\s\\S]*[\\u0000-\\u001f\\u007f\\u2028\\u2029])[^\\u0009-\\u000d\\u0020\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000\\ufeff](?:[\\s\\S]*[^\\u0009-\\u000d\\u0020\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000\\ufeff])?(?![\\s\\S])"
+                },
+                "displayMode": {
+                  "enum": [
+                    "full",
+                    "compact"
+                  ]
+                },
+                "context": {
+                  "type": [
+                    "object",
+                    "null"
+                  ]
+                }
+              },
+              "additionalProperties": false,
+              "required": [
+                "config"
+              ]
+            }
+          },
+          "required": [
+            "id",
+            "inputs"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "key",
+        "definition"
+      ],
+      "additionalProperties": false
+    },
+    "relatedResourceOutletWidget": {
+      "type": "object",
+      "properties": {
+        "key": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}(?![\\s\\S])",
+          "minLength": 36,
+          "maxLength": 36
+        },
+        "definition": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "const": "praxis-related-resource-outlet"
+            },
+            "inputs": {
+              "type": "object",
+              "properties": {
+                "surfaceId": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "maxLength": 255
+                },
+                "surface": {
+                  "type": [
+                    "object",
+                    "null"
+                  ]
+                },
+                "parentRecord": {
+                  "type": [
+                    "object",
+                    "null"
+                  ]
+                },
+                "parentResourceId": {
+                  "type": [
+                    "string",
+                    "integer",
+                    "number",
+                    "null"
+                  ]
+                },
+                "parentIdentity": {
+                  "type": [
+                    "object",
+                    "null"
+                  ]
+                },
+                "parentResourcePath": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "maxLength": 1024
+                },
+                "apiEndpointKey": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "maxLength": 255
+                },
+                "apiUrlEntry": {
+                  "type": [
+                    "object",
+                    "null"
+                  ]
+                },
+                "presentation": {
+                  "enum": [
+                    "drawer",
+                    "modal",
+                    "inline",
+                    "route"
+                  ]
+                },
+                "title": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "maxLength": 255
+                },
+                "subtitle": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "maxLength": 1024
+                },
+                "icon": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "maxLength": 80
+                },
+                "queryContext": {
+                  "type": [
+                    "object",
+                    "null"
+                  ]
+                },
+                "tableId": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "maxLength": 255
+                },
+                "tableConfig": {
+                  "type": [
+                    "object",
+                    "null"
+                  ]
+                },
+                "emptyState": {
+                  "type": [
+                    "object",
+                    "null"
+                  ]
+                },
+                "mode": {
+                  "enum": [
+                    "inline",
+                    "open-action"
+                  ]
+                },
+                "compact": {
+                  "type": "boolean"
+                },
+                "strictValidation": {
+                  "type": "boolean"
+                },
+                "authoringCapability": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "maxLength": 255
+                },
+                "ownerWidgetKey": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "maxLength": 255
+                }
+              },
+              "additionalProperties": false,
+              "anyOf": [
+                {
+                  "required": [
+                    "surfaceId"
+                  ],
+                  "properties": {
+                    "surfaceId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "pattern": "^[\\s\\S]*\\S[\\s\\S]*$"
+                    }
+                  }
+                },
+                {
+                  "required": [
+                    "surface"
+                  ],
+                  "properties": {
+                    "surface": {
+                      "type": "object"
+                    }
+                  }
+                },
+                {
+                  "required": [
+                    "tableConfig"
+                  ],
+                  "properties": {
+                    "tableConfig": {
+                      "type": "object"
+                    }
+                  }
+                },
+                {
+                  "required": [
+                    "parentResourcePath"
+                  ],
+                  "properties": {
+                    "parentResourcePath": {
+                      "type": "string",
+                      "minLength": 1,
+                      "pattern": "^[\\s\\S]*\\S[\\s\\S]*$"
+                    }
+                  }
+                }
+              ]
+            }
+          },
+          "required": [
+            "id",
+            "inputs"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "key",
+        "definition"
+      ],
+      "additionalProperties": false
+    },
+    "cronBuilderWidget": {
+      "type": "object",
+      "properties": {
+        "key": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}(?![\\s\\S])",
+          "minLength": 36,
+          "maxLength": 36
+        },
+        "definition": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "const": "pdx-cron-builder"
+            },
+            "inputs": {
+              "type": "object",
+              "properties": {
+                "metadata": {
+                  "type": "object"
+                },
+                "label": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 255,
+                  "pattern": "^(?![\\s\\S]*[\\u0000-\\u001f\\u007f\\u2028\\u2029])[^\\u0009-\\u000d\\u0020\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000\\ufeff](?:[\\s\\S]*[^\\u0009-\\u000d\\u0020\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000\\ufeff])?(?![\\s\\S])"
+                },
+                "hint": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 1024,
+                  "pattern": "^(?![\\s\\S]*[\\u0000-\\u001f\\u007f\\u2028\\u2029])[^\\u0009-\\u000d\\u0020\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000\\ufeff](?:[\\s\\S]*[^\\u0009-\\u000d\\u0020\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000\\ufeff])?(?![\\s\\S])"
+                },
+                "presets": {
+                  "type": "array"
+                },
+                "enableSeconds": {
+                  "type": "boolean"
+                }
+              },
+              "additionalProperties": false,
+              "anyOf": [
+                {
+                  "required": [
+                    "metadata"
+                  ]
+                },
+                {
+                  "required": [
+                    "presets"
+                  ]
+                }
+              ]
+            }
+          },
+          "required": [
+            "id",
+            "inputs"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "key",
+        "definition"
+      ],
+      "additionalProperties": false
+    },
+    "manualFormWidget": {
+      "type": "object",
+      "properties": {
+        "key": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}(?![\\s\\S])",
+          "minLength": 36,
+          "maxLength": 36
+        },
+        "definition": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "const": "praxis-manual-form"
+            },
+            "inputs": {
+              "type": "object",
+              "properties": {
+                "formId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 255,
+                  "pattern": "^(?![\\s\\S]*[\\u0000-\\u001f\\u007f\\u2028\\u2029])[^\\u0009-\\u000d\\u0020\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000\\ufeff](?:[\\s\\S]*[^\\u0009-\\u000d\\u0020\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000\\ufeff])?(?![\\s\\S])"
+                },
+                "formTitle": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 255,
+                  "pattern": "^(?![\\s\\S]*[\\u0000-\\u001f\\u007f\\u2028\\u2029])[^\\u0009-\\u000d\\u0020\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000\\ufeff](?:[\\s\\S]*[^\\u0009-\\u000d\\u0020\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000\\ufeff])?(?![\\s\\S])"
+                },
+                "formDescription": {
+                  "type": "string",
+                  "maxLength": 2000
+                },
+                "showHeader": {
+                  "type": "boolean"
+                },
+                "showActions": {
+                  "type": "boolean"
+                },
+                "enableAutoSave": {
+                  "type": "boolean"
+                },
+                "autoSaveDebounceMs": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "showAiAssistant": {
+                  "type": "boolean"
+                },
+                "usePathNames": {
+                  "type": "boolean"
+                },
+                "persistenceOptions": {
+                  "type": "object"
+                }
+              },
+              "additionalProperties": false,
+              "anyOf": [
+                {
+                  "required": [
+                    "formId"
+                  ]
+                },
+                {
+                  "required": [
+                    "persistenceOptions"
+                  ]
+                }
+              ]
+            }
+          },
+          "required": [
+            "id",
+            "inputs"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "key",
+        "definition"
+      ],
+      "additionalProperties": false
+    },
+    "editorialFormRuntimeWidget": {
+      "type": "object",
+      "properties": {
+        "key": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}(?![\\s\\S])",
+          "minLength": 36,
+          "maxLength": 36
+        },
+        "definition": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "const": "praxis-editorial-form-runtime"
+            },
+            "inputs": {
+              "type": "object",
+              "properties": {
+                "solution": {
+                  "type": "object"
+                },
+                "instance": {
+                  "type": "object"
+                },
+                "runtimeContext": {
+                  "type": [
+                    "object",
+                    "null"
+                  ]
+                },
+                "hostConfig": {
+                  "type": [
+                    "object",
+                    "null"
+                  ]
+                }
+              },
+              "additionalProperties": false,
+              "anyOf": [
+                {
+                  "required": [
+                    "solution"
+                  ]
+                },
+                {
+                  "required": [
+                    "instance"
+                  ]
+                }
+              ]
+            }
+          },
+          "required": [
+            "id",
+            "inputs"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "key",
+        "definition"
+      ],
+      "additionalProperties": false
+    },
+    "visualBuilderWidget": {
+      "type": "object",
+      "properties": {
+        "key": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}(?![\\s\\S])",
+          "minLength": 36,
+          "maxLength": 36
+        },
+        "definition": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "const": "praxis-visual-builder"
+            },
+            "inputs": {
+              "type": "object",
+              "properties": {
+                "config": {
+                  "type": [
+                    "object",
+                    "null"
+                  ]
+                },
+                "initialRules": {
+                  "type": [
+                    "object",
+                    "array"
+                  ]
+                }
+              },
+              "additionalProperties": false,
+              "anyOf": [
+                {
+                  "required": [
+                    "config"
+                  ],
+                  "properties": {
+                    "config": {
+                      "type": "object"
+                    }
+                  }
+                },
+                {
+                  "required": [
+                    "initialRules"
+                  ]
+                }
+              ]
+            }
+          },
+          "required": [
+            "id",
+            "inputs"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "key",
+        "definition"
+      ],
+      "additionalProperties": false
+    },
+    "tableRuleBuilderWidget": {
+      "type": "object",
+      "properties": {
+        "key": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}(?![\\s\\S])",
+          "minLength": 36,
+          "maxLength": 36
+        },
+        "definition": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "const": "praxis-table-rule-builder"
+            },
+            "inputs": {
+              "type": "object",
+              "properties": {
+                "scope": {
+                  "enum": [
+                    "cell",
+                    "row",
+                    "column",
+                    "table"
+                  ]
+                },
+                "value": {
+                  "type": "object"
+                },
+                "labels": {
+                  "type": "object"
+                }
+              },
+              "additionalProperties": false,
+              "anyOf": [
+                {
+                  "required": [
+                    "scope"
+                  ]
+                },
+                {
+                  "required": [
+                    "value"
+                  ]
+                }
+              ]
+            }
+          },
+          "required": [
+            "id",
+            "inputs"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "key",
+        "definition"
+      ],
+      "additionalProperties": false
+    },
+    "microVisualizationWidget": {
+      "type": "object",
+      "properties": {
+        "key": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}(?![\\s\\S])",
+          "minLength": 36,
+          "maxLength": 36
+        },
+        "definition": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "const": "praxis-micro-visualization"
+            },
+            "inputs": {
+              "type": "object",
+              "properties": {
+                "visualization": {
+                  "type": "object"
+                },
+                "fallbackText": {
+                  "type": "string",
+                  "maxLength": 255
+                },
+                "interactiveContainer": {
+                  "type": "boolean"
+                }
+              },
+              "additionalProperties": false,
+              "required": [
+                "visualization"
+              ]
+            }
+          },
+          "required": [
+            "id",
+            "inputs"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "key",
+        "definition"
+      ],
+      "additionalProperties": false
+    },
+    "heroBannerWidget": {
+      "type": "object",
+      "properties": {
+        "key": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}(?![\\s\\S])",
+          "minLength": 36,
+          "maxLength": 36
+        },
+        "definition": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "const": "widget:hero-banner"
+            },
+            "inputs": {
+              "type": "object",
+              "properties": {
+                "instanceId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 255,
+                  "pattern": "^(?![\\s\\S]*[\\u0000-\\u001f\\u007f\\u2028\\u2029])[^\\u0009-\\u000d\\u0020\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000\\ufeff](?:[\\s\\S]*[^\\u0009-\\u000d\\u0020\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000\\ufeff])?(?![\\s\\S])"
+                },
+                "analyticsId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 255,
+                  "pattern": "^(?![\\s\\S]*[\\u0000-\\u001f\\u007f\\u2028\\u2029])[^\\u0009-\\u000d\\u0020\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000\\ufeff](?:[\\s\\S]*[^\\u0009-\\u000d\\u0020\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000\\ufeff])?(?![\\s\\S])"
+                },
+                "ariaLabel": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 255,
+                  "pattern": "^(?![\\s\\S]*[\\u0000-\\u001f\\u007f\\u2028\\u2029])[^\\u0009-\\u000d\\u0020\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000\\ufeff](?:[\\s\\S]*[^\\u0009-\\u000d\\u0020\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000\\ufeff])?(?![\\s\\S])"
+                },
+                "brandText": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 255,
+                  "pattern": "^(?![\\s\\S]*[\\u0000-\\u001f\\u007f\\u2028\\u2029])[^\\u0009-\\u000d\\u0020\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000\\ufeff](?:[\\s\\S]*[^\\u0009-\\u000d\\u0020\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000\\ufeff])?(?![\\s\\S])"
+                },
+                "title": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 255,
+                  "pattern": "^(?![\\s\\S]*[\\u0000-\\u001f\\u007f\\u2028\\u2029])[^\\u0009-\\u000d\\u0020\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000\\ufeff](?:[\\s\\S]*[^\\u0009-\\u000d\\u0020\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000\\ufeff])?(?![\\s\\S])"
+                },
+                "titleAccent": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 255,
+                  "pattern": "^(?![\\s\\S]*[\\u0000-\\u001f\\u007f\\u2028\\u2029])[^\\u0009-\\u000d\\u0020\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000\\ufeff](?:[\\s\\S]*[^\\u0009-\\u000d\\u0020\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000\\ufeff])?(?![\\s\\S])"
+                },
+                "subtitle": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 512,
+                  "pattern": "^(?![\\s\\S]*[\\u0000-\\u001f\\u007f\\u2028\\u2029])[^\\u0009-\\u000d\\u0020\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000\\ufeff](?:[\\s\\S]*[^\\u0009-\\u000d\\u0020\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000\\ufeff])?(?![\\s\\S])"
+                },
+                "description": {
+                  "type": "string",
+                  "maxLength": 2000
+                },
+                "imageUrl": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 1024,
+                  "pattern": "^(?![\\s\\S]*[\\u0000-\\u001f\\u007f\\u2028\\u2029])[^\\u0009-\\u000d\\u0020\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000\\ufeff](?:[\\s\\S]*[^\\u0009-\\u000d\\u0020\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000\\ufeff])?(?![\\s\\S])"
+                },
+                "imageAlt": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 255,
+                  "pattern": "^(?![\\s\\S]*[\\u0000-\\u001f\\u007f\\u2028\\u2029])[^\\u0009-\\u000d\\u0020\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000\\ufeff](?:[\\s\\S]*[^\\u0009-\\u000d\\u0020\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000\\ufeff])?(?![\\s\\S])"
+                },
+                "badges": {
+                  "type": "array"
+                },
+                "metaItems": {
+                  "type": "array"
+                },
+                "visualSummary": {
+                  "type": "object"
+                },
+                "variant": {
+                  "enum": [
+                    "default",
+                    "event",
+                    "institutional"
+                  ]
+                },
+                "appearance": {
+                  "enum": [
+                    "card",
+                    "flat"
+                  ]
+                }
+              },
+              "additionalProperties": false,
+              "anyOf": [
+                {
+                  "required": [
+                    "title"
+                  ]
+                },
+                {
+                  "required": [
+                    "brandText"
+                  ]
+                },
+                {
+                  "required": [
+                    "visualSummary"
+                  ]
+                }
+              ]
+            }
+          },
+          "required": [
+            "id",
+            "inputs"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "key",
+        "definition"
+      ],
+      "additionalProperties": false
+    },
+    "footerLinksWidget": {
+      "type": "object",
+      "properties": {
+        "key": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}(?![\\s\\S])",
+          "minLength": 36,
+          "maxLength": 36
+        },
+        "definition": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "const": "widget:footer-links"
+            },
+            "inputs": {
+              "type": "object",
+              "properties": {
+                "instanceId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 255,
+                  "pattern": "^(?![\\s\\S]*[\\u0000-\\u001f\\u007f\\u2028\\u2029])[^\\u0009-\\u000d\\u0020\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000\\ufeff](?:[\\s\\S]*[^\\u0009-\\u000d\\u0020\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000\\ufeff])?(?![\\s\\S])"
+                },
+                "analyticsId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 255,
+                  "pattern": "^(?![\\s\\S]*[\\u0000-\\u001f\\u007f\\u2028\\u2029])[^\\u0009-\\u000d\\u0020\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000\\ufeff](?:[\\s\\S]*[^\\u0009-\\u000d\\u0020\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000\\ufeff])?(?![\\s\\S])"
+                },
+                "ariaLabel": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 255,
+                  "pattern": "^(?![\\s\\S]*[\\u0000-\\u001f\\u007f\\u2028\\u2029])[^\\u0009-\\u000d\\u0020\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000\\ufeff](?:[\\s\\S]*[^\\u0009-\\u000d\\u0020\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000\\ufeff])?(?![\\s\\S])"
+                },
+                "brandText": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 255,
+                  "pattern": "^(?![\\s\\S]*[\\u0000-\\u001f\\u007f\\u2028\\u2029])[^\\u0009-\\u000d\\u0020\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000\\ufeff](?:[\\s\\S]*[^\\u0009-\\u000d\\u0020\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000\\ufeff])?(?![\\s\\S])"
+                },
+                "secondaryText": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 512,
+                  "pattern": "^(?![\\s\\S]*[\\u0000-\\u001f\\u007f\\u2028\\u2029])[^\\u0009-\\u000d\\u0020\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000\\ufeff](?:[\\s\\S]*[^\\u0009-\\u000d\\u0020\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000\\ufeff])?(?![\\s\\S])"
+                },
+                "links": {
+                  "type": "array"
+                },
+                "layout": {
+                  "enum": [
+                    "inline",
+                    "stacked"
+                  ]
+                },
+                "appearance": {
+                  "enum": [
+                    "divider",
+                    "plain",
+                    "surface"
+                  ]
+                }
+              },
+              "additionalProperties": false,
+              "anyOf": [
+                {
+                  "required": [
+                    "links"
+                  ]
+                },
+                {
+                  "required": [
+                    "brandText"
+                  ]
+                },
+                {
+                  "required": [
+                    "secondaryText"
+                  ]
+                }
+              ]
+            }
+          },
+          "required": [
+            "id",
+            "inputs"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "key",
+        "definition"
+      ],
+      "additionalProperties": false
+    },
+    "legalNoticeWidget": {
+      "type": "object",
+      "properties": {
+        "key": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}(?![\\s\\S])",
+          "minLength": 36,
+          "maxLength": 36
+        },
+        "definition": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "const": "widget:legal-notice"
+            },
+            "inputs": {
+              "type": "object",
+              "properties": {
+                "instanceId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 255,
+                  "pattern": "^(?![\\s\\S]*[\\u0000-\\u001f\\u007f\\u2028\\u2029])[^\\u0009-\\u000d\\u0020\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000\\ufeff](?:[\\s\\S]*[^\\u0009-\\u000d\\u0020\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000\\ufeff])?(?![\\s\\S])"
+                },
+                "analyticsId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 255,
+                  "pattern": "^(?![\\s\\S]*[\\u0000-\\u001f\\u007f\\u2028\\u2029])[^\\u0009-\\u000d\\u0020\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000\\ufeff](?:[\\s\\S]*[^\\u0009-\\u000d\\u0020\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000\\ufeff])?(?![\\s\\S])"
+                },
+                "ariaLabel": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 255,
+                  "pattern": "^(?![\\s\\S]*[\\u0000-\\u001f\\u007f\\u2028\\u2029])[^\\u0009-\\u000d\\u0020\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000\\ufeff](?:[\\s\\S]*[^\\u0009-\\u000d\\u0020\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000\\ufeff])?(?![\\s\\S])"
+                },
+                "title": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 255,
+                  "pattern": "^(?![\\s\\S]*[\\u0000-\\u001f\\u007f\\u2028\\u2029])[^\\u0009-\\u000d\\u0020\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000\\ufeff](?:[\\s\\S]*[^\\u0009-\\u000d\\u0020\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000\\ufeff])?(?![\\s\\S])"
+                },
+                "subtitle": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 512,
+                  "pattern": "^(?![\\s\\S]*[\\u0000-\\u001f\\u007f\\u2028\\u2029])[^\\u0009-\\u000d\\u0020\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000\\ufeff](?:[\\s\\S]*[^\\u0009-\\u000d\\u0020\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000\\ufeff])?(?![\\s\\S])"
+                },
+                "contentFormat": {
+                  "enum": [
+                    "plain",
+                    "markdown"
+                  ]
+                },
+                "content": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 8000
+                },
+                "severity": {
+                  "enum": [
+                    "info",
+                    "warning",
+                    "muted"
+                  ]
+                },
+                "appearance": {
+                  "enum": [
+                    "card",
+                    "plain"
+                  ]
+                },
+                "links": {
+                  "type": "array"
+                }
+              },
+              "additionalProperties": false,
+              "anyOf": [
+                {
+                  "required": [
+                    "content"
+                  ]
+                },
+                {
+                  "required": [
+                    "title"
+                  ]
+                }
+              ]
+            }
+          },
+          "required": [
+            "id",
+            "inputs"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "key",
+        "definition"
+      ],
+      "additionalProperties": false
+    },
+    "richTextBlockWidget": {
+      "type": "object",
+      "properties": {
+        "key": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}(?![\\s\\S])",
+          "minLength": 36,
+          "maxLength": 36
+        },
+        "definition": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "const": "widget:rich-text-block"
+            },
+            "inputs": {
+              "type": "object",
+              "properties": {
+                "instanceId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 255,
+                  "pattern": "^(?![\\s\\S]*[\\u0000-\\u001f\\u007f\\u2028\\u2029])[^\\u0009-\\u000d\\u0020\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000\\ufeff](?:[\\s\\S]*[^\\u0009-\\u000d\\u0020\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000\\ufeff])?(?![\\s\\S])"
+                },
+                "analyticsId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 255,
+                  "pattern": "^(?![\\s\\S]*[\\u0000-\\u001f\\u007f\\u2028\\u2029])[^\\u0009-\\u000d\\u0020\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000\\ufeff](?:[\\s\\S]*[^\\u0009-\\u000d\\u0020\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000\\ufeff])?(?![\\s\\S])"
+                },
+                "ariaLabel": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 255,
+                  "pattern": "^(?![\\s\\S]*[\\u0000-\\u001f\\u007f\\u2028\\u2029])[^\\u0009-\\u000d\\u0020\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000\\ufeff](?:[\\s\\S]*[^\\u0009-\\u000d\\u0020\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000\\ufeff])?(?![\\s\\S])"
+                },
+                "title": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 255,
+                  "pattern": "^(?![\\s\\S]*[\\u0000-\\u001f\\u007f\\u2028\\u2029])[^\\u0009-\\u000d\\u0020\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000\\ufeff](?:[\\s\\S]*[^\\u0009-\\u000d\\u0020\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000\\ufeff])?(?![\\s\\S])"
+                },
+                "subtitle": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 512,
+                  "pattern": "^(?![\\s\\S]*[\\u0000-\\u001f\\u007f\\u2028\\u2029])[^\\u0009-\\u000d\\u0020\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000\\ufeff](?:[\\s\\S]*[^\\u0009-\\u000d\\u0020\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000\\ufeff])?(?![\\s\\S])"
+                },
+                "icon": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 80,
+                  "pattern": "^[a-z][a-z0-9_]*(?![\\s\\S])"
+                },
+                "variant": {
+                  "enum": [
+                    "default",
+                    "emphasis",
+                    "subtle"
+                  ]
+                },
+                "appearance": {
+                  "enum": [
+                    "card",
+                    "plain"
+                  ]
+                },
+                "contentFormat": {
+                  "enum": [
+                    "plain",
+                    "markdown"
+                  ]
+                },
+                "content": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 8000
+                }
+              },
+              "additionalProperties": false,
+              "anyOf": [
+                {
+                  "required": [
+                    "content"
+                  ]
+                },
+                {
+                  "required": [
+                    "title"
+                  ]
+                }
+              ]
+            }
+          },
+          "required": [
+            "id",
+            "inputs"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "key",
+        "definition"
+      ],
+      "additionalProperties": false
+    },
+    "userContextSummaryWidget": {
+      "type": "object",
+      "properties": {
+        "key": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}(?![\\s\\S])",
+          "minLength": 36,
+          "maxLength": 36
+        },
+        "definition": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "const": "form:user-context-summary"
+            },
+            "inputs": {
+              "type": "object",
+              "properties": {
+                "instanceId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 255,
+                  "pattern": "^(?![\\s\\S]*[\\u0000-\\u001f\\u007f\\u2028\\u2029])[^\\u0009-\\u000d\\u0020\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000\\ufeff](?:[\\s\\S]*[^\\u0009-\\u000d\\u0020\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000\\ufeff])?(?![\\s\\S])"
+                },
+                "analyticsId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 255,
+                  "pattern": "^(?![\\s\\S]*[\\u0000-\\u001f\\u007f\\u2028\\u2029])[^\\u0009-\\u000d\\u0020\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000\\ufeff](?:[\\s\\S]*[^\\u0009-\\u000d\\u0020\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000\\ufeff])?(?![\\s\\S])"
+                },
+                "ariaLabel": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 255,
+                  "pattern": "^(?![\\s\\S]*[\\u0000-\\u001f\\u007f\\u2028\\u2029])[^\\u0009-\\u000d\\u0020\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000\\ufeff](?:[\\s\\S]*[^\\u0009-\\u000d\\u0020\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000\\ufeff])?(?![\\s\\S])"
+                },
+                "title": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 255,
+                  "pattern": "^(?![\\s\\S]*[\\u0000-\\u001f\\u007f\\u2028\\u2029])[^\\u0009-\\u000d\\u0020\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000\\ufeff](?:[\\s\\S]*[^\\u0009-\\u000d\\u0020\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000\\ufeff])?(?![\\s\\S])"
+                },
+                "subtitle": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 512,
+                  "pattern": "^(?![\\s\\S]*[\\u0000-\\u001f\\u007f\\u2028\\u2029])[^\\u0009-\\u000d\\u0020\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000\\ufeff](?:[\\s\\S]*[^\\u0009-\\u000d\\u0020\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000\\ufeff])?(?![\\s\\S])"
+                },
+                "appearance": {
+                  "enum": [
+                    "card",
+                    "plain"
+                  ]
+                },
+                "source": {
+                  "enum": [
+                    "context",
+                    "static"
+                  ]
+                },
+                "context": {
+                  "type": [
+                    "object",
+                    "null"
+                  ]
+                },
+                "fields": {
+                  "type": "array"
+                },
+                "actionId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 255,
+                  "pattern": "^(?![\\s\\S]*[\\u0000-\\u001f\\u007f\\u2028\\u2029])[^\\u0009-\\u000d\\u0020\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000\\ufeff](?:[\\s\\S]*[^\\u0009-\\u000d\\u0020\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000\\ufeff])?(?![\\s\\S])"
+                },
+                "actionLabel": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 255,
+                  "pattern": "^(?![\\s\\S]*[\\u0000-\\u001f\\u007f\\u2028\\u2029])[^\\u0009-\\u000d\\u0020\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000\\ufeff](?:[\\s\\S]*[^\\u0009-\\u000d\\u0020\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000\\ufeff])?(?![\\s\\S])"
+                }
+              },
+              "additionalProperties": false,
+              "anyOf": [
+                {
+                  "required": [
+                    "fields"
+                  ]
+                },
+                {
+                  "required": [
+                    "title"
+                  ]
+                }
+              ]
+            }
+          },
+          "required": [
+            "id",
+            "inputs"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "key",
+        "definition"
+      ],
+      "additionalProperties": false
+    },
     "inputEndpoint": {
       "type": "object",
       "properties": {
@@ -1009,6 +2575,54 @@
               },
               {
                 "$ref": "#/$defs/progressionLadderWidget"
+              },
+              {
+                "$ref": "#/$defs/crudWidget"
+              },
+              {
+                "$ref": "#/$defs/filterWidget"
+              },
+              {
+                "$ref": "#/$defs/analyticsPresentationWidget"
+              },
+              {
+                "$ref": "#/$defs/filesUploadWidget"
+              },
+              {
+                "$ref": "#/$defs/relatedResourceOutletWidget"
+              },
+              {
+                "$ref": "#/$defs/cronBuilderWidget"
+              },
+              {
+                "$ref": "#/$defs/manualFormWidget"
+              },
+              {
+                "$ref": "#/$defs/editorialFormRuntimeWidget"
+              },
+              {
+                "$ref": "#/$defs/visualBuilderWidget"
+              },
+              {
+                "$ref": "#/$defs/tableRuleBuilderWidget"
+              },
+              {
+                "$ref": "#/$defs/microVisualizationWidget"
+              },
+              {
+                "$ref": "#/$defs/heroBannerWidget"
+              },
+              {
+                "$ref": "#/$defs/footerLinksWidget"
+              },
+              {
+                "$ref": "#/$defs/legalNoticeWidget"
+              },
+              {
+                "$ref": "#/$defs/richTextBlockWidget"
+              },
+              {
+                "$ref": "#/$defs/userContextSummaryWidget"
               }
             ]
           }

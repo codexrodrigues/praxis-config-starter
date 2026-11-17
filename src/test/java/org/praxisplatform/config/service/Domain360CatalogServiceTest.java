@@ -271,14 +271,14 @@ class Domain360CatalogServiceTest {
                                     "optionSource": {
                                       "key": "setor",
                                       "type": "RESOURCE_ENTITY",
-                                      "resourcePath": "/api/ergon/setores",
+                                      "resourcePath": "/api/workforce/setores",
                                       "entityKey": "setor",
                                       "referencedResourceKey": "administracao-pessoal.setores"
                                     }
                                   }
                                 }
                                 """),
-                        item("node", "administracao-pessoal.radar-remuneracao-movimentacao.policy.ruleset.ergon-radar-validate", "administracao-pessoal", "policy_hint", "{\"nodeKey\":\"administracao-pessoal.radar-remuneracao-movimentacao.policy.ruleset.ergon-radar-validate\",\"nodeType\":\"policy_hint\",\"source\":\"rule-set\",\"label\":\"RuleSet ergon.radar.validate\",\"metadata\":{\"policyKind\":\"domain_rule_set\",\"ruleSetKey\":\"ergon.radar.validate\",\"operationKey\":\"VALIDATE\",\"availableRoots\":[\"draft\",\"vinculo\",\"neighborhood\",\"context\"]}}"),
+                        item("node", "administracao-pessoal.radar-remuneracao-movimentacao.policy.ruleset.workforce-radar-validate", "administracao-pessoal", "policy_hint", "{\"nodeKey\":\"administracao-pessoal.radar-remuneracao-movimentacao.policy.ruleset.workforce-radar-validate\",\"nodeType\":\"policy_hint\",\"source\":\"rule-set\",\"label\":\"RuleSet workforce.radar.validate\",\"metadata\":{\"policyKind\":\"domain_rule_set\",\"ruleSetKey\":\"workforce.radar.validate\",\"operationKey\":\"VALIDATE\",\"availableRoots\":[\"draft\",\"vinculo\",\"neighborhood\",\"context\"]}}"),
                         item("node", "administracao-pessoal.radar-remuneracao-movimentacao.fact.variacao-percentual", "administracao-pessoal", "fact", """
                                 {
                                   "nodeKey": "administracao-pessoal.radar-remuneracao-movimentacao.fact.variacao-percentual",
@@ -336,7 +336,7 @@ class Domain360CatalogServiceTest {
                 .contains("analytical-data-product", "dashboard-overview");
         assertThat(response.coverage().capabilityCount()).isEqualTo(1);
         assertThat(response.capabilities()).extracting("key")
-                .containsExactly("administracao-pessoal.radar-remuneracao-movimentacao.policy.ruleset.ergon-radar-validate");
+                .containsExactly("administracao-pessoal.radar-remuneracao-movimentacao.policy.ruleset.workforce-radar-validate");
     }
 
     private DomainCatalogItemResponse item(

@@ -75,6 +75,9 @@ public class UiLayoutResolutionExceptionHandler {
         ProblemDetail body = ProblemDetail.forStatusAndDetail(status, lifecycleDetail(failure.getCode()));
         body.setTitle("UI layout lifecycle request failed");
         body.setProperty("code", failure.getCode().name());
+        if (failure.getErrorCode() != null && !failure.getErrorCode().isBlank()) {
+            body.setProperty("errorCode", failure.getErrorCode());
+        }
         return ResponseEntity.status(status).cacheControl(CacheControl.noStore()).body(body);
     }
 

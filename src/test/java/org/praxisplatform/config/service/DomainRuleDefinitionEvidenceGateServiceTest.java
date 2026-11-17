@@ -42,7 +42,7 @@ class DomainRuleDefinitionEvidenceGateServiceTest {
         .id(workspaceId).promotedDefinitionId(definitionId).submittedTestRunId(runId).build();
     DomainRuleTestRun run = DomainRuleTestRun.builder()
         .id(runId).workspaceId(workspaceId).tenantId("tenant-a").environment("prod")
-        .baselineEvidence("{\"authorityType\":\"LEGACY_ORACLE\",\"artifactRef\":\"ergon:r013\",\"artifactDigest\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"observedAtUtc\":\"2026-08-15T12:00:00Z\",\"eligibility\":\"ELIGIBLE\"}")
+        .baselineEvidence("{\"authorityType\":\"LEGACY_ORACLE\",\"artifactRef\":\"workforce:r013\",\"artifactDigest\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"observedAtUtc\":\"2026-08-15T12:00:00Z\",\"eligibility\":\"ELIGIBLE\"}")
         .build();
     when(workspaces.findByTenantIdAndEnvironmentAndPromotedDefinitionId("tenant-a", "prod", definitionId))
         .thenReturn(List.of(workspace));

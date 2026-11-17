@@ -2780,16 +2780,16 @@ class DomainRuleServiceTest {
         UUID definitionId = UUID.randomUUID();
         DomainRuleDefinition definition = DomainRuleDefinition.builder()
                 .id(definitionId).tenantId("tenant-a").environment("dev")
-                .ruleKey("ergon.r013.rule.frequency").version(2).ruleType("policy_reference")
-                .status("approved").contextKey("ergon").resourceKey("ergon.frequency")
-                .serviceKey("ergon-migration")
+                .ruleKey("workforce.r013.rule.frequency").version(2).ruleType("policy_reference")
+                .status("approved").contextKey("workforce").resourceKey("workforce.frequency")
+                .serviceKey("workforce-migration")
                 .definition("{\"summary\":\"RN-013 frequency rule\"}")
                 .parameters("{}")
                 .governance("{\"testEvidencePolicy\":{\"stages\":{\"PUBLISH\":{\"baselineEligibility\":\"ELIGIBLE\"}}}}")
                 .build();
         when(definitionRepository.findById(definitionId)).thenReturn(Optional.of(definition));
         when(definitionRepository.findByTenantIdAndEnvironmentAndResourceKeyAndStatusIn(
-                "tenant-a", "dev", "ergon.frequency", List.of("approved", "active")))
+                "tenant-a", "dev", "workforce.frequency", List.of("approved", "active")))
                 .thenReturn(List.of());
         when(gate.blockers("PUBLISH", definition, principal("publisher"))).thenReturn(List.of(
                 new DomainRuleWorkspaceBlocker(

@@ -2412,7 +2412,7 @@ class DomainCatalogIngestionServiceTest {
 
         DomainCatalogRelease bundleRelease = DomainCatalogRelease.builder()
                 .id(UUID.fromString("f190c524-b67a-4cc0-b754-d652d7424e14"))
-                .releaseKey("praxis-service:ergon:hash")
+                .releaseKey("praxis-service:workforce:hash")
                 .schemaVersion("praxis.domain-catalog/v0.2")
                 .serviceKey("praxis-service")
                 .resourceKey(null)
@@ -2425,13 +2425,13 @@ class DomainCatalogIngestionServiceTest {
         DomainCatalogItem incomingMaterializesEdge = DomainCatalogItem.builder()
                 .release(bundleRelease)
                 .itemType("edge")
-                .itemKey("ergon.radar-ferias-prescricao.materializes.ergon.vinculos")
+                .itemKey("workforce.radar-ferias-prescricao.materializes.workforce.vinculos")
                 .edgeType("materializes")
                 .payload("""
                     {
-                      "edgeKey": "ergon.radar-ferias-prescricao.materializes.ergon.vinculos",
-                      "sourceNodeKey": "ergon.radar-ferias-prescricao",
-                      "targetNodeKey": "ergon.vinculos",
+                      "edgeKey": "workforce.radar-ferias-prescricao.materializes.workforce.vinculos",
+                      "sourceNodeKey": "workforce.radar-ferias-prescricao",
+                      "targetNodeKey": "workforce.vinculos",
                       "edgeType": "materializes"
                     }
                     """)
@@ -2439,19 +2439,19 @@ class DomainCatalogIngestionServiceTest {
         DomainCatalogItem unrelatedEdge = DomainCatalogItem.builder()
                 .release(bundleRelease)
                 .itemType("edge")
-                .itemKey("ergon.cargos.references.ergon.setores")
+                .itemKey("workforce.cargos.references.workforce.setores")
                 .edgeType("references")
                 .payload("""
                     {
-                      "edgeKey": "ergon.cargos.references.ergon.setores",
-                      "sourceNodeKey": "ergon.cargos",
-                      "targetNodeKey": "ergon.setores",
+                      "edgeKey": "workforce.cargos.references.workforce.setores",
+                      "sourceNodeKey": "workforce.cargos",
+                      "targetNodeKey": "workforce.setores",
                       "edgeType": "references"
                     }
                     """)
                 .build();
 
-        when(releaseRepository.findLatestSummaries(eq("praxis-service"), eq("ergon.vinculos"), eq("tenant-a"), eq("dev"), any(Pageable.class)))
+        when(releaseRepository.findLatestSummaries(eq("praxis-service"), eq("workforce.vinculos"), eq("tenant-a"), eq("dev"), any(Pageable.class)))
                 .thenReturn(List.of());
         when(releaseRepository.findLatestSummaries(eq("praxis-service"), eq(null), eq("tenant-a"), eq("dev"), any(Pageable.class)))
                 .thenReturn(releaseSummaries(bundleRelease));
@@ -2466,17 +2466,17 @@ class DomainCatalogIngestionServiceTest {
 
         var edges = service.relationshipsLatest(
                 "praxis-service",
-                "ergon.vinculos",
+                "workforce.vinculos",
                 "tenant-a",
                 "dev",
                 null,
-                "ergon.vinculos",
+                "workforce.vinculos",
                 "materializes",
                 null,
                 10);
 
         assertThat(edges).singleElement()
                 .satisfies(edge -> assertThat(edge.itemKey())
-                        .isEqualTo("ergon.radar-ferias-prescricao.materializes.ergon.vinculos"));
+                        .isEqualTo("workforce.radar-ferias-prescricao.materializes.workforce.vinculos"));
     }
 }

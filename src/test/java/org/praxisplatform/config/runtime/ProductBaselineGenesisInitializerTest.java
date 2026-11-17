@@ -310,7 +310,7 @@ class ProductBaselineGenesisInitializerTest {
                                 "corp.leaves.create",
                                 "customer.",
                                 List.of(r1),
-                                null,
+                                List.of(),
                                 false,
                                 Map.of()));
         String schemaJson =

@@ -16,7 +16,7 @@ import org.junit.jupiter.api.Test;
 class DomainRuleG1SharedTreeReconciliationTest {
     @Test void functionalActionsAreClosedPerProfileAndPreserveTheSecondaryMigration() throws Exception {
         int profiles=0;
-        for(String family:List.of("cargos-por-setor","setores-ergon"))
+        for(String family:List.of("cargos-por-setor","setores-workforce"))
             for(JsonNode operation:catalog(family).path("operations")) {
                 profiles++;
                 var scoped=JSON.createObjectNode();scoped.putArray("operations").add(operation);
@@ -77,7 +77,7 @@ class DomainRuleG1SharedTreeReconciliationTest {
 
     @Test void functionalOrganizationCannotForgeUnavailableHistoryOrIncompleteCollections() throws Exception {
         int profiles = 0;
-        for (String family : List.of("cargos-por-setor", "setores-ergon"))
+        for (String family : List.of("cargos-por-setor", "setores-workforce"))
             for (JsonNode operation : catalog(family).path("operations")) {
                 profiles++;
                 var scoped = JSON.createObjectNode(); scoped.putArray("operations").add(operation);

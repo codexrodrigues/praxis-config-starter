@@ -6,12 +6,16 @@ final class UiLayoutMetadataAdmissionFailure {
 
   static UiLayoutLifecycleException sanitized(Exception failure, String message) {
     UiLayoutLifecycleException.Code code = UiLayoutLifecycleException.Code.SOURCE_UNAVAILABLE;
+    String errorCode = null;
     if (failure instanceof UiLayoutLifecycleException declared && declared.getCode() != null) {
       code = switch (declared.getCode()) {
-        case DENIED, CONTEXT_STALE, SOURCE_UNAVAILABLE, VALIDATION_FAILED -> declared.getCode();
+        case DENIED, CONTEXT_STALE, SOURCE_UNAVAILABLE, VALIDATION_FAILED -> {
+          errorCode = declared.getErrorCode();
+          yield declared.getCode();
+        }
         default -> UiLayoutLifecycleException.Code.SOURCE_UNAVAILABLE;
       };
     }
-    return new UiLayoutLifecycleException(code, message);
+    return new UiLayoutLifecycleException(code, errorCode, message);
   }
 }

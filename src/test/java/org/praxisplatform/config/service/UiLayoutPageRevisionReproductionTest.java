@@ -112,7 +112,7 @@ class UiLayoutPageRevisionReproductionTest {
           "queryContext":null}}},
         {"key":"10000000-0000-4000-8000-000000000002","definition":{"id":"praxis-list","inputs":{
           "config":{"layout":"card","titleField":"nome"},
-          "resourcePath":"/api/ergon/processos-progressao"}}},
+          "resourcePath":"/api/workforce/processos-progressao"}}},
         {"key":"10000000-0000-4000-8000-000000000003","definition":{"id":"praxis-rich-content","inputs":{
           "document":{"version":1,"blocks":[{"type":"heading","text":"Resumo Executivo"}]},
           "presetId":"executive-banner"}}},
@@ -129,7 +129,7 @@ class UiLayoutPageRevisionReproductionTest {
           "multi":true}}},
         {"key":"10000000-0000-4000-8000-000000000007","definition":{"id":"praxis-organogram","inputs":{
           "config":{"cardPreset":"compact","height":420},
-          "resourcePath":"/api/ergon/unidades-organizacionais",
+          "resourcePath":"/api/workforce/unidades-organizacionais",
           "queryContext":null,
           "topology":"orthogonal-compact",
           "hierarchyType":0,
@@ -176,7 +176,7 @@ class UiLayoutPageRevisionReproductionTest {
       {"kind":"praxis.dynamic-page.editor","version":1,"config":{
       "definition":{"widgets":[
         {"key":"20000000-0000-4000-8000-000000000001","definition":{"id":"praxis-organogram","inputs":{
-          "resourcePath":"/api/ergon/unidades-organizacionais",
+          "resourcePath":"/api/workforce/unidades-organizacionais",
           "topology":"curved-hub"}}}
       ],"layout":{"orientation":"vertical","columns":12,"gap":"16px"}},
       "presentation":{"title":"Organograma Remoto","icon":"account_tree"},"navigation":[]}}
@@ -189,7 +189,7 @@ class UiLayoutPageRevisionReproductionTest {
     assertThrows(UiLayoutLifecycleException.class, () -> reproduce(dashboard, retargetedChart));
 
     var retargetedList = dashboard.deepCopy();
-    input(retargetedList, 1).put("resourcePath", "/api/ergon/outro");
+    input(retargetedList, 1).put("resourcePath", "/api/workforce/outro");
     assertThrows(UiLayoutLifecycleException.class, () -> reproduce(dashboard, retargetedList));
 
     var retargetedRich = dashboard.deepCopy();
@@ -197,7 +197,7 @@ class UiLayoutPageRevisionReproductionTest {
     assertThrows(UiLayoutLifecycleException.class, () -> reproduce(dashboard, retargetedRich));
 
     var retargetedOrganogram = dashboard.deepCopy();
-    input(retargetedOrganogram, 6).put("resourcePath", "/api/ergon/outras-unidades");
+    input(retargetedOrganogram, 6).put("resourcePath", "/api/workforce/outras-unidades");
     assertThrows(UiLayoutLifecycleException.class, () -> reproduce(dashboard, retargetedOrganogram));
 
     // PageCopyTransformation allocates fresh UUIDs cleanly across all 8 declarative widgets

@@ -141,10 +141,10 @@ class AgenticAuthoringDomainCatalogHintsTest {
     void enrichPrefersCanonicalResourceKeyFromDomainCatalogEvidenceWhenApiPathPrefixDiffers() {
         ObjectNode contextHints = objectMapper.createObjectNode();
         AgenticAuthoringCandidate candidate = new AgenticAuthoringCandidate(
-                "/api/ergon/radar-ferias-prescricao",
+                "/api/workforce/radar-ferias-prescricao",
                 "POST",
-                "/schemas/filtered?path=/api/ergon/radar-ferias-prescricao/filter&operation=post",
-                "/api/ergon/radar-ferias-prescricao/filter",
+                "/schemas/filtered?path=/api/workforce/radar-ferias-prescricao/filter&operation=post",
+                "/api/workforce/radar-ferias-prescricao/filter",
                 "POST",
                 0.93,
                 "domain_catalog grounded resource selection",
@@ -160,14 +160,14 @@ class AgenticAuthoringDomainCatalogHintsTest {
                                 java.util.List.of("ferias", "prescricao"),
                                 "default",
                                 "dev",
-                                "ergon:release:1"))));
+                                "workforce:release:1"))));
 
         AgenticAuthoringDomainCatalogHints.enrich(
                 contextHints,
                 candidate,
                 "table",
                 "Investigar servidores com ferias em risco de prescricao",
-                "praxis-ergon-showcase");
+                "praxis-workforce-showcase");
 
         assertThat(contextHints.path("domainCatalog").path("contextKey").asText())
                 .isEqualTo("administracao-pessoal");

@@ -33,14 +33,14 @@ class DomainCatalogAutoSyncServiceTest {
 
         JsonNode catalogDoc = objectMapper.valueToTree(Map.of(
                 "schemaVersion", "praxis.domain-catalog/v0.2",
-                "serviceKey", "ergon-host",
+                "serviceKey", "workforce-host",
                 "resourceKey", "administracao-pessoal.radar-ferias-prescricao"));
         DomainCatalogLocalSourceProvider localSource = () -> List.of(catalogDoc);
         when(provider.iterator()).thenAnswer(invocation -> Stream.of(localSource).iterator());
 
         DomainCatalogIngestionResponse expectedResponse = new DomainCatalogIngestionResponse(
                 UUID.randomUUID(),
-                "ergon-host:administracao-pessoal.radar-ferias-prescricao:hash",
+                "workforce-host:administracao-pessoal.radar-ferias-prescricao:hash",
                 12);
         when(ingestionService.ingest(any(JsonNode.class), eq("default"), eq("dev")))
                 .thenReturn(expectedResponse);

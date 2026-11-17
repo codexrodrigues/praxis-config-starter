@@ -47,7 +47,7 @@ import org.springframework.util.StringUtils;
  */
 public final class GovernedRulesStudioDefinitionSeeder implements ApplicationRunner {
 
-    public static final String SEED_ACTOR = "system:praxis-rules-studio-seed";
+    public static final String SEED_ACTOR = "system:praxis-policy-studio-seed";
     public static final String FACT_CATALOG_SCHEMA_VERSION = "praxis.domain-rule-fact-catalog.v1";
 
     private final GovernedRuleFamilyRegistry familyRegistry;
@@ -55,6 +55,7 @@ public final class GovernedRulesStudioDefinitionSeeder implements ApplicationRun
     private final ObjectMapper objectMapper;
     private final List<String> tenantIds;
     private final String environment;
+    private final DtoRuleFactContractFactory dtoRuleFactContractFactory;
 
     public GovernedRulesStudioDefinitionSeeder(
             GovernedRuleFamilyRegistry familyRegistry,
@@ -62,11 +63,22 @@ public final class GovernedRulesStudioDefinitionSeeder implements ApplicationRun
             ObjectMapper objectMapper,
             List<String> tenantIds,
             String environment) {
+        this(familyRegistry, domainRuleService, objectMapper, tenantIds, environment, null);
+    }
+
+    public GovernedRulesStudioDefinitionSeeder(
+            GovernedRuleFamilyRegistry familyRegistry,
+            DomainRuleService domainRuleService,
+            ObjectMapper objectMapper,
+            List<String> tenantIds,
+            String environment,
+            DtoRuleFactContractFactory dtoRuleFactContractFactory) {
         this.familyRegistry = Objects.requireNonNull(familyRegistry, "familyRegistry");
         this.domainRuleService = Objects.requireNonNull(domainRuleService, "domainRuleService");
         this.objectMapper = Objects.requireNonNull(objectMapper, "objectMapper");
         this.tenantIds = normalizeTenantIds(tenantIds);
         this.environment = requireText(environment, "environment");
+        this.dtoRuleFactContractFactory = dtoRuleFactContractFactory;
     }
 
     @Override
@@ -320,7 +332,7 @@ public final class GovernedRulesStudioDefinitionSeeder implements ApplicationRun
                                 ruleSet.ref().ruleSetKey(),
                                 family.ownerServiceKey(),
                                 "praxis-rules-engine",
-                                "praxis-rules-studio",
+                                "praxis-policy-studio",
                                 null,
                                 null,
                                 definition,
@@ -340,6 +352,26 @@ public final class GovernedRulesStudioDefinitionSeeder implements ApplicationRun
             RuleSetDefinition ruleSet,
             JsonNode factSchemaNode,
             List<String> factPaths) {
+        List<String> effectivePaths =
+                factPaths.isEmpty() ? List.of("context.tenantId") : factPaths;
+        if (dtoRuleFactContractFactory != null
+                && (!family.rootDtoBindings().isEmpty()
+                        || family.factCatalogDocument().isPresent())) {
+            var enriched =
+                    dtoRuleFactContractFactory.buildEnrichedFactCatalog(
+                            family.familyKey(),
+                            family.ownerServiceKey(),
+                            ruleSet.ref().domainKey(),
+                            ruleSet.ref().operationKey(),
+                            effectivePaths,
+                            family.rootDtoBindings(),
+                            family.factCatalogDocument().orElse(null));
+            if (enriched.isPresent()
+                    && enriched.get().path("facts").isArray()
+                    && !enriched.get().path("facts").isEmpty()) {
+                return enriched.get();
+            }
+        }
         if (family.factCatalogDocument().isPresent()) {
             JsonNode explicit = objectMapper.valueToTree(family.factCatalogDocument().get());
             if (explicit.isObject() && explicit.path("facts").isArray() && !explicit.path("facts").isEmpty()) {
@@ -349,8 +381,6 @@ public final class GovernedRulesStudioDefinitionSeeder implements ApplicationRun
         ObjectNode catalog = objectMapper.createObjectNode();
         catalog.put("schemaVersion", FACT_CATALOG_SCHEMA_VERSION);
         ArrayNode facts = catalog.putArray("facts");
-        List<String> effectivePaths =
-                factPaths.isEmpty() ? List.of("context.tenantId") : factPaths;
         for (String path : effectivePaths) {
             ObjectNode node = objectMapper.createObjectNode();
             node.put("path", path);

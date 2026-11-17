@@ -56,7 +56,7 @@ public class AiProviderManagementService {
     @Value("${spring.ai.openai.chat.options.model:gpt-4o-mini}")
     private String openaiModel;
 
-    @Value("${spring.ai.google.genai.chat.options.model:gemini-2.0-flash}")
+    @Value("${spring.ai.google.genai.chat.options.model:gemini-flash-latest}")
     private String geminiModel;
 
     @Value("${spring.ai.openai.chat.options.model:grok-2-latest}")
@@ -290,6 +290,42 @@ public class AiProviderManagementService {
         return selectedProvider.generateText(prompt, config);
     }
 
+    /**
+     * Resolve a configuracao efetiva de provedor, chave e modelo para chamadas operacionais do
+     * assistente aplicando a mesma precedencia canonica (request -> configuracao do tenant -> defaults).
+     */
+    public AiCallConfig resolveEffectiveCallConfig(
+            AiCallConfig requestConfig,
+            String tenantId,
+            String userId,
+            String environment) {
+        StoredAiConfig stored = resolveStoredConfigSafely(
+                tenantId,
+                userId,
+                environment,
+                requestConfig != null ? requestConfig.getTimeoutSeconds() : null);
+        String provider = normalizeAlias(resolveProviderName(
+                requestConfig != null ? requestConfig.getProvider() : null,
+                stored != null ? stored.provider() : null));
+        String model = resolveCallModel(provider, requestConfig, stored);
+        if (model == null) {
+            model = resolvePreferredModel(provider, stored);
+        }
+        return AiCallConfig.builder()
+                .provider(provider)
+                .apiKey(resolveApiKey(requestConfig != null ? requestConfig.getApiKey() : null, stored))
+                .model(model)
+                .temperature(requestConfig != null ? requestConfig.getTemperature() : null)
+                .maxTokens(requestConfig != null ? requestConfig.getMaxTokens() : null)
+                .timeoutSeconds(requestConfig != null ? requestConfig.getTimeoutSeconds() : null)
+                .tenantId(tenantId)
+                .environment(environment)
+                .ragReleaseId(requestConfig != null ? requestConfig.getRagReleaseId() : null)
+                .executionProfile(requestConfig != null ? requestConfig.getExecutionProfile() : null)
+                .invocationTrace(requestConfig != null ? requestConfig.getInvocationTrace() : null)
+                .build();
+    }
+
     public AiProviderCatalogResponse listCatalog() {
         List<AiProviderCatalogItem> providers = new ArrayList<>();
         ProviderCapabilities geminiCapabilities = resolveProviderCapabilities("gemini");
@@ -297,7 +333,7 @@ public class AiProviderManagementService {
                 .id("gemini")
                 .label("Google Gemini")
                 .description("Modelos rápidos e multimodais do Google.")
-                .defaultModel("gemini-2.0-flash")
+                .defaultModel("gemini-flash-latest")
                 .requiresApiKey(true)
                 .supportsModels(true)
                 .supportsEmbeddings(true)

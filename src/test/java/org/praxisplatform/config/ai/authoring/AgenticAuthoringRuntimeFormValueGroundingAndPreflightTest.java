@@ -70,7 +70,7 @@ class AgenticAuthoringRuntimeFormValueGroundingAndPreflightTest {
         blockedIngressHints.putObject("ingressPolicy").put("processingAllowed", false);
         AgenticAuthoringTurnStreamRequest blockedIngressRequest = new AgenticAuthoringTurnStreamRequest(
                 "Preencha o formulário com CPF 123.456.789-01",
-                "ergon",
+                "workforce",
                 "employees-form",
                 "/payroll/employees",
                 objectMapper.createObjectNode(),
@@ -102,7 +102,7 @@ class AgenticAuthoringRuntimeFormValueGroundingAndPreflightTest {
         rva.put("allowDurableThreadStorage", false);
         AgenticAuthoringTurnStreamRequest zeroRetentionStrictRequest = new AgenticAuthoringTurnStreamRequest(
                 "Preencha os campos sensíveis sem retenção",
-                "ergon",
+                "workforce",
                 "employees-form",
                 "/payroll/employees",
                 objectMapper.createObjectNode(),
@@ -178,7 +178,7 @@ class AgenticAuthoringRuntimeFormValueGroundingAndPreflightTest {
         String sensitivePrompt = "Preencha com CPF 123.456.789-00 e salário confidencial";
         AgenticAuthoringTurnStreamRequest request = new AgenticAuthoringTurnStreamRequest(
                 sensitivePrompt,
-                "ergon",
+                "workforce",
                 "employees-form",
                 "/payroll/employees",
                 objectMapper.createObjectNode(),
@@ -258,7 +258,7 @@ class AgenticAuthoringRuntimeFormValueGroundingAndPreflightTest {
                 .put("valueRevision", 1);
         AgenticAuthoringTurnStreamRequest filterRequest = new AgenticAuthoringTurnStreamRequest(
                 "Preencha o formulário",
-                "ergon",
+                "workforce",
                 "employees-form",
                 "/payroll/employees",
                 objectMapper.createObjectNode(),
@@ -332,7 +332,7 @@ class AgenticAuthoringRuntimeFormValueGroundingAndPreflightTest {
 
         AgenticAuthoringTurnStreamRequest postRequest = new AgenticAuthoringTurnStreamRequest(
                 "Preencha com exemplo válido",
-                "ergon",
+                "workforce",
                 "employees-form",
                 "/payroll/employees",
                 objectMapper.createObjectNode(),
@@ -440,7 +440,7 @@ class AgenticAuthoringRuntimeFormValueGroundingAndPreflightTest {
 
         AgenticAuthoringIntentResolutionRequest intentRequest = new AgenticAuthoringIntentResolutionRequest(
                 "Preencha este formulário com exemplos válidos",
-                "ergon",
+                "workforce",
                 "praxis-dynamic-form",
                 "/payroll/employees",
                 objectMapper.createObjectNode().put("resourcePath", "/payroll/employees"),
@@ -493,7 +493,7 @@ class AgenticAuthoringRuntimeFormValueGroundingAndPreflightTest {
 
         AgenticAuthoringTurnStreamRequest streamRequest = new AgenticAuthoringTurnStreamRequest(
                 "Preencha este formulário com exemplos válidos",
-                "ergon",
+                "workforce",
                 "praxis-dynamic-form",
                 "/payroll/employees",
                 objectMapper.createObjectNode().put("resourcePath", "/payroll/employees"),

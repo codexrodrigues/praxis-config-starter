@@ -85,7 +85,211 @@ final class UiLayoutDeclarativeWidgetRevisionReproduction {
             "showBridgeBanner",
             "selectedStepId"),
         List.of("document"),
-        List.of());
+        List.of()),
+    CRUD(
+        "praxis-crud",
+        "praxis.crud.editor",
+        false,
+        List.of(
+            "metadata",
+            "showResourceIdentityKey",
+            "filterTeleport",
+            "disableAutoDrawer",
+            "hostManagedChrome"),
+        List.of("metadata"),
+        List.of(
+            "crudId",
+            "componentInstanceId",
+            "tableConfigPersistenceStrategy",
+            "context",
+            "filterCriteria",
+            "authoringCapability")),
+    FILTER(
+        "praxis-filter",
+        "praxis.filter.editor",
+        false,
+        List.of(
+            "presentation",
+            "fieldMetadata",
+            "value",
+            "alwaysVisibleFields",
+            "selectedFieldIds",
+            "changeDebounceMs",
+            "tags",
+            "allowSaveTags",
+            "placeBooleansInActions",
+            "advancedOpenMode",
+            "showFilterSettings",
+            "showAdvancedButton",
+            "showAddButton",
+            "showClearButton",
+            "showSearchButton",
+            "disablePersistence"),
+        List.of("presentation", "fieldMetadata", "resourcePath"),
+        List.of(
+            "resourcePath",
+            "endpointKey",
+            "apiUrlEntry",
+            "filterId",
+            "formId",
+            "componentInstanceId",
+            "persistenceKey")),
+    ANALYTICS_PRESENTATION(
+        "praxis-analytics-presentation",
+        "praxis.analytics-presentation.editor",
+        false,
+        List.of("analytics", "availableFamilies", "preferredFamily", "title", "subtitle"),
+        List.of("analytics"),
+        List.of("projectionId", "queryContext")),
+    FILES_UPLOAD(
+        "praxis-files-upload",
+        "praxis.files-upload.editor",
+        false,
+        List.of("config", "displayMode"),
+        List.of("config"),
+        List.of("filesUploadId", "componentInstanceId", "baseUrl", "context")),
+    RELATED_RESOURCE_OUTLET(
+        "praxis-related-resource-outlet",
+        "praxis.related-resource-outlet.editor",
+        false,
+        List.of(
+            "presentation",
+            "title",
+            "subtitle",
+            "icon",
+            "tableConfig",
+            "emptyState",
+            "mode",
+            "compact",
+            "strictValidation"),
+        List.of("surfaceId", "surface", "tableConfig", "parentResourcePath"),
+        List.of(
+            "surfaceId",
+            "surface",
+            "parentRecord",
+            "parentResourceId",
+            "parentIdentity",
+            "parentResourcePath",
+            "apiEndpointKey",
+            "apiUrlEntry",
+            "queryContext",
+            "tableId",
+            "authoringCapability",
+            "ownerWidgetKey")),
+    CRON_BUILDER(
+        "pdx-cron-builder",
+        "praxis.cron-builder.editor",
+        false,
+        List.of("metadata", "label", "hint", "presets", "enableSeconds"),
+        List.of("metadata", "presets"),
+        List.of()),
+    MANUAL_FORM(
+        "praxis-manual-form",
+        "praxis.manual-form.editor",
+        false,
+        List.of(
+            "formTitle",
+            "formDescription",
+            "showHeader",
+            "showActions",
+            "enableAutoSave",
+            "autoSaveDebounceMs",
+            "showAiAssistant",
+            "usePathNames"),
+        List.of("formId", "persistenceOptions"),
+        List.of("formId", "persistenceOptions")),
+    EDITORIAL_FORM_RUNTIME(
+        "praxis-editorial-form-runtime",
+        "praxis.editorial-form-runtime.editor",
+        false,
+        List.of("solution", "instance", "hostConfig"),
+        List.of("solution", "instance"),
+        List.of("runtimeContext")),
+    VISUAL_BUILDER(
+        "praxis-visual-builder",
+        "praxis.visual-builder.editor",
+        false,
+        List.of("config", "initialRules"),
+        List.of("config", "initialRules"),
+        List.of()),
+    TABLE_RULE_BUILDER(
+        "praxis-table-rule-builder",
+        "praxis.table-rule-builder.editor",
+        false,
+        List.of("scope", "value", "labels"),
+        List.of("scope", "value"),
+        List.of()),
+    MICRO_VISUALIZATION(
+        "praxis-micro-visualization",
+        "praxis.micro-visualization.editor",
+        false,
+        List.of("visualization", "fallbackText", "interactiveContainer"),
+        List.of("visualization"),
+        List.of()),
+    HERO_BANNER(
+        "widget:hero-banner",
+        "praxis.hero-banner.editor",
+        false,
+        List.of(
+            "ariaLabel",
+            "brandText",
+            "title",
+            "titleAccent",
+            "subtitle",
+            "description",
+            "imageUrl",
+            "imageAlt",
+            "badges",
+            "metaItems",
+            "visualSummary",
+            "variant",
+            "appearance"),
+        List.of("title", "brandText", "visualSummary"),
+        List.of("instanceId", "analyticsId")),
+    FOOTER_LINKS(
+        "widget:footer-links",
+        "praxis.footer-links.editor",
+        false,
+        List.of("ariaLabel", "brandText", "secondaryText", "links", "layout", "appearance"),
+        List.of("links", "brandText", "secondaryText"),
+        List.of("instanceId", "analyticsId")),
+    LEGAL_NOTICE(
+        "widget:legal-notice",
+        "praxis.legal-notice.editor",
+        false,
+        List.of(
+            "ariaLabel",
+            "title",
+            "subtitle",
+            "contentFormat",
+            "content",
+            "severity",
+            "appearance",
+            "links"),
+        List.of("content", "title"),
+        List.of("instanceId", "analyticsId")),
+    RICH_TEXT_BLOCK(
+        "widget:rich-text-block",
+        "praxis.rich-text-block.editor",
+        false,
+        List.of(
+            "ariaLabel",
+            "title",
+            "subtitle",
+            "icon",
+            "variant",
+            "appearance",
+            "contentFormat",
+            "content"),
+        List.of("content", "title"),
+        List.of("instanceId", "analyticsId")),
+    USER_CONTEXT_SUMMARY(
+        "form:user-context-summary",
+        "praxis.user-context-summary.editor",
+        false,
+        List.of("ariaLabel", "title", "subtitle", "appearance", "fields", "actionLabel"),
+        List.of("fields", "title"),
+        List.of("instanceId", "analyticsId", "source", "context", "actionId"));
 
     final String componentType;
     final String documentType;
@@ -110,27 +314,19 @@ final class UiLayoutDeclarativeWidgetRevisionReproduction {
     }
   }
 
-  private static final Map<String, Spec> BY_COMPONENT_TYPE =
-      Map.ofEntries(
-          Map.entry(Spec.CHART.componentType, Spec.CHART),
-          Map.entry(Spec.LIST.componentType, Spec.LIST),
-          Map.entry(Spec.RICH_CONTENT.componentType, Spec.RICH_CONTENT),
-          Map.entry(Spec.TABS.componentType, Spec.TABS),
-          Map.entry(Spec.STEPPER.componentType, Spec.STEPPER),
-          Map.entry(Spec.EXPANSION.componentType, Spec.EXPANSION),
-          Map.entry(Spec.ORGANOGRAM.componentType, Spec.ORGANOGRAM),
-          Map.entry(Spec.PROGRESSION_LADDER.componentType, Spec.PROGRESSION_LADDER));
+  private static final Map<String, Spec> BY_COMPONENT_TYPE;
+  private static final Map<String, Spec> BY_DOCUMENT_TYPE;
 
-  private static final Map<String, Spec> BY_DOCUMENT_TYPE =
-      Map.ofEntries(
-          Map.entry(Spec.CHART.documentType, Spec.CHART),
-          Map.entry(Spec.LIST.documentType, Spec.LIST),
-          Map.entry(Spec.RICH_CONTENT.documentType, Spec.RICH_CONTENT),
-          Map.entry(Spec.TABS.documentType, Spec.TABS),
-          Map.entry(Spec.STEPPER.documentType, Spec.STEPPER),
-          Map.entry(Spec.EXPANSION.documentType, Spec.EXPANSION),
-          Map.entry(Spec.ORGANOGRAM.documentType, Spec.ORGANOGRAM),
-          Map.entry(Spec.PROGRESSION_LADDER.documentType, Spec.PROGRESSION_LADDER));
+  static {
+    Map<String, Spec> byComponent = new java.util.LinkedHashMap<>();
+    Map<String, Spec> byDocument = new java.util.LinkedHashMap<>();
+    for (Spec spec : Spec.values()) {
+      byComponent.put(spec.componentType, spec);
+      byDocument.put(spec.documentType, spec);
+    }
+    BY_COMPONENT_TYPE = Map.copyOf(byComponent);
+    BY_DOCUMENT_TYPE = Map.copyOf(byDocument);
+  }
 
   private UiLayoutDeclarativeWidgetRevisionReproduction() {}
 
@@ -231,15 +427,11 @@ final class UiLayoutDeclarativeWidgetRevisionReproduction {
               .anyMatch(
                   field -> {
                     JsonNode entry = config.get(field);
-                    if (entry != null && (entry.isObject() || entry.isArray())) {
+                    if (hasRequiredValue(entry)) {
                       return true;
                     }
                     if (spec.bindingFields.contains(field)) {
-                      JsonNode bound = bindings.get(field);
-                      if (bound != null && bound.isTextual() && !bound.asText().isBlank()) {
-                        return true;
-                      }
-                      return entry != null && entry.isTextual() && !entry.asText().isBlank();
+                      return hasRequiredValue(bindings.get(field));
                     }
                     return false;
                   });
@@ -247,6 +439,16 @@ final class UiLayoutDeclarativeWidgetRevisionReproduction {
         throw invalid();
       }
     }
+  }
+
+  private static boolean hasRequiredValue(JsonNode node) {
+    if (node == null || node.isNull() || node.isMissingNode()) {
+      return false;
+    }
+    if (node.isObject() || node.isArray()) {
+      return true;
+    }
+    return node.isTextual() && !node.asText().isBlank();
   }
 
   private static boolean hasMergedObjectNull(JsonNode node) {

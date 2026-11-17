@@ -149,7 +149,7 @@ class UiLayoutPageChildCapturesTest {
     var widgets = (com.fasterxml.jackson.databind.node.ArrayNode) candidate.at("/config/definition/widgets");
     var chartWidget = (ObjectNode) UiLayoutPageRevisionReproductionTest.JSON.readTree("""
       {"key":"66666666-6666-4666-8666-666666666666","definition":{"id":"praxis-chart","inputs":{
-        "chartDocument":{"version":1,"series":[]},"resourceKey":"ergon.tabelas-vencimento"}}}
+        "chartDocument":{"version":1,"series":[]},"resourceKey":"workforce.tabelas-vencimento"}}}
       """);
     var richWidget = (ObjectNode) UiLayoutPageRevisionReproductionTest.JSON.readTree("""
       {"key":"77777777-7777-4777-8777-777777777777","definition":{"id":"praxis-rich-content","inputs":{

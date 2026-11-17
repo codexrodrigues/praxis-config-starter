@@ -345,4 +345,24 @@ public class UserConfigController {
   public ResponseEntity<String> handleBadRequest(IllegalArgumentException ex) {
     return ResponseEntity.badRequest().body(ex.getMessage());
   }
+
+  @ExceptionHandler(org.springframework.web.server.ResponseStatusException.class)
+  public ResponseEntity<org.springframework.http.ProblemDetail> handleResponseStatus(
+      org.springframework.web.server.ResponseStatusException ex) {
+    org.springframework.http.HttpStatusCode status = ex.getStatusCode();
+    String detail = ex.getReason() != null && !ex.getReason().isBlank()
+        ? ex.getReason()
+        : status.toString();
+    org.springframework.http.ProblemDetail body =
+        org.springframework.http.ProblemDetail.forStatusAndDetail(status, detail);
+    if (ex.getBody() != null && ex.getBody().getProperties() != null) {
+      ex.getBody().getProperties().forEach(body::setProperty);
+    }
+    if (ex instanceof org.praxisplatform.config.service.UiConfigWriteDeniedException denied
+        && denied.getErrorCode() != null
+        && !denied.getErrorCode().isBlank()) {
+      body.setProperty("errorCode", denied.getErrorCode());
+    }
+    return ResponseEntity.status(status).headers(ex.getHeaders()).body(body);
+  }
 }

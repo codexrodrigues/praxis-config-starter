@@ -120,7 +120,7 @@ class DomainRuleTestEvidencePolicyServiceTest {
   private DomainRuleTestRun run(String eligibility) throws Exception {
     return DomainRuleTestRun.builder().id(UUID.randomUUID())
         .baselineEvidence(objectMapper.writeValueAsString(new DomainRuleTestBaselineEvidence(
-            "LEGACY_ORACLE", "ergon:r013:matrix", "A".repeat(64),
+            "LEGACY_ORACLE", "workforce:r013:matrix", "A".repeat(64),
             Instant.parse("2026-08-14T12:00:00Z"), eligibility)))
         .build();
   }

@@ -30,9 +30,9 @@ class AgenticAuthoringConsultativeApiCatalogProjectionServiceTest {
 
         when(apiMetadataRepository.findAll()).thenReturn(List.of(
                 new ApiMetadata(
-                        "/api/ergon/funcionarios/filter",
+                        "/api/workforce/funcionarios/filter",
                         "POST",
-                        "ergon",
+                        "workforce",
                         "Filtrar servidores",
                         "Consulta filtrada de servidores",
                         "filterFuncionarios",
@@ -42,9 +42,9 @@ class AgenticAuthoringConsultativeApiCatalogProjectionServiceTest {
                         "{}",
                         null),
                 new ApiMetadata(
-                        "/api/ergon/funcionarios",
+                        "/api/workforce/funcionarios",
                         "POST",
-                        "ergon",
+                        "workforce",
                         "Cadastrar servidor",
                         "Cria novo servidor",
                         "createFuncionario",
@@ -54,9 +54,9 @@ class AgenticAuthoringConsultativeApiCatalogProjectionServiceTest {
                         "{}",
                         null),
                 new ApiMetadata(
-                        "/api/ergon/radar-remuneracao-movimentacao/filter",
+                        "/api/workforce/radar-remuneracao-movimentacao/filter",
                         "POST",
-                        "ergon",
+                        "workforce",
                         "Filtrar radar remuneratorio",
                         "Filtra projeção analítica",
                         "filterRadarRemuneracao",
@@ -66,9 +66,9 @@ class AgenticAuthoringConsultativeApiCatalogProjectionServiceTest {
                         "{}",
                         null),
                 new ApiMetadata(
-                        "/api/ergon/radar-remuneracao-movimentacao/stats/group-by",
+                        "/api/workforce/radar-remuneracao-movimentacao/stats/group-by",
                         "POST",
-                        "ergon",
+                        "workforce",
                         "Agrupar radar remuneratorio",
                         "Agrupa indicadores por situação",
                         "statsGroupByRadarRemuneracao",
@@ -78,9 +78,9 @@ class AgenticAuthoringConsultativeApiCatalogProjectionServiceTest {
                         "{}",
                         null),
                 new ApiMetadata(
-                        "/api/ergon/radar-remuneracao-movimentacao/stats/distribution",
+                        "/api/workforce/radar-remuneracao-movimentacao/stats/distribution",
                         "POST",
-                        "ergon",
+                        "workforce",
                         "Distribuição remuneratória",
                         "Calcula distribuição salarial",
                         "statsDistributionRadarRemuneracao",
@@ -92,10 +92,10 @@ class AgenticAuthoringConsultativeApiCatalogProjectionServiceTest {
 
         DomainCatalogReleaseResponse release = new DomainCatalogReleaseResponse(
                 UUID.randomUUID(),
-                "praxis-ergon-showcase:administracao-pessoal:v1",
+                "praxis-workforce-showcase:administracao-pessoal:v1",
                 "praxis.domain-catalog/v0.2",
-                "praxis-ergon-showcase",
-                "Praxis Ergon Showcase",
+                "praxis-workforce-showcase",
+                "Praxis Workforce Showcase",
                 "1.0.0",
                 Instant.parse("2026-11-03T12:00:00Z"),
                 "sha256:test",
@@ -115,7 +115,7 @@ class AgenticAuthoringConsultativeApiCatalogProjectionServiceTest {
                 .add("Quadro Funcional");
         ObjectNode funcionarioMetadata = funcionarioConcept.putObject("metadata");
         funcionarioMetadata.put("resourceKey", "administracao-pessoal.funcionarios");
-        funcionarioMetadata.put("resourcePath", "/api/ergon/funcionarios");
+        funcionarioMetadata.put("resourcePath", "/api/workforce/funcionarios");
         funcionarioMetadata.putArray("analyzedByDataProducts")
                 .add("administracao-pessoal.radar-remuneracao-movimentacao");
 
@@ -135,7 +135,7 @@ class AgenticAuthoringConsultativeApiCatalogProjectionServiceTest {
                 .put("description", "Produto de dados executivo de variação remuneratória.");
         ObjectNode radarMetadata = radarConcept.putObject("metadata");
         radarMetadata.put("resourceKey", "administracao-pessoal.radar-remuneracao-movimentacao");
-        radarMetadata.put("resourcePath", "/api/ergon/radar-remuneracao-movimentacao");
+        radarMetadata.put("resourcePath", "/api/workforce/radar-remuneracao-movimentacao");
         radarMetadata.put("conceptRole", "analytical_data_product");
         radarMetadata.putArray("analyzesConcepts").add("administracao-pessoal.funcionarios");
         radarMetadata.putObject("dataProduct")
@@ -154,7 +154,7 @@ class AgenticAuthoringConsultativeApiCatalogProjectionServiceTest {
                 List.of(
                         new DomainCatalogItemResponse(
                                 UUID.randomUUID(),
-                                "praxis-ergon-showcase:administracao-pessoal:v1",
+                                "praxis-workforce-showcase:administracao-pessoal:v1",
                                 "node",
                                 "administracao-pessoal.funcionarios",
                                 "administracao-pessoal",
@@ -164,7 +164,7 @@ class AgenticAuthoringConsultativeApiCatalogProjectionServiceTest {
                                 funcionarioConcept),
                         new DomainCatalogItemResponse(
                                 UUID.randomUUID(),
-                                "praxis-ergon-showcase:administracao-pessoal:v1",
+                                "praxis-workforce-showcase:administracao-pessoal:v1",
                                 "node",
                                 "administracao-pessoal.funcionarios.fact.tempoServicoAnos",
                                 "administracao-pessoal",
@@ -184,7 +184,7 @@ class AgenticAuthoringConsultativeApiCatalogProjectionServiceTest {
                 List.of(
                         new DomainCatalogItemResponse(
                                 UUID.randomUUID(),
-                                "praxis-ergon-showcase:administracao-pessoal:v1",
+                                "praxis-workforce-showcase:administracao-pessoal:v1",
                                 "node",
                                 "administracao-pessoal.radar-remuneracao-movimentacao",
                                 "administracao-pessoal",
@@ -194,8 +194,8 @@ class AgenticAuthoringConsultativeApiCatalogProjectionServiceTest {
                                 radarConcept)));
 
         when(ingestionService.contextLatest(
-                Mockito.eq("praxis-ergon-showcase"),
-                Mockito.eq("ergon.funcionarios"),
+                Mockito.eq("praxis-workforce-showcase"),
+                Mockito.eq("workforce.funcionarios"),
                 Mockito.eq("default"),
                 Mockito.eq("dev"),
                 Mockito.isNull(),
@@ -204,7 +204,7 @@ class AgenticAuthoringConsultativeApiCatalogProjectionServiceTest {
                 Mockito.isNull(),
                 Mockito.anyInt())).thenReturn(funcionarioContext);
         when(ingestionService.contextLatest(
-                Mockito.eq("praxis-ergon-showcase"),
+                Mockito.eq("praxis-workforce-showcase"),
                 Mockito.eq("administracao-pessoal.radar-remuneracao-movimentacao"),
                 Mockito.eq("default"),
                 Mockito.eq("dev"),
@@ -218,13 +218,13 @@ class AgenticAuthoringConsultativeApiCatalogProjectionServiceTest {
                 new AgenticAuthoringConsultativeApiCatalogProjectionService(
                         () -> ingestionService,
                         apiMetadataRepository,
-                        "praxis-ergon-showcase");
+                        "praxis-workforce-showcase");
 
         AgenticAuthoringCandidate candidate = new AgenticAuthoringCandidate(
-                "/api/ergon/funcionarios",
+                "/api/workforce/funcionarios",
                 "post",
-                "/schemas/filtered?path=/api/ergon/funcionarios/filter&operation=post&schemaType=response",
-                "/api/ergon/funcionarios/filter",
+                "/schemas/filtered?path=/api/workforce/funcionarios/filter&operation=post&schemaType=response",
+                "/api/workforce/funcionarios/filter",
                 "post",
                 0.85,
                 "matched funcionarios",
@@ -246,7 +246,7 @@ class AgenticAuthoringConsultativeApiCatalogProjectionServiceTest {
         AgenticAuthoringConsultativeApiCatalogProjection.Resource operational = projection.resources().get(0);
         assertThat(operational.label()).isEqualTo("Cadastro de Servidores");
         assertThat(operational.role()).isEqualTo("operational");
-        assertThat(operational.resourcePath()).isEqualTo("/api/ergon/funcionarios");
+        assertThat(operational.resourcePath()).isEqualTo("/api/workforce/funcionarios");
         assertThat(operational.fields())
                 .extracting(AgenticAuthoringConsultativeApiCatalogProjection.Field::label)
                 .contains("Tempo de Serviço (Anos)");
@@ -256,7 +256,7 @@ class AgenticAuthoringConsultativeApiCatalogProjectionServiceTest {
         AgenticAuthoringConsultativeApiCatalogProjection.Resource dataProduct = projection.resources().get(1);
         assertThat(dataProduct.label()).isEqualTo("Radar de Remuneração vs. Movimentação");
         assertThat(dataProduct.role()).isEqualTo("analytical");
-        assertThat(dataProduct.resourcePath()).isEqualTo("/api/ergon/radar-remuneracao-movimentacao");
+        assertThat(dataProduct.resourcePath()).isEqualTo("/api/workforce/radar-remuneracao-movimentacao");
         assertThat(dataProduct.evidence())
                 .contains("analytical_data_product", "analyzes:administracao-pessoal.funcionarios");
         assertThat(dataProduct.endpoints())
@@ -273,9 +273,9 @@ class AgenticAuthoringConsultativeApiCatalogProjectionServiceTest {
 
         when(apiMetadataRepository.findAll()).thenReturn(List.of(
                 new ApiMetadata(
-                        "/api/ergon/funcionarios/filter",
+                        "/api/workforce/funcionarios/filter",
                         "POST",
-                        "ergon",
+                        "workforce",
                         "Filtrar servidores",
                         "Filtra servidores públicos",
                         "filterFuncionarios",
@@ -287,10 +287,10 @@ class AgenticAuthoringConsultativeApiCatalogProjectionServiceTest {
 
         DomainCatalogReleaseResponse release = new DomainCatalogReleaseResponse(
                 UUID.randomUUID(),
-                "praxis-ergon-showcase:administracao-pessoal:v1",
+                "praxis-workforce-showcase:administracao-pessoal:v1",
                 "praxis.domain-catalog/v0.2",
-                "praxis-ergon-showcase",
-                "Praxis Ergon Showcase",
+                "praxis-workforce-showcase",
+                "Praxis Workforce Showcase",
                 "1.0.0",
                 Instant.parse("2026-11-03T12:00:00Z"),
                 "sha256:test",
@@ -305,7 +305,7 @@ class AgenticAuthoringConsultativeApiCatalogProjectionServiceTest {
         funcionarioConcept.put("description", "Cadastro funcional de servidores públicos.");
         ObjectNode conceptMeta = funcionarioConcept.putObject("metadata");
         conceptMeta.put("resourceKey", "administracao-pessoal.funcionarios");
-        conceptMeta.put("resourcePath", "/api/ergon/funcionarios");
+        conceptMeta.put("resourcePath", "/api/workforce/funcionarios");
 
         ObjectNode quickFilterNode = objectMapper.createObjectNode();
         quickFilterNode.put("nodeKey", "administracao-pessoal.funcionarios.quickFilter.ativos-folha");
@@ -334,7 +334,7 @@ class AgenticAuthoringConsultativeApiCatalogProjectionServiceTest {
                 List.of(
                         new DomainCatalogItemResponse(
                                 UUID.randomUUID(),
-                                "praxis-ergon-showcase:administracao-pessoal:v1",
+                                "praxis-workforce-showcase:administracao-pessoal:v1",
                                 "node",
                                 "administracao-pessoal.funcionarios",
                                 "administracao-pessoal",
@@ -344,7 +344,7 @@ class AgenticAuthoringConsultativeApiCatalogProjectionServiceTest {
                                 funcionarioConcept),
                         new DomainCatalogItemResponse(
                                 UUID.randomUUID(),
-                                "praxis-ergon-showcase:administracao-pessoal:v1",
+                                "praxis-workforce-showcase:administracao-pessoal:v1",
                                 "node",
                                 "administracao-pessoal.funcionarios.quickFilter.ativos-folha",
                                 "administracao-pessoal",
@@ -354,8 +354,8 @@ class AgenticAuthoringConsultativeApiCatalogProjectionServiceTest {
                                 quickFilterNode)));
 
         when(ingestionService.contextLatest(
-                Mockito.eq("praxis-ergon-showcase"),
-                Mockito.eq("ergon.funcionarios"),
+                Mockito.eq("praxis-workforce-showcase"),
+                Mockito.eq("workforce.funcionarios"),
                 Mockito.eq("default"),
                 Mockito.eq("dev"),
                 Mockito.isNull(),
@@ -368,13 +368,13 @@ class AgenticAuthoringConsultativeApiCatalogProjectionServiceTest {
                 new AgenticAuthoringConsultativeApiCatalogProjectionService(
                         () -> ingestionService,
                         apiMetadataRepository,
-                        "praxis-ergon-showcase");
+                        "praxis-workforce-showcase");
 
         AgenticAuthoringCandidate candidate = new AgenticAuthoringCandidate(
-                "/api/ergon/funcionarios",
+                "/api/workforce/funcionarios",
                 "post",
-                "/schemas/filtered?path=/api/ergon/funcionarios/filter&operation=post&schemaType=request",
-                "/api/ergon/funcionarios/filter",
+                "/schemas/filtered?path=/api/workforce/funcionarios/filter&operation=post&schemaType=request",
+                "/api/workforce/funcionarios/filter",
                 "post",
                 0.9,
                 "matched funcionarios",

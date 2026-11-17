@@ -278,20 +278,20 @@ class DomainKnowledgeProjectionServiceTest {
                 objectMapper);
 
         DomainCatalogRelease release = DomainCatalogRelease.builder()
-                .releaseKey("ergon-host:ergon:2026-04-22T12:00:00Z")
+                .releaseKey("workforce-host:workforce:2026-04-22T12:00:00Z")
                 .schemaVersion("praxis.domain-catalog/v0.2")
                 .tenantId("tenant-a")
                 .environment("dev")
                 .build();
         List<DomainCatalogItem> items = List.of(
-                item(release, "node", "ergon.radar-remuneracao-movimentacao", "ergon", "concept", null, null, """
+                item(release, "node", "workforce.radar-remuneracao-movimentacao", "workforce", "concept", null, null, """
                         {
-                          "nodeKey": "ergon.radar-remuneracao-movimentacao",
+                          "nodeKey": "workforce.radar-remuneracao-movimentacao",
                           "nodeType": "concept",
-                          "contextKey": "ergon",
+                          "contextKey": "workforce",
                           "label": "Radar de Remuneração sem Movimentação",
                           "metadata": {
-                            "resourceKey": "ergon.radar-remuneracao-movimentacao",
+                            "resourceKey": "workforce.radar-remuneracao-movimentacao",
                             "semanticRole": "analytical_data_product"
                           }
                         }
@@ -314,8 +314,8 @@ class DomainKnowledgeProjectionServiceTest {
         assertThat(toList(conceptCaptor.getValue()))
                 .singleElement()
                 .satisfies(concept -> {
-                    assertThat(concept.getConceptKey()).isEqualTo("ergon.radar-remuneracao-movimentacao");
-                    assertThat(concept.getResourceKey()).isEqualTo("ergon.radar-remuneracao-movimentacao");
+                    assertThat(concept.getConceptKey()).isEqualTo("workforce.radar-remuneracao-movimentacao");
+                    assertThat(concept.getResourceKey()).isEqualTo("workforce.radar-remuneracao-movimentacao");
                 });
     }
 
@@ -335,7 +335,7 @@ class DomainKnowledgeProjectionServiceTest {
                 objectMapper);
 
         DomainCatalogRelease release = DomainCatalogRelease.builder()
-                .releaseKey("praxis-ergon-showcase:administracao-pessoal.dependentes:2026-11-03T18:00:00Z")
+                .releaseKey("praxis-workforce-showcase:administracao-pessoal.dependentes:2026-11-03T18:00:00Z")
                 .schemaVersion("praxis.domain-catalog/v0.2")
                 .tenantId("1")
                 .environment("dev")
@@ -349,45 +349,45 @@ class DomainKnowledgeProjectionServiceTest {
                           "label": "Dependentes",
                           "metadata": {
                             "resourceKey": "administracao-pessoal.dependentes",
-                            "governedRuleSets": ["ergon.administracao-pessoal.dependentes.elegibilidade"],
+                            "governedRuleSets": ["workforce.administracao-pessoal.dependentes.elegibilidade"],
                             "ontologicalFactRoots": ["draft", "current", "servidor", "neighborhood", "context"]
                           }
                         }
                         """),
-                item(release, "node", "administracao-pessoal.dependentes.policy.ruleset.ergon.administracao-pessoal.dependentes.elegibilidade",
+                item(release, "node", "administracao-pessoal.dependentes.policy.ruleset.workforce.administracao-pessoal.dependentes.elegibilidade",
                         "administracao-pessoal", "policy_hint", null, null, """
                         {
-                          "nodeKey": "administracao-pessoal.dependentes.policy.ruleset.ergon.administracao-pessoal.dependentes.elegibilidade",
+                          "nodeKey": "administracao-pessoal.dependentes.policy.ruleset.workforce.administracao-pessoal.dependentes.elegibilidade",
                           "nodeType": "policy_hint",
                           "contextKey": "administracao-pessoal",
                           "label": "Elegibilidade de dependentes",
                           "metadata": {
                             "policyKind": "domain_rule_set",
                             "resourceKey": "administracao-pessoal.dependentes",
-                            "ruleSetKey": "ergon.administracao-pessoal.dependentes.elegibilidade",
+                            "ruleSetKey": "workforce.administracao-pessoal.dependentes.elegibilidade",
                             "operationKey": "CREATE"
                           }
                         }
                         """),
-                item(release, "edge", "administracao-pessoal.dependentes.governed-by.ergon.administracao-pessoal.dependentes.elegibilidade",
+                item(release, "edge", "administracao-pessoal.dependentes.governed-by.workforce.administracao-pessoal.dependentes.elegibilidade",
                         "administracao-pessoal", null, null, "governed_by", """
                         {
-                          "edgeKey": "administracao-pessoal.dependentes.governed-by.ergon.administracao-pessoal.dependentes.elegibilidade",
+                          "edgeKey": "administracao-pessoal.dependentes.governed-by.workforce.administracao-pessoal.dependentes.elegibilidade",
                           "sourceNodeKey": "administracao-pessoal.dependentes",
-                          "targetNodeKey": "administracao-pessoal.dependentes.policy.ruleset.ergon.administracao-pessoal.dependentes.elegibilidade",
+                          "targetNodeKey": "administracao-pessoal.dependentes.policy.ruleset.workforce.administracao-pessoal.dependentes.elegibilidade",
                           "edgeType": "governed_by"
                         }
                         """),
-                item(release, "binding", "binding:administracao-pessoal.dependentes.policy.ruleset.ergon.administracao-pessoal.dependentes.elegibilidade:rule-set",
+                item(release, "binding", "binding:administracao-pessoal.dependentes.policy.ruleset.workforce.administracao-pessoal.dependentes.elegibilidade:rule-set",
                         "administracao-pessoal", null, "rule_definition", null, """
                         {
-                          "bindingKey": "binding:administracao-pessoal.dependentes.policy.ruleset.ergon.administracao-pessoal.dependentes.elegibilidade:rule-set",
-                          "nodeKey": "administracao-pessoal.dependentes.policy.ruleset.ergon.administracao-pessoal.dependentes.elegibilidade",
+                          "bindingKey": "binding:administracao-pessoal.dependentes.policy.ruleset.workforce.administracao-pessoal.dependentes.elegibilidade:rule-set",
+                          "nodeKey": "administracao-pessoal.dependentes.policy.ruleset.workforce.administracao-pessoal.dependentes.elegibilidade",
                           "bindingType": "rule_definition",
                           "confidence": 0.99,
                           "targetRef": {
                             "resourceKey": "administracao-pessoal.dependentes",
-                            "ruleSetKey": "ergon.administracao-pessoal.dependentes.elegibilidade",
+                            "ruleSetKey": "workforce.administracao-pessoal.dependentes.elegibilidade",
                             "operationKey": "CREATE"
                           }
                         }
@@ -422,7 +422,7 @@ class DomainKnowledgeProjectionServiceTest {
                     assertThat(binding.getBindingType()).isEqualTo("rule_definition");
                     assertThat(binding.getResourceKey()).isEqualTo("administracao-pessoal.dependentes");
                     assertThat(binding.getSchemaPointer())
-                            .isEqualTo("ergon.administracao-pessoal.dependentes.elegibilidade#CREATE");
+                            .isEqualTo("workforce.administracao-pessoal.dependentes.elegibilidade#CREATE");
                 });
 
         @SuppressWarnings("unchecked")

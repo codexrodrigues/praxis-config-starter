@@ -126,9 +126,12 @@ abstract class PageRuntimePostgresFixture {
   }
 
   static void requireAssignment(JsonNode value) {
-    if (!"ancient-leaf-72055027".equals(value.path("projectId").asText())
-        || !"br-weathered-mountain-a48o0map".equals(value.path("branchId").asText())
-        || !"ep-floral-voice-a40bufyv.us-east-1.aws.neon.tech".equals(value.path("endpoint").asText())
+    String projectId = value.path("projectId").asText();
+    String branchId = value.path("branchId").asText();
+    String endpoint = value.path("endpoint").asText();
+    if (!projectId.matches("[a-z][a-z0-9-]{5,80}")
+        || !branchId.matches("br-[a-z0-9-]{5,80}")
+        || !endpoint.matches("ep-[a-z0-9-]+\\.[a-z0-9-]+\\.aws\\.neon\\.tech")
         || !"p3b_runtime_512_20261023".equals(value.path("schema").asText())
         || !"p3b_runtime_512_runtime".equals(value.path("username").asText())
         || value.path("password").asText().isBlank()) throw new IllegalArgumentException("P3 assignment mismatch");

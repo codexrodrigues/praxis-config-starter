@@ -221,7 +221,7 @@ class DomainRuleSnapshotControllerTest {
     when(principalResolver.resolve(
         request, "tenant-caller", "test", "RULE_SNAPSHOT_READER"))
         .thenReturn(new DomainRuleGovernancePrincipal(
-            "tenant-server", "service:ergon", "prod"));
+            "tenant-server", "service:workforce", "prod"));
     var active = new DomainRuleSnapshotActivationResponse(
         null, "A".repeat(64), "head-8", 8, "ACTIVE");
     when(service.findActive("tenant-server", "prod", "grant-rules", "evaluate"))
@@ -238,7 +238,7 @@ class DomainRuleSnapshotControllerTest {
     when(principalResolver.resolve(
         request, tenantId, environment, "RULE_SNAPSHOT_READER"))
         .thenReturn(new DomainRuleGovernancePrincipal(
-            tenantId, "service:ergon", environment));
+            tenantId, "service:workforce", environment));
     return request;
   }
 }

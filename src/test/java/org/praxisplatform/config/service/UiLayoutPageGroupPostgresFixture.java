@@ -126,9 +126,12 @@ abstract class UiLayoutPageGroupPostgresFixture {
   }
 
   static void requireAssignment(JsonNode value) {
-    if (!"ancient-leaf-72055027".equals(value.path("projectId").asText())
-        || !"br-holy-water-a4ihmkkj".equals(value.path("branchId").asText())
-        || !"ep-hidden-bread-a4x3zddv.us-east-1.aws.neon.tech".equals(value.path("endpoint").asText())
+    String projectId = value.path("projectId").asText();
+    String branchId = value.path("branchId").asText();
+    String endpoint = value.path("endpoint").asText();
+    if (!projectId.matches("[a-z][a-z0-9-]{5,80}")
+        || !branchId.matches("br-[a-z0-9-]{5,80}")
+        || !endpoint.matches("ep-[a-z0-9-]+\\.[a-z0-9-]+\\.aws\\.neon\\.tech")
         || !"p3a_group_511_20261022".equals(value.path("schema").asText())
         || !"p3a_group_511_runtime".equals(value.path("username").asText())
         || value.path("password").asText().isBlank()) throw new IllegalArgumentException("P3 assignment mismatch");

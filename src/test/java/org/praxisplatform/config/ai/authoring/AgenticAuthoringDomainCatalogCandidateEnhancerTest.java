@@ -748,7 +748,7 @@ class AgenticAuthoringDomainCatalogCandidateEnhancerTest {
                 radarPayload);
         Mockito.when(domainCatalogIngestionService.contextLatest(
                         Mockito.eq("praxis-service"),
-                        Mockito.eq("ergon.radar-remuneracao-movimentacao"),
+                        Mockito.eq("workforce.radar-remuneracao-movimentacao"),
                         Mockito.eq("default"),
                         Mockito.eq("dev"),
                         Mockito.isNull(),
@@ -769,10 +769,10 @@ class AgenticAuthoringDomainCatalogCandidateEnhancerTest {
         AgenticAuthoringDomainCatalogCandidateEnhancer enhancer =
                 new AgenticAuthoringDomainCatalogCandidateEnhancer(domainCatalogIngestionService, "praxis-service");
         AgenticAuthoringCandidate radarCandidate = new AgenticAuthoringCandidate(
-                "/api/ergon/radar-remuneracao-movimentacao",
+                "/api/workforce/radar-remuneracao-movimentacao",
                 "post",
-                "/schemas/filtered?path=/api/ergon/radar-remuneracao-movimentacao/filter&operation=post",
-                "/api/ergon/radar-remuneracao-movimentacao/filter",
+                "/schemas/filtered?path=/api/workforce/radar-remuneracao-movimentacao/filter&operation=post",
+                "/api/workforce/radar-remuneracao-movimentacao/filter",
                 "post",
                 0.60d,
                 "api_metadata semantic retrieval",
@@ -805,7 +805,7 @@ class AgenticAuthoringDomainCatalogCandidateEnhancerTest {
                 UUID.randomUUID(),
                 "praxis-service:administracao-pessoal.dependentes:test",
                 "node",
-                "administracao-pessoal.dependentes.policy.ruleset.ergon.administracao-pessoal.dependentes.elegibilidade",
+                "administracao-pessoal.dependentes.policy.ruleset.workforce.administracao-pessoal.dependentes.elegibilidade",
                 "administracao-pessoal",
                 "policy_hint",
                 null,
@@ -816,15 +816,15 @@ class AgenticAuthoringDomainCatalogCandidateEnhancerTest {
                           "metadata": {
                             "policyKind": "domain_rule_set",
                             "resourceKey": "administracao-pessoal.dependentes",
-                            "ruleSetKey": "ergon.administracao-pessoal.dependentes.elegibilidade",
+                            "ruleSetKey": "workforce.administracao-pessoal.dependentes.elegibilidade",
                             "operationKey": "CREATE",
                             "availableRoots": ["draft", "current", "servidor", "neighborhood", "context"],
                             "referencedFactPaths": ["draft.dtfim", "servidor.situacao", "neighborhood.dependentesAtivos"],
-                            "reasonCodes": ["ERG-03162"],
+                            "reasonCodes": ["WF-03162"],
                             "targetFields": ["dtfim"],
                             "rules": [
                               {
-                                "reasonCode": "ERG-03162",
+                                "reasonCode": "WF-03162",
                                 "targetField": "dtfim",
                                 "message": "Data de término da dependência não pode anteceder data de início.",
                                 "origin": "PCK_DEPENDENTES.MAIN_PRE"
@@ -846,7 +846,7 @@ class AgenticAuthoringDomainCatalogCandidateEnhancerTest {
                 .thenReturn(new DomainCatalogContextResponse(
                         "praxis.domain-catalog-context/v0.1",
                         null,
-                        "erg-03162 dependentes elegibilidade",
+                        "wf-03162 dependentes elegibilidade",
                         null,
                         null,
                         null,
@@ -866,7 +866,7 @@ class AgenticAuthoringDomainCatalogCandidateEnhancerTest {
                 List.of("api-metadata", "semantic-retrieval"));
 
         List<AgenticAuthoringCandidate> enhanced = enhancer.enhance(
-                "validar regra erg-03162 elegibilidade de dependentes dtfim",
+                "validar regra wf-03162 elegibilidade de dependentes dtfim",
                 List.of(dependenteCandidate),
                 "default",
                 "dev");
@@ -878,11 +878,11 @@ class AgenticAuthoringDomainCatalogCandidateEnhancerTest {
                 .anySatisfy(ev -> {
                     assertThat(ev.ref()).isEqualTo("administracao-pessoal.dependentes");
                     assertThat(ev.summary())
-                            .contains("ruleSets=ergon.administracao-pessoal.dependentes.elegibilidade")
-                            .contains("reasons=ERG-03162")
+                            .contains("ruleSets=workforce.administracao-pessoal.dependentes.elegibilidade")
+                            .contains("reasons=WF-03162")
                             .contains("factRoots=draft,current,servidor,neighborhood,context");
                     assertThat(ev.matchedTerms())
-                            .contains("erg-03162", "dtfim", "neighborhood");
+                            .contains("wf-03162", "dtfim", "neighborhood");
                 });
     }
 

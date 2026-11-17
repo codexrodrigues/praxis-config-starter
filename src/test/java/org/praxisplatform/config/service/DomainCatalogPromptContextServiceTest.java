@@ -98,8 +98,8 @@ class DomainCatalogPromptContextServiceTest {
                                         UUID.randomUUID(),
                                         "release-2026-04",
                                         "node",
-                                        "ergon.vinculos",
-                                        "ergon",
+                                        "workforce.vinculos",
+                                        "workforce",
                                         "concept",
                                         null,
                                         null,
@@ -108,12 +108,12 @@ class DomainCatalogPromptContextServiceTest {
                                               "label": "Vínculos Funcionais",
                                               "description": "Vínculo funcional ativo do servidor público.",
                                               "metadata": {
-                                                "resourceKey": "ergon.vinculos",
+                                                "resourceKey": "workforce.vinculos",
                                                 "semanticRole": "operational_resource",
-                                                "childConcepts": ["ergon.periodos-aquisitivos-ferias", "ergon.frequencias"],
-                                                "analyzedByDataProducts": ["ergon.radar-ferias-prescricao", "ergon.radar-chefias-substituicoes"],
+                                                "childConcepts": ["workforce.periodos-aquisitivos-ferias", "workforce.frequencias"],
+                                                "analyzedByDataProducts": ["workforce.radar-ferias-prescricao", "workforce.radar-chefias-substituicoes"],
                                                 "ontologicalFactRoots": ["draft", "current", "cargo", "setor", "neighborhood", "context"],
-                                                "governedRuleSets": ["ergon.vinculos.validate"]
+                                                "governedRuleSets": ["workforce.vinculos.validate"]
                                               }
                                             }
                                             """)),
@@ -121,8 +121,8 @@ class DomainCatalogPromptContextServiceTest {
                                         UUID.randomUUID(),
                                         "release-2026-04",
                                         "node",
-                                        "ergon.radar-ferias-prescricao",
-                                        "ergon",
+                                        "workforce.radar-ferias-prescricao",
+                                        "workforce",
                                         "concept",
                                         null,
                                         null,
@@ -131,9 +131,9 @@ class DomainCatalogPromptContextServiceTest {
                                               "label": "Radar de Prescrição de Férias",
                                               "description": "Data Product analítico consolidado de períodos aquisitivos vencidos.",
                                               "metadata": {
-                                                "resourceKey": "ergon.radar-ferias-prescricao",
+                                                "resourceKey": "workforce.radar-ferias-prescricao",
                                                 "semanticRole": "analytical_data_product",
-                                                "analyzesConcepts": ["ergon.vinculos", "ergon.periodos-aquisitivos-ferias"]
+                                                "analyzesConcepts": ["workforce.vinculos", "workforce.periodos-aquisitivos-ferias"]
                                               }
                                             }
                                             """)),
@@ -141,8 +141,8 @@ class DomainCatalogPromptContextServiceTest {
                                         UUID.randomUUID(),
                                         "release-2026-04",
                                         "node",
-                                        "ergon.periodos-aquisitivos-ferias",
-                                        "ergon",
+                                        "workforce.periodos-aquisitivos-ferias",
+                                        "workforce",
                                         "concept",
                                         null,
                                         null,
@@ -151,10 +151,10 @@ class DomainCatalogPromptContextServiceTest {
                                               "label": "Períodos Aquisitivos de Férias",
                                               "description": "Período aquisitivo e concessivo do servidor.",
                                               "metadata": {
-                                                "resourceKey": "ergon.periodos-aquisitivos-ferias",
+                                                "resourceKey": "workforce.periodos-aquisitivos-ferias",
                                                 "semanticRole": "operational_resource",
-                                                "parentConcepts": ["ergon.vinculos"],
-                                                "analyzedByDataProducts": ["ergon.radar-ferias-prescricao"]
+                                                "parentConcepts": ["workforce.vinculos"],
+                                                "analyzedByDataProducts": ["workforce.radar-ferias-prescricao"]
                                               }
                                             }
                                             """)))));
@@ -162,17 +162,17 @@ class DomainCatalogPromptContextServiceTest {
         String context = service.buildResourceIdentityContext("tenant-a", "dev", 30);
 
         assertThat(context)
-                .contains("resourceKey=ergon.vinculos")
+                .contains("resourceKey=workforce.vinculos")
                 .contains("role=operational_resource")
-                .contains("dataProducts=ergon.radar-ferias-prescricao,ergon.radar-chefias-substituicoes")
-                .contains("children=ergon.periodos-aquisitivos-ferias,ergon.frequencias")
+                .contains("dataProducts=workforce.radar-ferias-prescricao,workforce.radar-chefias-substituicoes")
+                .contains("children=workforce.periodos-aquisitivos-ferias,workforce.frequencias")
                 .contains("factRoots=draft,current,cargo,setor,neighborhood,context")
-                .contains("ruleSets=ergon.vinculos.validate")
-                .contains("resourceKey=ergon.radar-ferias-prescricao")
+                .contains("ruleSets=workforce.vinculos.validate")
+                .contains("resourceKey=workforce.radar-ferias-prescricao")
                 .contains("role=analytical_data_product")
-                .contains("analyzes=ergon.vinculos,ergon.periodos-aquisitivos-ferias")
-                .contains("resourceKey=ergon.periodos-aquisitivos-ferias")
-                .contains("parents=ergon.vinculos");
+                .contains("analyzes=workforce.vinculos,workforce.periodos-aquisitivos-ferias")
+                .contains("resourceKey=workforce.periodos-aquisitivos-ferias")
+                .contains("parents=workforce.vinculos");
     }
 
     @Test
@@ -1000,7 +1000,7 @@ class DomainCatalogPromptContextServiceTest {
         DomainCatalogIngestionService ingestionService = mock(DomainCatalogIngestionService.class);
         DomainCatalogPromptContextService service = new DomainCatalogPromptContextService(ingestionService);
         when(ingestionService.contextLatestSemantic(
-                eq("praxis-service"), eq("ergon.aposentadorias"), eq("tenant-a"), eq("dev"),
+                eq("praxis-service"), eq("workforce.aposentadorias"), eq("tenant-a"), eq("dev"),
                 eq("node"), eq(null), eq("quick_filter"), eq("ativas"), eq(8)))
                 .thenReturn(new DomainCatalogContextResponse(
                         "praxis.domain-catalog-context/v0.1",
@@ -1012,21 +1012,21 @@ class DomainCatalogPromptContextServiceTest {
                         List.of(),
                         List.of(new DomainCatalogItemResponse(
                                 UUID.randomUUID(),
-                                "praxis-service:ergon.aposentadorias:latest",
+                                "praxis-service:workforce.aposentadorias:latest",
                                 "node",
-                                "ergon.aposentadorias.quickFilter.ativas-em-folha",
-                                "ergon",
+                                "workforce.aposentadorias.quickFilter.ativas-em-folha",
+                                "workforce",
                                 "quick_filter",
                                 null,
                                 null,
                                 objectMapper.readTree("""
                                     {
-                                      "nodeKey": "ergon.aposentadorias.quickFilter.ativas-em-folha",
+                                      "nodeKey": "workforce.aposentadorias.quickFilter.ativas-em-folha",
                                       "label": "Ativas em folha",
                                       "description": "Aposentadorias vigentes já implantadas em folha.",
                                       "metadata": {
                                         "quickFilterId": "ativas-em-folha",
-                                        "resourceKey": "ergon.aposentadorias",
+                                        "resourceKey": "workforce.aposentadorias",
                                         "tone": "success",
                                         "isDefault": true,
                                         "filterFields": ["situacoesConcessaoIn", "apenasVigentes"],
@@ -1043,7 +1043,7 @@ class DomainCatalogPromptContextServiceTest {
                 objectMapper.readTree("""
                     {
                       "domainCatalog": {
-                        "resourceKey": "ergon.aposentadorias",
+                        "resourceKey": "workforce.aposentadorias",
                         "nodeType": "quick_filter",
                         "query": "ativas",
                         "limit": 8
@@ -1054,9 +1054,9 @@ class DomainCatalogPromptContextServiceTest {
                 "dev");
 
         assertThat(promptContext)
-                .contains("ergon.aposentadorias.quickFilter.ativas-em-folha")
+                .contains("workforce.aposentadorias.quickFilter.ativas-em-folha")
                 .contains("quickFilterId=ativas-em-folha")
-                .contains("resourceKey=ergon.aposentadorias")
+                .contains("resourceKey=workforce.aposentadorias")
                 .contains("tone=success")
                 .contains("isDefault=true")
                 .contains("filterFields=situacoesConcessaoIn,apenasVigentes")

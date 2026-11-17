@@ -19,7 +19,7 @@ import org.springframework.core.io.ClassPathResource;
 class AiRegistrySnapshotContractTest {
 
     private static final String EXPECTED_SNAPSHOT_HASH =
-            "25a029c668376c8465a895cede85088e2a94e1ac9b1302e81f3c75faa03d9b3b";
+            "8c1bb2c9068ec0121794f710795c1a28f76c4d17505718b3b1593e4234c99912";
     private static final String EXPECTED_VERSION = "1.0.0";
     private static final String EXPECTED_GENERATED_AT = "2026-11-15T22:22:39.472Z";
     private static final int EXPECTED_COMPONENT_COUNT = 109;
@@ -325,6 +325,26 @@ class AiRegistrySnapshotContractTest {
         }
 
         assertThat(oversized).isEmpty();
+    }
+
+    @Test
+    void classpathSnapshotChunksMaintainExactContentHashes() throws IOException {
+        JsonNode components = readSnapshot().path("components");
+        List<String> mismatched = new ArrayList<>();
+        var componentFields = components.fields();
+        while (componentFields.hasNext()) {
+            var component = componentFields.next();
+            for (JsonNode chunk : component.getValue().path("chunks")) {
+                String expected = RagDocumentIdentity.sha256(chunk.path("content").asText(""));
+                String actual = chunk.path("contentHash").asText("");
+                if (!expected.equals(actual)) {
+                    mismatched.add(component.getKey() + "/" + chunk.path("chunkIndex").asInt()
+                            + " expected=" + expected + " actual=" + actual);
+                }
+            }
+        }
+
+        assertThat(mismatched).isEmpty();
     }
 
     private JsonNode readSnapshot() throws IOException {

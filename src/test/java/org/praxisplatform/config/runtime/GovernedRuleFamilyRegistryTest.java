@@ -51,7 +51,7 @@ class GovernedRuleFamilyRegistryTest {
     private static final Instant NOW = Instant.parse("2026-11-10T15:00:00Z");
 
     enum CarreiraOp {
-        CREATE("ergon.carreiras:create");
+        CREATE("workforce.carreiras:create");
         final String key;
 
         CarreiraOp(String key) {
@@ -60,7 +60,7 @@ class GovernedRuleFamilyRegistryTest {
     }
 
     enum VinculoOp {
-        CREATE("ergon.vinculos:create");
+        CREATE("workforce.vinculos:create");
         final String key;
 
         VinculoOp(String key) {
@@ -75,32 +75,32 @@ class GovernedRuleFamilyRegistryTest {
                 buildFamily(
                         CarreiraOp.class,
                         CarreiraOp.CREATE,
-                        "ergon.carreiras",
+                        "workforce.carreiras",
                         CarreiraOp.CREATE.key,
-                        "ERG-09001");
+                        "WF-09001");
         GovernedRuleFamilyDescriptor<VinculoOp> vinculoFamily =
                 buildFamily(
                         VinculoOp.class,
                         VinculoOp.CREATE,
-                        "ergon.vinculos",
+                        "workforce.vinculos",
                         VinculoOp.CREATE.key,
-                        "ERG-09002");
+                        "WF-09002");
 
         GovernedRuleFamilyRegistry registry =
                 new GovernedRuleFamilyRegistry(List.of(carreiraFamily, vinculoFamily));
 
         assertThat(registry.families()).hasSize(2);
-        assertThat(registry.findByFamilyKey("ergon.carreiras")).contains(carreiraFamily);
-        assertThat(registry.findByOperationKey("ergon.vinculos:create")).contains(vinculoFamily);
+        assertThat(registry.findByFamilyKey("workforce.carreiras")).contains(carreiraFamily);
+        assertThat(registry.findByOperationKey("workforce.vinculos:create")).contains(vinculoFamily);
 
         DomainRuleProductCatalog productCatalog = registry.toProductCatalog();
         assertThat(
                         productCatalog.find(
-                                new DomainRuleImplementationScope("1", "dev", "ergon-service"),
+                                new DomainRuleImplementationScope("1", "dev", "workforce-service"),
                                 new RuleSetRef(
-                                        "ergon-service",
+                                        "workforce-service",
                                         "rh",
-                                        "ergon.carreiras",
+                                        "workforce.carreiras",
                                         CarreiraOp.CREATE.key,
                                         1)))
                 .isPresent();
@@ -159,7 +159,7 @@ class GovernedRuleFamilyRegistryTest {
                         () ->
                                 registry.probeCandidate(
                                         1,
-                                        "ergon.inexistente:create",
+                                        "workforce.inexistente:create",
                                         rolloutId,
                                         principal,
                                         snapshots,
@@ -172,7 +172,7 @@ class GovernedRuleFamilyRegistryTest {
                         ex -> assertThat(ex.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND));
 
         // 404 NOT_FOUND when no pending rollout exists
-        when(rollouts.pending("ergon.vinculos", VinculoOp.CREATE.key, principal))
+        when(rollouts.pending("workforce.vinculos", VinculoOp.CREATE.key, principal))
                 .thenReturn(Optional.empty());
         assertThatThrownBy(
                         () ->
@@ -199,7 +199,7 @@ class GovernedRuleFamilyRegistryTest {
                         "snap-vinculo-1",
                         "1",
                         "dev",
-                        "ergon-service",
+                        "workforce-service",
                         1,
                         "2026-01-01T00:00:00Z",
                         null,
@@ -208,7 +208,7 @@ class GovernedRuleFamilyRegistryTest {
                         null,
                         List.of(
                                 new RuleSnapshotSource(
-                                        "src-1", "ergon.vinculos", 1, "B".repeat(64))),
+                                        "src-1", "workforce.vinculos", 1, "B".repeat(64))),
                         List.of(
                                 new RuleSnapshotApproval(
                                         "app-1",
@@ -219,12 +219,12 @@ class GovernedRuleFamilyRegistryTest {
                         productRuleSet);
         String contentHash = PraxisCanonicalJson.sha256(JSON.valueToTree(snapshot));
 
-        when(rollouts.pending("ergon.vinculos", VinculoOp.CREATE.key, principal))
+        when(rollouts.pending("workforce.vinculos", VinculoOp.CREATE.key, principal))
                 .thenReturn(
                         Optional.of(
                                 new DomainRulePendingRolloutResponse(
                                         rolloutId,
-                                        "ergon.vinculos",
+                                        "workforce.vinculos",
                                         VinculoOp.CREATE.key,
                                         "snap-vinculo-1",
                                         contentHash,
@@ -276,7 +276,7 @@ class GovernedRuleFamilyRegistryTest {
         // Incompatible candidate (undeclared fact root) reports preloadReady=false and canonical RUNTIME_INCOMPATIBLE
         Rule badRule =
                 new Rule(
-                        "ERG-99999",
+                        "WF-99999",
                         "codigo",
                         "Raiz não permitida.",
                         "PCK_TEST",
@@ -286,15 +286,15 @@ class GovernedRuleFamilyRegistryTest {
                 OntologyRuleSetBuilder.requireReferencedFactPaths(
                         OntologyRuleSetBuilder.definition(
                                 new RuleSetRef(
-                                        "ergon-service",
+                                        "workforce-service",
                                         "rh",
-                                        "ergon.vinculos",
+                                        "workforce.vinculos",
                                         VinculoOp.CREATE.key,
                                         1),
-                                "ergon.vinculos.create",
+                                "workforce.vinculos.create",
                                 "customer.",
                                 List.of(badRule),
-                                null,
+                                List.of(),
                                 false,
                                 Map.of()));
         PublishedRuleSnapshot badSnapshot =
@@ -303,7 +303,7 @@ class GovernedRuleFamilyRegistryTest {
                         "snap-vinculo-bad",
                         "1",
                         "dev",
-                        "ergon-service",
+                        "workforce-service",
                         2,
                         "2026-01-01T00:00:00Z",
                         null,
@@ -312,7 +312,7 @@ class GovernedRuleFamilyRegistryTest {
                         null,
                         List.of(
                                 new RuleSnapshotSource(
-                                        "src-2", "ergon.vinculos", 2, "C".repeat(64))),
+                                        "src-2", "workforce.vinculos", 2, "C".repeat(64))),
                         List.of(
                                 new RuleSnapshotApproval(
                                         "app-2",
@@ -323,12 +323,12 @@ class GovernedRuleFamilyRegistryTest {
                         badRuleSet);
         String badHash = PraxisCanonicalJson.sha256(JSON.valueToTree(badSnapshot));
         UUID badRolloutId = UUID.randomUUID();
-        when(rollouts.pending("ergon.vinculos", VinculoOp.CREATE.key, principal))
+        when(rollouts.pending("workforce.vinculos", VinculoOp.CREATE.key, principal))
                 .thenReturn(
                         Optional.of(
                                 new DomainRulePendingRolloutResponse(
                                         badRolloutId,
-                                        "ergon.vinculos",
+                                        "workforce.vinculos",
                                         VinculoOp.CREATE.key,
                                         "snap-vinculo-bad",
                                         badHash,
@@ -375,23 +375,23 @@ class GovernedRuleFamilyRegistryTest {
                 buildFamily(
                         SharedValidateOp.class,
                         SharedValidateOp.VALIDATE,
-                        "ergon.lotacao",
+                        "workforce.lotacao",
                         "validate",
-                        "ERG-09101");
+                        "WF-09101");
         GovernedRuleFamilyDescriptor<SharedValidateOp> feriasFamily =
                 buildFamily(
                         SharedValidateOp.class,
                         SharedValidateOp.VALIDATE,
-                        "ergon.ferias",
+                        "workforce.ferias",
                         "validate",
-                        "ERG-09102");
+                        "WF-09102");
 
         GovernedRuleFamilyRegistry registry =
                 new GovernedRuleFamilyRegistry(List.of(lotacaoFamily, feriasFamily));
 
         assertThat(registry.findAllByOperationKey("validate"))
                 .containsExactly(lotacaoFamily, feriasFamily);
-        assertThat(registry.findByFamilyAndOperation("ergon.ferias", "validate"))
+        assertThat(registry.findByFamilyAndOperation("workforce.ferias", "validate"))
                 .contains(feriasFamily);
         assertThatThrownBy(() -> registry.findByOperationKey("validate"))
                 .isInstanceOf(IllegalStateException.class)
@@ -412,14 +412,14 @@ class GovernedRuleFamilyRegistryTest {
                         "snap-ferias-1",
                         "1",
                         "dev",
-                        "ergon-service",
+                        "workforce-service",
                         1,
                         "2026-01-01T00:00:00Z",
                         null,
                         "host/1.0",
                         "2026-01-01T00:00:00Z",
                         null,
-                        List.of(new RuleSnapshotSource("src-f1", "ergon.ferias", 1, "D".repeat(64))),
+                        List.of(new RuleSnapshotSource("src-f1", "workforce.ferias", 1, "D".repeat(64))),
                         List.of(
                                 new RuleSnapshotApproval(
                                         "app-f1",
@@ -430,14 +430,14 @@ class GovernedRuleFamilyRegistryTest {
                         feriasProduct);
         String feriasHash = PraxisCanonicalJson.sha256(JSON.valueToTree(feriasSnapshot));
 
-        when(rollouts.pending("ergon.lotacao", "validate", principal))
+        when(rollouts.pending("workforce.lotacao", "validate", principal))
                 .thenReturn(Optional.empty());
-        when(rollouts.pending("ergon.ferias", "validate", principal))
+        when(rollouts.pending("workforce.ferias", "validate", principal))
                 .thenReturn(
                         Optional.of(
                                 new DomainRulePendingRolloutResponse(
                                         feriasRolloutId,
-                                        "ergon.ferias",
+                                        "workforce.ferias",
                                         "validate",
                                         "snap-ferias-1",
                                         feriasHash,
@@ -510,11 +510,11 @@ class GovernedRuleFamilyRegistryTest {
         RuleSetDefinition productRuleSet =
                 OntologyRuleSetBuilder.requireReferencedFactPaths(
                         OntologyRuleSetBuilder.definition(
-                                new RuleSetRef("ergon-service", "rh", ruleSetKey, opKey, 1),
+                                new RuleSetRef("workforce-service", "rh", ruleSetKey, opKey, 1),
                                 ruleSetKey + ".create",
                                 "customer.",
                                 List.of(r1),
-                                null,
+                                List.of(),
                                 false,
                                 Map.of()));
         String schemaJson =
@@ -556,7 +556,7 @@ class GovernedRuleFamilyRegistryTest {
         GovernedHostRuleBundleRuntime<O> runtime =
                 new GovernedHostRuleBundleRuntime<>(
                         opClass,
-                        "ergon-service",
+                        "workforce-service",
                         ruleSetKey,
                         "host/1.0",
                         "provider/1.0",

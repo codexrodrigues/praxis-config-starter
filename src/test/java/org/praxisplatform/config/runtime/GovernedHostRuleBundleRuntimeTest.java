@@ -65,7 +65,7 @@ class GovernedHostRuleBundleRuntimeTest {
     @Test
     void admitsBundleEvaluatesAndEnforcesCommitFenceOnPolicyRotation() throws Exception {
         Rule r1 = new Rule(
-                "ERG-09001",
+                "WF-09001",
                 "codigo",
                 "Código obrigatório.",
                 "PCK_TEST",
@@ -77,7 +77,7 @@ class GovernedHostRuleBundleRuntimeTest {
                         "carreiras.create",
                         "customer.",
                         List.of(r1),
-                        null,
+                        List.of(),
                         false,
                         Map.of()));
 
@@ -222,7 +222,7 @@ class GovernedHostRuleBundleRuntimeTest {
     @Test
     void admitsAndEvaluatesUntypedSingleRuleSetFamilyAtLiveRuntimeWithCommitFence() {
         Rule r1 = new Rule(
-                "ERG-09101",
+                "WF-09101",
                 "nome",
                 "Nome obrigatório.",
                 "PCK_SETOR",
@@ -234,7 +234,7 @@ class GovernedHostRuleBundleRuntimeTest {
                         "setores.save",
                         "customer.",
                         List.of(r1),
-                        null,
+                        List.of(),
                         false,
                         Map.of()));
 
@@ -330,7 +330,7 @@ class GovernedHostRuleBundleRuntimeTest {
         assertThatThrownBy(() -> customScope.runtime().enforce(
                 SingleRuleOperation.DEFAULT, invalidFacts, customScope.nowUtc(), customScope.zone()))
                 .isInstanceOf(IllegalStateException.class)
-                .hasMessageContaining("HOST-VIOLATION:[ERG-09101]");
+                .hasMessageContaining("HOST-VIOLATION:[WF-09101]");
 
         // Tenant mismatch in context fails closed even for untyped RuleSets
         ObjectNode wrongTenantFacts = JSON.createObjectNode();

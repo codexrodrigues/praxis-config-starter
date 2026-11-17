@@ -35,7 +35,23 @@ final class UiLayoutAuthoringProjection {
           "praxis.stepper.editor",
           "praxis.expansion.editor",
           "praxis.organogram.editor",
-          "praxis.progression-ladder.editor" -> UiLayoutDeclarativeWidgetRevisionReproduction.requireNative(target, descriptor, baseline, candidate, patchDescriptor);
+          "praxis.progression-ladder.editor",
+          "praxis.crud.editor",
+          "praxis.filter.editor",
+          "praxis.analytics-presentation.editor",
+          "praxis.files-upload.editor",
+          "praxis.related-resource-outlet.editor",
+          "praxis.cron-builder.editor",
+          "praxis.manual-form.editor",
+          "praxis.editorial-form-runtime.editor",
+          "praxis.visual-builder.editor",
+          "praxis.table-rule-builder.editor",
+          "praxis.micro-visualization.editor",
+          "praxis.hero-banner.editor",
+          "praxis.footer-links.editor",
+          "praxis.legal-notice.editor",
+          "praxis.rich-text-block.editor",
+          "praxis.user-context-summary.editor" -> UiLayoutDeclarativeWidgetRevisionReproduction.requireNative(target, descriptor, baseline, candidate, patchDescriptor);
       default -> throw unavailable();
     }
     checkpoint.run();

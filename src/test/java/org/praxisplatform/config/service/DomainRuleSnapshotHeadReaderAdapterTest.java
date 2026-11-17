@@ -92,11 +92,11 @@ class DomainRuleSnapshotHeadReaderAdapterTest {
         "snapshot-frequency-1",
         "tenant-a",
         "prod",
-        "ergon",
+        "workforce",
         1,
         "2026-08-09T20:00:00Z",
         null,
-        "ergon/1.0",
+        "workforce/1.0",
         "2026-08-09T20:00:00Z",
         null,
         List.of(new RuleSnapshotSource(

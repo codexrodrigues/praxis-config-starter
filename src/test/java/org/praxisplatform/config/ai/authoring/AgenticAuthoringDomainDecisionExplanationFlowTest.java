@@ -36,7 +36,7 @@ class AgenticAuthoringDomainDecisionExplanationFlowTest {
         DomainRuleExplanationEvidenceProjection projection = projection("full");
         when(projectionService.project(
                         eq(DEFINITION_ID),
-                        eq("ERG-08382"),
+                        eq("WF-08382"),
                         eq(3),
                         any()))
                 .thenReturn(projection);
@@ -50,7 +50,7 @@ class AgenticAuthoringDomainDecisionExplanationFlowTest {
                         objectMapper.readTree("""
                                 {"schemaVersion":"praxis.ai.context-hints.domain-decision/v1",
                                  "definitionId":"00000000-0000-0000-0000-000000000382",
-                                 "ruleKey":"ERG-08382","version":3,
+                                 "ruleKey":"WF-08382","version":3,
                                  "source":"rules-studio-selection"}
                                 """)),
                 principal,
@@ -62,7 +62,7 @@ class AgenticAuthoringDomainDecisionExplanationFlowTest {
                 .containsEntry("exposureMode", "full")
                 .containsEntry("exactVersion", true);
         verify(projectionService).project(
-                eq(DEFINITION_ID), eq("ERG-08382"), eq(3), any());
+                eq(DEFINITION_ID), eq("WF-08382"), eq(3), any());
     }
 
     @Test
@@ -78,7 +78,7 @@ class AgenticAuthoringDomainDecisionExplanationFlowTest {
                         objectMapper.readTree("""
                                 {"schemaVersion":"local-policy-ref/v1",
                                  "definitionId":"00000000-0000-0000-0000-000000000382",
-                                 "ruleKey":"ERG-08382","version":3,
+                                 "ruleKey":"WF-08382","version":3,
                                  "source":"browser-local-state"}
                                 """)),
                 new AiPrincipalContext("acme", "reader", "dev", true),
@@ -116,7 +116,7 @@ class AgenticAuthoringDomainDecisionExplanationFlowTest {
         assertThat(answer.changeKind()).isEqualTo("explain_domain_decision");
         assertThat(answer.assistantMessage()).contains("compara os limites");
         assertThat(answer.evidenceBundle().path("domainDecision").path("decisionRef").path("ruleKey").asText())
-                .isEqualTo("ERG-08382");
+                .isEqualTo("WF-08382");
         assertThat(answer.warnings()).contains("domain-decision-explanation-grounded");
         verify(provider).generateText(
                 anyString(), any(AiCallConfig.class), eq("acme"), eq("reader"), eq("dev"));
@@ -185,7 +185,7 @@ class AgenticAuthoringDomainDecisionExplanationFlowTest {
                           "selectedDomainDecisionRef": {
                             "schemaVersion": "praxis.ai.context-hints.domain-decision/v1",
                             "definitionId": "00000000-0000-0000-0000-000000000382",
-                            "ruleKey": "ERG-08382",
+                            "ruleKey": "WF-08382",
                             "version": 3,
                             "source": "rules-studio-selection"
                           },
@@ -205,10 +205,10 @@ class AgenticAuthoringDomainDecisionExplanationFlowTest {
         return new DomainRuleExplanationEvidenceProjection(
                 DomainRuleExplanationEvidenceProjection.SCHEMA_VERSION,
                 new DomainRuleExplanationEvidenceProjection.DecisionRef(
-                        DEFINITION_ID, "ERG-08382", 3, "definition-hash", "condition-hash"),
+                        DEFINITION_ID, "WF-08382", 3, "definition-hash", "condition-hash"),
                 new DomainRuleExplanationEvidenceProjection.ScopeAttestation(true, true),
                 new DomainRuleExplanationEvidenceProjection.SemanticContext(
-                        "JSON_LOGIC_DECISION", "approved", "workforce", "frequency", "ergon", "policy-owner"),
+                        "JSON_LOGIC_DECISION", "approved", "workforce", "frequency", "workforce", "policy-owner"),
                 new DomainRuleExplanationEvidenceProjection.ConditionEvidence(
                         exposureMode,
                         "full".equals(exposureMode)

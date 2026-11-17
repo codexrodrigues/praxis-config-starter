@@ -25,8 +25,14 @@ class DomainRuleOperationScopeNeonIT {
 
   @BeforeAll static void prepare()throws Exception {
     String branch=required("PROOF_NEON_BRANCH");
-    assertThat(branch).isEqualTo(required("BULK_PROOF_DISPOSABLE_BRANCH"))
-        .isNotIn("br-super-sound-b7urizmd","br-bitter-bonus-b7i0vfko","br-purple-dust-b70ss3dj","br-blue-mode-b7oabglw");
+    String branchDigest=HexFormat.of().formatHex(
+        java.security.MessageDigest.getInstance("SHA-256").digest(branch.getBytes(java.nio.charset.StandardCharsets.UTF_8)));
+    assertThat(branch).isEqualTo(required("BULK_PROOF_DISPOSABLE_BRANCH"));
+    assertThat(branchDigest).isNotIn(
+        "e889b87e9b248565a4788ca356ecd75122b3d68025b75f3df5da0cb97f091e08",
+        "2c8374c25ec1ded61f41cb7a3cea15c287144bfe498ae63be385d5a1839049e8",
+        "b372ec7bc7b4df97528a243cdeba85fa9a488a1980ecf5ebb901b18e498d73c7",
+        "0be65500023f33386b0fb39cf22c3f0be1e06424c423b1edd2d5059814956df8");
     url=required("G3_NEON_JDBC");user=required("G3_NEON_USER");password=required("G3_NEON_PASSWORD");
     assertThat(url).startsWith("jdbc:postgresql://"+required("BULK_PROOF_EXPECTED_HOST")+"/g3_operation_proof?")
         .contains("sslmode=require");

@@ -107,7 +107,7 @@ class DomainRuleTestRunServiceTest {
   }
 
   @Test void recordsSanitizedBaselineAndOperationalProvenance() {
-    var baseline = new DomainRuleTestBaselineEvidence("LEGACY_ORACLE", "ergon:r013:matrix:case-01",
+    var baseline = new DomainRuleTestBaselineEvidence("LEGACY_ORACLE", "workforce:r013:matrix:case-01",
         "D".repeat(64), Instant.parse("2026-08-13T11:55:00Z"), "ELIGIBLE");
     var operational = new DomainRuleOperationalTestEvidence("UPDATE", "E".repeat(64),
         "F".repeat(64), true, false, true, "1".repeat(64), 1);
@@ -253,7 +253,7 @@ class DomainRuleTestRunServiceTest {
 
   @Test void requiresAnIndependentBaselineLaneForEveryEligibleScenario() {
     var base = request(2L, "A".repeat(64));
-    var eligible = new DomainRuleTestBaselineEvidence("LEGACY_ORACLE", "ergon:r013:matrix",
+    var eligible = new DomainRuleTestBaselineEvidence("LEGACY_ORACLE", "workforce:r013:matrix",
         "D".repeat(64), Instant.parse("2026-08-13T11:55:00Z"), "ELIGIBLE");
     var request = new DomainRuleTestRunRecordRequest(base.idempotencyKey(), base.workspaceRevision(),
         base.baseDefinitionHash(), base.evaluatedAtUtc(), base.userTimeZone(), base.activeSnapshotKey(),

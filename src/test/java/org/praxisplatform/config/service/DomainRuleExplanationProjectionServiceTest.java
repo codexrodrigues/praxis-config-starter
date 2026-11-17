@@ -26,7 +26,7 @@ class DomainRuleExplanationProjectionServiceTest {
 
     private static final UUID DEFINITION_ID = UUID.fromString("10000000-0000-0000-0000-000000000001");
     private static final UUID MATERIALIZATION_ID = UUID.fromString("20000000-0000-0000-0000-000000000002");
-    private static final String RULE_KEY = "ergon.retirement.eligibility";
+    private static final String RULE_KEY = "workforce.retirement.eligibility";
     private static final int VERSION = 3;
     private static final DomainRuleGovernancePrincipal PRINCIPAL =
             new DomainRuleGovernancePrincipal("tenant-secret", "actor-secret", "dev-secret");
@@ -233,10 +233,10 @@ class DomainRuleExplanationProjectionServiceTest {
                 VERSION,
                 "selection_eligibility",
                 "active",
-                "ergon",
+                "workforce",
                 "employees",
-                "ergon-service",
-                "ergon-policy-team",
+                "workforce-service",
+                "workforce-policy-team",
                 "steward-secret",
                 null,
                 null,
@@ -269,7 +269,7 @@ class DomainRuleExplanationProjectionServiceTest {
                 VERSION,
                 "selection_eligibility",
                 "employees",
-                "ergon-service",
+                "workforce-service",
                 List.of(
                         new DomainRuleTimelineEventResponse(
                                 "definition.activated",
@@ -309,7 +309,7 @@ class DomainRuleExplanationProjectionServiceTest {
                 DEFINITION_ID,
                 RULE_KEY,
                 VERSION,
-                "ergon-retirement-policy",
+                "workforce-retirement-policy",
                 "policy",
                 "runtime_policy",
                 "employee-retirement",

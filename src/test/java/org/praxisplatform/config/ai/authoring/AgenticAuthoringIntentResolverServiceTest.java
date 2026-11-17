@@ -4229,7 +4229,7 @@ class AgenticAuthoringIntentResolverServiceTest {
         ObjectNode selected = hints.putObject("selectedDomainDecisionRef");
         selected.put("schemaVersion", "praxis.ai.context-hints.domain-decision/v1");
         selected.put("definitionId", "00000000-0000-0000-0000-000000000382");
-        selected.put("ruleKey", "ERG-08382");
+        selected.put("ruleKey", "WF-08382");
         selected.put("version", 3);
         selected.put("source", "policy-studio-selection");
 
@@ -17239,7 +17239,7 @@ class AgenticAuthoringIntentResolverServiceTest {
         contextHints.putObject("selectedDomainDecisionRef")
                 .put("schemaVersion", "praxis.ai.context-hints.domain-decision/v1")
                 .put("definitionId", "00000000-0000-0000-0000-000000000382")
-                .put("ruleKey", "ERG-08382")
+                .put("ruleKey", "WF-08382")
                 .put("version", 3)
                 .put("source", "policy-studio-selection");
 
