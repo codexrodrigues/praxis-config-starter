@@ -74,9 +74,12 @@ public class OperationalAgentTurnStreamService {
     private final Map<UUID, Set<SseEmitter>> emittersByStream = new ConcurrentHashMap<>();
     private final Map<UUID, AtomicLong> replayCursorByStream = new ConcurrentHashMap<>();
     private final Map<UUID, ScheduledFuture<?>> heartbeatTasks = new ConcurrentHashMap<>();
+    private final Map<UUID, ScheduledFuture<?>> replayTasks = new ConcurrentHashMap<>();
+    private final Map<UUID, ScheduledFuture<?>> timeoutTasks = new ConcurrentHashMap<>();
     private final Map<UUID, Future<?>> processingTasks = new ConcurrentHashMap<>();
     private final Map<UUID, AtomicBoolean> terminalByStream = new ConcurrentHashMap<>();
     private final Map<UUID, AtomicBoolean> cancelledByStream = new ConcurrentHashMap<>();
+    private final Map<UUID, Object> streamLocks = new ConcurrentHashMap<>();
     private final ExecutorService executor = createExecutor();
     private final ScheduledExecutorService scheduler = createScheduler();
 
@@ -91,6 +94,12 @@ public class OperationalAgentTurnStreamService {
 
     @Value("${praxis.ai.agent.stream.heartbeat-seconds:5}")
     private long heartbeatSeconds = 5L;
+
+    @Value("${praxis.ai.agent.stream.poll-seconds:1}")
+    private long replayPollSeconds = 1L;
+
+    @Value("${praxis.ai.agent.turn-timeout-seconds:120}")
+    private long turnTimeoutSeconds = 120L;
 
     @Value("${praxis.ai.agent.stream.max-emitters-per-stream:4}")
     private int maxEmittersPerStream = 4;
@@ -172,7 +181,7 @@ public class OperationalAgentTurnStreamService {
                 Map.of(
                         "state", "started",
                         "phase", "agent.init",
-                        "statusText", "Recebi sua solicitacao operacional e estou consultando os recursos do dominio.",
+                        "statusText", "Recebi sua solicitação operacional e estou consultando os recursos do domínio.",
                         "requestHash", requestHash,
                         "expiresAt", expiresAt.toString()));
         if (!startAppend.appended()) {
@@ -205,6 +214,8 @@ public class OperationalAgentTurnStreamService {
             processingTasks.put(streamId, future);
             if (future.isDone()) {
                 processingTasks.remove(streamId, future);
+            } else {
+                scheduleTurnTimeout(principalContext, streamId, threadId, turnId, future);
             }
             return new StartResult(startResponse(streamId, threadId, turnId, expiresAt, principalContext), true);
         } catch (RejectedExecutionException ex) {
@@ -217,39 +228,44 @@ public class OperationalAgentTurnStreamService {
         }
     }
 
-    public synchronized SseEmitter connect(
+    public SseEmitter connect(
             UUID streamId,
             String lastEventId,
             AiPrincipalContext principalContext) {
-        AiTurnEventService.ReplayResult replay = turnEventService.replay(streamId, lastEventId, principalContext);
-        SseEmitter emitter = new SseEmitter(Math.max(10_000L, emitterTimeoutMs));
-        Set<SseEmitter> emitters = emittersByStream.computeIfAbsent(streamId, ignored -> ConcurrentHashMap.newKeySet());
-        if (maxEmittersPerStream > 0 && emitters.size() >= maxEmittersPerStream) {
-            throw new ResponseStatusException(HttpStatus.TOO_MANY_REQUESTS, "operational-agent-emitter-limit-exceeded");
-        }
-        emitters.add(emitter);
-        emitter.onCompletion(() -> unregister(streamId, emitter));
-        emitter.onTimeout(() -> unregister(streamId, emitter));
-        emitter.onError(err -> unregister(streamId, emitter));
+        synchronized (streamLock(streamId)) {
+            AiTurnEventService.ReplayResult replay = turnEventService.replay(streamId, lastEventId, principalContext);
+            SseEmitter emitter = new SseEmitter(Math.max(10_000L, emitterTimeoutMs));
+            Set<SseEmitter> emitters = emittersByStream.computeIfAbsent(streamId, ignored -> ConcurrentHashMap.newKeySet());
+            if (maxEmittersPerStream > 0 && emitters.size() >= maxEmittersPerStream) {
+                throw new ResponseStatusException(HttpStatus.TOO_MANY_REQUESTS, "operational-agent-emitter-limit-exceeded");
+            }
+            emitters.add(emitter);
+            emitter.onCompletion(() -> unregister(streamId, emitter));
+            emitter.onTimeout(() -> unregister(streamId, emitter));
+            emitter.onError(err -> unregister(streamId, emitter));
 
-        try {
-            AtomicLong cursor = replayCursorByStream.computeIfAbsent(streamId, ignored -> new AtomicLong(replay.afterSeq()));
-            AiTurnEventEnvelope tail = null;
-            for (AiTurnEventEnvelope event : replay.events()) {
-                send(emitter, event);
-                cursor.set(Math.max(cursor.get(), event.getSeq()));
-                tail = event;
+            try {
+                AtomicLong cursor = replayCursorByStream.computeIfAbsent(streamId, ignored -> new AtomicLong(replay.afterSeq()));
+                AiTurnEventEnvelope tail = null;
+                for (AiTurnEventEnvelope event : replay.events()) {
+                    send(emitter, event);
+                    cursor.set(Math.max(cursor.get(), event.getSeq()));
+                    tail = event;
+                }
+                ensureHeartbeat(streamId);
+                boolean hasTerminalTail = tail != null && turnEventService.isTerminalType(tail.getType());
+                if (hasTerminalTail) {
+                    terminalByStream.computeIfAbsent(streamId, ignored -> new AtomicBoolean()).set(true);
+                    completeStream(streamId);
+                } else if (!processingTasks.containsKey(streamId) && !terminalReached(streamId)) {
+                    ensureReplayPoller(streamId, principalContext);
+                }
+                return emitter;
+            } catch (RuntimeException ex) {
+                unregister(streamId, emitter);
+                emitter.completeWithError(ex);
+                throw ex;
             }
-            ensureHeartbeat(streamId);
-            if (tail != null && turnEventService.isTerminalType(tail.getType())) {
-                terminalByStream.computeIfAbsent(streamId, ignored -> new AtomicBoolean()).set(true);
-                completeStream(streamId);
-            }
-            return emitter;
-        } catch (RuntimeException ex) {
-            unregister(streamId, emitter);
-            emitter.completeWithError(ex);
-            throw ex;
         }
     }
 
@@ -272,7 +288,7 @@ public class OperationalAgentTurnStreamService {
         cancelledByStream.computeIfAbsent(streamId, ignored -> new AtomicBoolean()).set(true);
         appendAndEmit(principalContext, streamId, ownership.threadId(), ownership.turnId(), "cancelled", Map.of(
                 "phase", "cancelled",
-                "statusText", "Execucao operacional cancelada pelo usuario."));
+                "statusText", "Execução operacional cancelada pelo usuário."));
         Future<?> task = processingTasks.remove(streamId);
         if (task != null && !task.isDone()) {
             task.cancel(true);
@@ -335,8 +351,25 @@ public class OperationalAgentTurnStreamService {
                 @Override
                 public boolean isCancelled() {
                     AtomicBoolean cancelled = cancelledByStream.get(streamId);
-                    return Thread.currentThread().isInterrupted() || (cancelled != null && cancelled.get());
+                    if (Thread.currentThread().isInterrupted() || (cancelled != null && cancelled.get())) {
+                        return true;
+                    }
+                    long nowMs = System.currentTimeMillis();
+                    long prevMs = lastDbCancelCheckMs.get();
+                    if (nowMs - prevMs >= 1_500L && lastDbCancelCheckMs.compareAndSet(prevMs, nowMs)) {
+                        try {
+                            AiTurnEventEnvelope tail = turnEventService.findLastEvent(streamId).orElse(null);
+                            if (tail != null && "cancelled".equalsIgnoreCase(tail.getType())) {
+                                cancelledByStream.computeIfAbsent(streamId, ignored -> new AtomicBoolean()).set(true);
+                                return true;
+                            }
+                        } catch (RuntimeException ignored) {
+                            // Cross-pod cancel probe failure should not abort an active turn prematurely.
+                        }
+                    }
+                    return false;
                 }
+                private final AtomicLong lastDbCancelCheckMs = new AtomicLong(0L);
             };
 
             PraxisOperationalAgentLoop.AgentTurnOutcome outcome = agentLoop.execute(
@@ -381,7 +414,7 @@ public class OperationalAgentTurnStreamService {
                 log.error("[OperationalAgentTurnStream] Failed executing stream {}: {}", streamId, ex.getMessage(), ex);
                 appendAndEmit(principalContext, streamId, threadId, turnId, "error", Map.of(
                         "code", "operational-agent-turn-failed",
-                        "statusText", ex.getMessage() != null ? ex.getMessage() : "Falha na execucao do turno operacional.",
+                        "statusText", "Não foi possível concluir a consulta operacional no momento. Tente novamente.",
                         "retryable", true));
                 turnService.expireTurn(threadId, turnId);
                 completeStream(streamId);
@@ -391,36 +424,38 @@ public class OperationalAgentTurnStreamService {
         }
     }
 
-    private synchronized void appendAndEmit(
+    private void appendAndEmit(
             AiPrincipalContext principalContext,
             UUID streamId,
             UUID threadId,
             UUID turnId,
             String eventType,
             Object payload) {
-        if (terminalReached(streamId)) {
-            return;
-        }
-        AiTurnEventEnvelope envelope = turnEventService.appendEvent(
-                principalContext, streamId, threadId, turnId, eventType, payload);
-        if (turnEventService.isTerminalType(eventType)) {
-            terminalByStream.computeIfAbsent(streamId, ignored -> new AtomicBoolean()).set(true);
-        }
-        AtomicLong cursor = replayCursorByStream.computeIfAbsent(streamId, ignored -> new AtomicLong(0L));
-        cursor.set(Math.max(cursor.get(), envelope.getSeq()));
-
-        Set<SseEmitter> emitters = emittersByStream.get(streamId);
-        if (emitters != null && !emitters.isEmpty()) {
-            List<SseEmitter> failed = new ArrayList<>();
-            for (SseEmitter emitter : emitters) {
-                try {
-                    send(emitter, envelope);
-                } catch (Exception ex) {
-                    failed.add(emitter);
-                }
+        synchronized (streamLock(streamId)) {
+            if (terminalReached(streamId)) {
+                return;
             }
-            for (SseEmitter fail : failed) {
-                unregister(streamId, fail);
+            AiTurnEventEnvelope envelope = turnEventService.appendEvent(
+                    principalContext, streamId, threadId, turnId, eventType, payload);
+            if (turnEventService.isTerminalType(eventType)) {
+                terminalByStream.computeIfAbsent(streamId, ignored -> new AtomicBoolean()).set(true);
+            }
+            AtomicLong cursor = replayCursorByStream.computeIfAbsent(streamId, ignored -> new AtomicLong(0L));
+            cursor.set(Math.max(cursor.get(), envelope.getSeq()));
+
+            Set<SseEmitter> emitters = emittersByStream.get(streamId);
+            if (emitters != null && !emitters.isEmpty()) {
+                List<SseEmitter> failed = new ArrayList<>();
+                for (SseEmitter emitter : emitters) {
+                    try {
+                        send(emitter, envelope);
+                    } catch (Exception ex) {
+                        failed.add(emitter);
+                    }
+                }
+                for (SseEmitter fail : failed) {
+                    unregister(streamId, fail);
+                }
             }
         }
     }
@@ -434,6 +469,94 @@ public class OperationalAgentTurnStreamService {
                 heartbeatSeconds,
                 heartbeatSeconds,
                 TimeUnit.SECONDS));
+    }
+
+    private void ensureReplayPoller(UUID streamId, AiPrincipalContext principalContext) {
+        if (scheduler.isShutdown()) {
+            return;
+        }
+        long periodSeconds = Math.max(1L, replayPollSeconds);
+        replayTasks.computeIfAbsent(streamId, id -> scheduler.scheduleAtFixedRate(() -> {
+            try {
+                if (terminalReached(id)) {
+                    completeStream(id);
+                    return;
+                }
+                AtomicLong cursor = replayCursorByStream.computeIfAbsent(id, ignored -> new AtomicLong(0L));
+                AiTurnEventService.ReplayResult replay = turnEventService.replayFromSeq(
+                        id, cursor.get(), principalContext);
+                if (replay == null || replay.events() == null || replay.events().isEmpty()) {
+                    return;
+                }
+                synchronized (streamLock(id)) {
+                    Set<SseEmitter> emitters = emittersByStream.get(id);
+                    for (AiTurnEventEnvelope event : replay.events()) {
+                        if (event.getSeq() <= cursor.get()) {
+                            continue;
+                        }
+                        if (emitters != null && !emitters.isEmpty()) {
+                            List<SseEmitter> failed = new ArrayList<>();
+                            for (SseEmitter emitter : emitters) {
+                                try {
+                                    send(emitter, event);
+                                } catch (Exception ex) {
+                                    failed.add(emitter);
+                                }
+                            }
+                            for (SseEmitter fail : failed) {
+                                unregister(id, fail);
+                            }
+                        }
+                        cursor.set(Math.max(cursor.get(), event.getSeq()));
+                        if (turnEventService.isTerminalType(event.getType())) {
+                            terminalByStream.computeIfAbsent(id, ignored -> new AtomicBoolean()).set(true);
+                            completeStream(id);
+                            break;
+                        }
+                    }
+                }
+            } catch (Exception ex) {
+                completeStream(id);
+            }
+        }, periodSeconds, periodSeconds, TimeUnit.SECONDS));
+    }
+
+    private void scheduleTurnTimeout(
+            AiPrincipalContext principalContext,
+            UUID streamId,
+            UUID threadId,
+            UUID turnId,
+            Future<?> processingFuture) {
+        if (turnTimeoutSeconds <= 0 || scheduler.isShutdown()) {
+            return;
+        }
+        ScheduledFuture<?> task = scheduler.schedule(() -> {
+            if (terminalReached(streamId)) {
+                return;
+            }
+            cancelledByStream.computeIfAbsent(streamId, ignored -> new AtomicBoolean()).set(true);
+            if (processingFuture != null && !processingFuture.isDone()) {
+                processingFuture.cancel(true);
+            }
+            try {
+                appendAndEmit(principalContext, streamId, threadId, turnId, "error", Map.of(
+                        "code", "operational-agent-turn-timeout",
+                        "statusText", "O tempo limite de processamento da consulta foi excedido.",
+                        "retryable", true));
+                turnService.expireTurn(threadId, turnId);
+            } catch (RuntimeException ex) {
+                log.debug("[OperationalAgentTurnStream] Timeout finalization warning for stream {}: {}", streamId, ex.getMessage());
+            } finally {
+                completeStream(streamId);
+            }
+        }, Math.max(5L, turnTimeoutSeconds), TimeUnit.SECONDS);
+        timeoutTasks.put(streamId, task);
+        if (terminalReached(streamId)) {
+            ScheduledFuture<?> removed = timeoutTasks.remove(streamId);
+            if (removed != null) {
+                removed.cancel(false);
+            }
+        }
     }
 
     private void emitHeartbeat(UUID streamId) {
@@ -486,12 +609,33 @@ public class OperationalAgentTurnStreamService {
         if (hb != null) {
             hb.cancel(false);
         }
+        ScheduledFuture<?> replayTask = replayTasks.remove(streamId);
+        if (replayTask != null) {
+            replayTask.cancel(false);
+        }
+        ScheduledFuture<?> timeoutTask = timeoutTasks.remove(streamId);
+        if (timeoutTask != null) {
+            timeoutTask.cancel(false);
+        }
         Set<SseEmitter> emitters = emittersByStream.remove(streamId);
         if (emitters != null) {
             emitters.forEach(SseEmitter::complete);
         }
         replayCursorByStream.remove(streamId);
         cancelledByStream.remove(streamId);
+        if (!scheduler.isShutdown()) {
+            scheduler.schedule(() -> {
+                terminalByStream.remove(streamId);
+                streamLocks.remove(streamId);
+            }, 60, TimeUnit.SECONDS);
+        } else {
+            terminalByStream.remove(streamId);
+            streamLocks.remove(streamId);
+        }
+    }
+
+    private Object streamLock(UUID streamId) {
+        return streamLocks.computeIfAbsent(streamId, ignored -> new Object());
     }
 
     private void unregister(UUID streamId, SseEmitter emitter) {
@@ -500,6 +644,10 @@ public class OperationalAgentTurnStreamService {
             emitters.remove(emitter);
             if (emitters.isEmpty()) {
                 emittersByStream.remove(streamId);
+                ScheduledFuture<?> replayTask = replayTasks.remove(streamId);
+                if (replayTask != null) {
+                    replayTask.cancel(false);
+                }
             }
         }
     }
@@ -516,6 +664,9 @@ public class OperationalAgentTurnStreamService {
             OperationalAgentTurnStreamRequest request,
             AiPrincipalContext principalContext,
             HttpServletRequest servletRequest) {
+        Set<String> principalAuthorities = principalContext.authorities() != null
+                ? principalContext.authorities()
+                : Set.of();
         AgentExecutionContext ctx = new AgentExecutionContext(
                 threadId,
                 turnId,
@@ -524,7 +675,7 @@ public class OperationalAgentTurnStreamService {
                 principalContext.userId(),
                 principalContext.environment(),
                 principalContext.userId(),
-                Set.of(),
+                principalAuthorities,
                 request.activeScreenResourcePath(),
                 request.activeTopicKey(),
                 request.activeSelectionHints(),
@@ -593,6 +744,12 @@ public class OperationalAgentTurnStreamService {
             AiPrincipalContext principalContext) {
         try {
             MessageDigest md = MessageDigest.getInstance("SHA-256");
+            String historyJson = request.conversationMessages() != null && !request.conversationMessages().isEmpty()
+                    ? objectMapper.writeValueAsString(request.conversationMessages())
+                    : "";
+            String hintsJson = request.activeSelectionHints() != null && !request.activeSelectionHints().isEmpty()
+                    ? objectMapper.writeValueAsString(request.activeSelectionHints())
+                    : "";
             String payload = String.join("|",
                     safe(principalContext.tenantId()),
                     safe(principalContext.userId()),
@@ -601,7 +758,9 @@ public class OperationalAgentTurnStreamService {
                     safe(request.activeScreenResourcePath()),
                     safe(request.activeTopicKey()),
                     safe(request.provider()),
-                    safe(request.model()));
+                    safe(request.model()),
+                    historyJson,
+                    hintsJson);
             return HexFormat.of().formatHex(md.digest(payload.getBytes(StandardCharsets.UTF_8)));
         } catch (Exception ex) {
             return Integer.toHexString(Objects.hash(sanitizedPrompt, request.activeScreenResourcePath()));
@@ -658,6 +817,15 @@ public class OperationalAgentTurnStreamService {
         processingTasks.clear();
         heartbeatTasks.values().forEach(f -> f.cancel(false));
         heartbeatTasks.clear();
+        replayTasks.values().forEach(f -> f.cancel(false));
+        replayTasks.clear();
+        timeoutTasks.values().forEach(f -> f.cancel(false));
+        timeoutTasks.clear();
+        emittersByStream.clear();
+        replayCursorByStream.clear();
+        cancelledByStream.clear();
+        terminalByStream.clear();
+        streamLocks.clear();
         executor.shutdownNow();
         scheduler.shutdownNow();
     }

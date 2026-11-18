@@ -10,6 +10,7 @@ import org.praxisplatform.config.ai.agent.model.AgentToolDeclaration;
 import org.praxisplatform.config.ai.agent.runtime.AgentTurnArtifactStore;
 import org.praxisplatform.config.ai.agent.runtime.Mod11IdentifierHintExtractor;
 import org.praxisplatform.config.ai.agent.runtime.Mod11IdentifierHintExtractor.TaxIdMatch;
+import org.praxisplatform.config.ai.agent.runtime.OperationalAssistantBlockComposer;
 import org.praxisplatform.config.ai.agent.runtime.TurnScopedPiiVault;
 import org.praxisplatform.config.ai.agent.spi.AgentEntityMatch;
 import org.praxisplatform.config.ai.agent.spi.AgentEntitySearchRequest;
@@ -144,7 +145,11 @@ public class SearchAndResolveEntitiesTool implements OperationalAgentTool {
         if (autoLoadedDossier != null) {
             result.put("autoLoadedDossier", autoLoadedDossier);
         }
-        return piiVault != null ? piiVault.scrubOutboundForModel(result) : result;
+        if (matches.isEmpty()) {
+            result.put("hint", "Nenhum registro correspondeu na busca polimorfica global; responda de forma objetiva informando que nao houve correspondencia, sem repetir varias chamadas query_resource_records vazias.");
+        }
+        Map<String, Object> scrubbed = piiVault != null ? piiVault.scrubOutboundForModel(result) : result;
+        return OperationalAssistantBlockComposer.maskMod11InStructure(scrubbed);
     }
 
     private static String asString(Object value) {

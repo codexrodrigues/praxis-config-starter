@@ -115,6 +115,7 @@ class OpenAiResponsesAgentToolGatewayTest {
         assertThat(first.hasToolCalls()).isTrue();
         assertThat(first.toolCalls().get(0).callId()).isEqualTo("fc_1");
         assertThat(first.toolCalls().get(0).arguments()).containsEntry("query", "Ana");
+        assertThat(first.providerOpaqueState()).containsEntry("previousResponseId", "resp-1");
         assertThat(capturedParams.get(0).tools()).isPresent();
 
         AgentModelTurnResponse second = gateway.generateTurn(
@@ -132,6 +133,22 @@ class OpenAiResponsesAgentToolGatewayTest {
         assertThat(second.hasToolCalls()).isFalse();
         assertThat(second.text()).isEqualTo("Encontrei 2 candidatas chamadas Ana.");
         assertThat(second.usage().totalTokens()).isEqualTo(105L);
-        assertThat(capturedParams.get(1).input().orElseThrow().asResponse()).hasSize(3);
+        assertThat(capturedParams.get(1).previousResponseId()).contains("resp-1");
+        assertThat(capturedParams.get(1).input().orElseThrow().asResponse()).hasSize(1);
+
+        gateway.generateTurn(
+                new AgentModelTurnRequest(
+                        "System rules",
+                        List.of(
+                                AgentConversationItem.userText("Ana"),
+                                AgentConversationItem.assistantToolCalls(first.text(), first.toolCalls(), Map.of()),
+                                AgentConversationItem.toolResults(List.of(
+                                        new AgentToolResult("fc_1", "search_and_resolve_entities", Map.of("matchCount", 2), false)))),
+                        List.of(decl),
+                        cfg),
+                AgentModelStreamListener.NOOP);
+
+        assertThat(capturedParams.get(2).previousResponseId()).isEmpty();
+        assertThat(capturedParams.get(2).input().orElseThrow().asResponse()).hasSize(3);
     }
 }

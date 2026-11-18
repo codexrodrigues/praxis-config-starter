@@ -47,7 +47,10 @@ public class RoutingAiToolCallingProvider implements AiToolCallingProvider {
             AgentModelStreamListener listener) {
         Objects.requireNonNull(request, "request is required");
         AiCallConfig requested = request.callConfig();
-        AiCallConfig effective = providerManagementService != null
+        boolean alreadyResolvedForCaller = requested != null
+                && StringUtils.hasText(requested.getProvider())
+                && StringUtils.hasText(requested.getApiKey());
+        AiCallConfig effective = (!alreadyResolvedForCaller && providerManagementService != null)
                 ? providerManagementService.resolveEffectiveCallConfig(
                         requested,
                         requested != null ? requested.getTenantId() : null,

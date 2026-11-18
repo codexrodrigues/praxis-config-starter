@@ -11,16 +11,19 @@ import com.google.genai.types.FunctionResponse;
 import com.google.genai.types.GenerateContentConfig;
 import com.google.genai.types.GenerateContentResponse;
 import com.google.genai.types.GenerateContentResponseUsageMetadata;
+import com.google.genai.types.HttpOptions;
 import com.google.genai.types.Part;
 import com.google.genai.types.Schema;
 import com.google.genai.types.Tool;
 import com.google.genai.types.Type;
+import jakarta.annotation.PreDestroy;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.concurrent.ConcurrentHashMap;
 import org.praxisplatform.config.ai.agent.model.AgentConversationItem;
 import org.praxisplatform.config.ai.agent.model.AgentConversationRole;
 import org.praxisplatform.config.ai.agent.model.AgentModelStreamListener;
@@ -48,6 +51,12 @@ public class GoogleGenAiAgentToolGateway implements AiToolCallingProvider {
     public static final String PROVIDER_ID = "gemini";
     private static final String DEFAULT_MODEL = "gemini-flash-latest";
     private static final String SYNTHETIC_CALL_PREFIX = "gemini-auto-";
+    private static final int MAX_CACHED_CLIENTS = 32;
+    private static final Map<ClientKey, Client> CLIENT_CACHE = new ConcurrentHashMap<>();
+    private static final GeminiExchange DEFAULT_EXCHANGE = (apiKey, model, contents, config) ->
+            invokeSdk(apiKey, null, null, model, contents, config);
+
+    private record ClientKey(String apiKey, String baseUrl, Integer timeoutMs) {}
 
     @FunctionalInterface
     public interface GeminiExchange {
@@ -61,6 +70,7 @@ public class GoogleGenAiAgentToolGateway implements AiToolCallingProvider {
     private final ObjectMapper objectMapper;
     private final String defaultApiKey;
     private final String defaultModel;
+    private String defaultBaseUrl;
     private final GeminiExchange exchange;
 
     @Autowired
@@ -68,7 +78,7 @@ public class GoogleGenAiAgentToolGateway implements AiToolCallingProvider {
             ObjectMapper objectMapper,
             @Value("${spring.ai.google.genai.api-key:${GEMINI_API_KEY:${GOOGLE_API_KEY:}}}") String defaultApiKey,
             @Value("${spring.ai.google.genai.chat.options.model:" + DEFAULT_MODEL + "}") String defaultModel) {
-        this(objectMapper, defaultApiKey, defaultModel, GoogleGenAiAgentToolGateway::invokeSdk);
+        this(objectMapper, defaultApiKey, defaultModel, DEFAULT_EXCHANGE);
     }
 
     public GoogleGenAiAgentToolGateway(
@@ -79,7 +89,13 @@ public class GoogleGenAiAgentToolGateway implements AiToolCallingProvider {
         this.objectMapper = objectMapper == null ? new ObjectMapper() : objectMapper;
         this.defaultApiKey = trimToNull(defaultApiKey);
         this.defaultModel = StringUtils.hasText(defaultModel) ? defaultModel.trim() : DEFAULT_MODEL;
+        this.defaultBaseUrl = null;
         this.exchange = Objects.requireNonNull(exchange, "exchange is required");
+    }
+
+    @Autowired(required = false)
+    void setDefaultBaseUrl(@Value("${spring.ai.google.genai.base-url:}") String defaultBaseUrl) {
+        this.defaultBaseUrl = trimToNull(defaultBaseUrl);
     }
 
     @Override
@@ -102,7 +118,15 @@ public class GoogleGenAiAgentToolGateway implements AiToolCallingProvider {
         List<Content> contents = toGeminiContents(request.conversation());
         GenerateContentConfig config = toGeminiConfig(request, callConfig);
 
-        GenerateContentResponse response = exchange.generate(apiKey, model, contents, config);
+        GenerateContentResponse response = exchange == DEFAULT_EXCHANGE
+                ? invokeSdk(
+                        apiKey,
+                        defaultBaseUrl,
+                        callConfig != null ? callConfig.getTimeoutSeconds() : null,
+                        model,
+                        contents,
+                        config)
+                : exchange.generate(apiKey, model, contents, config);
         return fromGeminiResponse(model, response, listener);
     }
 
@@ -351,8 +375,61 @@ public class GoogleGenAiAgentToolGateway implements AiToolCallingProvider {
             String model,
             List<Content> contents,
             GenerateContentConfig config) {
-        try (Client client = Client.builder().apiKey(apiKey).build()) {
+        return invokeSdk(apiKey, null, null, model, contents, config);
+    }
+
+    private static GenerateContentResponse invokeSdk(
+            String apiKey,
+            String baseUrl,
+            Integer timeoutSeconds,
+            String model,
+            List<Content> contents,
+            GenerateContentConfig config) {
+        Integer timeoutMs = timeoutSeconds != null && timeoutSeconds > 0
+                ? (int) Math.min(Integer.MAX_VALUE, timeoutSeconds * 1000L)
+                : null;
+        ClientKey key = new ClientKey(
+                apiKey,
+                StringUtils.hasText(baseUrl) ? baseUrl.trim() : "",
+                timeoutMs);
+        Client cached = CLIENT_CACHE.get(key);
+        if (cached != null) {
+            return cached.models.generateContent(model, contents, config);
+        }
+        if (CLIENT_CACHE.size() < MAX_CACHED_CLIENTS) {
+            Client client = CLIENT_CACHE.computeIfAbsent(key, GoogleGenAiAgentToolGateway::buildClient);
             return client.models.generateContent(model, contents, config);
+        }
+        try (Client client = buildClient(key)) {
+            return client.models.generateContent(model, contents, config);
+        }
+    }
+
+    private static Client buildClient(ClientKey key) {
+        Client.Builder builder = Client.builder().apiKey(key.apiKey());
+        if (StringUtils.hasText(key.baseUrl()) || key.timeoutMs() != null) {
+            HttpOptions.Builder httpBuilder = HttpOptions.builder();
+            if (StringUtils.hasText(key.baseUrl())) {
+                httpBuilder.baseUrl(key.baseUrl());
+            }
+            if (key.timeoutMs() != null) {
+                httpBuilder.timeout(key.timeoutMs());
+            }
+            builder.httpOptions(httpBuilder.build());
+        }
+        return builder.build();
+    }
+
+    @PreDestroy
+    void closeCachedClients() {
+        List<Client> snapshot = new ArrayList<>(CLIENT_CACHE.values());
+        CLIENT_CACHE.clear();
+        for (Client client : snapshot) {
+            try {
+                client.close();
+            } catch (Exception ignored) {
+                // ignore shutdown cleanup noise
+            }
         }
     }
 

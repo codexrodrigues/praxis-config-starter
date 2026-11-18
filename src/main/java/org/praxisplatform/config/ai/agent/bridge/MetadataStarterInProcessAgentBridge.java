@@ -2,10 +2,15 @@ package org.praxisplatform.config.ai.agent.bridge;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import jakarta.validation.Validator;
 import java.beans.PropertyDescriptor;
 import java.lang.reflect.Field;
+import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.lang.reflect.RecordComponent;
+import java.math.BigDecimal;
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Comparator;
@@ -16,52 +21,117 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.OptionalLong;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
 import lombok.extern.slf4j.Slf4j;
+import org.praxisplatform.config.ai.agent.bridge.BridgeActionReflectionSupport.DeterminationEndpoint;
+import org.praxisplatform.config.ai.agent.bridge.BridgeActionReflectionSupport.MutatingActionEndpoint;
 import org.praxisplatform.config.ai.agent.spi.AgentActionAffordance;
 import org.praxisplatform.config.ai.agent.spi.AgentActionAffordanceContributor;
+import org.praxisplatform.config.ai.agent.spi.AgentActionExecutionOutcome;
+import org.praxisplatform.config.ai.agent.spi.AgentActionInputField;
+import org.praxisplatform.config.ai.agent.spi.AgentActionPreparationContributor;
+import org.praxisplatform.config.ai.agent.spi.AgentActionPreparationContributor.ActionGuardAssessment;
 import org.praxisplatform.config.ai.agent.spi.AgentAuthorizationBridge;
+import org.praxisplatform.config.ai.agent.spi.AgentDeterminationRequest;
 import org.praxisplatform.config.ai.agent.spi.AgentEntityCatalogContributor;
 import org.praxisplatform.config.ai.agent.spi.AgentEntityDescriptor;
 import org.praxisplatform.config.ai.agent.spi.AgentEntityDossier;
 import org.praxisplatform.config.ai.agent.spi.AgentEntityMatch;
 import org.praxisplatform.config.ai.agent.spi.AgentEntitySearchRequest;
+import org.praxisplatform.config.ai.agent.spi.AgentEvaluatedCalculationMemory;
+import org.praxisplatform.config.ai.agent.spi.AgentExecuteActionRequest;
 import org.praxisplatform.config.ai.agent.spi.AgentExecutionContext;
+import org.praxisplatform.config.ai.agent.spi.AgentFieldDescriptor;
+import org.praxisplatform.config.ai.agent.spi.AgentPrepareActionRequest;
+import org.praxisplatform.config.ai.agent.spi.AgentPreparedAction;
 import org.praxisplatform.config.ai.agent.spi.AgentProactiveAlert;
 import org.praxisplatform.config.ai.agent.spi.AgentProactiveAlertContributor;
 import org.praxisplatform.config.ai.agent.spi.AgentQueryResult;
 import org.praxisplatform.config.ai.agent.spi.AgentRelatedDataset;
 import org.praxisplatform.config.ai.agent.spi.AgentResourceExecutionBridge;
+import org.praxisplatform.config.ai.agent.spi.AgentSimulationPreview;
+import org.praxisplatform.config.ai.agent.spi.AgentStatsAggregationRequest;
+import org.praxisplatform.config.ai.agent.spi.AgentStatsResult;
+import org.praxisplatform.config.ai.agent.spi.AgentStatsResult.AgentStatsBucket;
 import org.praxisplatform.config.ai.agent.spi.AgentSurfaceSummary;
 import org.praxisplatform.config.ai.agent.spi.AgentTopicContributor;
 import org.praxisplatform.config.ai.agent.spi.AgentTopicDescriptor;
 import org.praxisplatform.config.ai.agent.spi.CompactAgentSchemaDigest;
+import org.praxisplatform.config.ai.agent.spi.CompactAgentSchemaDigest.DeterminationSummary;
+import org.praxisplatform.config.ai.agent.spi.CompactAgentSchemaDigest.QuickFilterSummary;
+import org.praxisplatform.config.ai.agent.spi.CompactAgentSchemaDigest.ResourceFactSummary;
+import org.praxisplatform.config.ai.agent.spi.CompactAgentSchemaDigest.StatsCapabilityDigest;
+import org.praxisplatform.config.ai.agent.spi.CompactAgentSchemaDigest.StatsFieldDigest;
 import org.praxisplatform.config.ai.agent.spi.DualProjectedPayload;
+import org.praxisplatform.rules.violation.PraxisRuleViolationException;
+import org.praxisplatform.rules.violation.SlotViolationDetail;
 import org.praxisplatform.uischema.FieldControlType;
 import org.praxisplatform.uischema.action.ActionCatalogItem;
 import org.praxisplatform.uischema.action.ActionCatalogResponse;
 import org.praxisplatform.uischema.action.ActionCatalogService;
+import org.praxisplatform.uischema.action.ActionDefinitionRegistry;
 import org.praxisplatform.uischema.action.ActionScope;
 import org.praxisplatform.uischema.annotation.ApiResource;
 import org.praxisplatform.uischema.annotation.DomainGovernance;
 import org.praxisplatform.uischema.annotation.ResourceIdentity;
+import org.praxisplatform.uischema.annotation.UiOption;
 import org.praxisplatform.uischema.capability.CapabilityOperation;
 import org.praxisplatform.uischema.capability.CapabilityService;
 import org.praxisplatform.uischema.capability.CapabilitySnapshot;
+import org.praxisplatform.uischema.capability.DefaultResourceAvailabilityService;
 import org.praxisplatform.uischema.capability.ResourceStateSnapshot;
 import org.praxisplatform.uischema.concurrency.ResourceRepresentationResult;
+import org.praxisplatform.uischema.concurrency.ResourceVersionEtagService;
+import org.praxisplatform.uischema.concurrency.ResourceVersionPreconditionException;
+import org.praxisplatform.uischema.concurrency.ResourceVersionScope;
+import org.praxisplatform.uischema.concurrency.ResourceVersionScopeProvider;
+import org.praxisplatform.uischema.concurrency.ResourceVersionUpdatePrecondition;
+import org.praxisplatform.uischema.controller.base.AbstractCreateUpdateResourceController;
 import org.praxisplatform.uischema.controller.base.AbstractResourceQueryController;
 import org.praxisplatform.uischema.extension.annotation.UISchema;
 import org.praxisplatform.uischema.extension.annotation.UISchemaPreset;
+import org.praxisplatform.uischema.fact.ResourceFact;
+import org.praxisplatform.uischema.fact.ResourceFactCatalogProvider;
+import org.praxisplatform.uischema.fact.ResourceFactDescriptor;
 import org.praxisplatform.uischema.filter.annotation.Filterable;
 import org.praxisplatform.uischema.filter.dto.GenericFilterDTO;
 import org.praxisplatform.uischema.id.CompositeIdSupport;
+import org.praxisplatform.uischema.rest.response.RestApiResponse;
+import org.praxisplatform.uischema.schema.ApiResourceQuickFilterResolver;
+import org.praxisplatform.uischema.schema.CalculationMemoryMetadataResolver;
+import org.praxisplatform.uischema.service.base.BaseCreateUpdateResourceCommandService;
+import org.praxisplatform.uischema.service.base.BaseCreateUpdateResourceService;
+import org.praxisplatform.uischema.service.base.BaseResourceCommandService;
 import org.praxisplatform.uischema.service.base.BaseResourceQueryService;
+import org.praxisplatform.uischema.service.base.VersionedCreateUpdateResourceService;
+import org.praxisplatform.uischema.stats.DistributionMode;
+import org.praxisplatform.uischema.stats.StatsBucketOrder;
+import org.praxisplatform.uischema.stats.StatsFieldDescriptor;
+import org.praxisplatform.uischema.stats.StatsFieldRegistry;
+import org.praxisplatform.uischema.stats.StatsMetric;
+import org.praxisplatform.uischema.stats.StatsSupportMode;
+import org.praxisplatform.uischema.stats.TimeSeriesGranularity;
+import org.praxisplatform.uischema.stats.dto.DistributionBucket;
+import org.praxisplatform.uischema.stats.dto.DistributionStatsRequest;
+import org.praxisplatform.uischema.stats.dto.DistributionStatsResponse;
+import org.praxisplatform.uischema.stats.dto.GroupByBucket;
+import org.praxisplatform.uischema.stats.dto.GroupByStatsRequest;
+import org.praxisplatform.uischema.stats.dto.GroupByStatsResponse;
+import org.praxisplatform.uischema.stats.dto.StatsMetricRequest;
+import org.praxisplatform.uischema.stats.dto.TimeSeriesPoint;
+import org.praxisplatform.uischema.stats.dto.TimeSeriesStatsRequest;
+import org.praxisplatform.uischema.stats.dto.TimeSeriesStatsResponse;
 import org.praxisplatform.uischema.surface.RelatedResourceSurface;
 import org.praxisplatform.uischema.surface.SurfaceCatalogItem;
 import org.praxisplatform.uischema.surface.SurfaceCatalogResponse;
 import org.praxisplatform.uischema.surface.SurfaceCatalogService;
+import org.praxisplatform.uischema.surface.SurfaceDefinition;
+import org.praxisplatform.uischema.surface.SurfaceDefinitionRegistry;
+import org.praxisplatform.uischema.surface.SurfaceScope;
+import org.springframework.web.context.request.RequestContextHolder;
 import org.springframework.aop.support.AopUtils;
 import org.springframework.beans.BeanUtils;
 import org.springframework.beans.BeanWrapperImpl;
@@ -72,12 +142,17 @@ import org.springframework.core.convert.support.DefaultConversionService;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
+import org.springframework.http.ProblemDetail;
+import org.springframework.http.ResponseEntity;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.TransactionDefinition;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.transaction.support.TransactionTemplate;
+import org.springframework.util.ClassUtils;
 import org.springframework.util.ReflectionUtils;
 import org.springframework.util.StringUtils;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.server.ResponseStatusException;
 
 /**
  * Ponte em processo sobre os controladores e servicos {@code @ApiResource} do host usando
@@ -104,7 +179,9 @@ public class MetadataStarterInProcessAgentBridge implements AgentResourceExecuti
             Class<?> idType,
             Class<?> filterDtoType,
             List<FilterFieldMeta> filterFields,
-            List<ResponseFieldMeta> responseFields
+            List<ResponseFieldMeta> responseFields,
+            List<DeterminationEndpoint> determinations,
+            List<MutatingActionEndpoint> mutatingActions
     ) {
     }
 
@@ -126,7 +203,14 @@ public class MetadataStarterInProcessAgentBridge implements AgentResourceExecuti
             String description,
             FieldControlType controlType,
             String aiVisibility,
-            boolean quickViewVisible
+            boolean quickViewVisible,
+            int order,
+            int quickViewOrder,
+            boolean hidden,
+            boolean tableHidden,
+            String labelTrue,
+            String labelFalse,
+            Map<String, String> optionLabels
     ) {
     }
 
@@ -135,13 +219,22 @@ public class MetadataStarterInProcessAgentBridge implements AgentResourceExecuti
     private final List<AgentTopicContributor> topicContributors;
     private final List<AgentProactiveAlertContributor> alertContributors;
     private final List<AgentActionAffordanceContributor> actionContributors;
+    private final List<ResourceFactCatalogProvider> factCatalogProviders;
+    private final List<AgentActionPreparationContributor> preparationContributors;
     private final CapabilityService capabilityService;
     private final ActionCatalogService actionCatalogService;
+    private final ActionDefinitionRegistry actionDefinitionRegistry;
     private final SurfaceCatalogService surfaceCatalogService;
+    private final SurfaceDefinitionRegistry surfaceDefinitionRegistry;
     private final AgentAuthorizationBridge authorizationBridge;
     private final ConversionService conversionService;
     private final ObjectMapper objectMapper;
+    private final ResourceVersionEtagService resourceVersionEtagService;
+    private final ResourceVersionScopeProvider resourceVersionScopeProvider;
+    private final Validator validator;
     private final TransactionTemplate readOnlyTxTemplate;
+    private final TransactionTemplate isolatedReadOnlyTxTemplate;
+    private final TransactionTemplate rollbackOnlyReadTemplate;
 
     private volatile List<RegisteredResource> cachedCatalog;
 
@@ -169,6 +262,8 @@ public class MetadataStarterInProcessAgentBridge implements AgentResourceExecuti
                 conversionService,
                 objectMapper,
                 transactionManager,
+                List.of(),
+                null,
                 List.of());
     }
 
@@ -185,28 +280,152 @@ public class MetadataStarterInProcessAgentBridge implements AgentResourceExecuti
             ObjectMapper objectMapper,
             PlatformTransactionManager transactionManager,
             List<AgentActionAffordanceContributor> actionContributors) {
+        this(
+                controllers,
+                entityContributors,
+                topicContributors,
+                alertContributors,
+                capabilityService,
+                actionCatalogService,
+                surfaceCatalogService,
+                authorizationBridge,
+                conversionService,
+                objectMapper,
+                transactionManager,
+                actionContributors,
+                null,
+                List.of());
+    }
+
+    public MetadataStarterInProcessAgentBridge(
+            List<AbstractResourceQueryController<?, ?, ?>> controllers,
+            List<AgentEntityCatalogContributor> entityContributors,
+            List<AgentTopicContributor> topicContributors,
+            List<AgentProactiveAlertContributor> alertContributors,
+            CapabilityService capabilityService,
+            ActionCatalogService actionCatalogService,
+            SurfaceCatalogService surfaceCatalogService,
+            AgentAuthorizationBridge authorizationBridge,
+            ConversionService conversionService,
+            ObjectMapper objectMapper,
+            PlatformTransactionManager transactionManager,
+            List<AgentActionAffordanceContributor> actionContributors,
+            SurfaceDefinitionRegistry surfaceDefinitionRegistry) {
+        this(
+                controllers,
+                entityContributors,
+                topicContributors,
+                alertContributors,
+                capabilityService,
+                actionCatalogService,
+                surfaceCatalogService,
+                authorizationBridge,
+                conversionService,
+                objectMapper,
+                transactionManager,
+                actionContributors,
+                surfaceDefinitionRegistry,
+                List.of());
+    }
+
+    public MetadataStarterInProcessAgentBridge(
+            List<AbstractResourceQueryController<?, ?, ?>> controllers,
+            List<AgentEntityCatalogContributor> entityContributors,
+            List<AgentTopicContributor> topicContributors,
+            List<AgentProactiveAlertContributor> alertContributors,
+            CapabilityService capabilityService,
+            ActionCatalogService actionCatalogService,
+            SurfaceCatalogService surfaceCatalogService,
+            AgentAuthorizationBridge authorizationBridge,
+            ConversionService conversionService,
+            ObjectMapper objectMapper,
+            PlatformTransactionManager transactionManager,
+            List<AgentActionAffordanceContributor> actionContributors,
+            SurfaceDefinitionRegistry surfaceDefinitionRegistry,
+            List<ResourceFactCatalogProvider> factCatalogProviders) {
+        this(
+                controllers,
+                entityContributors,
+                topicContributors,
+                alertContributors,
+                capabilityService,
+                actionCatalogService,
+                surfaceCatalogService,
+                authorizationBridge,
+                conversionService,
+                objectMapper,
+                transactionManager,
+                actionContributors,
+                surfaceDefinitionRegistry,
+                factCatalogProviders,
+                null,
+                null,
+                null,
+                null,
+                List.of());
+    }
+
+    public MetadataStarterInProcessAgentBridge(
+            List<AbstractResourceQueryController<?, ?, ?>> controllers,
+            List<AgentEntityCatalogContributor> entityContributors,
+            List<AgentTopicContributor> topicContributors,
+            List<AgentProactiveAlertContributor> alertContributors,
+            CapabilityService capabilityService,
+            ActionCatalogService actionCatalogService,
+            SurfaceCatalogService surfaceCatalogService,
+            AgentAuthorizationBridge authorizationBridge,
+            ConversionService conversionService,
+            ObjectMapper objectMapper,
+            PlatformTransactionManager transactionManager,
+            List<AgentActionAffordanceContributor> actionContributors,
+            SurfaceDefinitionRegistry surfaceDefinitionRegistry,
+            List<ResourceFactCatalogProvider> factCatalogProviders,
+            ActionDefinitionRegistry actionDefinitionRegistry,
+            ResourceVersionEtagService resourceVersionEtagService,
+            ResourceVersionScopeProvider resourceVersionScopeProvider,
+            Validator validator,
+            List<AgentActionPreparationContributor> preparationContributors) {
         this.controllers = controllers == null ? List.of() : List.copyOf(controllers);
         this.entityContributors = entityContributors == null ? List.of() : List.copyOf(entityContributors);
         this.topicContributors = topicContributors == null ? List.of() : List.copyOf(topicContributors);
         this.alertContributors = alertContributors == null ? List.of() : List.copyOf(alertContributors);
         this.actionContributors = actionContributors == null ? List.of() : List.copyOf(actionContributors);
+        this.factCatalogProviders = factCatalogProviders == null ? List.of() : List.copyOf(factCatalogProviders);
+        this.preparationContributors = preparationContributors == null ? List.of() : List.copyOf(preparationContributors);
         this.capabilityService = capabilityService;
         this.actionCatalogService = actionCatalogService;
+        this.actionDefinitionRegistry = actionDefinitionRegistry;
         this.surfaceCatalogService = surfaceCatalogService;
+        this.surfaceDefinitionRegistry = surfaceDefinitionRegistry;
         this.authorizationBridge = authorizationBridge != null
                 ? authorizationBridge
-                : new DefaultMetadataGovernanceAgentAuthorizationBridge();
+                : new DefaultMetadataGovernanceAgentAuthorizationBridge(this.controllers);
         this.conversionService = conversionService != null
                 ? conversionService
                 : DefaultConversionService.getSharedInstance();
         this.objectMapper = objectMapper != null ? objectMapper : new ObjectMapper().findAndRegisterModules();
+        this.resourceVersionEtagService = resourceVersionEtagService;
+        this.resourceVersionScopeProvider = resourceVersionScopeProvider;
+        this.validator = validator;
         if (transactionManager != null) {
             TransactionTemplate template = new TransactionTemplate(transactionManager);
             template.setReadOnly(true);
             template.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRED);
             this.readOnlyTxTemplate = template;
+
+            TransactionTemplate isolatedTemplate = new TransactionTemplate(transactionManager);
+            isolatedTemplate.setReadOnly(true);
+            isolatedTemplate.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+            this.isolatedReadOnlyTxTemplate = isolatedTemplate;
+
+            TransactionTemplate rollbackTemplate = new TransactionTemplate(transactionManager);
+            rollbackTemplate.setReadOnly(false);
+            rollbackTemplate.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+            this.rollbackOnlyReadTemplate = rollbackTemplate;
         } else {
             this.readOnlyTxTemplate = null;
+            this.isolatedReadOnlyTxTemplate = null;
+            this.rollbackOnlyReadTemplate = null;
         }
     }
 
@@ -287,7 +506,7 @@ public class MetadataStarterInProcessAgentBridge implements AgentResourceExecuti
         if (request == null || !StringUtils.hasText(request.rawQuery())) {
             return List.of();
         }
-        return executeReadOnly(() -> searchEntitiesInternal(context, request));
+        return searchEntitiesInternal(context, request);
     }
 
     @Override
@@ -326,7 +545,894 @@ public class MetadataStarterInProcessAgentBridge implements AgentResourceExecuti
         if (!authorizationBridge.canReadResource(context, res.descriptor().resourcePath())) {
             throw new SecurityException("Access denied to resource: " + res.descriptor().resourcePath());
         }
-        return executeReadOnly(() -> loadEntityDossierInternal(context, res, entityId.trim(), includeRelatedSurfaces));
+        return loadEntityDossierInternal(context, res, entityId.trim(), includeRelatedSurfaces);
+    }
+
+    @Override
+    public AgentStatsResult aggregateStats(
+            AgentExecutionContext context,
+            AgentStatsAggregationRequest request) {
+        if (request == null || !StringUtils.hasText(request.entityKeyOrResourcePath())) {
+            throw new IllegalArgumentException("entityKeyOrResourcePath is required");
+        }
+        RegisteredResource res = findResource(context, request.entityKeyOrResourcePath())
+                .orElseThrow(() -> new IllegalArgumentException(
+                        "Unknown entity/resource: " + request.entityKeyOrResourcePath()));
+        if (!authorizationBridge.canReadResource(context, res.descriptor().resourcePath())) {
+            throw new SecurityException("Access denied to resource: " + res.descriptor().resourcePath());
+        }
+        return executeReadOnly(() -> aggregateStatsInternal(context, res, request));
+    }
+
+    @Override
+    public List<AgentEvaluatedCalculationMemory> evaluateCalculationMemory(
+            AgentExecutionContext context,
+            String entityKeyOrResourcePath,
+            String entityId,
+            Map<String, Object> filters,
+            int maxRecords) {
+        if (!StringUtils.hasText(entityKeyOrResourcePath)) {
+            return List.of();
+        }
+        Optional<RegisteredResource> found = findResource(context, entityKeyOrResourcePath);
+        if (found.isEmpty()) {
+            return List.of();
+        }
+        RegisteredResource res = found.get();
+        if (!authorizationBridge.canReadResource(context, res.descriptor().resourcePath())) {
+            throw new SecurityException("Access denied to resource: " + res.descriptor().resourcePath());
+        }
+        return executeReadOnly(() -> evaluateCalculationMemoryInternal(
+                context, res, trimToNull(entityId), filters, Math.min(Math.max(1, maxRecords), 5)));
+    }
+
+    @Override
+    public AgentSimulationPreview simulateDetermination(
+            AgentExecutionContext context,
+            AgentDeterminationRequest request) {
+        if (request == null || !StringUtils.hasText(request.entityKeyOrResourcePath())) {
+            throw new IllegalArgumentException("entityKeyOrResourcePath is required");
+        }
+        RegisteredResource res = findResource(context, request.entityKeyOrResourcePath())
+                .orElseThrow(() -> new IllegalArgumentException(
+                        "Unknown entity/resource: " + request.entityKeyOrResourcePath()));
+        if (!authorizationBridge.canReadResource(context, res.descriptor().resourcePath())) {
+            throw new SecurityException("Access denied to resource: " + res.descriptor().resourcePath());
+        }
+        DeterminationEndpoint endpoint = resolveDeterminationEndpoint(res, request.determinationId());
+        Map<String, Object> submittedDraft = request.draftFields() != null ? request.draftFields() : Map.of();
+
+        Object convertedDraft = null;
+        if (endpoint.requestDtoType() != null && endpoint.requestBodyIndex() >= 0) {
+            try {
+                convertedDraft = objectMapper.convertValue(submittedDraft, endpoint.requestDtoType());
+            } catch (IllegalArgumentException ex) {
+                List<AgentFieldDescriptor> previewFields = toAgentFieldDescriptors(
+                        introspectResponseFields(endpoint.responseDtoType()));
+                return new AgentSimulationPreview(
+                        res.descriptor().entityKey(),
+                        res.descriptor().resourceKey(),
+                        res.descriptor().resourcePath(),
+                        endpoint.determinationId(),
+                        endpoint.title(),
+                        endpoint.description(),
+                        submittedDraft,
+                        Map.of(),
+                        Map.of(),
+                        previewFields,
+                        List.of(Map.of(
+                                "field", "_draft",
+                                "issueNote", "Formato inválido nos campos do rascunho para simulação.")));
+            }
+            Map<String, String> fieldErrors = BridgeActionReflectionSupport.validateDto(validator, convertedDraft);
+            if (!fieldErrors.isEmpty()) {
+                List<Map<String, String>> issues = fieldErrors.entrySet().stream()
+                        .map(e -> Map.of("field", e.getKey(), "issueNote", e.getValue()))
+                        .toList();
+                List<AgentFieldDescriptor> previewFields = toAgentFieldDescriptors(
+                        introspectResponseFields(endpoint.responseDtoType()));
+                return new AgentSimulationPreview(
+                        res.descriptor().entityKey(),
+                        res.descriptor().resourceKey(),
+                        res.descriptor().resourcePath(),
+                        endpoint.determinationId(),
+                        endpoint.title(),
+                        endpoint.description(),
+                        submittedDraft,
+                        Map.of(),
+                        Map.of(),
+                        previewFields,
+                        issues);
+            }
+        }
+
+        final Object finalDraft = convertedDraft;
+        Object rawOutcome = executeRollbackOnlyRead(() -> invokeDeterminationEndpoint(res, endpoint, finalDraft));
+        Object unwrapped = unwrapControllerResult(rawOutcome);
+        Map<String, Object> rawPreview = toMap(unwrapped);
+        DualProjectedPayload projected = authorizationBridge.projectRecord(
+                context,
+                res.descriptor().resourcePath(),
+                endpoint.responseDtoType(),
+                rawPreview);
+        List<AgentFieldDescriptor> previewFields = toAgentFieldDescriptors(
+                introspectResponseFields(endpoint.responseDtoType()));
+        return new AgentSimulationPreview(
+                res.descriptor().entityKey(),
+                res.descriptor().resourceKey(),
+                res.descriptor().resourcePath(),
+                endpoint.determinationId(),
+                endpoint.title(),
+                endpoint.description(),
+                submittedDraft,
+                projected.uiRecord(),
+                projected.modelSafeRecord(),
+                previewFields,
+                List.of());
+    }
+
+    @Override
+    public AgentPreparedAction prepareAction(
+            AgentExecutionContext context,
+            AgentPrepareActionRequest request) {
+        if (request == null || !StringUtils.hasText(request.entityKeyOrResourcePath()) || !StringUtils.hasText(request.actionId())) {
+            throw new IllegalArgumentException("entityKeyOrResourcePath e actionId são obrigatórios");
+        }
+        RegisteredResource res = findResource(context, request.entityKeyOrResourcePath())
+                .orElseThrow(() -> new IllegalArgumentException(
+                        "Recurso desconhecido: " + request.entityKeyOrResourcePath()));
+        if (!authorizationBridge.canReadResource(context, res.descriptor().resourcePath())) {
+            throw new SecurityException("Access denied to resource: " + res.descriptor().resourcePath());
+        }
+        MutatingActionEndpoint endpoint = resolveMutatingEndpoint(res, request.actionId());
+        boolean isCollectionScope = endpoint.scope() == ActionScope.COLLECTION;
+        if (!isCollectionScope && !StringUtils.hasText(request.entityId())) {
+            throw new IllegalArgumentException("entityId é obrigatório para preparar a ação " + endpoint.actionId());
+        }
+
+        Object convertedId = isCollectionScope ? null : tryConvertId(request.entityId().trim(), res.idType());
+        if (!isCollectionScope && convertedId == null) {
+            throw new IllegalArgumentException("Identificador inválido para " + res.descriptor().entityKey() + ": " + request.entityId());
+        }
+
+        return executeIsolatedReadOnly(() -> prepareActionInternal(context, res, endpoint, convertedId,
+                request.entityId() != null ? request.entityId().trim() : null,
+                request.proposedInputs() != null ? request.proposedInputs() : Map.of()));
+    }
+
+    @Override
+    public AgentActionExecutionOutcome executeConfirmedAction(
+            AgentExecutionContext context,
+            AgentExecuteActionRequest request) {
+        if (request == null || !StringUtils.hasText(request.entityKeyOrResourcePath()) || !StringUtils.hasText(request.actionId())) {
+            throw new IllegalArgumentException("entityKeyOrResourcePath e actionId são obrigatórios");
+        }
+        RegisteredResource res = findResource(context, request.entityKeyOrResourcePath())
+                .orElseThrow(() -> new IllegalArgumentException(
+                        "Recurso desconhecido: " + request.entityKeyOrResourcePath()));
+        MutatingActionEndpoint endpoint = resolveMutatingEndpoint(res, request.actionId());
+        boolean isCollectionScope = endpoint.scope() == ActionScope.COLLECTION;
+        Object convertedId = isCollectionScope ? null : tryConvertId(request.entityId(), res.idType());
+        if (!isCollectionScope && convertedId == null) {
+            throw new IllegalArgumentException("Identificador inválido para " + res.descriptor().entityKey() + ": " + request.entityId());
+        }
+        String canonicalId = convertedId != null ? stringifyEntityId(convertedId, request.entityId()) : null;
+
+        if (!authorizationBridge.canInvokeAction(context, res.descriptor().resourcePath(), endpoint.actionId(), convertedId)
+                || ("edit".equalsIgnoreCase(endpoint.actionId())
+                        && !authorizationBridge.canInvokeAction(context, res.descriptor().resourcePath(), "update", convertedId))) {
+            return failureOutcome(403, "ACCESS_DENIED", "Autoridade insuficiente para executar a ação " + endpoint.actionId() + ".");
+        }
+
+        if (!preparationContributors.isEmpty()) {
+            try {
+                Map<String, Object> authoritativeRaw = isCollectionScope
+                        ? Map.of()
+                        : loadRawRecordIsolated(res, convertedId);
+                if (!isCollectionScope && authoritativeRaw == null) {
+                    return failureOutcome(404, "RESOURCE_NOT_FOUND", "Registro não encontrado para execução da ação.");
+                }
+                ActionGuardAssessment guard = executeIsolatedReadOnly(() -> evaluatePreparationContributors(
+                        context, res.descriptor(), canonicalId, endpoint.actionId(), authoritativeRaw, request.confirmedInputs()));
+                if (guard != null && !guard.allowed()) {
+                    return failureOutcome(
+                            409,
+                            firstNonBlank(guard.blockedCode(), "ACTION_BLOCKED"),
+                            firstNonBlank(guard.impedimentNote(), "Execução bloqueada pelas regras de escopo do host."));
+                }
+                if (StringUtils.hasText(request.organizationId())
+                        && guard != null
+                        && StringUtils.hasText(guard.organizationId())
+                        && !request.organizationId().trim().equalsIgnoreCase(guard.organizationId().trim())) {
+                    return failureOutcome(
+                            409,
+                            "ORGANIZATION_SCOPE_CHANGED",
+                            "O escopo organizacional ativo diverge da organização vinculada à proposta.");
+                }
+            } catch (Throwable ex) {
+                return mapExecutionException(context, res, convertedId, canonicalId, ex);
+            }
+        }
+
+        Object requestDto = null;
+        if (endpoint.requestDtoType() != null) {
+            Map<String, Object> payloadMap = request.confirmedInputs() != null ? request.confirmedInputs() : Map.of();
+            if (!payloadMap.isEmpty()
+                    && !authorizationBridge.canModifyFields(
+                            context,
+                            res.descriptor().resourcePath(),
+                            endpoint.requestDtoType(),
+                            payloadMap.keySet())) {
+                return failureOutcome(
+                        403,
+                        "FIELD_EDIT_DENIED",
+                        "Sem permissão para alterar um ou mais campos informados.");
+            }
+            try {
+                requestDto = objectMapper.convertValue(payloadMap, endpoint.requestDtoType());
+            } catch (IllegalArgumentException ex) {
+                return new AgentActionExecutionOutcome(
+                        422,
+                        false,
+                        "INVALID_INPUT_PAYLOAD",
+                        "Os parâmetros informados não puderam ser convertidos para o contrato da ação.",
+                        null,
+                        null,
+                        Map.of(),
+                        Map.of(),
+                        List.of(),
+                        Map.of("_payload", "Formato de dados incompatível com o comando."),
+                        Map.of());
+            }
+            Map<String, String> fieldErrors = BridgeActionReflectionSupport.validateDto(validator, requestDto);
+            if (!fieldErrors.isEmpty()) {
+                return new AgentActionExecutionOutcome(
+                        422,
+                        false,
+                        "VALIDATION_FAILED",
+                        "Preencha os campos obrigatórios antes de confirmar a execução.",
+                        null,
+                        null,
+                        Map.of(),
+                        Map.of(),
+                        List.of(),
+                        fieldErrors,
+                        Map.of());
+            }
+        }
+
+        return invokeMutatingEndpoint(context, res, endpoint, convertedId, canonicalId, request, requestDto);
+    }
+
+    @SuppressWarnings({"rawtypes", "unchecked"})
+    private AgentPreparedAction prepareActionInternal(
+            AgentExecutionContext context,
+            RegisteredResource res,
+            MutatingActionEndpoint endpoint,
+            Object convertedId,
+            String rawEntityId,
+            Map<String, Object> proposedInputs) {
+        String resourceKey = res.descriptor().resourceKey();
+        String resourcePath = res.descriptor().resourcePath();
+        boolean isCollectionScope = endpoint.scope() == ActionScope.COLLECTION;
+
+        Map<String, Object> rawRecord = Map.of();
+        Map<String, Object> uiRecord = Map.of();
+        String canonicalId = rawEntityId;
+        String recordTitle = res.descriptor().title();
+        String recordSubtitle = null;
+        String expectedVersionTag = null;
+        ResourceStateSnapshot stateSnapshot = null;
+
+        if (!isCollectionScope) {
+            ResourceRepresentationResult<?> repr = ((BaseResourceQueryService) res.service()).findById(convertedId);
+            if (repr == null || repr.body() == null) {
+                throw new IllegalArgumentException("Registro não encontrado para " + res.descriptor().entityKey() + " id=" + rawEntityId);
+            }
+            Object dto = repr.body();
+            rawRecord = toMap(res, dto);
+            DualProjectedPayload projected = authorizationBridge.projectRecord(
+                    context, resourcePath, res.responseDtoType(), rawRecord);
+            uiRecord = projected.uiRecord();
+            canonicalId = firstNonBlank(extractIdString(res, dto), rawEntityId);
+            recordTitle = extractDisplayField(uiRecord, res.descriptor().titleField(), canonicalId);
+            recordSubtitle = extractDisplayField(uiRecord, res.descriptor().subtitleField(), "");
+            stateSnapshot = resolveItemStateSnapshot(res, convertedId);
+            OptionalLong persistedVer = repr.persistedVersion();
+            if (persistedVer.isPresent() && resourceVersionEtagService != null && StringUtils.hasText(resourceKey)) {
+                expectedVersionTag = resourceVersionEtagService.create(
+                        currentResourceVersionScope(), resourceKey, convertedId, persistedVer.getAsLong());
+            }
+        }
+
+        String lifecycleState = BridgeActionReflectionSupport.extractLifecycleState(rawRecord, stateSnapshot);
+        boolean allowed = true;
+        String blockedCode = null;
+        String impedimentNote = null;
+
+        boolean authorityOk = authorizationBridge.canInvokeAction(context, resourcePath, endpoint.actionId(), convertedId)
+                && (!"edit".equalsIgnoreCase(endpoint.actionId())
+                        || authorizationBridge.canInvokeAction(context, resourcePath, "update", convertedId));
+        if (!authorityOk) {
+            allowed = false;
+            blockedCode = "MISSING_AUTHORITY";
+            impedimentNote = "Usuário atual não possui autoridade de escrita para executar " + endpoint.title() + ".";
+        }
+
+        if (allowed && !isCollectionScope && !endpoint.allowedStates().isEmpty() && StringUtils.hasText(lifecycleState)) {
+            boolean stateMatch = endpoint.allowedStates().stream()
+                    .anyMatch(s -> s.equalsIgnoreCase(lifecycleState));
+            if (!stateMatch) {
+                allowed = false;
+                blockedCode = "INVALID_LIFECYCLE_STATE";
+                impedimentNote = "Ação '" + endpoint.title() + "' exige situação "
+                        + String.join(" ou ", endpoint.allowedStates())
+                        + ", mas o registro está em '" + lifecycleState + "'.";
+            }
+        }
+
+        if (allowed && !isCollectionScope && stateSnapshot != null && stateSnapshot.metadata() != null) {
+            String metaKey = "edit".equalsIgnoreCase(endpoint.actionId())
+                    ? "operation.update.allowed"
+                    : "action." + endpoint.actionId() + ".allowed";
+            if (Boolean.FALSE.equals(stateSnapshot.metadata().get(metaKey))) {
+                allowed = false;
+                blockedCode = "STATE_RULE_BLOCKED";
+                Object reasonMeta = stateSnapshot.metadata().get(metaKey.replace(".allowed", ".reason"));
+                impedimentNote = reasonMeta != null && StringUtils.hasText(reasonMeta.toString())
+                        ? reasonMeta.toString()
+                        : "Ação indisponível para o estado operacional atual do registro.";
+            }
+        }
+
+        ActionGuardAssessment guard = evaluatePreparationContributors(
+                context, res.descriptor(), canonicalId, endpoint.actionId(), rawRecord, proposedInputs);
+        String organizationId = guard != null ? trimToNull(guard.organizationId()) : null;
+        String organizationLabel = guard != null ? trimToNull(guard.organizationLabel()) : null;
+        if (allowed && guard != null && !guard.allowed()) {
+            allowed = false;
+            blockedCode = firstNonBlank(guard.blockedCode(), "HOST_SCOPE_BLOCKED");
+            impedimentNote = firstNonBlank(guard.impedimentNote(), "Execução bloqueada pelas regras de escopo ativas.");
+        }
+        if (allowed
+                && endpoint.requestDtoType() != null
+                && proposedInputs != null
+                && !proposedInputs.isEmpty()
+                && !authorizationBridge.canModifyFields(
+                        context, resourcePath, endpoint.requestDtoType(), proposedInputs.keySet())) {
+            allowed = false;
+            blockedCode = "FIELD_EDIT_DENIED";
+            impedimentNote = "Usuário atual não possui autoridade para editar um ou mais campos solicitados.";
+        }
+
+        Map<String, Object> mergedPrefill = new LinkedHashMap<>();
+        boolean seedFromRecord = "edit".equalsIgnoreCase(endpoint.actionId())
+                || "partial-patch".equalsIgnoreCase(endpoint.operationKind());
+        if (seedFromRecord && !uiRecord.isEmpty()) {
+            for (AgentActionInputField field : endpoint.inputFields()) {
+                if (uiRecord.containsKey(field.name()) && uiRecord.get(field.name()) != null) {
+                    if (endpoint.requestDtoType() == null
+                            || authorizationBridge.canModifyFields(
+                                    context, resourcePath, endpoint.requestDtoType(), Set.of(field.name()))) {
+                        mergedPrefill.put(field.name(), uiRecord.get(field.name()));
+                    }
+                }
+            }
+        }
+        if (guard != null && !guard.enrichedPrefill().isEmpty()) {
+            mergedPrefill.putAll(guard.enrichedPrefill());
+        }
+        if (proposedInputs != null && !proposedInputs.isEmpty()) {
+            for (Map.Entry<String, Object> entry : proposedInputs.entrySet()) {
+                if (entry.getKey() != null && entry.getValue() != null) {
+                    mergedPrefill.put(entry.getKey(), entry.getValue());
+                }
+            }
+        }
+
+        List<String> missingRequired = BridgeActionReflectionSupport.computeMissingRequiredFields(
+                endpoint.inputFields(), mergedPrefill);
+        boolean hasInputForm = endpoint.requestDtoType() != null && !endpoint.inputFields().isEmpty();
+        String formMode = "workflow-action".equals(endpoint.operationKind())
+                ? (hasInputForm ? "dialog" : "confirm-only")
+                : "drawer";
+        String submitUrl = resolveSubmitUrl(resourcePath, endpoint.relativePath(), canonicalId);
+        String schemaUrl = hasInputForm
+                ? buildFilteredSchemaUrl(
+                        BridgeActionReflectionSupport.combinePath(resourcePath, endpoint.relativePath()),
+                        endpoint.httpMethod())
+                : null;
+
+        return new AgentPreparedAction(
+                res.descriptor().entityKey(),
+                resourceKey,
+                resourcePath,
+                canonicalId,
+                recordTitle,
+                recordSubtitle,
+                endpoint.actionId(),
+                endpoint.title(),
+                endpoint.description(),
+                endpoint.operationKind(),
+                formMode,
+                endpoint.httpMethod(),
+                submitUrl,
+                schemaUrl,
+                endpoint.riskLevel(),
+                true,
+                hasInputForm,
+                organizationId,
+                organizationLabel,
+                lifecycleState,
+                expectedVersionTag,
+                allowed,
+                blockedCode,
+                impedimentNote,
+                mergedPrefill,
+                endpoint.inputFields(),
+                missingRequired);
+    }
+
+    @SuppressWarnings({"rawtypes", "unchecked"})
+    private AgentActionExecutionOutcome invokeMutatingEndpoint(
+            AgentExecutionContext context,
+            RegisteredResource res,
+            MutatingActionEndpoint endpoint,
+            Object convertedId,
+            String canonicalId,
+            AgentExecuteActionRequest request,
+            Object requestDto) {
+        String resourceKey = res.descriptor().resourceKey();
+        String resourcePath = res.descriptor().resourcePath();
+        try {
+            Object rawReturn;
+            String headerEtag = null;
+            if ("edit".equalsIgnoreCase(endpoint.actionId()) && endpoint.method() == null) {
+                if (res.service() instanceof VersionedCreateUpdateResourceService versioned) {
+                    if (resourceVersionEtagService == null) {
+                        return failureOutcome(500, "VERSIONING_UNCONFIGURED", "Controle de concorrência otimista não configurado.");
+                    }
+                    ResourceVersionUpdatePrecondition precondition = new ResourceVersionUpdatePrecondition(
+                            resourceVersionEtagService,
+                            request.expectedVersionTag(),
+                            currentResourceVersionScope(),
+                            resourceKey,
+                            convertedId);
+                    ResourceRepresentationResult<?> resResult = versioned.update(convertedId, requestDto, precondition);
+                    rawReturn = resResult != null ? resResult.body() : null;
+                    if (resResult != null && resResult.persistedVersion().isPresent()) {
+                        headerEtag = resourceVersionEtagService.create(
+                                currentResourceVersionScope(), resourceKey, convertedId, resResult.persistedVersion().getAsLong());
+                    }
+                } else if (res.service() instanceof BaseCreateUpdateResourceService base) {
+                    rawReturn = base.update(convertedId, requestDto);
+                } else {
+                    return failureOutcome(501, "UNSUPPORTED_OPERATION", "Serviço não suporta edição de registro.");
+                }
+            } else {
+                Method m = endpoint.method();
+                Object[] args = new Object[m.getParameterCount()];
+                if (endpoint.pathVariableIndex() >= 0) {
+                    args[endpoint.pathVariableIndex()] = convertedId;
+                }
+                if (endpoint.ifMatchHeaderIndex() >= 0) {
+                    args[endpoint.ifMatchHeaderIndex()] = request.expectedVersionTag();
+                }
+                if (endpoint.idempotencyKeyHeaderIndex() >= 0) {
+                    args[endpoint.idempotencyKeyHeaderIndex()] = request.idempotencyKey();
+                }
+                if (endpoint.requestBodyIndex() >= 0) {
+                    args[endpoint.requestBodyIndex()] = requestDto;
+                }
+                ReflectionUtils.makeAccessible(m);
+                rawReturn = m.invoke(res.controller(), args);
+            }
+
+            if (rawReturn instanceof ResponseEntity<?> responseEntity) {
+                int status = responseEntity.getStatusCode().value();
+                headerEtag = firstNonBlank(headerEtag, responseEntity.getHeaders().getETag());
+                if (status == 412 || status == 428) {
+                    return buildStaleOutcome(context, res, convertedId, canonicalId,
+                            "O registro foi alterado por outro usuário ou processo antes da confirmação.");
+                }
+                if (!responseEntity.getStatusCode().is2xxSuccessful()) {
+                    return mapNon2xxEntityOutcome(status, responseEntity.getBody());
+                }
+                return buildSuccessOutcome(context, res, endpoint.responseDtoType(), convertedId, unwrapControllerResult(responseEntity), headerEtag);
+            }
+            return buildSuccessOutcome(context, res, endpoint.responseDtoType(), convertedId, unwrapControllerResult(rawReturn), headerEtag);
+        } catch (InvocationTargetException ex) {
+            Throwable cause = ex.getTargetException() != null ? ex.getTargetException() : ex;
+            return mapExecutionException(context, res, convertedId, canonicalId, cause);
+        } catch (Throwable ex) {
+            return mapExecutionException(context, res, convertedId, canonicalId, ex);
+        }
+    }
+
+    private AgentActionExecutionOutcome buildSuccessOutcome(
+            AgentExecutionContext context,
+            RegisteredResource res,
+            Class<?> endpointResponseDtoType,
+            Object convertedId,
+            Object dto,
+            String updatedEtag) {
+        Map<String, Object> rawResult = dto != null ? toMap(res, dto) : Map.of();
+        Class<?> projectionDtoType = endpointResponseDtoType != null
+                && !Object.class.equals(endpointResponseDtoType)
+                ? endpointResponseDtoType
+                : res.responseDtoType();
+        DualProjectedPayload projected = authorizationBridge.projectRecord(
+                context, res.descriptor().resourcePath(), projectionDtoType, rawResult);
+        String resolvedEtag = trimToNull(updatedEtag);
+        if (!StringUtils.hasText(resolvedEtag) && convertedId != null && resourceVersionEtagService != null
+                && StringUtils.hasText(res.descriptor().resourceKey())) {
+            OptionalLong latestVer = loadLatestVersionIsolated(res, convertedId);
+            if (latestVer.isPresent()) {
+                resolvedEtag = resourceVersionEtagService.create(
+                        currentResourceVersionScope(),
+                        res.descriptor().resourceKey(),
+                        convertedId,
+                        latestVer.getAsLong());
+            }
+        }
+        String updatedState = BridgeActionReflectionSupport.extractLifecycleState(rawResult, null);
+        return new AgentActionExecutionOutcome(
+                200,
+                true,
+                "CONFIRMED",
+                "Ação executada com sucesso.",
+                resolvedEtag,
+                updatedState,
+                projected.uiRecord(),
+                projected.modelSafeRecord(),
+                List.of(),
+                Map.of(),
+                Map.of());
+    }
+
+    private AgentActionExecutionOutcome mapExecutionException(
+            AgentExecutionContext context,
+            RegisteredResource res,
+            Object convertedId,
+            String canonicalId,
+            Throwable cause) {
+        if (cause instanceof ResourceVersionPreconditionException rve) {
+            return buildStaleOutcome(context, res, convertedId, canonicalId,
+                    firstNonBlank(rve.getMessage(), "A versão informada não corresponde ao estado atual do registro."));
+        }
+        String className = cause.getClass().getName();
+        if (className.endsWith("OptimisticLockingFailureException")
+                || className.endsWith("OptimisticLockException")
+                || className.endsWith("ObjectOptimisticLockingFailureException")) {
+            return buildStaleOutcome(context, res, convertedId, canonicalId,
+                    "Conflito concorrente de atualização; o registro foi modificado por outra transação.");
+        }
+        if (cause instanceof PraxisRuleViolationException ruleEx) {
+            List<Map<String, Object>> violations = new ArrayList<>();
+            Map<String, String> fieldErrors = new LinkedHashMap<>();
+            if (ruleEx.getViolations() != null) {
+                for (SlotViolationDetail detail : ruleEx.getViolations()) {
+                    Map<String, Object> entry = new LinkedHashMap<>();
+                    if (StringUtils.hasText(detail.code())) entry.put("code", detail.code());
+                    if (StringUtils.hasText(detail.slotKey())) entry.put("slotKey", detail.slotKey());
+                    if (StringUtils.hasText(detail.targetField())) entry.put("targetField", detail.targetField());
+                    if (StringUtils.hasText(detail.messagePtBr())) entry.put("issueNote", detail.messagePtBr());
+                    if (StringUtils.hasText(detail.category())) entry.put("category", detail.category());
+                    violations.add(entry);
+                    if (StringUtils.hasText(detail.targetField()) && StringUtils.hasText(detail.messagePtBr())) {
+                        fieldErrors.putIfAbsent(detail.targetField(), detail.messagePtBr());
+                    }
+                }
+            }
+            int status = ruleEx.getHttpStatus() >= 400 ? ruleEx.getHttpStatus() : 422;
+            return new AgentActionExecutionOutcome(
+                    status,
+                    false,
+                    "RULE_VIOLATION",
+                    firstNonBlank(ruleEx.getMessage(), "Execução impedida por regra de negócio."),
+                    null,
+                    null,
+                    Map.of(),
+                    Map.of(),
+                    List.copyOf(violations),
+                    Map.copyOf(fieldErrors),
+                    Map.of());
+        }
+        if (cause instanceof ResponseStatusException rse) {
+            int status = rse.getStatusCode().value();
+            if (status == 412 || status == 428) {
+                return buildStaleOutcome(context, res, convertedId, canonicalId,
+                        firstNonBlank(rse.getReason(), "A versão informada está desatualizada."));
+            }
+            return failureOutcome(status, "HTTP_" + status,
+                    firstNonBlank(rse.getReason(), "Operação recusada pelo serviço de domínio."));
+        }
+        if (cause instanceof SecurityException
+                || className.endsWith(".AccessDeniedException")
+                || className.endsWith(".AuthorizationDeniedException")) {
+            return failureOutcome(403, "ACCESS_DENIED", "Autoridade insuficiente para executar esta operação.");
+        }
+        if (cause instanceof jakarta.validation.ConstraintViolationException cve) {
+            Map<String, String> fieldErrors = new LinkedHashMap<>();
+            if (cve.getConstraintViolations() != null) {
+                for (var v : cve.getConstraintViolations()) {
+                    String path = v.getPropertyPath() != null && StringUtils.hasText(v.getPropertyPath().toString())
+                            ? v.getPropertyPath().toString()
+                            : "_global";
+                    fieldErrors.putIfAbsent(path, v.getMessage());
+                }
+            }
+            return new AgentActionExecutionOutcome(
+                    422, false, "VALIDATION_FAILED", "Existem campos inválidos ou ausentes na confirmação.",
+                    null, null, Map.of(), Map.of(), List.of(), Map.copyOf(fieldErrors), Map.of());
+        }
+        log.warn("[MetadataAgentBridge] Action execution failure on {}.{}: {}",
+                res.descriptor().entityKey(), canonicalId, cause.getMessage(), cause);
+        return failureOutcome(422, "EXECUTION_REJECTED",
+                firstNonBlank(cause.getMessage(), "Falha ao executar a ação governada."));
+    }
+
+    @SuppressWarnings({"rawtypes", "unchecked"})
+    private AgentActionExecutionOutcome buildStaleOutcome(
+            AgentExecutionContext context,
+            RegisteredResource res,
+            Object convertedId,
+            String canonicalId,
+            String note) {
+        Map<String, Object> snapshotMap = new LinkedHashMap<>();
+        String freshEtag = null;
+        String freshState = null;
+        if (convertedId != null) {
+            try {
+                ResourceRepresentationResult<?> current = executeIsolatedReadOnly(
+                        () -> ((BaseResourceQueryService) res.service()).findById(convertedId));
+                if (current != null && current.body() != null) {
+                    Map<String, Object> raw = toMap(res, current.body());
+                    DualProjectedPayload projected = authorizationBridge.projectRecord(
+                            context, res.descriptor().resourcePath(), res.responseDtoType(), raw);
+                    ResourceStateSnapshot stateSnap = resolveItemStateSnapshot(res, convertedId);
+                    freshState = BridgeActionReflectionSupport.extractLifecycleState(raw, stateSnap);
+                    if (current.persistedVersion().isPresent() && resourceVersionEtagService != null
+                            && StringUtils.hasText(res.descriptor().resourceKey())) {
+                        freshEtag = resourceVersionEtagService.create(
+                                currentResourceVersionScope(),
+                                res.descriptor().resourceKey(),
+                                convertedId,
+                                current.persistedVersion().getAsLong());
+                    }
+                    snapshotMap.put("entityId", canonicalId);
+                    if (freshEtag != null) snapshotMap.put("expectedVersionTag", freshEtag);
+                    if (freshState != null) snapshotMap.put("recordLifecycleState", freshState);
+                    snapshotMap.put("record", projected.uiRecord());
+                }
+            } catch (Exception ex) {
+                log.debug("[MetadataAgentBridge] Unable to refresh snapshot on stale precondition: {}", ex.getMessage());
+            }
+        }
+        return new AgentActionExecutionOutcome(
+                412,
+                false,
+                "STALE_RESOURCE_VERSION",
+                note,
+                freshEtag,
+                freshState,
+                Map.of(),
+                Map.of(),
+                List.of(),
+                Map.of(),
+                snapshotMap);
+    }
+
+    private AgentActionExecutionOutcome mapNon2xxEntityOutcome(int status, Object body) {
+        String note = "Operação recusada pelo serviço (HTTP " + status + ").";
+        List<Map<String, Object>> violations = new ArrayList<>();
+        if (body instanceof RestApiResponse<?> api && StringUtils.hasText(api.getMessage())) {
+            note = api.getMessage();
+        } else if (body instanceof ProblemDetail pd) {
+            if (StringUtils.hasText(pd.getDetail())) {
+                note = pd.getDetail();
+            }
+            if (pd.getProperties() != null && pd.getProperties().get("violations") instanceof List<?> rawList) {
+                for (Object item : rawList) {
+                    if (item instanceof Map<?, ?> m) {
+                        Map<String, Object> copy = new LinkedHashMap<>();
+                        m.forEach((k, v) -> copy.put(String.valueOf(k), v));
+                        violations.add(copy);
+                    }
+                }
+            }
+        }
+        return new AgentActionExecutionOutcome(
+                status,
+                false,
+                "HTTP_" + status,
+                note,
+                null,
+                null,
+                Map.of(),
+                Map.of(),
+                List.copyOf(violations),
+                Map.of(),
+                Map.of());
+    }
+
+    private static AgentActionExecutionOutcome failureOutcome(int status, String code, String note) {
+        return new AgentActionExecutionOutcome(
+                status, false, code, note, null, null, Map.of(), Map.of(), List.of(), Map.of(), Map.of());
+    }
+
+    private DeterminationEndpoint resolveDeterminationEndpoint(RegisteredResource res, String determinationId) {
+        List<DeterminationEndpoint> endpoints = res.determinations();
+        if (endpoints == null || endpoints.isEmpty()) {
+            throw new IllegalArgumentException(
+                    "Recurso " + res.descriptor().entityKey() + " não possui endpoints /determinations/* declarados.");
+        }
+        if (!StringUtils.hasText(determinationId)) {
+            if (endpoints.size() == 1) {
+                return endpoints.get(0);
+            }
+            throw new IllegalArgumentException("determinationId é obrigatório quando há múltiplas determinações: "
+                    + endpoints.stream().map(DeterminationEndpoint::determinationId).toList());
+        }
+        String needle = determinationId.trim().toLowerCase(Locale.ROOT);
+        for (DeterminationEndpoint ep : endpoints) {
+            if (ep.determinationId().equalsIgnoreCase(needle) || ep.fullPath().toLowerCase(Locale.ROOT).endsWith("/" + needle)) {
+                return ep;
+            }
+        }
+        throw new IllegalArgumentException("Determinação não encontrada neste recurso: " + determinationId);
+    }
+
+    private MutatingActionEndpoint resolveMutatingEndpoint(RegisteredResource res, String actionId) {
+        String needle = actionId.trim().toLowerCase(Locale.ROOT);
+        for (MutatingActionEndpoint ep : res.mutatingActions()) {
+            if (ep.matchesActionId(needle)) {
+                return ep;
+            }
+        }
+        throw new IllegalArgumentException("Ação ou intenção de edição não encontrada neste recurso: " + actionId);
+    }
+
+    private Object invokeDeterminationEndpoint(
+            RegisteredResource res,
+            DeterminationEndpoint endpoint,
+            Object convertedDraft) {
+        Method m = endpoint.method();
+        Object[] args = new Object[m.getParameterCount()];
+        if (endpoint.requestBodyIndex() >= 0) {
+            args[endpoint.requestBodyIndex()] = convertedDraft;
+        }
+        ReflectionUtils.makeAccessible(m);
+        try {
+            return m.invoke(res.controller(), args);
+        } catch (InvocationTargetException ex) {
+            Throwable cause = ex.getTargetException() != null ? ex.getTargetException() : ex;
+            if (cause instanceof RuntimeException re) {
+                throw re;
+            }
+            throw new IllegalStateException("Falha ao simular determinação: " + cause.getMessage(), cause);
+        } catch (Exception ex) {
+            throw new IllegalStateException("Falha ao invocar endpoint de determinação: " + ex.getMessage(), ex);
+        }
+    }
+
+    private static Object unwrapControllerResult(Object result) {
+        Object current = result;
+        if (current instanceof ResponseEntity<?> entity) {
+            current = entity.getBody();
+        }
+        if (current instanceof RestApiResponse<?> api) {
+            current = api.getData();
+        }
+        return current;
+    }
+
+    private ResourceVersionScope currentResourceVersionScope() {
+        ResourceVersionScope scope = resourceVersionScopeProvider != null
+                ? resourceVersionScopeProvider.currentScope()
+                : ResourceVersionScope.GLOBAL;
+        return scope != null ? scope : ResourceVersionScope.GLOBAL;
+    }
+
+    @SuppressWarnings({"rawtypes", "unchecked"})
+    private Map<String, Object> loadRawRecordIsolated(RegisteredResource res, Object convertedId) {
+        if (convertedId == null) {
+            return Map.of();
+        }
+        return executeIsolatedReadOnly(() -> {
+            ResourceRepresentationResult<?> found = ((BaseResourceQueryService) res.service()).findById(convertedId);
+            if (found == null || found.body() == null) {
+                return null;
+            }
+            return toMap(res, found.body());
+        });
+    }
+
+    @SuppressWarnings({"rawtypes", "unchecked"})
+    private OptionalLong loadLatestVersionIsolated(RegisteredResource res, Object convertedId) {
+        try {
+            return executeIsolatedReadOnly(() -> {
+                ResourceRepresentationResult<?> found = ((BaseResourceQueryService) res.service()).findById(convertedId);
+                return found != null ? found.persistedVersion() : OptionalLong.empty();
+            });
+        } catch (Exception ex) {
+            return OptionalLong.empty();
+        }
+    }
+
+    private ActionGuardAssessment evaluatePreparationContributors(
+            AgentExecutionContext context,
+            AgentEntityDescriptor entity,
+            String entityId,
+            String actionId,
+            Map<String, Object> authoritativeRecord,
+            Map<String, Object> proposedInputs) {
+        if (preparationContributors.isEmpty()) {
+            return null;
+        }
+        String orgId = null;
+        String orgLabel = null;
+        Map<String, Object> mergedPrefill = new LinkedHashMap<>();
+        for (AgentActionPreparationContributor contributor : preparationContributors) {
+            ActionGuardAssessment assessment = contributor.assessAction(
+                    context, entity, entityId, actionId, authoritativeRecord, proposedInputs);
+            if (assessment == null) {
+                continue;
+            }
+            if (StringUtils.hasText(assessment.organizationId())) {
+                orgId = assessment.organizationId().trim();
+            }
+            if (StringUtils.hasText(assessment.organizationLabel())) {
+                orgLabel = assessment.organizationLabel().trim();
+            }
+            if (!assessment.enrichedPrefill().isEmpty()) {
+                mergedPrefill.putAll(assessment.enrichedPrefill());
+            }
+            if (!assessment.allowed()) {
+                return new ActionGuardAssessment(
+                        false,
+                        assessment.blockedCode(),
+                        assessment.impedimentNote(),
+                        orgId,
+                        orgLabel,
+                        mergedPrefill);
+            }
+        }
+        return ActionGuardAssessment.allow(orgId, orgLabel, mergedPrefill);
+    }
+
+    private String stringifyEntityId(Object convertedId, String fallback) {
+        if (convertedId == null) {
+            return fallback;
+        }
+        if (CompositeIdSupport.isCompositeIdValue(convertedId)) {
+            return CompositeIdSupport.encode(convertedId);
+        }
+        return String.valueOf(convertedId);
+    }
+
+    private static String resolveSubmitUrl(String resourcePath, String relativePath, String canonicalId) {
+        String resolvedRel = relativePath == null ? "" : relativePath;
+        if (StringUtils.hasText(canonicalId)) {
+            resolvedRel = resolvedRel.replace("{id}", canonicalId);
+        }
+        return BridgeActionReflectionSupport.combinePath(resourcePath, resolvedRel);
+    }
+
+    private static String buildFilteredSchemaUrl(String templatePath, String httpMethod) {
+        String method = StringUtils.hasText(httpMethod) ? httpMethod.trim().toLowerCase(Locale.ROOT) : "post";
+        String encodedPath = URLEncoder.encode(templatePath, StandardCharsets.UTF_8);
+        return "/schemas/filtered?path=" + encodedPath + "&operation=" + method + "&schemaType=request";
+    }
+
+    private <T> T executeRollbackOnlyRead(Supplier<T> supplier) {
+        if (rollbackOnlyReadTemplate == null) {
+            throw new IllegalStateException("Non-persistent simulation requires a configured PlatformTransactionManager.");
+        }
+        return rollbackOnlyReadTemplate.execute(status -> {
+            status.setRollbackOnly();
+            return supplier.get();
+        });
     }
 
     @SuppressWarnings({"rawtypes", "unchecked"})
@@ -456,10 +1562,12 @@ public class MetadataStarterInProcessAgentBridge implements AgentResourceExecuti
         List<ScoredRow> results = new ArrayList<>();
         Set<String> seenIds = new LinkedHashSet<>();
 
-        Object convertedId = tryConvertId(query, res.idType());
+        Object convertedId = String.class.equals(res.idType()) && query.indexOf(' ') >= 0
+                ? null
+                : tryConvertId(query, res.idType());
         if (convertedId != null) {
             try {
-                ResourceRepresentationResult<?> found = service.findById(convertedId);
+                ResourceRepresentationResult<?> found = executeIsolatedReadOnly(() -> service.findById(convertedId));
                 if (found != null && found.body() != null) {
                     String id = extractIdString(res, found.body());
                     if (seenIds.add(id)) {
@@ -559,7 +1667,7 @@ public class MetadataStarterInProcessAgentBridge implements AgentResourceExecuti
             }
             wrapper.setPropertyValue(fieldName, converted);
             Sort defaultSort = service.getDefaultSort() != null ? service.getDefaultSort() : Sort.unsorted();
-            return service.filter(filter, PageRequest.of(0, maxResults, defaultSort), null);
+            return executeIsolatedReadOnly(() -> service.filter(filter, PageRequest.of(0, maxResults, defaultSort), null));
         } catch (Exception ex) {
             return Page.empty();
         }
@@ -574,22 +1682,7 @@ public class MetadataStarterInProcessAgentBridge implements AgentResourceExecuti
             int size,
             String sort) {
         BaseResourceQueryService service = res.service();
-        GenericFilterDTO filterDto = instantiateFilter(res.filterDtoType());
-        if (filterDto != null && filters != null && !filters.isEmpty()) {
-            BeanWrapperImpl wrapper = new BeanWrapperImpl(filterDto);
-            for (Map.Entry<String, Object> entry : filters.entrySet()) {
-                if (entry.getKey() == null || entry.getValue() == null) {
-                    continue;
-                }
-                if (wrapper.isWritableProperty(entry.getKey())) {
-                    Class<?> propType = wrapper.getPropertyType(entry.getKey());
-                    Object converted = convertFilterFieldValue(entry.getValue(), propType);
-                    if (converted != null) {
-                        wrapper.setPropertyValue(entry.getKey(), converted);
-                    }
-                }
-            }
-        }
+        GenericFilterDTO filterDto = populateFilterDto(res, filters);
         Sort resolvedSort = parseSort(sort, service.getDefaultSort());
         Page<?> resultPage = service.filter(filterDto, PageRequest.of(page, size, resolvedSort), null);
         List<Map<String, Object>> uiRecords = new ArrayList<>();
@@ -614,7 +1707,8 @@ public class MetadataStarterInProcessAgentBridge implements AgentResourceExecuti
                 resultPage.getSize(),
                 uiRecords,
                 modelSafeRecords,
-                collectionActions);
+                collectionActions,
+                toAgentFieldDescriptors(res.responseFields()));
     }
 
     @SuppressWarnings({"rawtypes", "unchecked"})
@@ -630,7 +1724,7 @@ public class MetadataStarterInProcessAgentBridge implements AgentResourceExecuti
         BaseResourceQueryService service = res.service();
         ResourceRepresentationResult<?> representation;
         try {
-            representation = service.findById(convertedId);
+            representation = executeIsolatedReadOnly(() -> service.findById(convertedId));
         } catch (Exception ex) {
             return Optional.empty();
         }
@@ -650,12 +1744,16 @@ public class MetadataStarterInProcessAgentBridge implements AgentResourceExecuti
         String displayTitle = extractDisplayField(projected.uiRecord(), res.descriptor().titleField(), canonicalId);
         String displaySubtitle = extractDisplayField(projected.uiRecord(), res.descriptor().subtitleField(), "");
 
+        AtomicReference<ResourceStateSnapshot> snapshotCache = new AtomicReference<>();
         List<AgentActionAffordance> actions = resolveItemActions(
-                context, res, convertedId, canonicalId, projected.uiRecord());
-        List<AgentSurfaceSummary> surfaces = resolveItemSurfaces(context, res, convertedId, canonicalId);
+                context, res, convertedId, canonicalId, projected.uiRecord(), snapshotCache);
+        List<AgentSurfaceSummary> surfaces = resolveItemSurfaces(
+                context, res, convertedId, canonicalId, snapshotCache);
         List<AgentRelatedDataset> relatedDatasets = loadRelatedDatasets(
                 context, res, canonicalId, surfaces, includeRelatedSurfaces);
         List<AgentProactiveAlert> alerts = evaluateAlerts(context, res.descriptor().entityKey(), canonicalId, projected.uiRecord());
+        AgentEvaluatedCalculationMemory calculationMemory = evaluateCalculationMemoryForRecord(
+                res, canonicalId, displayTitle, projected);
 
         return Optional.of(new AgentEntityDossier(
                 res.descriptor(),
@@ -669,7 +1767,9 @@ public class MetadataStarterInProcessAgentBridge implements AgentResourceExecuti
                 relatedDatasets,
                 alerts,
                 actions,
-                surfaces));
+                surfaces,
+                toAgentFieldDescriptors(res.responseFields()),
+                calculationMemory));
     }
 
     @SuppressWarnings({"rawtypes", "unchecked"})
@@ -736,7 +1836,8 @@ public class MetadataStarterInProcessAgentBridge implements AgentResourceExecuti
                     parentField,
                     childPage.getTotalElements(),
                     uiRows,
-                    modelSafeRows));
+                    modelSafeRows,
+                    toAgentFieldDescriptors(child.responseFields())));
         }
         return datasets;
     }
@@ -749,10 +1850,15 @@ public class MetadataStarterInProcessAgentBridge implements AgentResourceExecuti
         List<AgentProactiveAlert> alerts = new ArrayList<>();
         for (AgentProactiveAlertContributor contributor : alertContributors) {
             if (contributor.supportsEntity(entityKey)) {
-                List<AgentProactiveAlert> found = contributor.evaluateAlerts(
-                        context, entityKey, entityId, authoritativeRecord);
-                if (found != null) {
-                    alerts.addAll(found);
+                try {
+                    List<AgentProactiveAlert> found = executeIsolatedReadOnly(() -> contributor.evaluateAlerts(
+                            context, entityKey, entityId, authoritativeRecord));
+                    if (found != null) {
+                        alerts.addAll(found);
+                    }
+                } catch (Exception ex) {
+                    log.debug("Ignorando falha em AgentProactiveAlertContributor {}: {}",
+                            contributor.getClass().getSimpleName(), ex.getMessage());
                 }
             }
         }
@@ -764,15 +1870,25 @@ public class MetadataStarterInProcessAgentBridge implements AgentResourceExecuti
             RegisteredResource res,
             Object convertedId,
             String canonicalId,
-            Map<String, Object> uiRecord) {
+            Map<String, Object> uiRecord,
+            AtomicReference<ResourceStateSnapshot> snapshotCache) {
         List<AgentActionAffordance> actions = new ArrayList<>();
         String resourceKey = res.descriptor().resourceKey();
         String resourcePath = res.descriptor().resourcePath();
+        ResourceStateSnapshot stateSnapshot = snapshotCache != null ? snapshotCache.get() : null;
+        boolean addedCatalogActions = false;
+        Set<String> seenActionIds = new LinkedHashSet<>();
         if (actionCatalogService != null && StringUtils.hasText(resourceKey)) {
             ActionCatalogResponse response = tryMetadataLookup("findItemActions:" + resourceKey,
                     () -> actionCatalogService.findItemActions(resourceKey, convertedId));
             if (response != null && response.actions() != null) {
-                ResourceStateSnapshot stateSnapshot = resolveItemStateSnapshot(res, convertedId);
+                addedCatalogActions = true;
+                if (stateSnapshot == null) {
+                    stateSnapshot = resolveItemStateSnapshot(res, convertedId);
+                    if (snapshotCache != null) {
+                        snapshotCache.compareAndSet(null, stateSnapshot);
+                    }
+                }
                 for (ActionCatalogItem item : response.actions()) {
                     if (isActionBlockedByStateOrRule(item, stateSnapshot)) {
                         continue;
@@ -785,6 +1901,7 @@ public class MetadataStarterInProcessAgentBridge implements AgentResourceExecuti
                                     context, resourcePath, item.id(), convertedId);
                     String submitPath = resolvePathId(item.path(), resourcePath, canonicalId);
                     boolean hasForm = StringUtils.hasText(item.requestSchemaUrl());
+                    seenActionIds.add(item.id().toLowerCase(Locale.ROOT));
                     actions.add(new AgentActionAffordance(
                             item.id(),
                             firstNonBlank(item.title(), item.id()),
@@ -804,12 +1921,69 @@ public class MetadataStarterInProcessAgentBridge implements AgentResourceExecuti
                             Map.of(),
                             item.scope() == ActionScope.ITEM,
                             !authorized,
-                            !authorized ? "Permissao insuficiente" : null,
+                            !authorized ? "Permissão insuficiente" : null,
                             item.order()));
                 }
             }
         }
-        if (capabilityService != null && StringUtils.hasText(resourceKey)) {
+        if (!addedCatalogActions && res.mutatingActions() != null && !res.mutatingActions().isEmpty()) {
+            if (stateSnapshot == null) {
+                stateSnapshot = resolveItemStateSnapshot(res, convertedId);
+                if (snapshotCache != null) {
+                    snapshotCache.compareAndSet(null, stateSnapshot);
+                }
+            }
+            String lifecycleState = BridgeActionReflectionSupport.extractLifecycleState(uiRecord, stateSnapshot);
+            for (MutatingActionEndpoint ep : res.mutatingActions()) {
+                if ("edit".equalsIgnoreCase(ep.actionId()) || ep.scope() != ActionScope.ITEM) {
+                    continue;
+                }
+                if (!seenActionIds.add(ep.actionId().toLowerCase(Locale.ROOT))) {
+                    continue;
+                }
+                if (!ep.allowedStates().isEmpty() && StringUtils.hasText(lifecycleState)
+                        && ep.allowedStates().stream().noneMatch(s -> s.equalsIgnoreCase(lifecycleState))) {
+                    continue;
+                }
+                if (stateSnapshot != null && stateSnapshot.metadata() != null
+                        && Boolean.FALSE.equals(stateSnapshot.metadata().get("action." + ep.actionId() + ".allowed"))) {
+                    continue;
+                }
+                boolean authorized = authorizationBridge.canInvokeAction(context, resourcePath, ep.actionId(), convertedId);
+                boolean hasForm = ep.requestDtoType() != null && !ep.inputFields().isEmpty();
+                String submitPath = resolveSubmitUrl(resourcePath, ep.relativePath(), canonicalId);
+                String schemaUrl = hasForm
+                        ? buildFilteredSchemaUrl(
+                                BridgeActionReflectionSupport.combinePath(resourcePath, ep.relativePath()),
+                                ep.httpMethod())
+                        : null;
+                actions.add(new AgentActionAffordance(
+                        ep.actionId(),
+                        ep.title(),
+                        ep.description(),
+                        "partial-patch".equals(ep.operationKind()) ? "tune" : "bolt",
+                        "partial-patch".equals(ep.operationKind()) ? "neutral" : "primary",
+                        resourceKey,
+                        resourcePath,
+                        canonicalId,
+                        ep.operationKind(),
+                        hasForm ? ("partial-patch".equals(ep.operationKind()) ? "drawer" : "dialog") : "confirm-only",
+                        ep.httpMethod(),
+                        submitPath,
+                        schemaUrl,
+                        null,
+                        Map.of(),
+                        Map.of(),
+                        true,
+                        !authorized,
+                        !authorized ? "Permissão insuficiente" : null,
+                        ep.order()));
+            }
+        }
+        boolean allowOpenApiCapabilityLookup = capabilityService != null
+                && StringUtils.hasText(resourceKey)
+                && (hasActiveHttpRequest() || surfaceDefinitionRegistry == null);
+        if (allowOpenApiCapabilityLookup) {
             CapabilitySnapshot cap = tryMetadataLookup("itemCapabilities:" + resourceKey,
                     () -> capabilityService.itemCapabilities(resourceKey, resourcePath, convertedId));
             if (cap != null && cap.operations() != null) {
@@ -820,7 +1994,7 @@ public class MetadataStarterInProcessAgentBridge implements AgentResourceExecuti
                         actions.add(new AgentActionAffordance(
                                 "edit",
                                 "Editar registro",
-                                "Abre o formulario de edicao governado deste registro",
+                                "Abre o formulário de edição governado deste registro",
                                 "edit",
                                 "neutral",
                                 resourceKey,
@@ -840,6 +2014,38 @@ public class MetadataStarterInProcessAgentBridge implements AgentResourceExecuti
                                 900));
                     }
                 }
+            }
+        } else if (res.service() instanceof BaseResourceCommandService<?, ?, ?, ?>
+                && authorizationBridge.canInvokeAction(context, resourcePath, "update", convertedId)) {
+            if (stateSnapshot == null) {
+                stateSnapshot = resolveItemStateSnapshot(res, convertedId);
+            }
+            boolean stateAllowed = stateSnapshot == null
+                    || stateSnapshot.metadata() == null
+                    || (!Boolean.FALSE.equals(stateSnapshot.metadata().get("operation.update.allowed"))
+                            && !Boolean.FALSE.equals(stateSnapshot.metadata().get("surface.edit.allowed")));
+            if (stateAllowed) {
+                actions.add(new AgentActionAffordance(
+                        "edit",
+                        "Editar registro",
+                        "Abre o formulário de edição governado deste registro",
+                        "edit",
+                        "neutral",
+                        resourceKey,
+                        resourcePath,
+                        canonicalId,
+                        "edit",
+                        "drawer",
+                        "PUT",
+                        resourcePath + "/" + canonicalId,
+                        "/schemas/filtered?path=" + resourcePath + "/" + canonicalId + "&schemaType=request",
+                        null,
+                        Map.of(),
+                        Map.of(),
+                        false,
+                        false,
+                        null,
+                        900));
             }
         }
         if (StringUtils.hasText(res.descriptor().routeTemplate())) {
@@ -878,10 +2084,12 @@ public class MetadataStarterInProcessAgentBridge implements AgentResourceExecuti
         List<AgentActionAffordance> actions = new ArrayList<>();
         String resourceKey = res.descriptor().resourceKey();
         String resourcePath = res.descriptor().resourcePath();
+        boolean addedCollectionCatalog = false;
         if (actionCatalogService != null && StringUtils.hasText(resourceKey)) {
             ActionCatalogResponse response = tryMetadataLookup("findCollectionActions:" + resourceKey,
                     () -> actionCatalogService.findCollectionActions(resourceKey));
             if (response != null && response.actions() != null) {
+                addedCollectionCatalog = true;
                 for (ActionCatalogItem item : response.actions()) {
                     if (isActionBlockedByStateOrRule(item, null)) {
                         continue;
@@ -910,9 +2118,41 @@ public class MetadataStarterInProcessAgentBridge implements AgentResourceExecuti
                             Map.of(),
                             true,
                             !authorized,
-                            !authorized ? "Permissao insuficiente" : null,
+                            !authorized ? "Permissão insuficiente" : null,
                             item.order()));
                 }
+            }
+        }
+        if (!addedCollectionCatalog && res.mutatingActions() != null && !res.mutatingActions().isEmpty()) {
+            for (MutatingActionEndpoint ep : res.mutatingActions()) {
+                if (ep.scope() != ActionScope.COLLECTION) {
+                    continue;
+                }
+                boolean authorized = authorizationBridge.canInvokeAction(context, resourcePath, ep.actionId(), null);
+                boolean hasForm = ep.requestDtoType() != null && !ep.inputFields().isEmpty();
+                String submitPath = resolveSubmitUrl(resourcePath, ep.relativePath(), null);
+                String schemaUrl = hasForm ? buildFilteredSchemaUrl(submitPath, ep.httpMethod()) : null;
+                actions.add(new AgentActionAffordance(
+                        ep.actionId(),
+                        ep.title(),
+                        ep.description(),
+                        "playlist_play",
+                        "accent",
+                        resourceKey,
+                        resourcePath,
+                        null,
+                        "workflow-action",
+                        hasForm ? "dialog" : "confirm-only",
+                        ep.httpMethod(),
+                        submitPath,
+                        schemaUrl,
+                        null,
+                        Map.of(),
+                        Map.of(),
+                        true,
+                        !authorized,
+                        !authorized ? "Permissão insuficiente" : null,
+                        ep.order()));
             }
         }
         actions = applyActionContributors(context, res.descriptor(), null, null, Map.of(), actions);
@@ -952,11 +2192,37 @@ public class MetadataStarterInProcessAgentBridge implements AgentResourceExecuti
             AgentExecutionContext context,
             RegisteredResource res,
             Object convertedId,
-            String canonicalId) {
-        if (surfaceCatalogService == null || !StringUtils.hasText(res.descriptor().resourceKey())) {
+            String canonicalId,
+            AtomicReference<ResourceStateSnapshot> snapshotCache) {
+        String resourceKey = res.descriptor().resourceKey();
+        if (!StringUtils.hasText(resourceKey)) {
             return List.of();
         }
-        String resourceKey = res.descriptor().resourceKey();
+        if (!hasActiveHttpRequest() && surfaceDefinitionRegistry != null) {
+            List<SurfaceDefinition> definitions = surfaceDefinitionRegistry.findByResourceKey(resourceKey);
+            if (definitions == null || definitions.isEmpty()) {
+                return List.of();
+            }
+            ResourceStateSnapshot stateSnapshot = snapshotCache != null ? snapshotCache.get() : null;
+            if (stateSnapshot == null) {
+                stateSnapshot = resolveItemStateSnapshot(res, convertedId);
+                if (snapshotCache != null) {
+                    snapshotCache.compareAndSet(null, stateSnapshot);
+                }
+            }
+            List<AgentSurfaceSummary> summaries = new ArrayList<>();
+            for (SurfaceDefinition def : definitions) {
+                if (def.scope() != SurfaceScope.ITEM) {
+                    continue;
+                }
+                summaries.add(toSurfaceSummary(def, context, stateSnapshot, canonicalId));
+            }
+            summaries.sort(Comparator.comparingInt(AgentSurfaceSummary::order));
+            return summaries;
+        }
+        if (surfaceCatalogService == null) {
+            return List.of();
+        }
         SurfaceCatalogResponse response = tryMetadataLookup("findItemSurfaces:" + resourceKey,
                 () -> surfaceCatalogService.findItemSurfaces(resourceKey, convertedId));
         if (response == null || response.surfaces() == null) {
@@ -1003,28 +2269,46 @@ public class MetadataStarterInProcessAgentBridge implements AgentResourceExecuti
                 .toList();
         List<AgentActionAffordance> collectionActions = resolveCollectionActions(context, res);
         List<AgentSurfaceSummary> resourceSurfaces = List.of();
-        if (surfaceCatalogService != null && StringUtils.hasText(res.descriptor().resourceKey())) {
-            SurfaceCatalogResponse surf = tryMetadataLookup("findByResourceKey:" + res.descriptor().resourceKey(),
-                    () -> surfaceCatalogService.findByResourceKey(res.descriptor().resourceKey()));
-            if (surf != null && surf.surfaces() != null) {
-                resourceSurfaces = surf.surfaces().stream()
-                        .map(s -> new AgentSurfaceSummary(
-                                s.id(),
-                                firstNonBlank(s.title(), s.id()),
-                                s.description(),
-                                s.kind() != null ? s.kind().name() : null,
-                                s.scope() != null ? s.scope().name() : null,
-                                s.contextualReadPath(),
-                                s.relatedResource() != null ? s.relatedResource().childResourceKey() : null,
-                                s.relatedResource() != null ? s.relatedResource().childResourcePath() : null,
-                                s.relatedResource() != null ? s.relatedResource().childParentField() : null,
-                                s.availability() == null || s.availability().allowed(),
-                                s.availability() != null ? s.availability().reason() : null,
-                                s.order()))
-                        .toList();
+        String resourceKey = res.descriptor().resourceKey();
+        if (StringUtils.hasText(resourceKey)) {
+            if (!hasActiveHttpRequest() && surfaceDefinitionRegistry != null) {
+                List<SurfaceDefinition> definitions = surfaceDefinitionRegistry.findByResourceKey(resourceKey);
+                if (definitions != null && !definitions.isEmpty()) {
+                    resourceSurfaces = definitions.stream()
+                            .map(def -> toSurfaceSummary(def, context, null, null))
+                            .sorted(Comparator.comparingInt(AgentSurfaceSummary::order))
+                            .toList();
+                }
+            } else if (surfaceCatalogService != null) {
+                SurfaceCatalogResponse surf = tryMetadataLookup("findByResourceKey:" + resourceKey,
+                        () -> surfaceCatalogService.findByResourceKey(resourceKey));
+                if (surf != null && surf.surfaces() != null) {
+                    resourceSurfaces = surf.surfaces().stream()
+                            .map(s -> new AgentSurfaceSummary(
+                                    s.id(),
+                                    firstNonBlank(s.title(), s.id()),
+                                    s.description(),
+                                    s.kind() != null ? s.kind().name() : null,
+                                    s.scope() != null ? s.scope().name() : null,
+                                    s.contextualReadPath(),
+                                    s.relatedResource() != null ? s.relatedResource().childResourceKey() : null,
+                                    s.relatedResource() != null ? s.relatedResource().childResourcePath() : null,
+                                    s.relatedResource() != null ? s.relatedResource().childParentField() : null,
+                                    s.availability() == null || s.availability().allowed(),
+                                    s.availability() != null ? s.availability().reason() : null,
+                                    s.order()))
+                            .toList();
+                }
             }
         }
         AgentEntityDescriptor d = res.descriptor();
+        StatsCapabilityDigest statsCapability = extractStatsCapability(context, res);
+        List<QuickFilterSummary> quickFilters = extractQuickFilters(res);
+        List<ResourceFactSummary> resourceFacts = extractResourceFacts(context, res);
+        List<String> calculationTrailIds = extractCalculationTrailIds(res.responseDtoType());
+        List<DeterminationSummary> determinations = res.determinations() == null
+                ? List.of()
+                : res.determinations().stream().map(DeterminationEndpoint::toSummary).toList();
         return new CompactAgentSchemaDigest(
                 d.entityKey(),
                 d.resourceKey(),
@@ -1038,7 +2322,623 @@ public class MetadataStarterInProcessAgentBridge implements AgentResourceExecuti
                 filters,
                 fields,
                 collectionActions,
-                resourceSurfaces);
+                resourceSurfaces,
+                statsCapability,
+                quickFilters,
+                resourceFacts,
+                !calculationTrailIds.isEmpty(),
+                calculationTrailIds,
+                determinations);
+    }
+
+    @SuppressWarnings({"rawtypes", "unchecked"})
+    private AgentStatsResult aggregateStatsInternal(
+            AgentExecutionContext context,
+            RegisteredResource res,
+            AgentStatsAggregationRequest request) {
+        BaseResourceQueryService service = res.service();
+        StatsFieldRegistry registry = tryMetadataLookup("statsRegistry:" + res.descriptor().entityKey(),
+                service::getStatsFieldRegistry);
+        if (registry == null || registry.isEmpty()) {
+            return new AgentStatsResult(
+                    res.descriptor().entityKey(),
+                    res.descriptor().resourceKey(),
+                    res.descriptor().resourcePath(),
+                    firstNonBlank(request.title(), res.descriptor().title()),
+                    res.descriptor().description(),
+                    resolveOperationKind(request.operationKind()),
+                    "bar",
+                    request.field(),
+                    request.field(),
+                    "COUNT",
+                    null,
+                    request.granularity(),
+                    0L,
+                    List.of(),
+                    "Este recurso não declarou dimensões estatísticas habilitadas.");
+        }
+
+        Set<String> blockedFields = findBlockedStatsFields(context, res, registry);
+        if (StringUtils.hasText(request.field())
+                && blockedFields.contains(request.field().trim().toLowerCase(Locale.ROOT))) {
+            throw new SecurityException("Stats field restricted by governance policy: " + request.field().trim());
+        }
+
+        StatsSupportMode groupMode = safeStatsMode(service::getGroupByStatsSupportMode);
+        StatsSupportMode tsMode = safeStatsMode(service::getTimeSeriesStatsSupportMode);
+        StatsSupportMode distMode = safeStatsMode(service::getDistributionStatsSupportMode);
+
+        String operationKind = resolveOperationKind(request.operationKind());
+        StatsFieldDescriptor targetDescriptor = resolveTargetStatsField(
+                registry, operationKind, request.field(), blockedFields);
+        if (targetDescriptor == null) {
+            throw new IllegalArgumentException(
+                    "Nenhum campo estatístico elegível encontrado para " + operationKind
+                            + (StringUtils.hasText(request.field()) ? " (campo=" + request.field() + ")" : ""));
+        }
+
+        if ("GROUP_BY".equals(operationKind) && groupMode == StatsSupportMode.DISABLED) {
+            throw new IllegalArgumentException("Agregação GROUP_BY desabilitada neste recurso.");
+        }
+        if ("TIMESERIES".equals(operationKind) && tsMode == StatsSupportMode.DISABLED) {
+            throw new IllegalArgumentException("Agregação TIMESERIES desabilitada neste recurso.");
+        }
+        if ("DISTRIBUTION".equals(operationKind) && distMode == StatsSupportMode.DISABLED) {
+            throw new IllegalArgumentException("Agregação DISTRIBUTION desabilitada neste recurso.");
+        }
+
+        StatsMetric metricOp = resolveMetricOperation(request.metricOperation(), targetDescriptor);
+        String metricField = trimToNull(request.metricField());
+        if (metricOp != StatsMetric.COUNT && metricOp != StatsMetric.DISTINCT_COUNT) {
+            if (StringUtils.hasText(metricField)
+                    && blockedFields.contains(metricField.toLowerCase(Locale.ROOT))) {
+                throw new SecurityException("Stats metricField restricted by governance policy: " + metricField);
+            }
+            if (!StringUtils.hasText(metricField)) {
+                metricField = registry.descriptors().stream()
+                        .filter(StatsFieldDescriptor::metricFieldEligible)
+                        .filter(d -> !blockedFields.contains(d.field().toLowerCase(Locale.ROOT)))
+                        .map(StatsFieldDescriptor::field)
+                        .findFirst()
+                        .orElse(targetDescriptor.metricFieldEligible()
+                                && !blockedFields.contains(targetDescriptor.field().toLowerCase(Locale.ROOT))
+                                        ? targetDescriptor.field()
+                                        : null);
+            }
+            if (StringUtils.hasText(metricField)) {
+                String checkField = metricField;
+                StatsFieldDescriptor metricDesc = registry.resolve(checkField)
+                        .orElseThrow(() -> new IllegalArgumentException("metricField inválido para stats: " + checkField));
+                if (!metricDesc.metricFieldEligible()) {
+                    throw new IllegalArgumentException("Campo não elegível como métrica numérica: " + checkField);
+                }
+            }
+        } else if (metricOp == StatsMetric.COUNT) {
+            metricField = null;
+        } else if (StringUtils.hasText(metricField)
+                && blockedFields.contains(metricField.toLowerCase(Locale.ROOT))) {
+            throw new SecurityException("Stats metricField restricted by governance policy: " + metricField);
+        }
+        StatsMetricRequest metricRequest = new StatsMetricRequest(metricOp, metricField);
+
+        GenericFilterDTO filterDto = populateFilterDto(res, request.filters());
+        List<AgentStatsBucket> buckets = new ArrayList<>();
+        String granularityUsed = trimToNull(request.granularity());
+
+        if ("TIMESERIES".equals(operationKind)) {
+            TimeSeriesGranularity gran = parseTimeSeriesGranularity(request.granularity());
+            granularityUsed = gran.name();
+            TimeSeriesStatsResponse tsResponse = service.timeSeriesStats(
+                    new TimeSeriesStatsRequest<>(filterDto, targetDescriptor.field(), gran, metricRequest, null, null, Boolean.TRUE));
+            if (tsResponse != null && tsResponse.points() != null) {
+                for (TimeSeriesPoint pt : tsResponse.points()) {
+                    String key = pt.start() != null ? pt.start().toString() : firstNonBlank(pt.label(), "");
+                    String label = firstNonBlank(pt.label(), key);
+                    buckets.add(new AgentStatsBucket(
+                            key,
+                            label,
+                            toBigDecimal(pt.value(), pt.count()),
+                            pt.count(),
+                            pt.start() != null ? pt.start().toString() : null,
+                            pt.end() != null ? pt.end().toString() : null));
+                }
+            }
+        } else if ("DISTRIBUTION".equals(operationKind)) {
+            DistributionMode distModeReq = "HISTOGRAM".equalsIgnoreCase(request.distributionMode())
+                    || (targetDescriptor.distributionHistogramEligible() && !targetDescriptor.distributionTermsEligible())
+                    ? DistributionMode.HISTOGRAM
+                    : DistributionMode.TERMS;
+            DistributionStatsResponse distResponse = service.distributionStats(
+                    new DistributionStatsRequest<>(
+                            filterDto,
+                            targetDescriptor.field(),
+                            distModeReq,
+                            metricRequest,
+                            null,
+                            null,
+                            request.limit(),
+                            StatsBucketOrder.VALUE_DESC));
+            if (distResponse != null && distResponse.buckets() != null) {
+                for (DistributionBucket b : distResponse.buckets()) {
+                    String key = b.key() != null ? String.valueOf(b.key()) : firstNonBlank(b.label(), "");
+                    String label = firstNonBlank(b.label(), key);
+                    buckets.add(new AgentStatsBucket(
+                            key,
+                            label,
+                            toBigDecimal(b.value(), b.count()),
+                            b.count(),
+                            b.from() != null ? String.valueOf(b.from()) : null,
+                            b.to() != null ? String.valueOf(b.to()) : null));
+                }
+            }
+        } else {
+            GroupByStatsResponse gbResponse = service.groupByStats(
+                    new GroupByStatsRequest<>(
+                            filterDto,
+                            targetDescriptor.field(),
+                            metricRequest,
+                            request.limit(),
+                            StatsBucketOrder.VALUE_DESC));
+            if (gbResponse != null && gbResponse.buckets() != null) {
+                for (GroupByBucket b : gbResponse.buckets()) {
+                    String key = b.key() != null ? String.valueOf(b.key()) : firstNonBlank(b.label(), "N/D");
+                    String label = resolveBucketLabel(res, targetDescriptor.field(), key, b.label());
+                    buckets.add(new AgentStatsBucket(
+                            key,
+                            label,
+                            toBigDecimal(b.value(), b.count()),
+                            b.count(),
+                            null,
+                            null));
+                }
+            }
+        }
+
+        long totalElements = buckets.stream().mapToLong(AgentStatsBucket::count).sum();
+        String fieldLabel = resolveFieldLabel(res, targetDescriptor.field());
+        String chartKind = inferChartKind(request.chartKind(), operationKind, metricOp, buckets.size());
+        String title = firstNonBlank(request.title(), res.descriptor().title() + " — " + fieldLabel);
+        String subtitle = formatStatsSubtitlePtBr(res, metricOp, metricField, fieldLabel);
+        String emptyReason = buckets.isEmpty() ? "Nenhum registro encontrado para os filtros informados." : null;
+
+        return new AgentStatsResult(
+                res.descriptor().entityKey(),
+                res.descriptor().resourceKey(),
+                res.descriptor().resourcePath(),
+                title,
+                subtitle,
+                operationKind,
+                chartKind,
+                targetDescriptor.field(),
+                fieldLabel,
+                metricOp.name(),
+                metricField,
+                granularityUsed,
+                totalElements,
+                buckets,
+                emptyReason);
+    }
+
+    @SuppressWarnings({"rawtypes", "unchecked"})
+    private List<AgentEvaluatedCalculationMemory> evaluateCalculationMemoryInternal(
+            AgentExecutionContext context,
+            RegisteredResource res,
+            String entityId,
+            Map<String, Object> filters,
+            int maxRecords) {
+        Map<String, Object> calcMeta = CalculationMemoryMetadataResolver.resolve(res.responseDtoType());
+        if (calcMeta == null || calcMeta.isEmpty()) {
+            return List.of();
+        }
+        BaseResourceQueryService service = res.service();
+        List<AgentEvaluatedCalculationMemory> results = new ArrayList<>();
+
+        if (StringUtils.hasText(entityId)) {
+            Object convertedId = tryConvertId(entityId, res.idType());
+            if (convertedId == null) {
+                return List.of();
+            }
+            try {
+                ResourceRepresentationResult<?> representation = executeIsolatedReadOnly(() -> service.findById(convertedId));
+                if (representation != null && representation.body() != null) {
+                    evaluateAndAddCalculationMemory(context, res, calcMeta, representation.body(), results);
+                }
+            } catch (Exception ignored) {
+                return List.of();
+            }
+            return results;
+        }
+
+        GenericFilterDTO filterDto = populateFilterDto(res, filters);
+        Page<?> page = service.filter(filterDto, PageRequest.of(0, maxRecords, service.getDefaultSort()), null);
+        if (page != null && page.getContent() != null) {
+            for (Object dto : page.getContent()) {
+                evaluateAndAddCalculationMemory(context, res, calcMeta, dto, results);
+            }
+        }
+        return results;
+    }
+
+    private void evaluateAndAddCalculationMemory(
+            AgentExecutionContext context,
+            RegisteredResource res,
+            Map<String, Object> calcMeta,
+            Object dto,
+            List<AgentEvaluatedCalculationMemory> out) {
+        DualProjectedPayload projected = authorizationBridge.projectRecord(
+                context,
+                res.descriptor().resourcePath(),
+                res.responseDtoType(),
+                toMap(res, dto));
+        String canonicalId = firstNonBlank(extractIdString(res, dto), "");
+        String displayTitle = extractDisplayField(projected.uiRecord(), res.descriptor().titleField(), canonicalId);
+        AgentEvaluatedCalculationMemory evaluated = AgentCalculationMemoryEvaluator.evaluate(
+                res.descriptor(),
+                canonicalId,
+                displayTitle,
+                calcMeta,
+                projected);
+        if (evaluated != null) {
+            out.add(evaluated);
+        }
+    }
+
+    private AgentEvaluatedCalculationMemory evaluateCalculationMemoryForRecord(
+            RegisteredResource res,
+            String canonicalId,
+            String displayTitle,
+            DualProjectedPayload projected) {
+        Map<String, Object> calcMeta = CalculationMemoryMetadataResolver.resolve(res.responseDtoType());
+        if (calcMeta == null || calcMeta.isEmpty()) {
+            return null;
+        }
+        return AgentCalculationMemoryEvaluator.evaluate(
+                res.descriptor(),
+                canonicalId,
+                displayTitle,
+                calcMeta,
+                projected);
+    }
+
+    private GenericFilterDTO populateFilterDto(RegisteredResource res, Map<String, Object> filters) {
+        GenericFilterDTO filterDto = instantiateFilter(res.filterDtoType());
+        if (filterDto != null && filters != null && !filters.isEmpty()) {
+            BeanWrapperImpl wrapper = new BeanWrapperImpl(filterDto);
+            for (Map.Entry<String, Object> entry : filters.entrySet()) {
+                if (entry.getKey() == null || entry.getValue() == null) {
+                    continue;
+                }
+                if (wrapper.isWritableProperty(entry.getKey())) {
+                    Class<?> propType = wrapper.getPropertyType(entry.getKey());
+                    Object converted = convertFilterFieldValue(entry.getValue(), propType);
+                    if (converted != null) {
+                        wrapper.setPropertyValue(entry.getKey(), converted);
+                    }
+                }
+            }
+        }
+        return filterDto;
+    }
+
+    private StatsCapabilityDigest extractStatsCapability(AgentExecutionContext context, RegisteredResource res) {
+        StatsFieldRegistry registry = tryMetadataLookup("statsDigest:" + res.descriptor().entityKey(),
+                () -> res.service().getStatsFieldRegistry());
+        if (registry == null || registry.isEmpty()) {
+            return null;
+        }
+        StatsSupportMode gMode = safeStatsMode(() -> res.service().getGroupByStatsSupportMode());
+        StatsSupportMode tsMode = safeStatsMode(() -> res.service().getTimeSeriesStatsSupportMode());
+        StatsSupportMode distMode = safeStatsMode(() -> res.service().getDistributionStatsSupportMode());
+        org.praxisplatform.uischema.stats.StatsCapability cap =
+                org.praxisplatform.uischema.stats.StatsCapability.from(registry, gMode, tsMode, distMode);
+        if (cap.fields().isEmpty()) {
+            return null;
+        }
+        Set<String> blockedFields = findBlockedStatsFields(context, res, registry);
+        List<StatsFieldDigest> fields = cap.fields().stream()
+                .filter(fc -> !blockedFields.contains(fc.field().toLowerCase(Locale.ROOT)))
+                .map(fc -> new StatsFieldDigest(
+                        fc.field(),
+                        firstNonBlank(fc.label(), resolveFieldLabel(res, fc.field())),
+                        fc.metrics(),
+                        fc.groupByEligible(),
+                        fc.timeSeriesEligible(),
+                        fc.distributionTermsEligible(),
+                        fc.distributionHistogramEligible(),
+                        fc.metricFieldEligible()))
+                .toList();
+        if (fields.isEmpty()) {
+            return null;
+        }
+        return new StatsCapabilityDigest(gMode.name(), tsMode.name(), distMode.name(), fields);
+    }
+
+    private Set<String> findBlockedStatsFields(
+            AgentExecutionContext context,
+            RegisteredResource res,
+            StatsFieldRegistry registry) {
+        Map<String, Object> probeMap = new LinkedHashMap<>();
+        for (ResponseFieldMeta meta : res.responseFields()) {
+            if (StringUtils.hasText(meta.name())) {
+                probeMap.put(meta.name(), Boolean.TRUE);
+            }
+        }
+        if (registry != null) {
+            for (StatsFieldDescriptor desc : registry.descriptors()) {
+                if (desc != null && StringUtils.hasText(desc.field())) {
+                    probeMap.putIfAbsent(desc.field(), Boolean.TRUE);
+                }
+            }
+        }
+        Set<String> blocked = new LinkedHashSet<>();
+        if (!probeMap.isEmpty()) {
+            DualProjectedPayload projected = authorizationBridge.projectRecord(
+                    context,
+                    res.descriptor().resourcePath(),
+                    res.responseDtoType(),
+                    probeMap);
+            if (projected != null && projected.hiddenFields() != null) {
+                for (String hidden : projected.hiddenFields()) {
+                    if (StringUtils.hasText(hidden)) {
+                        blocked.add(hidden.trim().toLowerCase(Locale.ROOT));
+                    }
+                }
+            }
+        }
+        for (ResponseFieldMeta meta : res.responseFields()) {
+            if ("deny".equalsIgnoreCase(meta.aiVisibility()) || "mask".equalsIgnoreCase(meta.aiVisibility())) {
+                blocked.add(meta.name().trim().toLowerCase(Locale.ROOT));
+            }
+        }
+        return Set.copyOf(blocked);
+    }
+
+    private static String formatStatsSubtitlePtBr(
+            RegisteredResource res,
+            StatsMetric metricOp,
+            String metricField,
+            String fieldLabel) {
+        String opLabel = switch (metricOp) {
+            case DISTINCT_COUNT -> "Contagem distinta";
+            case SUM -> "Soma";
+            case AVG -> "Média";
+            case MIN -> "Mínimo";
+            case MAX -> "Máximo";
+            default -> "Quantidade";
+        };
+        StringBuilder sb = new StringBuilder(opLabel);
+        if (StringUtils.hasText(metricField)) {
+            sb.append(" (").append(firstNonBlank(resolveFieldLabel(res, metricField), metricField)).append(')');
+        }
+        if (StringUtils.hasText(fieldLabel)) {
+            sb.append(" por ").append(fieldLabel);
+        }
+        return sb.toString();
+    }
+
+    private List<QuickFilterSummary> extractQuickFilters(RegisteredResource res) {
+        try {
+            Class<?> targetControllerClass = AopUtils.getTargetClass(res.controller());
+            List<Map<String, Object>> resolved = ApiResourceQuickFilterResolver.resolveControllerQuickFilters(
+                    targetControllerClass, res.controller(), res.filterDtoType());
+            if (resolved == null || resolved.isEmpty()) {
+                return List.of();
+            }
+            List<QuickFilterSummary> out = new ArrayList<>(resolved.size());
+            for (Map<String, Object> item : resolved) {
+                if (item == null || item.isEmpty()) {
+                    continue;
+                }
+                String id = item.get("id") != null ? item.get("id").toString() : null;
+                String label = item.get("label") != null ? item.get("label").toString() : id;
+                if (!StringUtils.hasText(id) && !StringUtils.hasText(label)) {
+                    continue;
+                }
+                out.add(new QuickFilterSummary(
+                        id,
+                        label,
+                        item.get("description") != null ? item.get("description").toString() : null,
+                        item.get("category") != null ? item.get("category").toString() : null));
+            }
+            return List.copyOf(out);
+        } catch (Exception ex) {
+            log.debug("[AgentBridge] Quick filter introspection failed for '{}': {}", res.descriptor().entityKey(), ex.getMessage());
+            return List.of();
+        }
+    }
+
+    private List<ResourceFactSummary> extractResourceFacts(AgentExecutionContext context, RegisteredResource res) {
+        String resourceKey = res.descriptor().resourceKey();
+        if (!StringUtils.hasText(resourceKey)) {
+            return List.of();
+        }
+        Map<String, ResourceFactSummary> byKey = new LinkedHashMap<>();
+        String tenantId = context != null ? context.tenantId() : null;
+        for (ResourceFactCatalogProvider provider : factCatalogProviders) {
+            try {
+                List<ResourceFactDescriptor> found = provider.findFacts(resourceKey, tenantId);
+                if (found != null) {
+                    for (ResourceFactDescriptor desc : found) {
+                        if (desc != null && StringUtils.hasText(desc.key())) {
+                            byKey.putIfAbsent(desc.key(), new ResourceFactSummary(
+                                    desc.key(), desc.label(), desc.dataType(), desc.description(), desc.authority()));
+                        }
+                    }
+                }
+            } catch (Exception ex) {
+                log.debug("[AgentBridge] Fact provider lookup skipped for '{}': {}", resourceKey, ex.getMessage());
+            }
+        }
+        collectAnnotatedFacts(AopUtils.getTargetClass(res.controller()), byKey);
+        collectAnnotatedFacts(res.responseDtoType(), byKey);
+        return List.copyOf(byKey.values());
+    }
+
+    private static void collectAnnotatedFacts(Class<?> target, Map<String, ResourceFactSummary> out) {
+        if (target == null) {
+            return;
+        }
+        for (ResourceFact fact : AnnotatedElementUtils.getMergedRepeatableAnnotations(target, ResourceFact.class)) {
+            if (fact != null && StringUtils.hasText(fact.key())) {
+                out.putIfAbsent(fact.key(), new ResourceFactSummary(
+                        fact.key(), fact.label(), fact.dataType(), fact.description(), fact.authority()));
+            }
+        }
+    }
+
+    private static List<String> extractCalculationTrailIds(Class<?> dtoType) {
+        Map<String, Object> meta = CalculationMemoryMetadataResolver.resolve(dtoType);
+        if (meta == null || !(meta.get("trails") instanceof List<?> trails) || trails.isEmpty()) {
+            return List.of();
+        }
+        List<String> ids = new ArrayList<>(trails.size());
+        for (Object item : trails) {
+            if (item instanceof Map<?, ?> map && map.get("id") != null) {
+                String id = map.get("id").toString().trim();
+                if (!id.isEmpty()) {
+                    ids.add(id);
+                }
+            }
+        }
+        return List.copyOf(ids);
+    }
+
+    private StatsSupportMode safeStatsMode(Supplier<StatsSupportMode> supplier) {
+        StatsSupportMode mode = tryMetadataLookup("statsMode", supplier);
+        return mode != null ? mode : StatsSupportMode.DISABLED;
+    }
+
+    private static StatsFieldDescriptor resolveTargetStatsField(
+            StatsFieldRegistry registry,
+            String operationKind,
+            String requestedField,
+            Set<String> blockedFields) {
+        if (StringUtils.hasText(requestedField)) {
+            Optional<StatsFieldDescriptor> exact = registry.resolve(requestedField.trim());
+            if (exact.isPresent()) {
+                return blockedFields.contains(exact.get().field().toLowerCase(Locale.ROOT)) ? null : exact.get();
+            }
+            for (StatsFieldDescriptor candidate : registry.descriptors()) {
+                if (candidate.field().equalsIgnoreCase(requestedField.trim())) {
+                    return blockedFields.contains(candidate.field().toLowerCase(Locale.ROOT)) ? null : candidate;
+                }
+            }
+            return null;
+        }
+        for (StatsFieldDescriptor candidate : registry.descriptors()) {
+            if (blockedFields.contains(candidate.field().toLowerCase(Locale.ROOT))) {
+                continue;
+            }
+            boolean matches = switch (operationKind) {
+                case "TIMESERIES" -> candidate.timeSeriesEligible();
+                case "DISTRIBUTION" -> candidate.distributionTermsEligible() || candidate.distributionHistogramEligible();
+                default -> candidate.groupByEligible();
+            };
+            if (matches) {
+                return candidate;
+            }
+        }
+        return null;
+    }
+
+    private static String resolveOperationKind(String rawKind) {
+        if (!StringUtils.hasText(rawKind)) {
+            return "GROUP_BY";
+        }
+        String norm = rawKind.trim().toUpperCase(Locale.ROOT).replace('-', '_');
+        return switch (norm) {
+            case "TIMESERIES", "TIME_SERIES" -> "TIMESERIES";
+            case "DISTRIBUTION" -> "DISTRIBUTION";
+            default -> "GROUP_BY";
+        };
+    }
+
+    private static StatsMetric resolveMetricOperation(String rawMetric, StatsFieldDescriptor targetDescriptor) {
+        if (StringUtils.hasText(rawMetric)) {
+            String norm = rawMetric.trim().toUpperCase(Locale.ROOT).replace('-', '_');
+            try {
+                return StatsMetric.valueOf(norm);
+            } catch (IllegalArgumentException ignored) {
+                // fallback below
+            }
+        }
+        if (targetDescriptor.metrics() != null && targetDescriptor.metrics().contains(StatsMetric.COUNT)) {
+            return StatsMetric.COUNT;
+        }
+        return targetDescriptor.metrics() != null && !targetDescriptor.metrics().isEmpty()
+                ? targetDescriptor.metrics().iterator().next()
+                : StatsMetric.COUNT;
+    }
+
+    private static TimeSeriesGranularity parseTimeSeriesGranularity(String raw) {
+        if (!StringUtils.hasText(raw)) {
+            return TimeSeriesGranularity.MONTH;
+        }
+        return switch (raw.trim().toUpperCase(Locale.ROOT)) {
+            case "DAY" -> TimeSeriesGranularity.DAY;
+            case "WEEK" -> TimeSeriesGranularity.WEEK;
+            default -> TimeSeriesGranularity.MONTH;
+        };
+    }
+
+    private static String inferChartKind(String requested, String operationKind, StatsMetric metricOp, int bucketCount) {
+        if (StringUtils.hasText(requested)) {
+            String norm = requested.trim().toLowerCase(Locale.ROOT);
+            if ("horizontalbar".equals(norm) || "horizontal_bar".equals(norm) || "horizontal-bar".equals(norm)) {
+                return "horizontal-bar";
+            }
+            if ("bar".equals(norm) || "line".equals(norm) || "pie".equals(norm) || "donut".equals(norm)) {
+                return norm;
+            }
+        }
+        if ("TIMESERIES".equals(operationKind)) {
+            return "line";
+        }
+        if ("GROUP_BY".equals(operationKind) && metricOp == StatsMetric.COUNT && bucketCount > 0 && bucketCount <= 5) {
+            return "donut";
+        }
+        return "bar";
+    }
+
+    private static String resolveFieldLabel(RegisteredResource res, String fieldName) {
+        if (!StringUtils.hasText(fieldName)) {
+            return "";
+        }
+        for (ResponseFieldMeta rf : res.responseFields()) {
+            if (fieldName.equals(rf.name()) && StringUtils.hasText(rf.label())) {
+                return rf.label();
+            }
+        }
+        for (FilterFieldMeta ff : res.filterFields()) {
+            if (fieldName.equals(ff.name()) && StringUtils.hasText(ff.label())) {
+                return ff.label();
+            }
+        }
+        return fieldName;
+    }
+
+    private static String resolveBucketLabel(RegisteredResource res, String fieldName, String key, String serverLabel) {
+        if (StringUtils.hasText(serverLabel) && !serverLabel.equals(key)) {
+            return serverLabel;
+        }
+        if (StringUtils.hasText(fieldName) && StringUtils.hasText(key)) {
+            for (ResponseFieldMeta rf : res.responseFields()) {
+                if (fieldName.equals(rf.name()) && rf.optionLabels() != null && rf.optionLabels().containsKey(key)) {
+                    return rf.optionLabels().get(key);
+                }
+            }
+        }
+        return firstNonBlank(serverLabel, key);
+    }
+
+    private static BigDecimal toBigDecimal(Number value, long fallbackCount) {
+        if (value instanceof BigDecimal bd) {
+            return bd;
+        }
+        if (value != null) {
+            return BigDecimal.valueOf(value.doubleValue());
+        }
+        return BigDecimal.valueOf(fallbackCount);
     }
 
     private List<RegisteredResource> selectCandidateResources(
@@ -1079,7 +2979,7 @@ public class MetadataStarterInProcessAgentBridge implements AgentResourceExecuti
         List<RegisteredResource> sorted = new ArrayList<>(filtered);
         sorted.sort(Comparator
                 .comparing((RegisteredResource r) -> matchesActiveScreen(context, r.descriptor()), Comparator.reverseOrder())
-                .thenComparingInt((RegisteredResource r) -> r.descriptor().matchPriority()).reversed());
+                .thenComparing(Comparator.comparingInt((RegisteredResource r) -> r.descriptor().matchPriority()).reversed()));
         return sorted;
     }
 
@@ -1143,7 +3043,9 @@ public class MetadataStarterInProcessAgentBridge implements AgentResourceExecuti
                         res.idType(),
                         res.filterDtoType(),
                         res.filterFields(),
-                        res.responseFields()));
+                        res.responseFields(),
+                        res.determinations(),
+                        res.mutatingActions()));
             } else {
                 merged.add(new RegisteredResource(
                         mergeDescriptors(res.descriptor(), override),
@@ -1153,7 +3055,9 @@ public class MetadataStarterInProcessAgentBridge implements AgentResourceExecuti
                         res.idType(),
                         res.filterDtoType(),
                         res.filterFields(),
-                        res.responseFields()));
+                        res.responseFields(),
+                        res.determinations(),
+                        res.mutatingActions()));
             }
         }
         return merged;
@@ -1247,6 +3151,20 @@ public class MetadataStarterInProcessAgentBridge implements AgentResourceExecuti
                     null,
                     null,
                     10);
+            Class<?> updateDtoType = AbstractCreateUpdateResourceController.class.isAssignableFrom(targetClass)
+                    ? ResolvableType.forClass(targetClass).as(AbstractCreateUpdateResourceController.class)
+                            .getGeneric(4).resolve(Object.class)
+                    : null;
+            List<DeterminationEndpoint> determinations =
+                    BridgeActionReflectionSupport.discoverDeterminations(targetClass, basePath);
+            List<MutatingActionEndpoint> mutatingActions =
+                    BridgeActionReflectionSupport.discoverMutatingActions(
+                            targetClass,
+                            basePath,
+                            updateDtoType,
+                            AbstractCreateUpdateResourceController.class.isAssignableFrom(targetClass)
+                                    && service instanceof BaseCreateUpdateResourceService<?, ?, ?, ?, ?>);
+
             list.add(new RegisteredResource(
                     descriptor,
                     controller,
@@ -1255,7 +3173,9 @@ public class MetadataStarterInProcessAgentBridge implements AgentResourceExecuti
                     idType,
                     filterDtoType,
                     filterFields,
-                    responseFields));
+                    responseFields,
+                    determinations,
+                    mutatingActions));
         }
         return List.copyOf(list);
     }
@@ -1396,14 +3316,71 @@ public class MetadataStarterInProcessAgentBridge implements AgentResourceExecuti
 
     private static ResponseFieldMeta toResponseFieldMeta(
             String name, UISchema ui, DomainGovernance gov) {
-        String label = ui != null && StringUtils.hasText(ui.label()) ? ui.label() : name;
+        String label = ui != null && StringUtils.hasText(ui.label()) ? ui.label().trim() : name;
         String desc = ui != null ? ui.description() : "";
         FieldControlType ctrl = ui != null ? ui.controlType() : FieldControlType.AUTO;
         String aiVis = gov != null && gov.aiUsage() != null
                 ? gov.aiUsage().visibility().wireValue()
                 : "allow";
         boolean quickViewVisible = ui != null && ui.quickViewVisible();
-        return new ResponseFieldMeta(name, label, desc, ctrl, aiVis, quickViewVisible);
+        int order = ui != null ? ui.order() : 0;
+        int quickViewOrder = ui != null ? (ui.quickViewOrder() != 0 ? ui.quickViewOrder() : ui.order()) : 0;
+        boolean hidden = ui != null && ui.hidden();
+        boolean tableHidden = ui != null && ui.tableHidden();
+        String labelTrue = ui != null ? ui.labelTrue() : "";
+        String labelFalse = ui != null ? ui.labelFalse() : "";
+        Map<String, String> optionLabels = extractOptionLabels(ui);
+        return new ResponseFieldMeta(
+                name,
+                label,
+                desc,
+                ctrl,
+                aiVis,
+                quickViewVisible,
+                order,
+                quickViewOrder,
+                hidden,
+                tableHidden,
+                labelTrue,
+                labelFalse,
+                optionLabels);
+    }
+
+    private static Map<String, String> extractOptionLabels(UISchema ui) {
+        if (ui == null || ui.optionItems() == null || ui.optionItems().length == 0) {
+            return Map.of();
+        }
+        Map<String, String> map = new LinkedHashMap<>();
+        for (UiOption opt : ui.optionItems()) {
+            if (opt != null && StringUtils.hasText(opt.value()) && StringUtils.hasText(opt.label())) {
+                map.put(opt.value().trim(), opt.label().trim());
+            }
+        }
+        return map.isEmpty() ? Map.of() : Map.copyOf(map);
+    }
+
+    private static List<AgentFieldDescriptor> toAgentFieldDescriptors(List<ResponseFieldMeta> metas) {
+        if (metas == null || metas.isEmpty()) {
+            return List.of();
+        }
+        List<AgentFieldDescriptor> descriptors = new ArrayList<>(metas.size());
+        for (ResponseFieldMeta meta : metas) {
+            String explicitLabel = meta.label() != null && !meta.label().equals(meta.name())
+                    ? meta.label()
+                    : null;
+            descriptors.add(new AgentFieldDescriptor(
+                    meta.name(),
+                    explicitLabel,
+                    meta.order(),
+                    meta.quickViewVisible(),
+                    meta.quickViewOrder(),
+                    meta.hidden(),
+                    meta.tableHidden(),
+                    meta.labelTrue(),
+                    meta.labelFalse(),
+                    meta.optionLabels()));
+        }
+        return List.copyOf(descriptors);
     }
 
     private static String inferTaxIdFilterField(List<FilterFieldMeta> filters) {
@@ -1602,6 +3579,55 @@ public class MetadataStarterInProcessAgentBridge implements AgentResourceExecuti
         return summary;
     }
 
+    private static boolean hasActiveHttpRequest() {
+        return RequestContextHolder.getRequestAttributes() != null;
+    }
+
+    private static AgentSurfaceSummary toSurfaceSummary(
+            SurfaceDefinition def,
+            AgentExecutionContext context,
+            ResourceStateSnapshot stateSnapshot,
+            String canonicalId) {
+        boolean missingAuthority = def.requiredAuthorities() != null
+                && !def.requiredAuthorities().isEmpty()
+                && (context == null || context.authorities() == null
+                        || !context.authorities().containsAll(def.requiredAuthorities()));
+        boolean wrongState = def.allowedStates() != null
+                && !def.allowedStates().isEmpty()
+                && stateSnapshot != null
+                && StringUtils.hasText(stateSnapshot.state())
+                && !def.allowedStates().contains(stateSnapshot.state());
+        org.praxisplatform.uischema.capability.AvailabilityDecision decision =
+                DefaultResourceAvailabilityService.INSTANCE.evaluateSurfaceSnapshot(def, stateSnapshot);
+        boolean available = !missingAuthority && !wrongState && (decision == null || decision.allowed());
+        String reason = null;
+        if (missingAuthority) {
+            reason = "missing-authority";
+        } else if (wrongState) {
+            reason = "resource-state-blocked";
+        } else if (decision != null && !decision.allowed()) {
+            reason = decision.reason();
+        }
+        String contextualPath = def.contextualReadPath();
+        if (contextualPath != null && canonicalId != null) {
+            contextualPath = contextualPath.replace("{id}", canonicalId);
+        }
+        RelatedResourceSurface related = def.relatedResource();
+        return new AgentSurfaceSummary(
+                def.id(),
+                firstNonBlank(def.title(), def.id()),
+                def.description(),
+                def.kind() != null ? def.kind().name() : null,
+                def.scope() != null ? def.scope().name() : null,
+                contextualPath,
+                related != null ? related.childResourceKey() : null,
+                related != null ? related.childResourcePath() : null,
+                related != null ? related.childParentField() : null,
+                available,
+                reason,
+                def.order());
+    }
+
     private static String extractDisplayField(Map<String, Object> record, String field, String fallback) {
         if (record != null && StringUtils.hasText(field)) {
             Object value = record.get(field);
@@ -1619,16 +3645,28 @@ public class MetadataStarterInProcessAgentBridge implements AgentResourceExecuti
         return readOnlyTxTemplate.execute(status -> supplier.get());
     }
 
+    private <T> T executeIsolatedReadOnly(Supplier<T> supplier) {
+        if (isolatedReadOnlyTxTemplate == null) {
+            return supplier.get();
+        }
+        if (TransactionSynchronizationManager.isActualTransactionActive()
+                && TransactionSynchronizationManager.isCurrentTransactionReadOnly()) {
+            return supplier.get();
+        }
+        return isolatedReadOnlyTxTemplate.execute(status -> supplier.get());
+    }
+
     @SuppressWarnings({"rawtypes", "unchecked"})
     private ResourceStateSnapshot resolveItemStateSnapshot(RegisteredResource res, Object convertedId) {
         if (res == null || res.service() == null || convertedId == null) {
             return null;
         }
-        return tryMetadataLookup("findResourceStateSnapshot:" + res.descriptor().resourceKey(), () -> {
-            Optional<ResourceStateSnapshot> snapshot =
-                    ((BaseResourceQueryService) res.service()).findResourceStateSnapshot(convertedId);
-            return snapshot != null ? snapshot.orElse(null) : null;
-        });
+        return tryMetadataLookup("findResourceStateSnapshot:" + res.descriptor().resourceKey(),
+                () -> executeIsolatedReadOnly(() -> {
+                    Optional<ResourceStateSnapshot> snapshot =
+                            ((BaseResourceQueryService) res.service()).findResourceStateSnapshot(convertedId);
+                    return snapshot != null ? snapshot.orElse(null) : null;
+                }));
     }
 
     private boolean isActionBlockedByStateOrRule(ActionCatalogItem item, ResourceStateSnapshot stateSnapshot) {

@@ -35,4 +35,37 @@ public interface AgentResourceExecutionBridge {
             String entityKeyOrResourcePath,
             String entityId,
             List<String> includeRelatedSurfaces);
+
+    default AgentStatsResult aggregateStats(
+            AgentExecutionContext context,
+            AgentStatsAggregationRequest request) {
+        throw new UnsupportedOperationException("Agregacao analitica nao suportada por esta bridge");
+    }
+
+    default List<AgentEvaluatedCalculationMemory> evaluateCalculationMemory(
+            AgentExecutionContext context,
+            String entityKeyOrResourcePath,
+            String entityId,
+            Map<String, Object> filters,
+            int maxRecords) {
+        return List.of();
+    }
+
+    default AgentSimulationPreview simulateDetermination(
+            AgentExecutionContext context,
+            AgentDeterminationRequest request) {
+        throw new UnsupportedOperationException("Simulacao de determinacoes nao suportada por esta bridge");
+    }
+
+    default AgentPreparedAction prepareAction(
+            AgentExecutionContext context,
+            AgentPrepareActionRequest request) {
+        throw new UnsupportedOperationException("Preparacao de acoes governadas nao suportada por esta bridge");
+    }
+
+    default AgentActionExecutionOutcome executeConfirmedAction(
+            AgentExecutionContext context,
+            AgentExecuteActionRequest request) {
+        throw new UnsupportedOperationException("Execucao de acoes governadas nao suportada por esta bridge");
+    }
 }

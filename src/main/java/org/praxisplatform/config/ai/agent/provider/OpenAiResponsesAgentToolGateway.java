@@ -14,12 +14,14 @@ import com.openai.models.responses.ResponseInputItem;
 import com.openai.models.responses.ResponseOutputItem;
 import com.openai.models.responses.ResponseOutputMessage;
 import com.openai.models.responses.ResponseUsage;
+import jakarta.annotation.PreDestroy;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.concurrent.ConcurrentHashMap;
 import org.praxisplatform.config.ai.agent.model.AgentConversationItem;
 import org.praxisplatform.config.ai.agent.model.AgentConversationRole;
 import org.praxisplatform.config.ai.agent.model.AgentModelStreamListener;
@@ -43,7 +45,11 @@ public class OpenAiResponsesAgentToolGateway implements AiToolCallingProvider {
 
     public static final String PROVIDER_ID = "openai";
     private static final String DEFAULT_MODEL = "gpt-4o-mini";
+    private static final int MAX_CACHED_CLIENTS = 32;
     private static final TypeReference<Map<String, Object>> MAP_TYPE = new TypeReference<>() {};
+    private static final Map<ClientKey, OpenAIClient> CLIENT_CACHE = new ConcurrentHashMap<>();
+
+    private record ClientKey(String apiKey, String baseUrl, Integer timeoutSeconds) {}
 
     @FunctionalInterface
     public interface OpenAiExchange {
@@ -108,9 +114,35 @@ public class OpenAiResponsesAgentToolGateway implements AiToolCallingProvider {
             AgentModelTurnRequest request,
             String model,
             AiCallConfig callConfig) {
+        List<AgentConversationItem> conversation = request.conversation() == null
+                ? List.of()
+                : request.conversation();
+        String previousResponseId = null;
+        int resumeAfterIndex = -1;
+        for (int i = conversation.size() - 1; i >= 0; i--) {
+            AgentConversationItem item = conversation.get(i);
+            if (item != null
+                    && item.role() == AgentConversationRole.ASSISTANT
+                    && item.providerOpaqueState() != null
+                    && item.providerOpaqueState().get("previousResponseId") instanceof String prevId
+                    && StringUtils.hasText(prevId)
+                    && i < conversation.size() - 1) {
+                previousResponseId = prevId.trim();
+                resumeAfterIndex = i;
+                break;
+            }
+        }
+
+        List<ResponseInputItem> inputItems = previousResponseId != null
+                ? toInputItems(conversation.subList(resumeAfterIndex + 1, conversation.size()))
+                : toInputItems(conversation);
+
         ResponseCreateParams.Builder builder = ResponseCreateParams.builder()
                 .model(model)
-                .inputOfResponse(toInputItems(request.conversation()));
+                .inputOfResponse(inputItems);
+        if (previousResponseId != null) {
+            builder.previousResponseId(previousResponseId);
+        }
         if (StringUtils.hasText(request.systemInstruction())) {
             builder.instructions(request.systemInstruction());
         }
@@ -235,6 +267,9 @@ public class OpenAiResponsesAgentToolGateway implements AiToolCallingProvider {
                 .map(this::toUsage)
                 .orElse(AgentTokenUsage.ZERO);
         String finishReason = response.status().map(Object::toString).orElse("completed");
+        Map<String, Object> opaqueState = StringUtils.hasText(response.id())
+                ? Map.of("previousResponseId", response.id())
+                : Map.of();
         return new AgentModelTurnResponse(
                 PROVIDER_ID,
                 model,
@@ -243,7 +278,7 @@ public class OpenAiResponsesAgentToolGateway implements AiToolCallingProvider {
                 usage,
                 finishReason,
                 response.id(),
-                Map.of());
+                opaqueState);
     }
 
     private AgentTokenUsage toUsage(ResponseUsage usage) {
@@ -258,7 +293,9 @@ public class OpenAiResponsesAgentToolGateway implements AiToolCallingProvider {
             Map<String, Object> parsed = objectMapper.readValue(json, MAP_TYPE);
             return parsed == null ? Map.of() : parsed;
         } catch (Exception ex) {
-            return Map.of("_rawArguments", json);
+            return Map.of(
+                    "_argumentParseError", "Invalid tool arguments JSON",
+                    "_rawArguments", json);
         }
     }
 
@@ -275,18 +312,47 @@ public class OpenAiResponsesAgentToolGateway implements AiToolCallingProvider {
             String baseUrl,
             Integer timeoutSeconds,
             ResponseCreateParams params) {
-        OpenAIOkHttpClient.Builder clientBuilder = OpenAIOkHttpClient.builder().apiKey(apiKey);
-        if (StringUtils.hasText(baseUrl)) {
-            clientBuilder.baseUrl(baseUrl);
+        ClientKey key = new ClientKey(
+                apiKey,
+                StringUtils.hasText(baseUrl) ? baseUrl.trim() : "",
+                timeoutSeconds);
+        OpenAIClient cached = CLIENT_CACHE.get(key);
+        if (cached != null) {
+            return cached.responses().create(params);
         }
-        if (timeoutSeconds != null && timeoutSeconds > 0) {
-            clientBuilder.timeout(Duration.ofSeconds(timeoutSeconds));
-        }
-        OpenAIClient client = clientBuilder.build();
-        try {
+        if (CLIENT_CACHE.size() < MAX_CACHED_CLIENTS) {
+            OpenAIClient client = CLIENT_CACHE.computeIfAbsent(key, OpenAiResponsesAgentToolGateway::buildClient);
             return client.responses().create(params);
+        }
+        OpenAIClient transientClient = buildClient(key);
+        try {
+            return transientClient.responses().create(params);
         } finally {
-            client.close();
+            transientClient.close();
+        }
+    }
+
+    private static OpenAIClient buildClient(ClientKey key) {
+        OpenAIOkHttpClient.Builder clientBuilder = OpenAIOkHttpClient.builder().apiKey(key.apiKey());
+        if (StringUtils.hasText(key.baseUrl())) {
+            clientBuilder.baseUrl(key.baseUrl());
+        }
+        if (key.timeoutSeconds() != null && key.timeoutSeconds() > 0) {
+            clientBuilder.timeout(Duration.ofSeconds(key.timeoutSeconds()));
+        }
+        return clientBuilder.build();
+    }
+
+    @PreDestroy
+    void closeCachedClients() {
+        List<OpenAIClient> snapshot = new ArrayList<>(CLIENT_CACHE.values());
+        CLIENT_CACHE.clear();
+        for (OpenAIClient client : snapshot) {
+            try {
+                client.close();
+            } catch (Exception ignored) {
+                // ignore shutdown cleanup noise
+            }
         }
     }
 

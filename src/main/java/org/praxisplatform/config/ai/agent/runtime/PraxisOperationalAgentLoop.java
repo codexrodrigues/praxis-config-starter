@@ -16,6 +16,8 @@ import org.praxisplatform.config.ai.agent.model.AgentToolDeclaration;
 import org.praxisplatform.config.ai.agent.model.AgentToolResult;
 import org.praxisplatform.config.ai.agent.model.AiToolCallingProvider;
 import org.praxisplatform.config.ai.agent.spi.AgentExecutionContext;
+import org.praxisplatform.config.ai.agent.spi.AgentResourceExecutionBridge;
+import org.praxisplatform.config.ai.agent.spi.AgentTopicDescriptor;
 import org.praxisplatform.config.ai.agent.tools.OperationalAgentTool;
 import org.praxisplatform.config.service.AiCallConfig;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
@@ -68,12 +70,13 @@ public class PraxisOperationalAgentLoop {
     private final Map<String, OperationalAgentTool> toolsByName;
     private final OperationalAssistantBlockComposer blockComposer;
     private final int maxIterations;
+    private final AgentResourceExecutionBridge bridge;
 
     public PraxisOperationalAgentLoop(
             AiToolCallingProvider toolCallingProvider,
             List<OperationalAgentTool> tools,
             OperationalAssistantBlockComposer blockComposer) {
-        this(toolCallingProvider, tools, blockComposer, DEFAULT_MAX_ITERATIONS);
+        this(toolCallingProvider, tools, blockComposer, DEFAULT_MAX_ITERATIONS, null);
     }
 
     public PraxisOperationalAgentLoop(
@@ -81,9 +84,19 @@ public class PraxisOperationalAgentLoop {
             List<OperationalAgentTool> tools,
             OperationalAssistantBlockComposer blockComposer,
             int maxIterations) {
+        this(toolCallingProvider, tools, blockComposer, maxIterations, null);
+    }
+
+    public PraxisOperationalAgentLoop(
+            AiToolCallingProvider toolCallingProvider,
+            List<OperationalAgentTool> tools,
+            OperationalAssistantBlockComposer blockComposer,
+            int maxIterations,
+            AgentResourceExecutionBridge bridge) {
         this.toolCallingProvider = Objects.requireNonNull(toolCallingProvider, "toolCallingProvider is required");
         this.blockComposer = Objects.requireNonNull(blockComposer, "blockComposer is required");
         this.maxIterations = Math.max(1, maxIterations);
+        this.bridge = bridge;
         Map<String, OperationalAgentTool> map = new LinkedHashMap<>();
         if (tools != null) {
             for (OperationalAgentTool tool : tools) {
@@ -128,7 +141,7 @@ public class PraxisOperationalAgentLoop {
                 throw new IllegalStateException("Agent loop must never hold an active database transaction during LLM I/O.");
             }
             rounds = round;
-            progress.onStatus("reasoning", "Analisando solicitacao operacional...");
+            progress.onStatus("reasoning", "Analisando solicitação operacional...");
 
             AgentModelTurnResponse response = toolCallingProvider.generateTurn(
                     new AgentModelTurnRequest(systemInstruction, conversation, declarations, callConfig),
@@ -163,14 +176,14 @@ public class PraxisOperationalAgentLoop {
                 Map<String, Object> output;
                 boolean error = false;
                 if (tool == null) {
-                    output = Map.of("error", "Unknown operational tool: " + call.name());
+                    output = Map.of("error", "Ferramenta operacional desconhecida: " + call.name());
                     error = true;
                 } else {
                     try {
                         output = tool.execute(context, vault, artifacts, call.arguments());
                     } catch (Exception ex) {
                         log.warn("[OperationalAgentLoop] Tool '{}' failed: {}", call.name(), ex.getMessage(), ex);
-                        output = Map.of("error", ex.getMessage() != null ? ex.getMessage() : ex.getClass().getSimpleName());
+                        output = Map.of("error", "Falha ao executar ferramenta operacional.");
                         error = true;
                     }
                 }
@@ -180,14 +193,27 @@ public class PraxisOperationalAgentLoop {
                 results.add(new AgentToolResult(call.callId(), call.name(), output, error));
             }
             conversation.add(AgentConversationItem.toolResults(results));
-            if (round == maxIterations) {
-                finalText = "Consulta operacional concluida com as evidencias disponiveis.";
+            if (round == maxIterations && !progress.isCancelled()) {
+                AgentModelTurnResponse synthesis = toolCallingProvider.generateTurn(
+                        new AgentModelTurnRequest(systemInstruction, conversation, List.of(), callConfig),
+                        AgentModelStreamListener.NOOP);
+                if (StringUtils.hasText(synthesis.provider())) {
+                    provider = synthesis.provider();
+                }
+                if (StringUtils.hasText(synthesis.model())) {
+                    model = synthesis.model();
+                }
+                totalUsage = totalUsage.plus(synthesis.usage());
+                finalText = StringUtils.hasText(synthesis.text())
+                        ? synthesis.text().trim()
+                        : "Consulta operacional concluída com as evidências disponíveis.";
             }
         }
 
         if (!StringUtils.hasText(finalText)) {
             finalText = buildFallbackNarrative(artifacts);
         }
+        finalText = OperationalAssistantBlockComposer.maskMod11TaxIds(finalText);
         OperationalAssistantBlockComposer.ComposedAssistantOutput composed =
                 blockComposer.compose(finalText, artifacts);
 
@@ -224,21 +250,63 @@ public class PraxisOperationalAgentLoop {
         return items;
     }
 
-    private static String buildSystemInstruction(AgentExecutionContext context) {
+    private String buildSystemInstruction(AgentExecutionContext context) {
         StringBuilder sb = new StringBuilder();
-        sb.append("Voce e o assistente operacional da plataforma Praxis.\n");
-        sb.append("Regras obrigatorias:\n");
-        sb.append("1. Sempre comece por 'search_and_resolve_entities' quando o usuario informar um documento ([TAX_ID_n]), codigo, matricula, nome ou termo curto sem entidade inequivoca.\n");
-        sb.append("2. Se 'search_and_resolve_entities' retornar exactamente 1 candidato (SINGLE_MATCH) e ja incluir 'autoLoadedDossier', nao chame 'get_entity_360_dossier' novamente; responda diretamente consolidando os dados, alertas e acoes ja retornados. Chame 'get_entity_360_dossier' apenas quando 'autoLoadedDossier' nao estiver presente ou quando o usuario escolher um candidato especifico.\n");
-        sb.append("3. Se 'search_and_resolve_entities' retornar multiplos candidatos (MULTIPLE_CANDIDATES), nunca escolha um deles por conta propria; apresente os candidatos encontrados e peca ao usuario para escolher.\n");
-        sb.append("4. Para listar colecoes ou aplicar filtros especificos, use 'discover_topic_resources_and_schemas' e 'query_resource_records'.\n");
-        sb.append("5. Nunca invente fatos, numeros, alertas ou permissoes; nao gere HTML nem blocos JSON na resposta em texto pois a UI renderizara os blocos ricos automaticamente a partir das ferramentas.\n");
+        sb.append("Você é o assistente operacional da plataforma Praxis.\n");
+        sb.append("Regras obrigatórias:\n");
+        sb.append("1. Sempre comece por 'search_and_resolve_entities' quando o usuário informar um documento ([TAX_ID_n]), código, matrícula, nome ou termo curto sem entidade inequívoca.\n");
+        sb.append("2. Se 'search_and_resolve_entities' retornar exatamente 1 candidato (SINGLE_MATCH) e já incluir 'autoLoadedDossier', não chame 'get_entity_360_dossier' novamente; responda diretamente consolidando os dados, alertas e ações já retornados. Chame 'get_entity_360_dossier' apenas quando 'autoLoadedDossier' não estiver presente ou quando o usuário escolher um candidato específico.\n");
+        sb.append("3. Se 'search_and_resolve_entities' retornar múltiplos candidatos (MULTIPLE_CANDIDATES), nunca escolha um deles por conta própria; apresente a síntese e peça ao usuário para escolher na lista.\n");
+        sb.append("4. Para listar coleções ou aplicar filtros específicos, use 'discover_topic_resources_and_schemas' e 'query_resource_records'. Se não houver correspondência relevante na busca polimórfica global, responda de forma objetiva sem repetir múltiplas consultas vazias.\n");
+        sb.append("5. Nunca invente fatos, números, alertas ou permissões; não gere HTML nem blocos JSON na resposta em texto pois a UI renderizará os blocos ricos automaticamente a partir das ferramentas.\n");
+        sb.append("6. Seja executivo e conciso (1 a 3 frases curtas): não repita como lista em markdown os campos detalhados de 'autoLoadedDossier', 'get_entity_360_dossier', candidatos de 'search_and_resolve_entities' ou linhas de 'query_resource_records' quando os blocos ricos da UI já os exibirem; destaque apenas a identificação principal, o status e alertas críticos.\n");
+        sb.append("7. Para análises quantitativas, gráficos, rankings ou séries temporais, inspecione 'statsCapability' via 'discover_topic_resources_and_schemas' (se necessário) e chame 'aggregate_resource_stats' usando apenas campos declarados.\n");
+        sb.append("8. Para perguntas sobre fórmulas, contracheques, descontos, tetos ou composições de valores auditáveis, use 'explain_calculation_memory' (ou o campo 'calculationTrails' do dossiê) e explique apenas os passos retornados sem inventar parcelas.\n");
+        sb.append("9. Para perguntas sobre leis, estatutos, regras declarativas ou motivos de bloqueio/validação, consulte 'search_domain_knowledge_and_rules' respeitando o tenant/ente ativo do contexto.\n");
+        sb.append("10. Para simular cenários, prévias, saldos projetados ou elegibilidade sem gravar no banco, use 'simulate_determination_or_rules' informando 'draftFields' coerentes com o digest do recurso e deixe claro que é simulação não persistida.\n");
+        sb.append("11. Nunca efetue ou declare uma mutação de banco diretamente durante o turno. Quando o usuário solicitar executar uma ação ou edição (ex.: homologar, aprovar, cancelar ou editar registro), localize o registro real e chame 'prepare_action_or_mutation' para gerar o cartão de proposta governada com ETag, escopo organizacional e revisão humana explícita.\n");
+        if (bridge != null) {
+            try {
+                List<AgentTopicDescriptor> topics = bridge.listTopics(context);
+                if (topics != null && !topics.isEmpty()) {
+                    sb.append("Tópicos de domínio disponíveis neste host: ");
+                    for (int i = 0; i < Math.min(topics.size(), 10); i++) {
+                        AgentTopicDescriptor topic = topics.get(i);
+                        if (i > 0) {
+                            sb.append(", ");
+                        }
+                        sb.append(topic.topicKey()).append(" (").append(topic.title()).append(')');
+                    }
+                    sb.append(".\n");
+                }
+            } catch (RuntimeException ex) {
+                log.debug("[OperationalAgentLoop] Topics unavailable during instruction composition: {}", ex.getMessage());
+            }
+        }
+        if (context != null && StringUtils.hasText(context.activeTopicKey())) {
+            sb.append("Tópico em foco na tela ativa: ")
+                    .append(sanitizePromptHint(context.activeTopicKey(), 120))
+                    .append(".\n");
+        }
         if (context != null && StringUtils.hasText(context.activeScreenResourcePath())) {
-            sb.append("Contexto consultivo da tela aberta (apenas desempate, nao bloqueia buscas em outros modulos): ")
-                    .append(context.activeScreenResourcePath())
+            sb.append("Contexto consultivo da tela aberta (apenas desempate, não bloqueia buscas em outros módulos): ")
+                    .append(sanitizePromptHint(context.activeScreenResourcePath(), 240))
+                    .append(".\n");
+        }
+        if (context != null && context.activeSelectionHints() != null && !context.activeSelectionHints().isEmpty()) {
+            sb.append("Registro/escopo ativo em foco na conversa: ")
+                    .append(sanitizePromptHint(String.valueOf(context.activeSelectionHints()), 512))
                     .append(".\n");
         }
         return sb.toString();
+    }
+
+    private static String sanitizePromptHint(String raw, int maxLen) {
+        if (!StringUtils.hasText(raw)) {
+            return "";
+        }
+        String singleLine = raw.replaceAll("[\\p{Cntrl}]+", " ").trim();
+        return singleLine.length() > maxLen ? singleLine.substring(0, maxLen) : singleLine;
     }
 
     private static int estimateResultCount(Map<String, Object> output) {
@@ -258,15 +326,30 @@ public class PraxisOperationalAgentLoop {
     }
 
     private static String buildFallbackNarrative(AgentTurnArtifactStore artifacts) {
+        if (!artifacts.actionProposals().isEmpty()) {
+            return "Proposta governada preparada abaixo. Revise os dados antes de confirmar a execução.";
+        }
+        if (!artifacts.simulationPreviews().isEmpty()) {
+            return "Simulação não persistida calculada com os parâmetros informados abaixo.";
+        }
         if (!artifacts.dossiers().isEmpty()) {
-            return "Dados consolidados no dossie operacional abaixo.";
+            return "Dados consolidados no dossiê operacional abaixo.";
+        }
+        if (!artifacts.calculationMemories().isEmpty()) {
+            return "Memória de cálculo detalhada nas trilhas auditáveis abaixo.";
+        }
+        if (!artifacts.statsResults().isEmpty()) {
+            return "Agregação analítica consolidada no gráfico abaixo.";
+        }
+        if (!artifacts.knowledgeCitations().isEmpty()) {
+            return "Referências normativas e regras aplicáveis localizadas abaixo.";
         }
         if (artifacts.lastSearchMatches().size() > 1) {
-            return "Encontrei multiplos registros correspondentes. Escolha qual deseja abrir:";
+            return "Encontrei múltiplos registros correspondentes. Escolha qual deseja abrir:";
         }
         if (!artifacts.queryResults().isEmpty()) {
-            return "Consulta concluida com os registros retornados abaixo.";
+            return "Consulta concluída com os registros retornados abaixo.";
         }
-        return "Nao foram encontrados registros para os criterios informados.";
+        return "Não foram encontrados registros para os critérios informados.";
     }
 }
