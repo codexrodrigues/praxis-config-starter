@@ -328,6 +328,22 @@ public final class AgenticAuthoringValidatorRegistry {
             "combo-minimum-series",
             "gauge-scalar-contract",
             "gauge-scale-valid",
+            "boxplot-quartiles-valid",
+            "calendar-range-valid",
+            "waterfall-roles-valid",
+            "sankey-dag-acyclic",
+            "hierarchy-multilevel-contract",
+            "radar-indicators-valid",
+            "annotations-bounds-valid",
+            "scalability-contract-valid",
+            "occupancy-thresholds-valid",
+            "graph-layout-parameters-valid",
+            "graph-appearance-valid",
+            "rule-condition-json-logic-valid",
+            "action-reference-exists",
+            "timeline-reference-date-format",
+            "timeline-zoom-range",
+            "timeline-source-binding",
             "series-field-exists",
             "series-field-aggregable",
             "series-id-unique",
@@ -836,6 +852,24 @@ public final class AgenticAuthoringValidatorRegistry {
                 case "combo-minimum-series" -> validateChartComboMinimumSeries(operationId, planOperation, config, failures);
                 case "gauge-scalar-contract" -> validateChartGaugeScalarContract(operationId, planOperation, config, failures);
                 case "gauge-scale-valid" -> validateChartGaugeScale(operationId, planOperation, config, failures);
+                case "boxplot-quartiles-valid" -> validateChartBoxplotQuartiles(operationId, planOperation, config, failures);
+                case "calendar-range-valid" -> validateChartCalendarRange(operationId, planOperation, config, failures);
+                case "waterfall-roles-valid" -> validateChartWaterfallRoles(operationId, planOperation, config, failures);
+                case "sankey-dag-acyclic" -> validateChartSankeyDagAcyclic(operationId, planOperation, config, failures);
+                case "hierarchy-multilevel-contract" -> validateChartHierarchyContract(operationId, planOperation, config, failures);
+                case "radar-indicators-valid" -> validateChartRadarIndicators(operationId, planOperation, config, failures);
+                case "annotations-bounds-valid" -> validateChartAnnotationsBounds(operationId, planOperation, config, failures);
+                case "scalability-contract-valid" -> validateChartScalabilityContract(operationId, planOperation, config, failures);
+                case "occupancy-thresholds-valid" -> validateOrganogramOccupancyThresholds(operationId, planOperation, config, failures);
+                case "graph-layout-parameters-valid" -> validateRelationshipGraphLayout(operationId, planOperation, failures);
+                case "graph-appearance-valid" -> validateRelationshipGraphAppearance(operationId, planOperation, failures);
+                case "rule-condition-json-logic-valid" -> validateRelationshipGraphRuleCondition(operationId, planOperation, failures);
+                case "action-reference-exists" -> validateRelationshipGraphActionReference(operationId, planOperation, config, failures);
+                case "timeline-reference-date-format" -> validateTimelineReferenceDateFormat(operationId, planOperation, failures);
+                case "timeline-zoom-range" -> validateTimelineZoomRange(operationId, planOperation, config, failures);
+                case "timeline-source-binding" -> {
+                    // Advisory binding check: empty sources trigger UI diagnostics without blocking root config edits.
+                }
                 case "series-field-exists", "axis-field-exists", "bound-fields-exist",
                      "query-context-fields-exist" ->
                         validateChartInputFieldsExist(operationId, planOperation, config, failures);
@@ -3949,6 +3983,455 @@ public final class AgenticAuthoringValidatorRegistry {
         }
     }
 
+    private JsonNode resolveChartSubConfig(JsonNode planOperation, JsonNode config, String key) {
+        JsonNode input = planOperation.path("input");
+        JsonNode fromInput = firstPresent(input, key);
+        if (fromInput != null && fromInput.isObject()) {
+            return fromInput;
+        }
+        return config.path("chartDocument").path(key);
+    }
+
+    private void validateChartBoxplotQuartiles(
+            String operationId,
+            JsonNode planOperation,
+            JsonNode config,
+            List<String> failures) {
+        if (!"boxplot".equals(chartKind(planOperation, config))) {
+            return;
+        }
+        JsonNode boxplot = resolveChartSubConfig(planOperation, config, "boxplot");
+        JsonNode mult = boxplot.path("iqrMultiplier");
+        if (mult.isNumber() && (!Double.isFinite(mult.asDouble()) || mult.asDouble() < 0)) {
+            failures.add("validator boxplot-quartiles-valid failed for " + operationId
+                    + ": boxplot.iqrMultiplier must be a finite non-negative number");
+        }
+        JsonNode input = planOperation.path("input");
+        String sourceKind = firstNonBlank(
+                text(input, "sourceKind"),
+                text(input.path("source"), "kind"),
+                text(config.path("chartDocument").path("source"), "kind"));
+        if (!"praxis.stats".equals(sourceKind)) {
+            return;
+        }
+        JsonNode metrics = chartMetricsCandidate(planOperation, config);
+        if (!metrics.isArray() || metrics.isEmpty()) {
+            return;
+        }
+        Set<String> aggs = new HashSet<>();
+        for (JsonNode metric : metrics) {
+            String agg = text(metric, "aggregation").trim().toLowerCase();
+            if (!agg.isBlank()) {
+                aggs.add(agg);
+            }
+        }
+        boolean hasMedian = aggs.contains("median") || aggs.contains("percentile-50");
+        if (!aggs.contains("min")
+                || !aggs.contains("percentile-25")
+                || !hasMedian
+                || !aggs.contains("percentile-75")
+                || !aggs.contains("max")) {
+            failures.add("validator boxplot-quartiles-valid failed for " + operationId
+                    + ": praxis.stats boxplot requires min, percentile-25, median/percentile-50, percentile-75 and max metrics");
+        }
+    }
+
+    private void validateChartCalendarRange(
+            String operationId,
+            JsonNode planOperation,
+            JsonNode config,
+            List<String> failures) {
+        if (!"calendar".equals(chartKind(planOperation, config))) {
+            return;
+        }
+        JsonNode calendar = resolveChartSubConfig(planOperation, config, "calendar");
+        JsonNode range = calendar.path("range");
+        if (range.isMissingNode() || range.isNull()) {
+            return;
+        }
+        if (range.isTextual()) {
+            String raw = range.asText("").trim();
+            if (!raw.matches("\\d{4}(-\\d{2})?")) {
+                failures.add("validator calendar-range-valid failed for " + operationId
+                        + ": calendar.range string must match YYYY or YYYY-MM");
+            } else if (raw.length() == 7) {
+                int month = Integer.parseInt(raw.substring(5, 7));
+                if (month < 1 || month > 12) {
+                    failures.add("validator calendar-range-valid failed for " + operationId
+                            + ": calendar.range month must be between 01 and 12");
+                }
+            }
+            return;
+        }
+        if (range.isArray()) {
+            if (range.size() != 2) {
+                failures.add("validator calendar-range-valid failed for " + operationId
+                        + ": calendar.range tuple must contain [startDate, endDate]");
+                return;
+            }
+            try {
+                LocalDate start = LocalDate.parse(range.get(0).asText("").trim());
+                LocalDate end = LocalDate.parse(range.get(1).asText("").trim());
+                if (end.isBefore(start)) {
+                    failures.add("validator calendar-range-valid failed for " + operationId
+                            + ": calendar.range endDate must not be before startDate");
+                }
+            } catch (DateTimeParseException ex) {
+                failures.add("validator calendar-range-valid failed for " + operationId
+                        + ": calendar.range array items must be ISO dates (YYYY-MM-DD)");
+            }
+            return;
+        }
+        failures.add("validator calendar-range-valid failed for " + operationId
+                + ": calendar.range must be a YYYY/YYYY-MM string or [start, end] tuple");
+    }
+
+    private void validateChartWaterfallRoles(
+            String operationId,
+            JsonNode planOperation,
+            JsonNode config,
+            List<String> failures) {
+        if (!"waterfall".equals(chartKind(planOperation, config))) {
+            return;
+        }
+        JsonNode waterfall = resolveChartSubConfig(planOperation, config, "waterfall");
+        JsonNode roles = waterfall.path("roles");
+        if (!roles.isObject()) {
+            return;
+        }
+        Set<String> allowedRoles = Set.of("start", "increase", "decrease", "subtotal", "total");
+        Iterator<Map.Entry<String, JsonNode>> fields = roles.fields();
+        while (fields.hasNext()) {
+            Map.Entry<String, JsonNode> entry = fields.next();
+            String role = entry.getValue().asText("").trim();
+            if (!allowedRoles.contains(role)) {
+                failures.add("validator waterfall-roles-valid failed for " + operationId
+                        + ": unsupported waterfall step role " + role);
+            }
+        }
+    }
+
+    private void validateChartSankeyDagAcyclic(
+            String operationId,
+            JsonNode planOperation,
+            JsonNode config,
+            List<String> failures) {
+        if (!"sankey".equals(chartKind(planOperation, config))) {
+            return;
+        }
+        JsonNode sankey = resolveChartSubConfig(planOperation, config, "sankey");
+        JsonNode links = sankey.path("links").isArray() ? sankey.path("links") : sankey.path("edges");
+        if (!links.isArray() || links.isEmpty()) {
+            return;
+        }
+        Map<String, Set<String>> adj = new java.util.HashMap<>();
+        for (JsonNode link : links) {
+            String source = text(link, "source").trim();
+            String target = text(link, "target").trim();
+            if (source.isBlank() || target.isBlank()) {
+                continue;
+            }
+            if (source.equals(target)) {
+                failures.add("validator sankey-dag-acyclic failed for " + operationId
+                        + ": self-loop detected at node " + source + "; cyclic flows should use <praxis-relationship-graph>");
+                return;
+            }
+            adj.computeIfAbsent(source, unused -> new LinkedHashSet<>()).add(target);
+        }
+        Map<String, Integer> visitState = new java.util.HashMap<>();
+        for (String node : adj.keySet()) {
+            if (hasDirectedCycle(node, adj, visitState)) {
+                failures.add("validator sankey-dag-acyclic failed for " + operationId
+                        + ": directed cycle detected in sankey flow; cyclic graphs must use <praxis-relationship-graph>");
+                return;
+            }
+        }
+    }
+
+    private boolean hasDirectedCycle(
+            String node,
+            Map<String, Set<String>> adj,
+            Map<String, Integer> visitState) {
+        int state = visitState.getOrDefault(node, 0);
+        if (state == 1) {
+            return true;
+        }
+        if (state == 2) {
+            return false;
+        }
+        visitState.put(node, 1);
+        for (String next : adj.getOrDefault(node, Set.of())) {
+            if (hasDirectedCycle(next, adj, visitState)) {
+                return true;
+            }
+        }
+        visitState.put(node, 2);
+        return false;
+    }
+
+    private void validateChartHierarchyContract(
+            String operationId,
+            JsonNode planOperation,
+            JsonNode config,
+            List<String> failures) {
+        String kind = chartKind(planOperation, config);
+        if (!"sunburst".equals(kind) && !"treemap".equals(kind)) {
+            return;
+        }
+        JsonNode hierarchy = resolveChartSubConfig(planOperation, config, "hierarchy");
+        if (!hierarchy.isObject()) {
+            return;
+        }
+        String mode = text(hierarchy, "mode").trim();
+        if (!mode.isBlank() && !Set.of("auto", "dimensions", "path", "parent-id", "children").contains(mode)) {
+            failures.add("validator hierarchy-multilevel-contract failed for " + operationId
+                    + ": unsupported hierarchy.mode " + mode);
+        }
+        JsonNode maxDepth = hierarchy.path("maxDepth");
+        if (maxDepth.isNumber() && maxDepth.asInt() < 1) {
+            failures.add("validator hierarchy-multilevel-contract failed for " + operationId
+                    + ": hierarchy.maxDepth must be >= 1");
+        }
+    }
+
+    private void validateChartRadarIndicators(
+            String operationId,
+            JsonNode planOperation,
+            JsonNode config,
+            List<String> failures) {
+        if (!"radar".equals(chartKind(planOperation, config))) {
+            return;
+        }
+        JsonNode radar = resolveChartSubConfig(planOperation, config, "radar");
+        if (!radar.isObject()) {
+            return;
+        }
+        JsonNode indicators = radar.path("indicators");
+        if (!indicators.isArray()) {
+            return;
+        }
+        if (indicators.size() < 3) {
+            failures.add("validator radar-indicators-valid failed for " + operationId
+                    + ": radar charts require at least 3 bounded indicators");
+            return;
+        }
+        for (JsonNode indicator : indicators) {
+            JsonNode maxNode = indicator.path("max");
+            double minVal = indicator.path("min").isNumber() ? indicator.path("min").asDouble() : 0d;
+            if (!isFiniteNumber(maxNode) || !Double.isFinite(minVal) || maxNode.asDouble() <= minVal) {
+                failures.add("validator radar-indicators-valid failed for " + operationId
+                        + ": each radar indicator requires finite [min, max] bounds with max > min");
+                return;
+            }
+        }
+    }
+
+    private void validateChartAnnotationsBounds(
+            String operationId,
+            JsonNode planOperation,
+            JsonNode config,
+            List<String> failures) {
+        JsonNode input = planOperation.path("input");
+        JsonNode bands = input.path("referenceBands").isArray()
+                ? input.path("referenceBands")
+                : config.path("chartDocument").path("referenceBands");
+        if (!bands.isArray()) {
+            return;
+        }
+        for (JsonNode band : bands) {
+            JsonNode start = band.has("from") ? band.path("from") : band.path("min");
+            JsonNode end = band.has("to") ? band.path("to") : band.path("max");
+            if (isFiniteNumber(start) && isFiniteNumber(end) && end.asDouble() < start.asDouble()) {
+                failures.add("validator annotations-bounds-valid failed for " + operationId
+                        + ": reference band upper bound must be >= lower bound");
+            }
+        }
+    }
+
+    private void validateChartScalabilityContract(
+            String operationId,
+            JsonNode planOperation,
+            JsonNode config,
+            List<String> failures) {
+        JsonNode input = planOperation.path("input");
+        JsonNode zoom = input.path("dataZoom").isObject()
+                ? input.path("dataZoom")
+                : config.path("chartDocument").path("dataZoom");
+        if (zoom.isObject()) {
+            JsonNode start = zoom.path("startPercent");
+            JsonNode end = zoom.path("endPercent");
+            if (isFiniteNumber(start) && (start.asDouble() < 0d || start.asDouble() > 100d)) {
+                failures.add("validator scalability-contract-valid failed for " + operationId
+                        + ": dataZoom.startPercent must be between 0 and 100");
+            }
+            if (isFiniteNumber(end) && (end.asDouble() < 0d || end.asDouble() > 100d)) {
+                failures.add("validator scalability-contract-valid failed for " + operationId
+                        + ": dataZoom.endPercent must be between 0 and 100");
+            }
+            if (isFiniteNumber(start) && isFiniteNumber(end) && start.asDouble() >= end.asDouble()) {
+                failures.add("validator scalability-contract-valid failed for " + operationId
+                        + ": dataZoom.startPercent must be < endPercent");
+            }
+        }
+        JsonNode sampling = input.path("sampling").isObject()
+                ? input.path("sampling")
+                : config.path("chartDocument").path("sampling");
+        if (sampling.isObject() && sampling.path("maxPoints").isNumber() && sampling.path("maxPoints").asInt() < 1) {
+            failures.add("validator scalability-contract-valid failed for " + operationId
+                    + ": sampling.maxPoints must be >= 1");
+        }
+    }
+
+    private void validateOrganogramOccupancyThresholds(
+            String operationId,
+            JsonNode planOperation,
+            JsonNode config,
+            List<String> failures) {
+        JsonNode input = planOperation.path("input");
+        JsonNode rules = input.isObject() && (input.has("lowThresholdPercent") || input.has("highThresholdPercent"))
+                ? input
+                : config.path("rules").path("occupancyColoring");
+        if (!rules.isObject()) {
+            return;
+        }
+        JsonNode low = rules.path("lowThresholdPercent");
+        JsonNode warning = rules.path("warningThresholdPercent");
+        JsonNode high = rules.path("highThresholdPercent");
+        if (isFiniteNumber(low) && (low.asDouble() < 0d || low.asDouble() > 100d)) {
+            failures.add("validator occupancy-thresholds-valid failed for " + operationId
+                    + ": lowThresholdPercent must be in [0, 100]");
+        }
+        if (isFiniteNumber(high) && (high.asDouble() < 0d || high.asDouble() > 100d)) {
+            failures.add("validator occupancy-thresholds-valid failed for " + operationId
+                    + ": highThresholdPercent must be in [0, 100]");
+        }
+        if (isFiniteNumber(low) && isFiniteNumber(high) && low.asDouble() >= high.asDouble()) {
+            failures.add("validator occupancy-thresholds-valid failed for " + operationId
+                    + ": lowThresholdPercent must be < highThresholdPercent");
+        }
+        if (isFiniteNumber(warning) && (warning.asDouble() < 0d || warning.asDouble() > 100d)) {
+            failures.add("validator occupancy-thresholds-valid failed for " + operationId
+                    + ": warningThresholdPercent must be in [0, 100]");
+        }
+    }
+
+    private void validateRelationshipGraphLayout(
+            String operationId,
+            JsonNode planOperation,
+            List<String> failures) {
+        JsonNode input = planOperation.path("input");
+        String algorithm = text(input, "algorithm").trim();
+        if (!algorithm.isBlank() && !Set.of("layered-dag", "ego-radial", "force-spring").contains(algorithm)) {
+            failures.add("validator graph-layout-parameters-valid failed for " + operationId
+                    + ": unsupported graph algorithm " + algorithm);
+        }
+        String orientation = text(input, "orientation").trim();
+        if (!orientation.isBlank() && !Set.of("LR", "TB").contains(orientation)) {
+            failures.add("validator graph-layout-parameters-valid failed for " + operationId
+                    + ": unsupported graph orientation " + orientation);
+        }
+        String nodeShape = text(input, "nodeShape").trim();
+        if (!nodeShape.isBlank() && !Set.of("circle", "card", "pill", "diamond").contains(nodeShape)) {
+            failures.add("validator graph-layout-parameters-valid failed for " + operationId
+                    + ": unsupported graph nodeShape " + nodeShape);
+        }
+        JsonNode maxDepth = input.path("maxDepth");
+        if (maxDepth.isNumber() && (maxDepth.asInt() < 1 || maxDepth.asInt() > 12)) {
+            failures.add("validator graph-layout-parameters-valid failed for " + operationId
+                    + ": graph maxDepth must be between 1 and 12");
+        }
+    }
+
+    private void validateRelationshipGraphAppearance(
+            String operationId,
+            JsonNode planOperation,
+            List<String> failures) {
+        JsonNode input = planOperation.path("input");
+        String skin = text(input.path("appearance"), "skin").trim();
+        if (!skin.isBlank() && !Set.of("elevated", "outline", "flat", "glass", "custom").contains(skin)) {
+            failures.add("validator graph-appearance-valid failed for " + operationId
+                    + ": unsupported graph appearance skin " + skin);
+        }
+        String tone = text(input.path("verdict"), "tone").trim();
+        if (!tone.isBlank()
+                && !Set.of("neutral", "primary", "info", "success", "warning", "danger", "violet").contains(tone)) {
+            failures.add("validator graph-appearance-valid failed for " + operationId
+                    + ": unsupported graph verdict tone " + tone);
+        }
+    }
+
+    private void validateRelationshipGraphRuleCondition(
+            String operationId,
+            JsonNode planOperation,
+            List<String> failures) {
+        JsonNode input = planOperation.path("input");
+        if (text(input, "id").isBlank()) {
+            failures.add("validator rule-condition-json-logic-valid failed for " + operationId
+                    + ": node style rule requires non-blank id");
+        }
+        if (input.has("condition") && !input.path("condition").isNull() && !input.path("condition").isObject()) {
+            failures.add("validator rule-condition-json-logic-valid failed for " + operationId
+                    + ": rule condition must be a JSON Logic object");
+        }
+    }
+
+    private void validateRelationshipGraphActionReference(
+            String operationId,
+            JsonNode planOperation,
+            JsonNode config,
+            List<String> failures) {
+        String id = firstNonBlank(text(planOperation.path("input"), "id"), targetText(planOperation.path("target")));
+        if (id.isBlank()) {
+            failures.add("validator action-reference-exists failed for " + operationId
+                    + ": action id is required");
+            return;
+        }
+        JsonNode actions = config.path("actions");
+        if (actions.isArray() && !actions.isEmpty()) {
+            boolean found = false;
+            for (JsonNode action : actions) {
+                if (id.equals(text(action, "id").trim())) {
+                    found = true;
+                    break;
+                }
+            }
+            if (!found) {
+                failures.add("validator action-reference-exists failed for " + operationId
+                        + ": graph action not found " + id);
+            }
+        }
+    }
+
+    private void validateTimelineReferenceDateFormat(
+            String operationId,
+            JsonNode planOperation,
+            List<String> failures) {
+        String referenceDate = text(planOperation.path("input"), "referenceDate").trim();
+        if (referenceDate.isBlank()) {
+            return;
+        }
+        try {
+            LocalDate.parse(referenceDate);
+        } catch (DateTimeParseException ex) {
+            failures.add("validator timeline-reference-date-format failed for " + operationId
+                    + ": referenceDate must be an ISO YYYY-MM-DD date");
+        }
+    }
+
+    private void validateTimelineZoomRange(
+            String operationId,
+            JsonNode planOperation,
+            JsonNode config,
+            List<String> failures) {
+        JsonNode zoom = planOperation.path("input").has("zoom")
+                ? planOperation.path("input").path("zoom")
+                : config.path("layout").path("zoom");
+        if (isFiniteNumber(zoom) && (zoom.asDouble() < 0.5d || zoom.asDouble() > 3.0d)) {
+            failures.add("validator timeline-zoom-range failed for " + operationId
+                    + ": layout.zoom must stay within [0.5, 3.0]");
+        }
+    }
+
     private boolean isFiniteNumber(JsonNode value) {
         return value != null && value.isNumber() && Double.isFinite(value.asDouble());
     }
@@ -4558,7 +5041,28 @@ public final class AgenticAuthoringValidatorRegistry {
     }
 
     private Set<String> chartKinds() {
-        return Set.of("bar", "combo", "horizontal-bar", "line", "pie", "donut", "funnel", "pyramid", "treemap", "gauge", "area", "stacked-bar", "stacked-area", "scatter");
+        return Set.of(
+                "bar",
+                "combo",
+                "horizontal-bar",
+                "line",
+                "pie",
+                "donut",
+                "area",
+                "stacked-bar",
+                "stacked-area",
+                "scatter",
+                "funnel",
+                "pyramid",
+                "treemap",
+                "sunburst",
+                "sankey",
+                "radar",
+                "gauge",
+                "heatmap",
+                "boxplot",
+                "calendar",
+                "waterfall");
     }
 
     private Set<String> categorySliceChartKinds() {

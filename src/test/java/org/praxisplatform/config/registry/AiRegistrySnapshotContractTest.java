@@ -19,13 +19,13 @@ import org.springframework.core.io.ClassPathResource;
 class AiRegistrySnapshotContractTest {
 
     private static final String EXPECTED_SNAPSHOT_HASH =
-            "8c1bb2c9068ec0121794f710795c1a28f76c4d17505718b3b1593e4234c99912";
+            "5b7e8280a44b011bee4c5b17259bfd7849e23d9c63e2976e75092004ca1e205c";
     private static final String EXPECTED_VERSION = "1.0.0";
-    private static final String EXPECTED_GENERATED_AT = "2026-11-15T22:22:39.472Z";
-    private static final int EXPECTED_COMPONENT_COUNT = 109;
-    private static final int EXPECTED_AUTHORING_MANIFEST_COUNT = 101;
-    private static final int EXPECTED_CHUNKED_COMPONENT_COUNT = 109;
-    private static final int EXPECTED_CHUNK_COUNT = 2678;
+    private static final String EXPECTED_GENERATED_AT = "2026-11-18T20:03:10.800Z";
+    private static final int EXPECTED_COMPONENT_COUNT = 118;
+    private static final int EXPECTED_AUTHORING_MANIFEST_COUNT = 103;
+    private static final int EXPECTED_CHUNKED_COMPONENT_COUNT = 118;
+    private static final int EXPECTED_CHUNK_COUNT = 2722;
 
     private final ObjectMapper objectMapper = new ObjectMapper();
 
@@ -110,7 +110,8 @@ class AiRegistrySnapshotContractTest {
                 .containsExactly(
                         objectMapper.valueToTree("chart"),
                         objectMapper.valueToTree("analytic-table"),
-                        objectMapper.valueToTree("kpi"));
+                        objectMapper.valueToTree("kpi"),
+                        objectMapper.valueToTree("summary-list"));
         assertThat(manifest.path("presentationAffordances")
                 .path("affordances")
                 .get(0)
@@ -118,7 +119,8 @@ class AiRegistrySnapshotContractTest {
                 .containsExactly(
                         objectMapper.valueToTree("chart"),
                         objectMapper.valueToTree("analytic-table"),
-                        objectMapper.valueToTree("kpi"));
+                        objectMapper.valueToTree("kpi"),
+                        objectMapper.valueToTree("summary-list"));
     }
 
     @Test
