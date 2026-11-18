@@ -63,6 +63,12 @@ public interface AgentResourceExecutionBridge {
         throw new UnsupportedOperationException("Preparacao de acoes governadas nao suportada por esta bridge");
     }
 
+    default AgentPreparedBulkOperation prepareBulkOperation(
+            AgentExecutionContext context,
+            AgentPrepareBulkRequest request) {
+        throw new UnsupportedOperationException("Preparacao de operacoes em lote governadas nao suportada por esta bridge");
+    }
+
     default AgentActionExecutionOutcome executeConfirmedAction(
             AgentExecutionContext context,
             AgentExecuteActionRequest request) {

@@ -25,7 +25,8 @@ public record CompactAgentSchemaDigest(
         List<ResourceFactSummary> resourceFacts,
         boolean calculationMemoryAvailable,
         List<String> calculationTrailIds,
-        List<DeterminationSummary> determinations
+        List<DeterminationSummary> determinations,
+        BulkCapabilityDigest bulkCapability
 ) {
     public CompactAgentSchemaDigest(
             String entityKey,
@@ -60,7 +61,8 @@ public record CompactAgentSchemaDigest(
                 List.of(),
                 false,
                 List.of(),
-                List.of());
+                List.of(),
+                null);
     }
 
     public CompactAgentSchemaDigest(
@@ -101,7 +103,51 @@ public record CompactAgentSchemaDigest(
                 resourceFacts,
                 calculationMemoryAvailable,
                 calculationTrailIds,
-                List.of());
+                List.of(),
+                null);
+    }
+
+    public CompactAgentSchemaDigest(
+            String entityKey,
+            String resourceKey,
+            String resourcePath,
+            String title,
+            String description,
+            String idFieldName,
+            String titleField,
+            String subtitleField,
+            List<String> metadataFields,
+            List<FilterFieldDigest> filterableFields,
+            List<ResponseFieldDigest> responseFields,
+            List<AgentActionAffordance> availableActions,
+            List<AgentSurfaceSummary> availableSurfaces,
+            StatsCapabilityDigest statsCapability,
+            List<QuickFilterSummary> quickFilters,
+            List<ResourceFactSummary> resourceFacts,
+            boolean calculationMemoryAvailable,
+            List<String> calculationTrailIds,
+            List<DeterminationSummary> determinations) {
+        this(
+                entityKey,
+                resourceKey,
+                resourcePath,
+                title,
+                description,
+                idFieldName,
+                titleField,
+                subtitleField,
+                metadataFields,
+                filterableFields,
+                responseFields,
+                availableActions,
+                availableSurfaces,
+                statsCapability,
+                quickFilters,
+                resourceFacts,
+                calculationMemoryAvailable,
+                calculationTrailIds,
+                determinations,
+                null);
     }
 
     public CompactAgentSchemaDigest {
@@ -114,6 +160,49 @@ public record CompactAgentSchemaDigest(
         resourceFacts = resourceFacts == null ? List.of() : List.copyOf(resourceFacts);
         calculationTrailIds = calculationTrailIds == null ? List.of() : List.copyOf(calculationTrailIds);
         determinations = determinations == null ? List.of() : List.copyOf(determinations);
+    }
+
+    public record BulkEditableFieldDigest(
+            String name,
+            String label,
+            String controlType,
+            List<String> modes,
+            boolean allowClear
+    ) {
+        public BulkEditableFieldDigest {
+            modes = modes == null ? List.of() : List.copyOf(modes);
+        }
+    }
+
+    public record BulkCommandDigest(
+            String actionId,
+            String operationId,
+            String title,
+            String description,
+            String atomicity,
+            int maxTargets,
+            String evaluationPath,
+            String confirmPath,
+            List<AgentActionInputField> inputFields
+    ) {
+        public BulkCommandDigest {
+            inputFields = inputFields == null ? List.of() : List.copyOf(inputFields);
+        }
+    }
+
+    public record BulkCapabilityDigest(
+            boolean uniformUpdateSupported,
+            boolean perItemUpdateSupported,
+            int uniformMaxTargets,
+            List<String> uniformSelectionModes,
+            List<BulkEditableFieldDigest> editableFields,
+            List<BulkCommandDigest> domainCommands
+    ) {
+        public BulkCapabilityDigest {
+            uniformSelectionModes = uniformSelectionModes == null ? List.of() : List.copyOf(uniformSelectionModes);
+            editableFields = editableFields == null ? List.of() : List.copyOf(editableFields);
+            domainCommands = domainCommands == null ? List.of() : List.copyOf(domainCommands);
+        }
     }
 
     public record DeterminationSummary(

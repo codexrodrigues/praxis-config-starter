@@ -18,8 +18,11 @@ import org.praxisplatform.config.ai.agent.spi.AgentExecutionContext;
 import org.praxisplatform.config.ai.agent.spi.AgentExecutionContextCustomizer;
 import org.praxisplatform.config.ai.agent.spi.AgentPersistedActionProposal;
 import org.praxisplatform.config.ai.agent.spi.AgentPrepareActionRequest;
+import org.praxisplatform.config.ai.agent.spi.AgentPrepareBulkRequest;
 import org.praxisplatform.config.ai.agent.spi.AgentPreparedAction;
+import org.praxisplatform.config.ai.agent.spi.AgentPreparedBulkOperation;
 import org.praxisplatform.config.ai.agent.spi.AgentResourceExecutionBridge;
+import org.praxisplatform.config.ai.agent.spi.CompactAgentSchemaDigest;
 import org.praxisplatform.config.domain.AiAgentActionProposal;
 import org.praxisplatform.config.domain.AiAgentActionProposalStatus;
 import org.praxisplatform.config.repository.AiAgentActionProposalRepository;
@@ -165,6 +168,108 @@ public class OperationalAgentProposalService {
                 prepared);
     }
 
+    public boolean isBulkCommandOrMode(AgentExecutionContext context, String entityKey, String actionId) {
+        if (!StringUtils.hasText(actionId)) {
+            return false;
+        }
+        String normalized = actionId.trim().toLowerCase(java.util.Locale.ROOT);
+        if ("bulk-update".equals(normalized) || "bulk-update-items".equals(normalized)) {
+            return true;
+        }
+        if (!StringUtils.hasText(entityKey)) {
+            return false;
+        }
+        try {
+            return executionBridge.describeEntitySchema(context, entityKey)
+                    .map(CompactAgentSchemaDigest::bulkCapability)
+                    .map(cap -> cap.domainCommands().stream()
+                            .anyMatch(cmd -> cmd.actionId() != null && cmd.actionId().equalsIgnoreCase(normalized)))
+                    .orElse(false);
+        } catch (RuntimeException ex) {
+            return false;
+        }
+    }
+
+    public AgentPersistedActionProposal prepareAndPersistBulk(
+            AgentExecutionContext context,
+            AgentPrepareBulkRequest request) {
+        if (context == null || !StringUtils.hasText(context.tenantId()) || !StringUtils.hasText(context.userId())) {
+            throw new SecurityException("Contexto de identidade obrigatorio para preparar proposta em lote.");
+        }
+        AgentPreparedBulkOperation prepared = executionBridge.prepareBulkOperation(context, request);
+        AgentPreparedAction base = prepared.base();
+        Instant now = Instant.now();
+        purgeExpiredProposalsIfDue(now);
+        Instant expiresAt = now.plusSeconds(Math.max(60L, proposalTtlSeconds));
+        if (prepared.nativeExpiresAt() != null && prepared.nativeExpiresAt().isBefore(expiresAt)) {
+            expiresAt = prepared.nativeExpiresAt();
+        }
+        boolean pendingEligible = base != null && base.allowed() && (
+                prepared.domainProposalId() == null
+                        || "READY".equalsIgnoreCase(prepared.domainProposalStatus())
+                        || ("PER_ITEM".equalsIgnoreCase(prepared.atomicity()) && prepared.executableCount() > 0L));
+        AiAgentActionProposalStatus initialStatus = pendingEligible
+                ? AiAgentActionProposalStatus.PENDING
+                : AiAgentActionProposalStatus.BLOCKED;
+
+        Map<String, Object> totalsMap = new LinkedHashMap<>();
+        totalsMap.put("targetCount", prepared.targetCount());
+        totalsMap.put("evaluated", prepared.evaluatedCount());
+        totalsMap.put("executable", prepared.executableCount());
+        totalsMap.put("blocked", prepared.blockedCount());
+
+        AiAgentActionProposal entity = AiAgentActionProposal.builder()
+                .proposalId(UUID.randomUUID())
+                .tenantId(context.tenantId())
+                .userId(context.userId())
+                .environment(StringUtils.hasText(context.environment()) ? context.environment() : "default")
+                .threadId(context.threadId())
+                .turnId(context.turnId())
+                .entityKey(base.entityKey())
+                .resourceKey(base.resourceKey())
+                .resourcePath(base.resourcePath())
+                .entityId(base.entityId())
+                .actionId(base.actionId())
+                .actionTitle(base.actionTitle())
+                .actionDescription(truncate(base.actionDescription(), 1024))
+                .operationKind(base.operationKind())
+                .formMode(base.formMode())
+                .httpMethod(base.httpMethod())
+                .submitUrl(base.submitUrl())
+                .schemaUrl(base.schemaUrl())
+                .riskLevel(StringUtils.hasText(base.riskLevel()) ? base.riskLevel() : "HIGH")
+                .confirmationRequired(true)
+                .hasInputForm(true)
+                .organizationId(base.organizationId())
+                .organizationLabel(base.organizationLabel())
+                .recordTitle(truncate(OperationalAssistantBlockComposer.maskMod11TaxIds(base.recordTitle()), 255))
+                .recordSubtitle(truncate(OperationalAssistantBlockComposer.maskMod11TaxIds(base.recordSubtitle()), 255))
+                .recordLifecycleState(truncate(base.recordLifecycleState(), 120))
+                .expectedVersionTag(truncate(base.expectedVersionTag(), 255))
+                .status(initialStatus)
+                .blockedCode(truncate(base.blockedCode(), 80))
+                .impedimentNote(truncate(OperationalAssistantBlockComposer.maskMod11TaxIds(base.impedimentNote()), 1024))
+                .prefillJson(writeJson(base.prefill()))
+                .inputFieldsJson(writeJson(base.inputFields()))
+                .missingFieldsJson(writeJson(base.missingRequiredFields()))
+                .bulkProposalId(truncate(prepared.domainProposalId(), 120))
+                .bulkOperationId(truncate(prepared.bulkOperationId(), 200))
+                .bulkMode(truncate(prepared.bulkMode(), 40))
+                .bulkAtomicity(truncate(prepared.atomicity(), 32))
+                .bulkTotalsJson(writeJson(totalsMap))
+                .createdAt(now)
+                .expiresAt(expiresAt)
+                .build();
+
+        AiAgentActionProposal saved = inConfigWriteTx(() -> proposalRepository.save(entity));
+        return new AgentPersistedActionProposal(
+                saved.getProposalId(),
+                saved.getStatus().name(),
+                saved.getExpiresAt(),
+                base,
+                prepared);
+    }
+
     public ConfirmHttpResult confirm(
             UUID proposalId,
             AiPrincipalContext principal,
@@ -177,6 +282,21 @@ public class OperationalAgentProposalService {
         }
         String env = StringUtils.hasText(principal.environment()) ? principal.environment() : "default";
         AiAgentActionProposal proposal = loadOwnedProposal(proposalId, principal.tenantId(), principal.userId(), env);
+
+        if (StringUtils.hasText(proposal.getBulkMode())) {
+            return new ConfirmHttpResult(409, new AgentProposalConfirmResponse(
+                    proposalId,
+                    proposal.getStatus().name(),
+                    false,
+                    "BULK_REQUIRES_MODAL_REVIEW",
+                    "Operações em lote exigem revisão completa e confirmação no modal dedicado.",
+                    proposal.getExpectedVersionTag(),
+                    proposal.getRecordLifecycleState(),
+                    Map.of(),
+                    List.of(),
+                    Map.of(),
+                    Map.of()));
+        }
 
         String effectiveIdempotencyKey = firstNonBlank(
                 idempotencyHeader,
@@ -356,12 +476,22 @@ public class OperationalAgentProposalService {
         AiAgentActionProposal proposal = loadOwnedProposal(proposalId, principal.tenantId(), principal.userId(), env);
 
         if (proposal.getStatus() == AiAgentActionProposalStatus.CONFIRMED) {
+            if (StringUtils.hasText(proposal.getExecutionReceiptJson())) {
+                AgentProposalConfirmResponse replay = readJson(
+                        proposal.getExecutionReceiptJson(), AgentProposalConfirmResponse.class);
+                if (replay != null) {
+                    return new ConfirmHttpResult(200, replay);
+                }
+            }
+            String replayOutcome = StringUtils.hasText(proposal.getBulkExecutionId())
+                    ? "BULK_COMPLETED"
+                    : "CONFIRMED_VIA_FORM";
             return new ConfirmHttpResult(200, new AgentProposalConfirmResponse(
                     proposalId,
                     AiAgentActionProposalStatus.CONFIRMED.name(),
                     true,
-                    "CONFIRMED_VIA_FORM",
-                    "Operação já registrada como concluída pelo formulário governado.",
+                    replayOutcome,
+                    "Operação já registrada como concluída pelo fluxo governado.",
                     proposal.getExpectedVersionTag(),
                     proposal.getRecordLifecycleState(),
                     Map.of(),
@@ -405,19 +535,45 @@ public class OperationalAgentProposalService {
         String updatedVersion = request != null ? firstNonBlank(request.updatedVersionTag(), proposal.getExpectedVersionTag()) : proposal.getExpectedVersionTag();
         String updatedState = request != null ? firstNonBlank(request.updatedLifecycleState(), proposal.getRecordLifecycleState()) : proposal.getRecordLifecycleState();
         String idemKey = request != null ? firstNonBlank(request.idempotencyKey(), "proposal-form-" + proposalId) : "proposal-form-" + proposalId;
+        String outcomeCode = (request != null && request.failedCount() != null && request.failedCount() > 0L)
+                ? "BULK_COMPLETED_WITH_ERRORS"
+                : (request != null && StringUtils.hasText(request.bulkExecutionId())
+                        ? "BULK_COMPLETED"
+                        : "CONFIRMED_VIA_FORM");
+        String statusNote = "BULK_COMPLETED_WITH_ERRORS".equals(outcomeCode)
+                ? "Operação em lote executada com ocorrências parciais; consulte o recibo durável."
+                : ("BULK_COMPLETED".equals(outcomeCode)
+                        ? "Operação em lote confirmada e conciliada pelo modal governado."
+                        : "Operação concluída pelo formulário governado.");
 
         AgentProposalConfirmResponse okResponse = new AgentProposalConfirmResponse(
                 proposalId,
                 AiAgentActionProposalStatus.CONFIRMED.name(),
                 true,
-                "CONFIRMED_VIA_FORM",
-                "Operação concluída pelo formulário governado.",
+                outcomeCode,
+                statusNote,
                 updatedVersion,
                 updatedState,
                 Map.of(),
                 List.of(),
                 Map.of(),
                 Map.of());
+
+        Map<String, Object> mergedTotals = new LinkedHashMap<>(readMap(proposal.getBulkTotalsJson()));
+        if (request != null) {
+            if (StringUtils.hasText(request.bulkExecutionStatus())) {
+                mergedTotals.put("executionStatus", request.bulkExecutionStatus().trim());
+            }
+            if (request.confirmedCount() != null) {
+                mergedTotals.put("confirmedCount", request.confirmedCount());
+            }
+            if (request.unchangedCount() != null) {
+                mergedTotals.put("unchangedCount", request.unchangedCount());
+            }
+            if (request.failedCount() != null) {
+                mergedTotals.put("failedCount", request.failedCount());
+            }
+        }
 
         inConfigWriteTx(() -> {
             AiAgentActionProposal managed = proposalRepository.findById(proposalId).orElseThrow();
@@ -429,6 +585,15 @@ public class OperationalAgentProposalService {
             }
             if (StringUtils.hasText(updatedState)) {
                 managed.setRecordLifecycleState(truncate(updatedState, 120));
+            }
+            if (request != null && StringUtils.hasText(request.domainProposalId())) {
+                managed.setBulkProposalId(truncate(request.domainProposalId().trim(), 120));
+            }
+            if (request != null && StringUtils.hasText(request.bulkExecutionId())) {
+                managed.setBulkExecutionId(truncate(request.bulkExecutionId().trim(), 120));
+            }
+            if (!mergedTotals.isEmpty()) {
+                managed.setBulkTotalsJson(writeJson(mergedTotals));
             }
             managed.setExecutionReceiptJson(writeJson(okResponse));
             return proposalRepository.save(managed);

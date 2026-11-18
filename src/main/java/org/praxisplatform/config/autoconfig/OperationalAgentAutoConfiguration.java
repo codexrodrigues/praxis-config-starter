@@ -32,6 +32,7 @@ import org.praxisplatform.config.ai.agent.tools.ExplainCalculationMemoryTool;
 import org.praxisplatform.config.ai.agent.tools.GetEntity360DossierTool;
 import org.praxisplatform.config.ai.agent.tools.OperationalAgentTool;
 import org.praxisplatform.config.ai.agent.tools.PrepareActionOrMutationTool;
+import org.praxisplatform.config.ai.agent.tools.PrepareBulkOperationTool;
 import org.praxisplatform.config.ai.agent.tools.QueryResourceRecordsTool;
 import org.praxisplatform.config.ai.agent.tools.SearchAndResolveEntitiesTool;
 import org.praxisplatform.config.ai.agent.tools.SearchDomainKnowledgeAndRulesTool;
@@ -310,6 +311,13 @@ public class OperationalAgentAutoConfiguration {
     @ConditionalOnMissingBean(PrepareActionOrMutationTool.class)
     public PrepareActionOrMutationTool prepareActionOrMutationTool(OperationalAgentProposalService proposalService) {
         return new PrepareActionOrMutationTool(proposalService);
+    }
+
+    @Bean
+    @ConditionalOnBean(OperationalAgentProposalService.class)
+    @ConditionalOnMissingBean(PrepareBulkOperationTool.class)
+    public PrepareBulkOperationTool prepareBulkOperationTool(OperationalAgentProposalService proposalService) {
+        return new PrepareBulkOperationTool(proposalService);
     }
 
     @Bean

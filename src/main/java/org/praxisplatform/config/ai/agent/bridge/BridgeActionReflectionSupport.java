@@ -20,15 +20,27 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import org.praxisplatform.config.ai.agent.spi.AgentActionInputField;
+import org.praxisplatform.config.ai.agent.spi.CompactAgentSchemaDigest.BulkCapabilityDigest;
+import org.praxisplatform.config.ai.agent.spi.CompactAgentSchemaDigest.BulkCommandDigest;
+import org.praxisplatform.config.ai.agent.spi.CompactAgentSchemaDigest.BulkEditableFieldDigest;
 import org.praxisplatform.config.ai.agent.spi.CompactAgentSchemaDigest.DeterminationSummary;
 import org.praxisplatform.uischema.FieldControlType;
+import org.praxisplatform.uischema.action.ActionCollectionAtomicity;
 import org.praxisplatform.uischema.action.ActionRequirement;
 import org.praxisplatform.uischema.action.ActionScope;
+import org.praxisplatform.uischema.annotation.BulkEditable;
+import org.praxisplatform.uischema.annotation.BulkOperation;
 import org.praxisplatform.uischema.annotation.ResourceIntent;
 import org.praxisplatform.uischema.annotation.UiOption;
 import org.praxisplatform.uischema.annotation.UiSurface;
 import org.praxisplatform.uischema.annotation.WorkflowAction;
+import org.praxisplatform.uischema.bulk.BulkCommandEvaluationRequest;
+import org.praxisplatform.uischema.bulk.BulkControllerOperationIds;
+import org.praxisplatform.uischema.bulk.BulkMode;
+import org.praxisplatform.uischema.bulk.BulkResourceOperation;
+import org.praxisplatform.uischema.bulk.BulkResourceOperations;
 import org.praxisplatform.uischema.capability.ResourceStateSnapshot;
+import org.praxisplatform.uischema.controller.base.AbstractBulkGovernedResourceController;
 import org.praxisplatform.uischema.extension.annotation.UISchema;
 import org.praxisplatform.uischema.rest.response.RestApiResponse;
 import org.springframework.core.DefaultParameterNameDiscoverer;
@@ -114,6 +126,107 @@ final class BridgeActionReflectionSupport {
         }
     }
 
+    record BulkCommandEndpoint(
+            String actionId,
+            String operationId,
+            String evaluationOperationId,
+            String title,
+            String description,
+            String atomicity,
+            int maxTargets,
+            String evaluationPath,
+            String confirmPath,
+            List<String> requiredAuthorities,
+            Class<?> parameterDtoType,
+            List<AgentActionInputField> inputFields
+    ) {
+        boolean matchesActionId(String candidate) {
+            return StringUtils.hasText(candidate) && actionId.equalsIgnoreCase(candidate.trim());
+        }
+
+        BulkCommandDigest toDigest() {
+            return new BulkCommandDigest(
+                    actionId,
+                    operationId,
+                    title,
+                    description,
+                    atomicity,
+                    maxTargets,
+                    evaluationPath,
+                    confirmPath,
+                    inputFields);
+        }
+    }
+
+    record BulkResourceSupport(
+            boolean bulkSupported,
+            boolean uniformUpdateSupported,
+            boolean perItemUpdateSupported,
+            String uniformEvaluationOperationId,
+            String uniformConfirmationOperationId,
+            String uniformEvaluationPath,
+            String uniformConfirmPath,
+            int uniformMaxTargets,
+            String perItemEvaluationOperationId,
+            String perItemConfirmationOperationId,
+            String perItemEvaluationPath,
+            String perItemConfirmPath,
+            String proposalOperationId,
+            String proposalResultsOperationId,
+            String executionOperationId,
+            String executionResultsOperationId,
+            String cancelOperationId,
+            String proposalPath,
+            String proposalResultsPath,
+            String executionPath,
+            String executionResultsPath,
+            String cancelPath,
+            Set<String> protectedUpdateFields,
+            List<BulkEditableFieldDigest> editableFields,
+            List<BulkCommandEndpoint> domainCommands,
+            BulkCapabilityDigest digest
+    ) {
+        BulkCommandEndpoint resolveCommand(String actionId) {
+            if (!StringUtils.hasText(actionId) || domainCommands == null) {
+                return null;
+            }
+            for (BulkCommandEndpoint cmd : domainCommands) {
+                if (cmd.matchesActionId(actionId)) {
+                    return cmd;
+                }
+            }
+            return null;
+        }
+
+        boolean isEditableField(String fieldName, BulkMode mode) {
+            if (!StringUtils.hasText(fieldName) || editableFields == null) {
+                return false;
+            }
+            String modeName = mode != null ? mode.name() : "";
+            for (BulkEditableFieldDigest f : editableFields) {
+                if (f.name().equals(fieldName) && (modeName.isEmpty() || f.modes().contains(modeName))) {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        boolean isClearAllowed(String fieldName, BulkMode mode) {
+            if (!StringUtils.hasText(fieldName) || editableFields == null) {
+                return false;
+            }
+            String modeName = mode != null ? mode.name() : "";
+            for (BulkEditableFieldDigest f : editableFields) {
+                if (f.name().equals(fieldName)
+                        && (modeName.isEmpty() || f.modes().contains(modeName))
+                        && f.allowClear()) {
+                    return true;
+                }
+            }
+            return false;
+        }
+    }
+
     static List<DeterminationEndpoint> discoverDeterminations(Class<?> targetClass, String basePath) {
         if (targetClass == null || Object.class.equals(targetClass)) {
             return List.of();
@@ -178,8 +291,9 @@ final class BridgeActionReflectionSupport {
                 continue;
             }
             WorkflowAction wf = AnnotatedElementUtils.findMergedAnnotation(method, WorkflowAction.class);
+            BulkOperation bulkOp = AnnotatedElementUtils.findMergedAnnotation(method, BulkOperation.class);
             ResourceIntent intent = AnnotatedElementUtils.findMergedAnnotation(method, ResourceIntent.class);
-            if (wf == null && intent == null) {
+            if ((wf == null || bulkOp != null) && intent == null) {
                 continue;
             }
             RequestMapping mapping = AnnotatedElementUtils.findMergedAnnotation(method, RequestMapping.class);
@@ -300,6 +414,306 @@ final class BridgeActionReflectionSupport {
                     introspectInputFields(updateDtoType)));
         }
         return List.copyOf(byId.values());
+    }
+
+    static BulkResourceSupport discoverBulkSupport(
+            Class<?> targetClass,
+            String basePath,
+            Class<?> updateDtoType,
+            String resourceKey) {
+        if (targetClass == null
+                || Object.class.equals(targetClass)
+                || !AbstractBulkGovernedResourceController.class.isAssignableFrom(targetClass)) {
+            return null;
+        }
+        BulkResourceOperations opsDecl =
+                AnnotatedElementUtils.findMergedAnnotation(targetClass, BulkResourceOperations.class);
+        if (opsDecl == null) {
+            return null;
+        }
+
+        Set<String> protectedFields = new LinkedHashSet<>();
+        if (opsDecl.protectedUpdateFields() != null) {
+            for (String p : opsDecl.protectedUpdateFields()) {
+                if (StringUtils.hasText(p)) {
+                    protectedFields.add(p.trim());
+                }
+            }
+        }
+        List<BulkEditableFieldDigest> editableFields = introspectBulkEditableFields(updateDtoType, protectedFields);
+
+        Method[] allMethods = ReflectionUtils.getAllDeclaredMethods(targetClass);
+        Map<String, Method> methodByOperationId = new LinkedHashMap<>();
+        Map<BulkResourceOperation.Role, Method> methodByRole = new LinkedHashMap<>();
+        for (Method m : allMethods) {
+            if (m.isBridge() || m.isSynthetic() || m.getDeclaringClass() == Object.class) {
+                continue;
+            }
+            Operation op = AnnotatedElementUtils.findMergedAnnotation(m, Operation.class);
+            if (op != null && StringUtils.hasText(op.operationId())) {
+                methodByOperationId.putIfAbsent(op.operationId().trim(), m);
+            }
+            BulkResourceOperation roleAnn = AnnotatedElementUtils.findMergedAnnotation(m, BulkResourceOperation.class);
+            if (roleAnn != null && roleAnn.value() != null) {
+                methodByRole.putIfAbsent(roleAnn.value(), m);
+            }
+        }
+
+        String proposalOpId = BulkControllerOperationIds.lifecycleOperationId(
+                targetClass, opsDecl, BulkResourceOperation.Role.PROPOSAL);
+        String proposalResultsOpId = BulkControllerOperationIds.lifecycleOperationId(
+                targetClass, opsDecl, BulkResourceOperation.Role.PROPOSAL_RESULTS);
+        String executionOpId = BulkControllerOperationIds.lifecycleOperationId(
+                targetClass, opsDecl, BulkResourceOperation.Role.EXECUTION);
+        String executionResultsOpId = BulkControllerOperationIds.lifecycleOperationId(
+                targetClass, opsDecl, BulkResourceOperation.Role.EXECUTION_RESULTS);
+        String cancelOpId = BulkControllerOperationIds.lifecycleOperationId(
+                targetClass, opsDecl, BulkResourceOperation.Role.CANCEL);
+
+        String proposalPath = resolveMethodFullPath(basePath, methodByRole.get(BulkResourceOperation.Role.PROPOSAL), "/bulk/proposals/{proposalId}");
+        String proposalResultsPath = resolveMethodFullPath(basePath, methodByRole.get(BulkResourceOperation.Role.PROPOSAL_RESULTS), "/bulk/proposals/{proposalId}/results");
+        String executionPath = resolveMethodFullPath(basePath, methodByRole.get(BulkResourceOperation.Role.EXECUTION), "/bulk/executions/{executionId}");
+        String executionResultsPath = resolveMethodFullPath(basePath, methodByRole.get(BulkResourceOperation.Role.EXECUTION_RESULTS), "/bulk/executions/{executionId}/results");
+        String cancelPath = resolveMethodFullPath(basePath, methodByRole.get(BulkResourceOperation.Role.CANCEL), "/bulk/executions/{executionId}/cancel");
+
+        String uniformConfirmOpId = BulkControllerOperationIds.updateConfirmationId(targetClass, false);
+        String uniformEvalOpId = methodByRole.containsKey(BulkResourceOperation.Role.UNIFORM_CONFIRMATION)
+                ? extractEvaluationOperationId(methodByRole.get(BulkResourceOperation.Role.UNIFORM_CONFIRMATION), uniformConfirmOpId + ".evaluate")
+                : uniformConfirmOpId + ".evaluate";
+        String perItemConfirmOpId = BulkControllerOperationIds.updateConfirmationId(targetClass, true);
+        String perItemEvalOpId = methodByRole.containsKey(BulkResourceOperation.Role.ITEM_CONFIRMATION)
+                ? extractEvaluationOperationId(methodByRole.get(BulkResourceOperation.Role.ITEM_CONFIRMATION), perItemConfirmOpId + ".evaluate")
+                : perItemConfirmOpId + ".evaluate";
+
+        String uniformEvalPath = resolveMethodFullPath(basePath, methodByRole.get(BulkResourceOperation.Role.UNIFORM_EVALUATION), "/bulk/update/evaluation");
+        String uniformConfirmPath = resolveMethodFullPath(basePath, methodByRole.get(BulkResourceOperation.Role.UNIFORM_CONFIRMATION), "/bulk/update");
+        String perItemEvalPath = resolveMethodFullPath(basePath, methodByRole.get(BulkResourceOperation.Role.ITEM_EVALUATION), "/bulk/update-items/evaluation");
+        String perItemConfirmPath = resolveMethodFullPath(basePath, methodByRole.get(BulkResourceOperation.Role.ITEM_CONFIRMATION), "/bulk/update-items");
+
+        boolean hasUpdateSource = StringUtils.hasText(opsDecl.updateSourceOperationId());
+        boolean uniformUpdateSupported = hasUpdateSource
+                && editableFields.stream().anyMatch(f -> f.modes().contains(BulkMode.UNIFORM_UPDATE.name()));
+        boolean perItemUpdateSupported = hasUpdateSource
+                && editableFields.stream().anyMatch(f -> f.modes().contains(BulkMode.PER_ITEM_UPDATE.name()));
+
+        Map<String, BulkCommandEndpoint> commandsById = new LinkedHashMap<>();
+        for (Method method : allMethods) {
+            if (method.isBridge() || method.isSynthetic() || method.getDeclaringClass() == Object.class) {
+                continue;
+            }
+            BulkOperation bulkOp = AnnotatedElementUtils.findMergedAnnotation(method, BulkOperation.class);
+            WorkflowAction wf = AnnotatedElementUtils.findMergedAnnotation(method, WorkflowAction.class);
+            if (bulkOp == null || bulkOp.mode() != BulkMode.DOMAIN_COMMAND || wf == null || !StringUtils.hasText(wf.id())) {
+                continue;
+            }
+            String actionId = wf.id().trim();
+            if (commandsById.containsKey(actionId.toLowerCase(Locale.ROOT))) {
+                continue;
+            }
+            Operation confirmOp = AnnotatedElementUtils.findMergedAnnotation(method, Operation.class);
+            String confirmOpId = confirmOp != null && StringUtils.hasText(confirmOp.operationId())
+                    ? confirmOp.operationId().trim()
+                    : method.getName();
+            String evalOpId = StringUtils.hasText(bulkOp.evaluationOperationId())
+                    ? bulkOp.evaluationOperationId().trim()
+                    : confirmOpId + ".evaluation";
+
+            Method evalMethod = methodByOperationId.get(evalOpId);
+            String confirmPath = resolveMethodFullPath(basePath, method, "/actions/" + actionId);
+            String evalPath = evalMethod != null
+                    ? resolveMethodFullPath(basePath, evalMethod, "/bulk/" + actionId + "/evaluation")
+                    : combinePath(basePath, "/bulk/" + actionId + "/evaluation");
+
+            Class<?> paramDtoType = null;
+            if (evalMethod != null) {
+                int evalBodyIdx = findRequestBodyIndex(evalMethod.getParameters());
+                if (evalBodyIdx >= 0) {
+                    ResolvableType bodyType = ResolvableType.forMethodParameter(evalMethod, evalBodyIdx, targetClass);
+                    Class<?> resolvedParam = bodyType.as(BulkCommandEvaluationRequest.class).getGeneric(0).resolve(Object.class);
+                    if (resolvedParam != null && !Object.class.equals(resolvedParam)) {
+                        paramDtoType = resolvedParam;
+                    }
+                }
+            }
+            List<AgentActionInputField> inputFields = introspectInputFields(paramDtoType);
+            String atomicity = bulkOp.atomicity() != null
+                    ? bulkOp.atomicity().name()
+                    : (wf.atomicity() != null ? wf.atomicity().name() : ActionCollectionAtomicity.PER_ITEM.name());
+            int maxTargets = wf.maxSelection() > 0
+                    ? wf.maxSelection()
+                    : (ActionCollectionAtomicity.ATOMIC.name().equalsIgnoreCase(atomicity) ? 50 : 200);
+            List<String> reqAuths = wf.requiredAuthorities() == null
+                    ? List.of()
+                    : Arrays.stream(wf.requiredAuthorities())
+                            .filter(StringUtils::hasText)
+                            .map(String::trim)
+                            .toList();
+            String title = StringUtils.hasText(wf.title()) ? wf.title().trim() : actionId;
+            String description = wf.description() != null ? wf.description().trim() : "";
+            commandsById.put(
+                    actionId.toLowerCase(Locale.ROOT),
+                    new BulkCommandEndpoint(
+                            actionId,
+                            confirmOpId,
+                            evalOpId,
+                            title,
+                            description,
+                            atomicity,
+                            maxTargets,
+                            evalPath,
+                            confirmPath,
+                            reqAuths,
+                            paramDtoType,
+                            inputFields));
+        }
+
+        List<BulkCommandEndpoint> commands = List.copyOf(commandsById.values());
+        boolean bulkSupported = uniformUpdateSupported || perItemUpdateSupported || !commands.isEmpty();
+        if (!bulkSupported) {
+            return null;
+        }
+        BulkCapabilityDigest digest = new BulkCapabilityDigest(
+                uniformUpdateSupported,
+                perItemUpdateSupported,
+                uniformUpdateSupported ? 200 : 0,
+                uniformUpdateSupported ? List.of("EXPLICIT", "QUERY") : List.of("EXPLICIT"),
+                editableFields,
+                commands.stream().map(BulkCommandEndpoint::toDigest).toList());
+        return new BulkResourceSupport(
+                true,
+                uniformUpdateSupported,
+                perItemUpdateSupported,
+                uniformEvalOpId,
+                uniformConfirmOpId,
+                uniformEvalPath,
+                uniformConfirmPath,
+                200,
+                perItemEvalOpId,
+                perItemConfirmOpId,
+                perItemEvalPath,
+                perItemConfirmPath,
+                proposalOpId,
+                proposalResultsOpId,
+                executionOpId,
+                executionResultsOpId,
+                cancelOpId,
+                proposalPath,
+                proposalResultsPath,
+                executionPath,
+                executionResultsPath,
+                cancelPath,
+                Set.copyOf(protectedFields),
+                editableFields,
+                commands,
+                digest);
+    }
+
+    private static String extractEvaluationOperationId(Method confirmMethod, String fallback) {
+        if (confirmMethod == null) {
+            return fallback;
+        }
+        BulkOperation bulkOp = AnnotatedElementUtils.findMergedAnnotation(confirmMethod, BulkOperation.class);
+        if (bulkOp != null && StringUtils.hasText(bulkOp.evaluationOperationId())) {
+            return bulkOp.evaluationOperationId().trim();
+        }
+        return fallback;
+    }
+
+    private static String resolveMethodFullPath(String basePath, Method method, String fallbackRelPath) {
+        if (method != null) {
+            RequestMapping mapping = AnnotatedElementUtils.findMergedAnnotation(method, RequestMapping.class);
+            if (mapping != null) {
+                String raw = firstPath(mapping);
+                if (StringUtils.hasText(raw)) {
+                    return combinePath(basePath, raw);
+                }
+            }
+        }
+        return combinePath(basePath, fallbackRelPath);
+    }
+
+    static List<BulkEditableFieldDigest> introspectBulkEditableFields(
+            Class<?> dtoType,
+            Set<String> protectedFields) {
+        if (dtoType == null || Object.class.equals(dtoType) || dtoType.isPrimitive()) {
+            return List.of();
+        }
+        List<BulkEditableFieldDigest> result = new ArrayList<>();
+        Set<String> seen = new LinkedHashSet<>();
+        if (dtoType.isRecord()) {
+            for (RecordComponent component : dtoType.getRecordComponents()) {
+                BulkEditable bulkEd = component.getAnnotation(BulkEditable.class);
+                if (bulkEd == null) {
+                    continue;
+                }
+                String name = resolveWireFieldName(
+                        component.getName(),
+                        component.getAnnotation(com.fasterxml.jackson.annotation.JsonProperty.class));
+                if ((protectedFields != null && protectedFields.contains(name)) || !seen.add(name)) {
+                    continue;
+                }
+                AgentActionInputField inputMeta = toInputField(
+                        name,
+                        component.getType(),
+                        component.getAnnotation(UISchema.class),
+                        component.getAnnotation(Schema.class),
+                        false,
+                        false,
+                        false);
+                List<String> modes = Arrays.stream(bulkEd.modes()).map(Enum::name).toList();
+                result.add(new BulkEditableFieldDigest(
+                        name,
+                        inputMeta.label(),
+                        inputMeta.controlType(),
+                        modes,
+                        bulkEd.allowClear()));
+            }
+        }
+        Class<?> current = dtoType;
+        while (current != null && !Object.class.equals(current)) {
+            for (Field field : current.getDeclaredFields()) {
+                if (java.lang.reflect.Modifier.isStatic(field.getModifiers())
+                        || java.lang.reflect.Modifier.isTransient(field.getModifiers())) {
+                    continue;
+                }
+                BulkEditable bulkEd = AnnotatedElementUtils.findMergedAnnotation(field, BulkEditable.class);
+                if (bulkEd == null) {
+                    continue;
+                }
+                String name = resolveWireFieldName(
+                        field.getName(),
+                        AnnotatedElementUtils.findMergedAnnotation(field, com.fasterxml.jackson.annotation.JsonProperty.class));
+                if ((protectedFields != null && protectedFields.contains(name)) || !seen.add(name)) {
+                    continue;
+                }
+                AgentActionInputField inputMeta = toInputField(
+                        name,
+                        field.getType(),
+                        AnnotatedElementUtils.findMergedAnnotation(field, UISchema.class),
+                        AnnotatedElementUtils.findMergedAnnotation(field, Schema.class),
+                        false,
+                        false,
+                        false);
+                List<String> modes = Arrays.stream(bulkEd.modes()).map(Enum::name).toList();
+                result.add(new BulkEditableFieldDigest(
+                        name,
+                        inputMeta.label(),
+                        inputMeta.controlType(),
+                        modes,
+                        bulkEd.allowClear()));
+            }
+            current = current.getSuperclass();
+        }
+        return List.copyOf(result);
+    }
+
+    private static String resolveWireFieldName(
+            String javaName,
+            com.fasterxml.jackson.annotation.JsonProperty jsonProp) {
+        if (jsonProp != null && StringUtils.hasText(jsonProp.value())) {
+            return jsonProp.value().trim();
+        }
+        return javaName;
     }
 
     static List<AgentActionInputField> introspectInputFields(Class<?> dtoType) {

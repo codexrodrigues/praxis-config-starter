@@ -25,6 +25,7 @@ import org.praxisplatform.config.ai.agent.spi.AgentFieldDescriptor;
 import org.praxisplatform.config.ai.agent.spi.AgentKnowledgeDocument;
 import org.praxisplatform.config.ai.agent.spi.AgentPersistedActionProposal;
 import org.praxisplatform.config.ai.agent.spi.AgentPreparedAction;
+import org.praxisplatform.config.ai.agent.spi.AgentPreparedBulkOperation;
 import org.praxisplatform.config.ai.agent.spi.AgentProactiveAlert;
 import org.praxisplatform.config.ai.agent.spi.AgentQueryResult;
 import org.praxisplatform.config.ai.agent.spi.AgentRelatedDataset;
@@ -973,6 +974,74 @@ public class OperationalAssistantBlockComposer {
                     fn.put("required", f.required());
                 }
             }
+            if (proposal.bulk() != null) {
+                appendBulkProposalNode(item, proposal.bulk());
+            }
+        }
+    }
+
+    private void appendBulkProposalNode(ObjectNode item, AgentPreparedBulkOperation bulk) {
+        // NOTE: Only emit non-reserved SSE keys (never summary, content, message, details, reason, *token).
+        ObjectNode bulkNode = item.putObject("bulk");
+        putIfText(bulkNode, "domainProposalId", bulk.domainProposalId());
+        putIfText(bulkNode, "bulkOperationId", bulk.bulkOperationId());
+        putIfText(bulkNode, "bulkMode", bulk.bulkMode());
+        putIfText(bulkNode, "atomicity", bulk.atomicity());
+        putIfText(bulkNode, "selectionMode", bulk.selectionMode());
+        putIfText(bulkNode, "domainProposalStatus", bulk.domainProposalStatus());
+        ObjectNode totalsNode = bulkNode.putObject("totals");
+        totalsNode.put("targetCount", bulk.targetCount());
+        totalsNode.put("evaluated", bulk.evaluatedCount());
+        totalsNode.put("executable", bulk.executableCount());
+        totalsNode.put("blocked", bulk.blockedCount());
+        putIfText(bulkNode, "filterLabel", maskMod11TaxIds(bulk.filterLabel()));
+        if (bulk.base() != null) {
+            putIfText(bulkNode, "statusNote", maskMod11TaxIds(bulk.base().impedimentNote()));
+        }
+        if (bulk.blockedDiagnostics() != null && !bulk.blockedDiagnostics().isEmpty()
+                && bulk.blockedDiagnostics().get(0).get("diagnostics") instanceof List<?> firstDiags
+                && !firstDiags.isEmpty()
+                && firstDiags.get(0) instanceof Map<?, ?> firstDiagMap
+                && firstDiagMap.get("issueNote") != null) {
+            putIfText(bulkNode, "diagnosticText", maskMod11TaxIds(firstDiagMap.get("issueNote").toString()));
+        }
+        if (bulk.selectionPayload() != null && !bulk.selectionPayload().isEmpty()) {
+            bulkNode.set("selectionPayload", objectMapper.valueToTree(bulk.selectionPayload()));
+        }
+        if (bulk.changes() != null && !bulk.changes().isEmpty()) {
+            bulkNode.set("changes", objectMapper.valueToTree(bulk.changes()));
+        }
+        if (bulk.itemChanges() != null && !bulk.itemChanges().isEmpty()) {
+            bulkNode.set("itemChanges", objectMapper.valueToTree(bulk.itemChanges()));
+        }
+        if (bulk.uiPreviewItems() != null && !bulk.uiPreviewItems().isEmpty()) {
+            ArrayNode samples = bulkNode.putArray("sampleTargets");
+            int limit = Math.min(8, bulk.uiPreviewItems().size());
+            for (int i = 0; i < limit; i++) {
+                Map<String, Object> src = bulk.uiPreviewItems().get(i);
+                ObjectNode sNode = samples.addObject();
+                if (src.get("id") != null) {
+                    sNode.set("id", objectMapper.valueToTree(src.get("id")));
+                }
+                if (src.get("title") != null) {
+                    putIfText(sNode, "title", maskMod11TaxIds(src.get("title").toString()));
+                }
+                if (src.get("subtitle") != null) {
+                    putIfText(sNode, "subtitle", maskMod11TaxIds(src.get("subtitle").toString()));
+                }
+                if (src.get("decision") != null) {
+                    putIfText(sNode, "decision", src.get("decision").toString());
+                }
+                if (src.get("diagnostics") != null) {
+                    sNode.set("diagnostics", objectMapper.valueToTree(maskMod11Value(src.get("diagnostics"))));
+                }
+            }
+        }
+        if (bulk.blockedDiagnostics() != null && !bulk.blockedDiagnostics().isEmpty()) {
+            bulkNode.set("blockedItems", objectMapper.valueToTree(maskMod11Value(bulk.blockedDiagnostics())));
+        }
+        if (bulk.bulkContract() != null && !bulk.bulkContract().isEmpty()) {
+            bulkNode.set("bulkContract", objectMapper.valueToTree(bulk.bulkContract()));
         }
     }
 

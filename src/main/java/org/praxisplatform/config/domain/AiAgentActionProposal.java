@@ -138,6 +138,24 @@ public class AiAgentActionProposal {
     @Column(name = "execution_receipt_json", columnDefinition = "TEXT")
     private String executionReceiptJson;
 
+    @Column(name = "bulk_proposal_id", length = 120)
+    private String bulkProposalId;
+
+    @Column(name = "bulk_operation_id", length = 200)
+    private String bulkOperationId;
+
+    @Column(name = "bulk_mode", length = 40)
+    private String bulkMode;
+
+    @Column(name = "bulk_atomicity", length = 32)
+    private String bulkAtomicity;
+
+    @Column(name = "bulk_execution_id", length = 120)
+    private String bulkExecutionId;
+
+    @Column(name = "bulk_totals_json", columnDefinition = "TEXT")
+    private String bulkTotalsJson;
+
     @Column(name = "created_at", nullable = false)
     private Instant createdAt;
 

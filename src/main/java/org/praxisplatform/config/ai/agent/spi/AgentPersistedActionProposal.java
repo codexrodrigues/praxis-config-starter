@@ -11,6 +11,14 @@ public record AgentPersistedActionProposal(
         UUID proposalId,
         String proposalStatus,
         Instant expiresAt,
-        AgentPreparedAction prepared
+        AgentPreparedAction prepared,
+        AgentPreparedBulkOperation bulk
 ) {
+    public AgentPersistedActionProposal(
+            UUID proposalId,
+            String proposalStatus,
+            Instant expiresAt,
+            AgentPreparedAction prepared) {
+        this(proposalId, proposalStatus, expiresAt, prepared, null);
+    }
 }

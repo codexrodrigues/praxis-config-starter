@@ -76,6 +76,16 @@ public class PrepareActionOrMutationTool implements OperationalAgentTool {
                 ? (Map<String, Object>) map
                 : Map.of();
 
+        if ("bulk-update".equalsIgnoreCase(actionId)
+                || "bulk-update-items".equalsIgnoreCase(actionId)
+                || proposalService.isBulkCommandOrMode(context, entityKey, actionId)) {
+            return Map.of(
+                    "persistedWriteExecuted", false,
+                    "allowed", false,
+                    "blockedCode", "USE_PREPARE_BULK_OPERATION",
+                    "guidance", "Use a ferramenta 'prepare_bulk_operation' para operacoes em lote (@BulkOperation, UNIFORM_UPDATE, PER_ITEM_UPDATE ou DOMAIN_COMMAND).");
+        }
+
         AgentPersistedActionProposal persisted = proposalService.prepareAndPersist(
                 context,
                 new AgentPrepareActionRequest(entityKey, entityId, actionId, proposedInputs));

@@ -11,6 +11,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.validation.Validation;
 import jakarta.validation.Validator;
 import jakarta.validation.constraints.NotBlank;
+import java.time.Instant;
 import java.time.LocalDate;
 import java.util.Collection;
 import java.util.List;
@@ -45,7 +46,11 @@ import org.praxisplatform.config.ai.agent.spi.AgentExecuteActionRequest;
 import org.praxisplatform.config.ai.agent.spi.AgentExecutionContext;
 import org.praxisplatform.config.ai.agent.spi.AgentPrepareActionRequest;
 import org.praxisplatform.config.ai.agent.spi.AgentPreparedAction;
+import org.praxisplatform.config.ai.agent.spi.AgentPrepareBulkRequest;
+import org.praxisplatform.config.ai.agent.spi.AgentPreparedBulkOperation;
 import org.praxisplatform.config.ai.agent.spi.AgentProactiveAlert;
+import org.praxisplatform.config.ai.agent.spi.CompactAgentSchemaDigest;
+import org.praxisplatform.config.ai.agent.spi.CompactAgentSchemaDigest.BulkCapabilityDigest;
 import org.praxisplatform.config.ai.agent.spi.AgentProactiveAlertContributor;
 import org.praxisplatform.config.ai.agent.spi.AgentKnowledgeDocument;
 import org.praxisplatform.config.ai.agent.spi.AgentSimulationPreview;
@@ -69,15 +74,42 @@ import org.praxisplatform.rules.violation.SlotViolationDetail;
 import org.praxisplatform.uischema.action.ActionCatalogItem;
 import org.praxisplatform.uischema.action.ActionCatalogResponse;
 import org.praxisplatform.uischema.action.ActionCatalogService;
+import org.praxisplatform.uischema.action.ActionCollectionAtomicity;
 import org.praxisplatform.uischema.action.ActionExecutionContract;
 import org.praxisplatform.uischema.action.ActionRequirement;
 import org.praxisplatform.uischema.action.ActionRiskLevel;
 import org.praxisplatform.uischema.action.ActionScope;
+import org.praxisplatform.uischema.annotation.BulkEditable;
+import org.praxisplatform.uischema.annotation.BulkOperation;
 import org.praxisplatform.uischema.annotation.CalculationMemory;
 import org.praxisplatform.uischema.annotation.CalculationTrail;
 import org.praxisplatform.uischema.annotation.FilterCriterion;
 import org.praxisplatform.uischema.annotation.QuickFilter;
 import org.praxisplatform.uischema.annotation.WorkflowAction;
+import org.praxisplatform.uischema.bulk.BulkCommandEvaluationRequest;
+import org.praxisplatform.uischema.bulk.BulkConfirmationRequest;
+import org.praxisplatform.uischema.bulk.BulkControllerOperationIds;
+import org.praxisplatform.uischema.bulk.BulkDomainResourceAdapter;
+import org.praxisplatform.uischema.bulk.BulkExecution;
+import org.praxisplatform.uischema.bulk.BulkExecutionMode;
+import org.praxisplatform.uischema.bulk.BulkIdentityCodecs;
+import org.praxisplatform.uischema.bulk.BulkItemEvaluationRequest;
+import org.praxisplatform.uischema.bulk.BulkMode;
+import org.praxisplatform.uischema.bulk.BulkProposal;
+import org.praxisplatform.uischema.bulk.BulkProposalItemResult;
+import org.praxisplatform.uischema.bulk.BulkProposalStatus;
+import org.praxisplatform.uischema.bulk.BulkProposalTotals;
+import org.praxisplatform.uischema.bulk.BulkResourceOperation;
+import org.praxisplatform.uischema.bulk.BulkResourceOperations;
+import org.praxisplatform.uischema.bulk.BulkSelectionMode;
+import org.praxisplatform.uischema.bulk.BulkUniformEvaluationRequest;
+import org.praxisplatform.uischema.bulk.JpaResourceBulkEngine;
+import org.praxisplatform.uischema.command.ResourceCommandErrorCategory;
+import org.praxisplatform.uischema.command.ResourceCommandMessage;
+import org.praxisplatform.uischema.controller.base.AbstractBulkGovernedResourceController;
+import org.praxisplatform.uischema.openapi.CanonicalOperationRef;
+import org.praxisplatform.uischema.rest.response.RestApiResponse;
+import org.springframework.test.util.ReflectionTestUtils;
 import org.praxisplatform.uischema.fact.ResourceFact;
 import org.praxisplatform.uischema.capability.AvailabilityDecision;
 import org.praxisplatform.uischema.concurrency.ResourceVersionEtagService;
@@ -118,6 +150,7 @@ import org.praxisplatform.uischema.options.OptionSourceDescriptor;
 import org.praxisplatform.uischema.options.OptionSourceFilterRequest;
 import org.praxisplatform.uischema.options.OptionSourceRegistry;
 import org.praxisplatform.uischema.service.base.BaseResourceQueryService;
+import org.praxisplatform.uischema.service.base.BaseResourceService;
 import org.praxisplatform.uischema.stats.StatsBucketOrder;
 import org.praxisplatform.uischema.stats.StatsFieldDescriptor;
 import org.praxisplatform.uischema.stats.StatsFieldRegistry;
@@ -1935,5 +1968,325 @@ class MetadataStarterInProcessAgentBridgeTest {
                 .doesNotContain("529.982.247-25")
                 .doesNotContain("52998224725")
                 .doesNotContain("11144477735");
+    }
+
+    public static class BulkLeaveUpdateDto {
+        @UISchema(label = "Observações")
+        @BulkEditable(modes = {BulkMode.UNIFORM_UPDATE, BulkMode.PER_ITEM_UPDATE}, allowClear = true)
+        public String notes;
+        @UISchema(label = "Situação")
+        @BulkEditable(modes = {BulkMode.UNIFORM_UPDATE})
+        public String status;
+        @UISchema(label = "Campo protegido")
+        @BulkEditable(modes = {BulkMode.UNIFORM_UPDATE})
+        public String lockedNotes;
+
+        public String getNotes() { return notes; }
+        public void setNotes(String notes) { this.notes = notes; }
+        public String getStatus() { return status; }
+        public void setStatus(String status) { this.status = status; }
+        public String getLockedNotes() { return lockedNotes; }
+        public void setLockedNotes(String lockedNotes) { this.lockedNotes = lockedNotes; }
+    }
+
+    public static class ApproveBatchParams {
+        @NotBlank
+        @UISchema(label = "Portaria")
+        public String portaria;
+
+        public String getPortaria() { return portaria; }
+        public void setPortaria(String portaria) { this.portaria = portaria; }
+    }
+
+    public static class BulkLeaveFilter implements GenericFilterDTO {
+        @Filterable(operation = Filterable.FilterOperation.LIKE)
+        private String q;
+
+        public String getQ() { return q; }
+        public void setQ(String q) { this.q = q; }
+    }
+
+    @ApiResource(
+            value = "/api/workforce/bulk-leaves",
+            resourceKey = "workforce.bulk-leaves",
+            title = "Parcelas em Lote",
+            identity = @ResourceIdentity(keyField = "id", titleField = "fullName", subtitleField = "departmentName"))
+    @BulkResourceOperations(
+            updateSourceOperationId = "workforce.bulk-leaves.update",
+            protectedUpdateFields = {"lockedNotes"})
+    static class StubBulkLeaveController
+            extends AbstractBulkGovernedResourceController<NullableEmployeeDto, Long, BulkLeaveFilter, NullableEmployeeDto, BulkLeaveUpdateDto>
+            implements MetadataStarterInProcessAgentBridge.BulkEnginePort {
+        private final BaseResourceService<NullableEmployeeDto, Long, BulkLeaveFilter, NullableEmployeeDto, BulkLeaveUpdateDto> service;
+        private final MetadataStarterInProcessAgentBridge.BulkEnginePort bulkPort;
+
+        StubBulkLeaveController(
+                BaseResourceService<NullableEmployeeDto, Long, BulkLeaveFilter, NullableEmployeeDto, BulkLeaveUpdateDto> service,
+                MetadataStarterInProcessAgentBridge.BulkEnginePort bulkPort) {
+            this.service = service;
+            this.bulkPort = bulkPort;
+        }
+
+        @Override
+        protected BaseResourceService<NullableEmployeeDto, Long, BulkLeaveFilter, NullableEmployeeDto, BulkLeaveUpdateDto> getService() {
+            return service;
+        }
+
+        @Override
+        protected Long getResponseId(NullableEmployeeDto dto) {
+            return dto.getId();
+        }
+
+        @Override
+        protected JpaResourceBulkEngine<Long, BulkLeaveFilter> getBulkEngine() {
+            return null;
+        }
+
+        @Override public Object encodeWireId(Object convertedId) { return bulkPort.encodeWireId(convertedId); }
+        @Override public String currentVersion(Object convertedId) { return bulkPort.currentVersion(convertedId); }
+        @Override public BulkProposal evaluateUniform(String opId, BulkUniformEvaluationRequest<?, Object> req) { return bulkPort.evaluateUniform(opId, req); }
+        @Override public BulkProposal evaluateItems(String opId, BulkItemEvaluationRequest<?> req) { return bulkPort.evaluateItems(opId, req); }
+        @Override public BulkProposal evaluateDomainCommand(String opId, BulkCommandEvaluationRequest<Object, ?, Object> req) { return bulkPort.evaluateDomainCommand(opId, req); }
+        @Override public CursorPage<BulkProposalItemResult<Object>> proposalResults(String opId, UUID propId, int size, String after) { return bulkPort.proposalResults(opId, propId, size, after); }
+
+        @PostMapping("/bulk/approve-batch/evaluation")
+        @io.swagger.v3.oas.annotations.Operation(operationId = "workforce.bulk-leaves.approve-batch.evaluation")
+        public ResponseEntity<RestApiResponse<BulkProposal>> evalApproveBatch(
+                @RequestBody BulkCommandEvaluationRequest<ApproveBatchParams, ?, BulkLeaveFilter> req) {
+            return evaluateBulkDomainCommand("approve-batch", req);
+        }
+
+        @PostMapping("/actions/approve-batch")
+        @WorkflowAction(
+                id = "approve-batch",
+                title = "Homologar parcelas em lote",
+                description = "Homologa coletivamente",
+                scope = ActionScope.COLLECTION,
+                requiredAuthorities = {"WORKFORCE_WRITE"},
+                confirmationRequired = true,
+                atomicity = ActionCollectionAtomicity.PER_ITEM,
+                maxSelection = 50)
+        @BulkOperation(
+                mode = BulkMode.DOMAIN_COMMAND,
+                evaluationOperationId = "workforce.bulk-leaves.approve-batch.evaluation",
+                atomicity = ActionCollectionAtomicity.PER_ITEM)
+        @io.swagger.v3.oas.annotations.Operation(operationId = "workforce.bulk-leaves.approve-batch")
+        public ResponseEntity<RestApiResponse<BulkExecution>> confirmApproveBatch(
+                @RequestBody BulkConfirmationRequest req,
+                @RequestHeader("Idempotency-Key") String key) {
+            return confirmBulkDomainCommand("approve-batch", req, key);
+        }
+    }
+
+    @Test
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    void discoversBulkCapabilitiesPreparesNonTransactionallyPreservesQuotaAndScrubsFastGrounding() {
+        ObjectMapper om = new ObjectMapper().findAndRegisterModules();
+        NullableEmployeeDto r1 = new NullableEmployeeDto(101L, "Maria 529.982.247-25", "SCHEDULED");
+        NullableEmployeeDto r2 = new NullableEmployeeDto(102L, "Joao Silva", "BLOCKED");
+
+        BaseResourceService<NullableEmployeeDto, Long, BulkLeaveFilter, NullableEmployeeDto, BulkLeaveUpdateDto> service = mock(BaseResourceService.class);
+        when(service.getIdFieldName()).thenReturn("id");
+        when(service.getDefaultSort()).thenReturn(Sort.by("id"));
+        when(service.findById(101L)).thenReturn(ResourceRepresentationResult.versioned(r1, 1L));
+        when(service.findById(102L)).thenReturn(ResourceRepresentationResult.versioned(r2, 2L));
+        when(service.filter(any(), any(), any())).thenReturn(new PageImpl<>(List.of(r1, r2)));
+
+        MetadataStarterInProcessAgentBridge.BulkEnginePort engine = mock(MetadataStarterInProcessAgentBridge.BulkEnginePort.class);
+        when(engine.encodeWireId(any())).thenAnswer(inv -> String.valueOf((Object) inv.getArgument(0)));
+        when(engine.currentVersion(101L)).thenReturn("\"etag-101\"");
+        when(engine.currentVersion(102L)).thenReturn("\"etag-102\"");
+
+        StubBulkLeaveController controller = new StubBulkLeaveController(service, engine);
+        ResourceVersionEtagService etags = new ResourceVersionEtagService("unit-test-secret-0123456789abcdef012345");
+        ResourceVersionScopeProvider scopeProvider = () -> ResourceVersionScope.GLOBAL;
+        Validator validator = Validation.buildDefaultValidatorFactory().getValidator();
+
+        PlatformTransactionManager txManager = new PlatformTransactionManager() {
+            @Override
+            public TransactionStatus getTransaction(TransactionDefinition def) {
+                TransactionSynchronizationManager.setActualTransactionActive(true);
+                TransactionSynchronizationManager.setCurrentTransactionReadOnly(def != null && def.isReadOnly());
+                return new SimpleTransactionStatus();
+            }
+            @Override public void commit(TransactionStatus s) {
+                TransactionSynchronizationManager.setActualTransactionActive(false);
+                TransactionSynchronizationManager.setCurrentTransactionReadOnly(false);
+            }
+            @Override public void rollback(TransactionStatus s) {
+                TransactionSynchronizationManager.setActualTransactionActive(false);
+                TransactionSynchronizationManager.setCurrentTransactionReadOnly(false);
+            }
+        };
+
+        MetadataStarterInProcessAgentBridge bridge = new MetadataStarterInProcessAgentBridge(
+                List.of(controller),
+                List.of(ctx -> List.of(new AgentEntityDescriptor(
+                        "workforce.bulk-leaves", "workforce.bulk-leaves", "/api/workforce/bulk-leaves",
+                        "Parcelas em Lote", "Parcelas", "event",
+                        "id", "fullName", "departmentName", List.of("departmentName"),
+                        null, "fullName", null, "/bulk-leaves/{id}", "workforce", 100))),
+                List.of(), List.of(), null, null, null,
+                new DefaultMetadataGovernanceAgentAuthorizationBridge(List.of(controller)),
+                new DefaultConversionService(), om, txManager, List.of(), null, List.of(), null,
+                etags, scopeProvider, validator, List.of());
+
+        AgentExecutionContext writerCtx = new AgentExecutionContext(
+                UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID(),
+                "tenant-a", "op-1", "prod", "op-1",
+                Set.of("WORKFORCE_WRITE"),
+                "/api/workforce/bulk-leaves",
+                null,
+                Map.of("recordId", "101", "cpfHint", "529.982.247-25"),
+                Map.of());
+
+        CompactAgentSchemaDigest digest = bridge.describeEntitySchema(writerCtx, "workforce.bulk-leaves").orElseThrow();
+        BulkCapabilityDigest bulkCap = digest.bulkCapability();
+        assertThat(bulkCap).isNotNull();
+        assertThat(bulkCap.uniformUpdateSupported()).isTrue();
+        assertThat(bulkCap.perItemUpdateSupported()).isTrue();
+        assertThat(bulkCap.editableFields()).extracting(CompactAgentSchemaDigest.BulkEditableFieldDigest::name)
+                .containsExactlyInAnyOrder("notes", "status")
+                .doesNotContain("lockedNotes");
+        assertThat(bulkCap.domainCommands()).extracting(CompactAgentSchemaDigest.BulkCommandDigest::actionId)
+                .containsExactly("approve-batch");
+        // @BulkOperation method must not appear in single-item prepareAction
+        assertThatThrownBy(() -> bridge.prepareAction(
+                writerCtx, new AgentPrepareActionRequest("workforce.bulk-leaves", "101", "approve-batch", Map.of())))
+                .isInstanceOf(IllegalArgumentException.class);
+
+        // Missing required param ("portaria") returns INCOMPLETE without burning engine evaluation quota
+        AgentPreparedBulkOperation incomplete = bridge.prepareBulkOperation(
+                writerCtx,
+                new AgentPrepareBulkRequest("workforce.bulk-leaves", "DOMAIN_COMMAND", "approve-batch",
+                        "EXPLICIT", Map.of("q", "a"), List.of(), List.of(), List.of(), List.of(), Map.of(), null));
+        assertThat(incomplete.base().allowed()).isTrue();
+        assertThat(incomplete.domainProposalId()).isNull();
+        assertThat(incomplete.domainProposalStatus()).isEqualTo("INCOMPLETE");
+        assertThat(incomplete.base().missingRequiredFields()).containsExactly("portaria");
+        assertThat(incomplete.targetCount()).isEqualTo(2L);
+
+        // Protected/non-editable field rejected before calling engine
+        AgentPreparedBulkOperation deniedField = bridge.prepareBulkOperation(
+                writerCtx,
+                new AgentPrepareBulkRequest("workforce.bulk-leaves", "UNIFORM_UPDATE", null,
+                        "QUERY", Map.of("q", "a"), List.of(), List.of(),
+                        List.of(Map.of("field", "lockedNotes", "operator", "SET", "value", "x")),
+                        List.of(), Map.of(), null));
+        assertThat(deniedField.base().allowed()).isFalse();
+        assertThat(deniedField.base().blockedCode()).isEqualTo("BULK_FIELD_NOT_EDITABLE");
+
+        // Uniform QUERY evaluation runs OUTSIDE tx with confirmation operationId and Mod-11 scrubbed preview
+        String uniformConfirmOp = BulkControllerOperationIds.updateConfirmationId(StubBulkLeaveController.class, false);
+        String uniformPropId = UUID.randomUUID().toString();
+        when(engine.evaluateUniform(eq(uniformConfirmOp), any(BulkUniformEvaluationRequest.class))).thenAnswer(inv -> {
+            assertThat(TransactionSynchronizationManager.isActualTransactionActive()).isFalse();
+            BulkUniformEvaluationRequest req = inv.getArgument(1);
+            assertThat(req.selection().mode()).isEqualTo(BulkSelectionMode.QUERY);
+            return new BulkProposal(
+                    uniformPropId,
+                    new CanonicalOperationRef("workforce", uniformConfirmOp, "/api/workforce/bulk-leaves/bulk/update", "POST"),
+                    BulkMode.UNIFORM_UPDATE, BulkExecutionMode.SYNC, ActionCollectionAtomicity.PER_ITEM,
+                    BulkProposalStatus.READY, Instant.now().minusSeconds(1), Instant.now().plusSeconds(300),
+                    new BulkProposalTotals(2, 2, 2, 0), om.createObjectNode(), List.of(), List.of());
+        });
+        when(engine.proposalResults(eq(uniformConfirmOp), eq(UUID.fromString(uniformPropId)), eq(50), eq(null)))
+                .thenReturn(new CursorPage<>(List.of(
+                        new BulkProposalItemResult<>("101", BulkProposalItemResult.Decision.EXECUTABLE, List.of()),
+                        new BulkProposalItemResult<>("102", BulkProposalItemResult.Decision.EXECUTABLE, List.of())),
+                        null, null, 50));
+
+        AgentPreparedBulkOperation uniformOk = bridge.prepareBulkOperation(
+                writerCtx,
+                new AgentPrepareBulkRequest("workforce.bulk-leaves", "UNIFORM_UPDATE", null,
+                        "QUERY", Map.of("q", "a"), List.of(), List.of(),
+                        List.of(Map.of("field", "notes", "operator", "SET", "value", "Atualizado")),
+                        List.of(), Map.of(), "Teste"));
+        assertThat(uniformOk.base().allowed()).isTrue();
+        assertThat(uniformOk.domainProposalStatus()).isEqualTo("READY");
+        assertThat(uniformOk.executableCount()).isEqualTo(2L);
+        assertThat(uniformOk.modelSafePreviewItems().toString()).doesNotContain("529.982.247-25").doesNotContain("52998224725");
+
+        // Mixed PER_ITEM keeps base.allowed=true and maps blockedDiagnostics cleanly
+        String itemConfirmOp = BulkControllerOperationIds.updateConfirmationId(StubBulkLeaveController.class, true);
+        String mixedPropId = UUID.randomUUID().toString();
+        when(engine.evaluateItems(eq(itemConfirmOp), any(BulkItemEvaluationRequest.class))).thenAnswer(inv -> {
+            assertThat(TransactionSynchronizationManager.isActualTransactionActive()).isFalse();
+            return new BulkProposal(
+                    mixedPropId,
+                    new CanonicalOperationRef("workforce", itemConfirmOp, "/api/workforce/bulk-leaves/bulk/update-items", "POST"),
+                    BulkMode.PER_ITEM_UPDATE, BulkExecutionMode.SYNC, ActionCollectionAtomicity.PER_ITEM,
+                    BulkProposalStatus.BLOCKED, Instant.now().minusSeconds(1), Instant.now().plusSeconds(300),
+                    new BulkProposalTotals(2, 2, 1, 1), om.createObjectNode(),
+                    List.of(new ResourceCommandMessage(ResourceCommandErrorCategory.VALIDATION, "RULE_X", "1 item bloqueado", null, Map.of())),
+                    List.of());
+        });
+        when(engine.proposalResults(eq(itemConfirmOp), eq(UUID.fromString(mixedPropId)), eq(50), eq(null)))
+                .thenReturn(new CursorPage<>(List.of(
+                        new BulkProposalItemResult<>("101", BulkProposalItemResult.Decision.EXECUTABLE, List.of()),
+                        new BulkProposalItemResult<>("102", BulkProposalItemResult.Decision.BLOCKED,
+                                List.of(new ResourceCommandMessage(ResourceCommandErrorCategory.VALIDATION, "RULE_X", "Parcela bloqueada", null, Map.of())))),
+                        null, null, 50));
+
+        AgentPreparedBulkOperation mixed = bridge.prepareBulkOperation(
+                writerCtx,
+                new AgentPrepareBulkRequest("workforce.bulk-leaves", "PER_ITEM_UPDATE", null,
+                        "EXPLICIT", Map.of(), List.of(), List.of(), List.of(),
+                        List.of(
+                                Map.of("id", "101", "changes", List.of(Map.of("field", "notes", "operator", "SET", "value", "Ok"))),
+                                Map.of("id", "102", "changes", List.of(Map.of("field", "notes", "operator", "SET", "value", "Try")))),
+                        Map.of(), null));
+        assertThat(mixed.base().allowed()).isTrue();
+        assertThat(mixed.domainProposalStatus()).isEqualTo("BLOCKED");
+        assertThat(mixed.executableCount()).isEqualTo(1L);
+        assertThat(mixed.blockedCount()).isEqualTo(1L);
+        assertThat(mixed.blockedDiagnostics()).hasSize(1);
+        assertThat(mixed.blockedDiagnostics().get(0).get("diagnostics").toString()).contains("Parcela bloqueada");
+
+        // DOMAIN_COMMAND with filters resolves targets + currentVersion in Tx A, then evaluates EXPLICIT outside Tx
+        String cmdPropId = UUID.randomUUID().toString();
+        when(engine.evaluateDomainCommand(eq("workforce.bulk-leaves.approve-batch"), any(BulkCommandEvaluationRequest.class)))
+                .thenAnswer(inv -> {
+                    assertThat(TransactionSynchronizationManager.isActualTransactionActive()).isFalse();
+                    BulkCommandEvaluationRequest req = inv.getArgument(1);
+                    assertThat(req.selection().mode()).isEqualTo(BulkSelectionMode.EXPLICIT);
+                    assertThat(req.selection().targets()).hasSize(2);
+                    return new BulkProposal(
+                            cmdPropId,
+                            new CanonicalOperationRef("workforce", "workforce.bulk-leaves.approve-batch", "/api/workforce/bulk-leaves/actions/approve-batch", "POST"),
+                            BulkMode.DOMAIN_COMMAND, BulkExecutionMode.SYNC, ActionCollectionAtomicity.PER_ITEM,
+                            BulkProposalStatus.READY, Instant.now().minusSeconds(1), Instant.now().plusSeconds(300),
+                            new BulkProposalTotals(2, 2, 2, 0), om.createObjectNode(), List.of(), List.of());
+                });
+        when(engine.proposalResults(eq("workforce.bulk-leaves.approve-batch"), eq(UUID.fromString(cmdPropId)), eq(50), eq(null)))
+                .thenReturn(new CursorPage<>(List.of(), null, null, 50));
+
+        AgentPreparedBulkOperation cmdPrepared = bridge.prepareBulkOperation(
+                writerCtx,
+                new AgentPrepareBulkRequest("workforce.bulk-leaves", "DOMAIN_COMMAND", "approve-batch",
+                        "QUERY", Map.of("q", "a"), List.of(), List.of(), List.of(), List.of(),
+                        Map.of("portaria", "PORT-99/2026"), null));
+        assertThat(cmdPrepared.base().allowed()).isTrue();
+        assertThat(cmdPrepared.domainProposalId()).isEqualTo(cmdPropId);
+
+        // Step 2A Fast Grounding + Mod-11 scrubbing in PraxisOperationalAgentLoop
+        AiToolCallingProvider capturingProvider = new AiToolCallingProvider() {
+            @Override public String providerId() { return "gemini"; }
+            @Override public AgentModelTurnResponse generateTurn(
+                    org.praxisplatform.config.ai.agent.model.AgentModelTurnRequest request,
+                    org.praxisplatform.config.ai.agent.model.AgentModelStreamListener listener) {
+                assertThat(request.systemInstruction())
+                        .contains("Fast Grounding")
+                        .contains("prepare_bulk_operation")
+                        .contains("***.982.247-**")
+                        .doesNotContain("529.982.247-25")
+                        .doesNotContain("52998224725");
+                return new AgentModelTurnResponse("gemini", "gemini-2.5-flash", "Ok.", List.of(),
+                        new AgentTokenUsage(10, 5, 15), "stop", "resp-fg", Map.of());
+            }
+        };
+        PraxisOperationalAgentLoop loop = new PraxisOperationalAgentLoop(
+                capturingProvider, List.of(), new OperationalAssistantBlockComposer(om), 4, bridge);
+        loop.execute(writerCtx, "Explique este registro.", null, List.of(), null, null);
     }
 }

@@ -1,6 +1,7 @@
 package org.praxisplatform.config.ai.agent.bridge;
 
 import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.validation.Validator;
 import java.beans.PropertyDescriptor;
@@ -11,6 +12,7 @@ import java.lang.reflect.RecordComponent;
 import java.math.BigDecimal;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Comparator;
@@ -23,11 +25,15 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.OptionalLong;
 import java.util.Set;
+import java.util.UUID;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
 import lombok.extern.slf4j.Slf4j;
+import org.praxisplatform.config.ai.agent.bridge.BridgeActionReflectionSupport.BulkCommandEndpoint;
+import org.praxisplatform.config.ai.agent.bridge.BridgeActionReflectionSupport.BulkResourceSupport;
 import org.praxisplatform.config.ai.agent.bridge.BridgeActionReflectionSupport.DeterminationEndpoint;
 import org.praxisplatform.config.ai.agent.bridge.BridgeActionReflectionSupport.MutatingActionEndpoint;
+import org.praxisplatform.config.ai.agent.runtime.OperationalAssistantBlockComposer;
 import org.praxisplatform.config.ai.agent.spi.AgentActionAffordance;
 import org.praxisplatform.config.ai.agent.spi.AgentActionAffordanceContributor;
 import org.praxisplatform.config.ai.agent.spi.AgentActionExecutionOutcome;
@@ -46,7 +52,9 @@ import org.praxisplatform.config.ai.agent.spi.AgentExecuteActionRequest;
 import org.praxisplatform.config.ai.agent.spi.AgentExecutionContext;
 import org.praxisplatform.config.ai.agent.spi.AgentFieldDescriptor;
 import org.praxisplatform.config.ai.agent.spi.AgentPrepareActionRequest;
+import org.praxisplatform.config.ai.agent.spi.AgentPrepareBulkRequest;
 import org.praxisplatform.config.ai.agent.spi.AgentPreparedAction;
+import org.praxisplatform.config.ai.agent.spi.AgentPreparedBulkOperation;
 import org.praxisplatform.config.ai.agent.spi.AgentProactiveAlert;
 import org.praxisplatform.config.ai.agent.spi.AgentProactiveAlertContributor;
 import org.praxisplatform.config.ai.agent.spi.AgentQueryResult;
@@ -60,6 +68,7 @@ import org.praxisplatform.config.ai.agent.spi.AgentSurfaceSummary;
 import org.praxisplatform.config.ai.agent.spi.AgentTopicContributor;
 import org.praxisplatform.config.ai.agent.spi.AgentTopicDescriptor;
 import org.praxisplatform.config.ai.agent.spi.CompactAgentSchemaDigest;
+import org.praxisplatform.config.ai.agent.spi.CompactAgentSchemaDigest.BulkCapabilityDigest;
 import org.praxisplatform.config.ai.agent.spi.CompactAgentSchemaDigest.DeterminationSummary;
 import org.praxisplatform.config.ai.agent.spi.CompactAgentSchemaDigest.QuickFilterSummary;
 import org.praxisplatform.config.ai.agent.spi.CompactAgentSchemaDigest.ResourceFactSummary;
@@ -78,6 +87,22 @@ import org.praxisplatform.uischema.annotation.ApiResource;
 import org.praxisplatform.uischema.annotation.DomainGovernance;
 import org.praxisplatform.uischema.annotation.ResourceIdentity;
 import org.praxisplatform.uischema.annotation.UiOption;
+import org.praxisplatform.uischema.bulk.BulkCommandEvaluationRequest;
+import org.praxisplatform.uischema.bulk.BulkDomainResourceAdapter;
+import org.praxisplatform.uischema.bulk.BulkExecutionMode;
+import org.praxisplatform.uischema.bulk.BulkFieldChange;
+import org.praxisplatform.uischema.bulk.BulkIdentityCodec;
+import org.praxisplatform.uischema.bulk.BulkItemChange;
+import org.praxisplatform.uischema.bulk.BulkItemEvaluationRequest;
+import org.praxisplatform.uischema.bulk.BulkMode;
+import org.praxisplatform.uischema.bulk.BulkProposal;
+import org.praxisplatform.uischema.bulk.BulkProposalItemResult;
+import org.praxisplatform.uischema.bulk.BulkProposalStatus;
+import org.praxisplatform.uischema.bulk.BulkSelection;
+import org.praxisplatform.uischema.bulk.BulkSelectionMode;
+import org.praxisplatform.uischema.bulk.BulkTarget;
+import org.praxisplatform.uischema.bulk.BulkUniformEvaluationRequest;
+import org.praxisplatform.uischema.bulk.JpaResourceBulkEngine;
 import org.praxisplatform.uischema.capability.CapabilityOperation;
 import org.praxisplatform.uischema.capability.CapabilityService;
 import org.praxisplatform.uischema.capability.CapabilitySnapshot;
@@ -89,8 +114,10 @@ import org.praxisplatform.uischema.concurrency.ResourceVersionPreconditionExcept
 import org.praxisplatform.uischema.concurrency.ResourceVersionScope;
 import org.praxisplatform.uischema.concurrency.ResourceVersionScopeProvider;
 import org.praxisplatform.uischema.concurrency.ResourceVersionUpdatePrecondition;
+import org.praxisplatform.uischema.controller.base.AbstractBulkGovernedResourceController;
 import org.praxisplatform.uischema.controller.base.AbstractCreateUpdateResourceController;
 import org.praxisplatform.uischema.controller.base.AbstractResourceQueryController;
+import org.praxisplatform.uischema.dto.CursorPage;
 import org.praxisplatform.uischema.extension.annotation.UISchema;
 import org.praxisplatform.uischema.extension.annotation.UISchemaPreset;
 import org.praxisplatform.uischema.fact.ResourceFact;
@@ -132,6 +159,7 @@ import org.praxisplatform.uischema.surface.SurfaceDefinition;
 import org.praxisplatform.uischema.surface.SurfaceDefinitionRegistry;
 import org.praxisplatform.uischema.surface.SurfaceScope;
 import org.springframework.web.context.request.RequestContextHolder;
+import org.springframework.aop.framework.AopProxyUtils;
 import org.springframework.aop.support.AopUtils;
 import org.springframework.beans.BeanUtils;
 import org.springframework.beans.BeanWrapperImpl;
@@ -171,6 +199,22 @@ public class MetadataStarterInProcessAgentBridge implements AgentResourceExecuti
     private static final int MAX_RELATED_DATASETS = 4;
     private static final int MAX_RELATED_ROWS = 5;
 
+    public interface BulkEnginePort {
+        Object encodeWireId(Object convertedId);
+
+        String currentVersion(Object convertedId);
+
+        BulkProposal evaluateUniform(String operationId, BulkUniformEvaluationRequest<?, Object> request);
+
+        BulkProposal evaluateItems(String operationId, BulkItemEvaluationRequest<?> request);
+
+        BulkProposal evaluateDomainCommand(
+                String operationId, BulkCommandEvaluationRequest<Object, ?, Object> request);
+
+        CursorPage<BulkProposalItemResult<Object>> proposalResults(
+                String operationId, UUID proposalId, int size, String after);
+    }
+
     private record RegisteredResource(
             AgentEntityDescriptor descriptor,
             AbstractResourceQueryController<?, ?, ?> controller,
@@ -181,7 +225,8 @@ public class MetadataStarterInProcessAgentBridge implements AgentResourceExecuti
             List<FilterFieldMeta> filterFields,
             List<ResponseFieldMeta> responseFields,
             List<DeterminationEndpoint> determinations,
-            List<MutatingActionEndpoint> mutatingActions
+            List<MutatingActionEndpoint> mutatingActions,
+            BulkResourceSupport bulkSupport
     ) {
     }
 
@@ -701,6 +746,22 @@ public class MetadataStarterInProcessAgentBridge implements AgentResourceExecuti
     }
 
     @Override
+    public AgentPreparedBulkOperation prepareBulkOperation(
+            AgentExecutionContext context,
+            AgentPrepareBulkRequest request) {
+        if (request == null || !StringUtils.hasText(request.entityKeyOrResourcePath())) {
+            throw new IllegalArgumentException("entityKeyOrResourcePath é obrigatório para preparar operação em lote.");
+        }
+        RegisteredResource res = findResource(context, request.entityKeyOrResourcePath())
+                .orElseThrow(() -> new IllegalArgumentException(
+                        "Recurso desconhecido: " + request.entityKeyOrResourcePath()));
+        if (!authorizationBridge.canReadResource(context, res.descriptor().resourcePath())) {
+            throw new SecurityException("Access denied to resource: " + res.descriptor().resourcePath());
+        }
+        return prepareBulkOperationInternal(context, res, request);
+    }
+
+    @Override
     public AgentActionExecutionOutcome executeConfirmedAction(
             AgentExecutionContext context,
             AgentExecuteActionRequest request) {
@@ -971,6 +1032,1371 @@ public class MetadataStarterInProcessAgentBridge implements AgentResourceExecuti
                 mergedPrefill,
                 endpoint.inputFields(),
                 missingRequired);
+    }
+
+    private record BulkResolvedSelection(
+            String effectiveSelectionMode,
+            List<BulkTarget<Object>> targets,
+            GenericFilterDTO filterDto,
+            List<Object> excludedWireIds,
+            List<Map<String, Object>> normalizedSelectionTargets,
+            Map<String, Map<String, Object>> uiPreviewByWireKey,
+            Map<String, Map<String, Object>> modelPreviewByWireKey,
+            long totalMatchingCount,
+            String filterLabel,
+            String blockedCode,
+            String impedimentNote
+    ) {
+    }
+
+    @SuppressWarnings({"rawtypes", "unchecked"})
+    private AgentPreparedBulkOperation prepareBulkOperationInternal(
+            AgentExecutionContext context,
+            RegisteredResource res,
+            AgentPrepareBulkRequest request) {
+        String entityKey = res.descriptor().entityKey();
+        String resourceKey = res.descriptor().resourceKey();
+        String resourcePath = res.descriptor().resourcePath();
+        BulkResourceSupport bulk = res.bulkSupport();
+
+        String normalizedMode = normalizeBulkMode(request);
+        if (bulk == null || !bulk.bulkSupported()) {
+            return blockedBulkResult(
+                    entityKey, resourceKey, resourcePath,
+                    request.actionId() != null ? request.actionId() : "bulk",
+                    "Operação em lote",
+                    "Este recurso não publica operações em lote governadas.",
+                    normalizedMode, "PER_ITEM", "EXPLICIT",
+                    "Operação em lote", null, null,
+                    null, "BULK_UNSUPPORTED",
+                    "Este recurso não oferece operações em lote governadas.",
+                    Map.of(), List.of(), Map.of());
+        }
+
+        final String actionId;
+        final String actionTitle;
+        final String actionDescription;
+        final String operationKind;
+        final String formMode;
+        final String confirmOpId;
+        final String evalOpId;
+        final String submitUrl;
+        final String evalUrl;
+        final String schemaUrl;
+        final String atomicity;
+        final int maxTargets;
+        final Class<?> paramDtoType;
+        final List<AgentActionInputField> inputFields;
+        final BulkCommandEndpoint cmd;
+
+        if ("DOMAIN_COMMAND".equals(normalizedMode)) {
+            if (!StringUtils.hasText(request.actionId())) {
+                return blockedBulkResult(
+                        entityKey, resourceKey, resourcePath,
+                        "bulk-command", "Comando coletivo em lote", "",
+                        normalizedMode, "PER_ITEM", "EXPLICIT",
+                        "Comando coletivo", null, null,
+                        null, "BULK_ACTION_REQUIRED",
+                        "Informe actionId para preparar o comando coletivo em lote.",
+                        Map.of(), List.of(), Map.of());
+            }
+            cmd = bulk.resolveCommand(request.actionId());
+            if (cmd == null) {
+                throw new IllegalArgumentException(
+                        "Comando em lote não encontrado para " + entityKey + ": " + request.actionId());
+            }
+            actionId = cmd.actionId();
+            actionTitle = cmd.title();
+            actionDescription = cmd.description();
+            operationKind = "bulk-command";
+            formMode = "bulk-command";
+            confirmOpId = cmd.operationId();
+            evalOpId = cmd.evaluationOperationId();
+            submitUrl = cmd.confirmPath();
+            evalUrl = cmd.evaluationPath();
+            paramDtoType = cmd.parameterDtoType();
+            inputFields = cmd.inputFields();
+            schemaUrl = (paramDtoType != null && !inputFields.isEmpty())
+                    ? buildFilteredSchemaUrl(evalUrl, "POST")
+                    : null;
+            atomicity = firstNonBlank(cmd.atomicity(), "PER_ITEM");
+            maxTargets = cmd.maxTargets() > 0 ? cmd.maxTargets() : 200;
+        } else if ("PER_ITEM_UPDATE".equals(normalizedMode)) {
+            cmd = null;
+            actionId = "bulk-update-items";
+            actionTitle = "Editar itens em lote (" + res.descriptor().title() + ")";
+            actionDescription = "Atualização governada com alterações distintas por registro.";
+            operationKind = "bulk-update";
+            formMode = "bulk-edit-items";
+            confirmOpId = bulk.perItemConfirmationOperationId();
+            evalOpId = bulk.perItemEvaluationOperationId();
+            submitUrl = bulk.perItemConfirmPath();
+            evalUrl = bulk.perItemEvaluationPath();
+            paramDtoType = null;
+            inputFields = List.of();
+            schemaUrl = null;
+            atomicity = "PER_ITEM";
+            maxTargets = bulk.uniformMaxTargets() > 0 ? bulk.uniformMaxTargets() : 200;
+            if (!bulk.perItemUpdateSupported()) {
+                return blockedBulkResult(
+                        entityKey, resourceKey, resourcePath, actionId, actionTitle, actionDescription,
+                        normalizedMode, atomicity, "EXPLICIT", submitUrl, null, null,
+                        schemaUrl, "BULK_ITEMS_UNSUPPORTED",
+                        "Edição individualizada em lote não está habilitada neste recurso.",
+                        Map.of(), List.of(), Map.of());
+            }
+        } else {
+            normalizedMode = "UNIFORM_UPDATE";
+            cmd = null;
+            actionId = "bulk-update";
+            actionTitle = "Editar em lote (" + res.descriptor().title() + ")";
+            actionDescription = "Atualização uniforme governada de múltiplos registros em lote.";
+            operationKind = "bulk-update";
+            formMode = "bulk-edit-uniform";
+            confirmOpId = bulk.uniformConfirmationOperationId();
+            evalOpId = bulk.uniformEvaluationOperationId();
+            submitUrl = bulk.uniformConfirmPath();
+            evalUrl = bulk.uniformEvaluationPath();
+            paramDtoType = null;
+            inputFields = List.of();
+            schemaUrl = null;
+            atomicity = "PER_ITEM";
+            maxTargets = bulk.uniformMaxTargets() > 0 ? bulk.uniformMaxTargets() : 200;
+            if (!bulk.uniformUpdateSupported()) {
+                return blockedBulkResult(
+                        entityKey, resourceKey, resourcePath, actionId, actionTitle, actionDescription,
+                        normalizedMode, atomicity, "EXPLICIT", submitUrl, null, null,
+                        schemaUrl, "BULK_UNIFORM_UNSUPPORTED",
+                        "Edição uniforme em lote não está habilitada neste recurso.",
+                        Map.of(), List.of(), Map.of());
+            }
+        }
+
+        Map<String, Object> bulkContract = new LinkedHashMap<>();
+        bulkContract.put("evaluationUrl", evalUrl);
+        bulkContract.put("confirmUrl", submitUrl);
+        bulkContract.put("proposalUrlTemplate", bulk.proposalPath());
+        bulkContract.put("proposalResultsUrlTemplate", bulk.proposalResultsPath());
+        bulkContract.put("executionUrlTemplate", bulk.executionPath());
+        bulkContract.put("executionResultsUrlTemplate", bulk.executionResultsPath());
+        bulkContract.put("cancelUrlTemplate", bulk.cancelPath());
+        bulkContract.put("confirmOperationId", confirmOpId);
+        bulkContract.put("evaluationOperationId", evalOpId);
+        if (!bulk.editableFields().isEmpty() && !"DOMAIN_COMMAND".equals(normalizedMode)) {
+            bulkContract.put("editableFields", bulk.editableFields().stream()
+                    .map(f -> Map.of(
+                            "name", f.name(),
+                            "label", f.label() != null ? f.label() : f.name(),
+                            "controlType", f.controlType() != null ? f.controlType() : "TEXT",
+                            "modes", f.modes(),
+                            "allowClear", f.allowClear()))
+                    .toList());
+        }
+
+        boolean authorityOk = "DOMAIN_COMMAND".equals(normalizedMode)
+                ? (authorizationBridge.canInvokeAction(context, resourcePath, cmd.actionId(), null)
+                        && (cmd.requiredAuthorities().isEmpty()
+                                || (context != null && context.authorities() != null
+                                        && context.authorities().containsAll(cmd.requiredAuthorities()))))
+                : (authorizationBridge.canInvokeAction(context, resourcePath, "update", null)
+                        && authorizationBridge.canInvokeAction(context, resourcePath, actionId, null));
+        ActionGuardAssessment guard = executeIsolatedReadOnly(() -> evaluatePreparationContributors(
+                context, res.descriptor(), null, actionId, Map.of(), request.parameters()));
+        String orgId = guard != null ? trimToNull(guard.organizationId()) : null;
+        String orgLabel = guard != null ? trimToNull(guard.organizationLabel()) : null;
+        if (!authorityOk) {
+            return blockedBulkResult(
+                    entityKey, resourceKey, resourcePath, actionId, actionTitle, actionDescription,
+                    normalizedMode, atomicity, "EXPLICIT", submitUrl, orgId, orgLabel,
+                    schemaUrl, "ACCESS_DENIED",
+                    "Usuário atual não possui autoridade para executar " + actionTitle + " em lote.",
+                    Map.of(), inputFields, bulkContract);
+        }
+        if (guard != null && !guard.allowed()) {
+            return blockedBulkResult(
+                    entityKey, resourceKey, resourcePath, actionId, actionTitle, actionDescription,
+                    normalizedMode, atomicity, "EXPLICIT", submitUrl, orgId, orgLabel,
+                    schemaUrl, firstNonBlank(guard.blockedCode(), "HOST_SCOPE_BLOCKED"),
+                    firstNonBlank(guard.impedimentNote(), "Execução em lote bloqueada pelas regras de escopo ativas."),
+                    Map.of(), inputFields, bulkContract);
+        }
+
+        BulkEnginePort enginePort = resolveBulkEnginePort(res.controller());
+        if (enginePort == null) {
+            return blockedBulkResult(
+                    entityKey, resourceKey, resourcePath, actionId, actionTitle, actionDescription,
+                    normalizedMode, atomicity, "EXPLICIT", submitUrl, orgId, orgLabel,
+                    schemaUrl, "BULK_ENGINE_UNAVAILABLE",
+                    "Motor de avaliação em lote não está disponível para este recurso.",
+                    Map.of(), inputFields, bulkContract);
+        }
+
+        // Validate input changes/parameters BEFORE calling engine.evaluate* to avoid burning pending proposal quota.
+        BulkMode enumMode = BulkMode.valueOf(normalizedMode);
+        Class<?> updateDtoType = resolveUpdateDtoType(res.controller());
+        List<BulkFieldChange> uniformChanges = new ArrayList<>();
+        List<Map<String, Object>> normalizedChangesList = new ArrayList<>();
+        if ("UNIFORM_UPDATE".equals(normalizedMode)) {
+            String fieldValidationError = parseAndValidateFieldChanges(
+                    context, res, bulk, enumMode, updateDtoType, request.changes(), uniformChanges, normalizedChangesList);
+            if (fieldValidationError != null) {
+                return blockedBulkResult(
+                        entityKey, resourceKey, resourcePath, actionId, actionTitle, actionDescription,
+                        normalizedMode, atomicity, "EXPLICIT", submitUrl, orgId, orgLabel,
+                        schemaUrl, "BULK_FIELD_NOT_EDITABLE", fieldValidationError,
+                        Map.of(), inputFields, bulkContract);
+            }
+        }
+
+        Map<String, Object> mergedParams = new LinkedHashMap<>();
+        List<String> missingRequired = new ArrayList<>();
+        Object convertedParamDto = null;
+        if ("DOMAIN_COMMAND".equals(normalizedMode)) {
+            if (guard != null && !guard.enrichedPrefill().isEmpty()) {
+                mergedParams.putAll(guard.enrichedPrefill());
+            }
+            if (request.parameters() != null && !request.parameters().isEmpty()) {
+                for (Map.Entry<String, Object> entry : request.parameters().entrySet()) {
+                    if (entry.getKey() != null && entry.getValue() != null) {
+                        mergedParams.put(entry.getKey(), entry.getValue());
+                    }
+                }
+            }
+            missingRequired.addAll(BridgeActionReflectionSupport.computeMissingRequiredFields(inputFields, mergedParams));
+            if (missingRequired.isEmpty() && paramDtoType != null) {
+                if (!mergedParams.isEmpty()
+                        && !authorizationBridge.canModifyFields(context, resourcePath, paramDtoType, mergedParams.keySet())) {
+                    return blockedBulkResult(
+                            entityKey, resourceKey, resourcePath, actionId, actionTitle, actionDescription,
+                            normalizedMode, atomicity, "EXPLICIT", submitUrl, orgId, orgLabel,
+                            schemaUrl, "FIELD_EDIT_DENIED",
+                            "Usuário atual não possui permissão para informar um ou mais parâmetros do comando.",
+                            mergedParams, inputFields, bulkContract);
+                }
+                try {
+                    convertedParamDto = objectMapper.convertValue(mergedParams, paramDtoType);
+                } catch (IllegalArgumentException ex) {
+                    return blockedBulkResult(
+                            entityKey, resourceKey, resourcePath, actionId, actionTitle, actionDescription,
+                            normalizedMode, atomicity, "EXPLICIT", submitUrl, orgId, orgLabel,
+                            schemaUrl, "INVALID_INPUT_PAYLOAD",
+                            "Os parâmetros informados não puderam ser convertidos para o contrato do comando.",
+                            mergedParams, inputFields, bulkContract);
+                }
+                Map<String, String> fieldErrors = BridgeActionReflectionSupport.validateDto(validator, convertedParamDto);
+                if (!fieldErrors.isEmpty()) {
+                    String summaryErr = String.join("; ", fieldErrors.values());
+                    return blockedBulkResult(
+                            entityKey, resourceKey, resourcePath, actionId, actionTitle, actionDescription,
+                            normalizedMode, atomicity, "EXPLICIT", submitUrl, orgId, orgLabel,
+                            schemaUrl, "VALIDATION_FAILED", summaryErr,
+                            mergedParams, inputFields, bulkContract);
+                }
+            }
+        } else if ("UNIFORM_UPDATE".equals(normalizedMode) && uniformChanges.isEmpty()) {
+            missingRequired.add("changes");
+        } else if ("PER_ITEM_UPDATE".equals(normalizedMode) && (request.items() == null || request.items().isEmpty())) {
+            missingRequired.add("items");
+        }
+
+        // Tx A (isolated read-only): resolve selection targets, wire IDs, authoritative versions, and preview rows.
+        final String modeSnapshot = normalizedMode;
+        if ("PER_ITEM_UPDATE".equals(normalizedMode)) {
+            return preparePerItemBulk(
+                    context, res, bulk, updateDtoType, enginePort,
+                    request, actionId, actionTitle, actionDescription, operationKind, formMode,
+                    confirmOpId, submitUrl, schemaUrl, atomicity, maxTargets,
+                    orgId, orgLabel, missingRequired, bulkContract);
+        }
+
+        BulkResolvedSelection resolvedSelection = executeIsolatedReadOnly(() -> resolveBulkSelectionTxA(
+                context, res, enginePort, request, modeSnapshot, maxTargets));
+
+        if (resolvedSelection.blockedCode() != null) {
+            return blockedBulkResult(
+                    entityKey, resourceKey, resourcePath, actionId, actionTitle, actionDescription,
+                    normalizedMode, atomicity, resolvedSelection.effectiveSelectionMode(),
+                    submitUrl, orgId, orgLabel, schemaUrl,
+                    resolvedSelection.blockedCode(), resolvedSelection.impedimentNote(),
+                    mergedParams, inputFields, bulkContract);
+        }
+
+        Map<String, Object> selectionPayload = new LinkedHashMap<>();
+        selectionPayload.put("mode", resolvedSelection.effectiveSelectionMode());
+        if ("QUERY".equals(resolvedSelection.effectiveSelectionMode())) {
+            selectionPayload.put("filter", request.filters());
+            if (!resolvedSelection.excludedWireIds().isEmpty()) {
+                selectionPayload.put("excludedIds", resolvedSelection.excludedWireIds());
+            }
+        } else {
+            selectionPayload.put("targets", resolvedSelection.normalizedSelectionTargets());
+        }
+
+        // If required command parameters or uniform changes are missing, return PENDING/incomplete without calling evaluate* (quota safe).
+        if (!missingRequired.isEmpty()) {
+            List<Map<String, Object>> uiPreview = resolvedSelection.uiPreviewByWireKey().values().stream().limit(8).toList();
+            List<Map<String, Object>> modelPreview = resolvedSelection.modelPreviewByWireKey().values().stream()
+                    .limit(8)
+                    .map(OperationalAssistantBlockComposer::maskMod11InStructure)
+                    .toList();
+            AgentPreparedAction base = new AgentPreparedAction(
+                    entityKey, resourceKey, resourcePath, null,
+                    firstNonBlank(resolvedSelection.filterLabel(), actionTitle),
+                    res.descriptor().title(),
+                    actionId, actionTitle, actionDescription,
+                    operationKind, formMode, "POST", submitUrl, schemaUrl,
+                    "HIGH", true, true,
+                    orgId, orgLabel, "INCOMPLETE", null,
+                    true, null, null,
+                    mergedParams, inputFields, missingRequired);
+            return new AgentPreparedBulkOperation(
+                    base, null, confirmOpId, normalizedMode, atomicity,
+                    resolvedSelection.effectiveSelectionMode(), "INCOMPLETE",
+                    resolvedSelection.totalMatchingCount(), 0L, 0L, 0L,
+                    resolvedSelection.filterLabel(),
+                    selectionPayload,
+                    normalizedChangesList,
+                    List.of(),
+                    uiPreview,
+                    modelPreview,
+                    List.of(),
+                    bulkContract,
+                    null);
+        }
+
+        BulkProposal proposal;
+        CursorPage<BulkProposalItemResult<Object>> firstPage;
+        try {
+            BulkSelection<Object, Object> bulkSelection = "QUERY".equals(resolvedSelection.effectiveSelectionMode())
+                    ? new BulkSelection<>(BulkSelectionMode.QUERY, null, resolvedSelection.filterDto(), resolvedSelection.excludedWireIds())
+                    : new BulkSelection<>(BulkSelectionMode.EXPLICIT, resolvedSelection.targets(), null, null);
+            if ("DOMAIN_COMMAND".equals(normalizedMode)) {
+                BulkCommandEvaluationRequest<Object, ?, Object> evalReq = new BulkCommandEvaluationRequest<>(
+                        BulkExecutionMode.SYNC,
+                        bulkSelection,
+                        convertedParamDto != null ? convertedParamDto : Map.of());
+                proposal = enginePort.evaluateDomainCommand(confirmOpId, evalReq);
+            } else {
+                BulkUniformEvaluationRequest<?, Object> evalReq = new BulkUniformEvaluationRequest<>(
+                        BulkExecutionMode.SYNC,
+                        bulkSelection,
+                        uniformChanges);
+                proposal = enginePort.evaluateUniform(confirmOpId, evalReq);
+            }
+            firstPage = enginePort.proposalResults(confirmOpId, UUID.fromString(proposal.proposalId()), 50, null);
+        } catch (RuntimeException ex) {
+            return mapBulkEvaluationException(
+                    ex, entityKey, resourceKey, resourcePath,
+                    actionId, actionTitle, actionDescription,
+                    normalizedMode, atomicity, resolvedSelection.effectiveSelectionMode(),
+                    submitUrl, orgId, orgLabel, schemaUrl,
+                    mergedParams, inputFields, bulkContract);
+        }
+
+        return assemblePreparedBulkOperation(
+                entityKey, resourceKey, resourcePath, res.descriptor().title(),
+                actionId, actionTitle, actionDescription, operationKind, formMode,
+                submitUrl, schemaUrl, orgId, orgLabel,
+                normalizedMode, confirmOpId, atomicity, resolvedSelection.effectiveSelectionMode(),
+                resolvedSelection.filterLabel(), selectionPayload,
+                normalizedChangesList, List.of(),
+                mergedParams, inputFields, missingRequired,
+                resolvedSelection.uiPreviewByWireKey(), resolvedSelection.modelPreviewByWireKey(),
+                proposal, firstPage, bulkContract);
+    }
+
+    @SuppressWarnings({"rawtypes", "unchecked"})
+    private AgentPreparedBulkOperation preparePerItemBulk(
+            AgentExecutionContext context,
+            RegisteredResource res,
+            BulkResourceSupport bulk,
+            Class<?> updateDtoType,
+            BulkEnginePort enginePort,
+            AgentPrepareBulkRequest request,
+            String actionId,
+            String actionTitle,
+            String actionDescription,
+            String operationKind,
+            String formMode,
+            String confirmOpId,
+            String submitUrl,
+            String schemaUrl,
+            String atomicity,
+            int maxTargets,
+            String orgId,
+            String orgLabel,
+            List<String> missingRequired,
+            Map<String, Object> bulkContract) {
+        String entityKey = res.descriptor().entityKey();
+        String resourceKey = res.descriptor().resourceKey();
+        String resourcePath = res.descriptor().resourcePath();
+        if (!missingRequired.isEmpty()) {
+            AgentPreparedAction base = new AgentPreparedAction(
+                    entityKey, resourceKey, resourcePath, null,
+                    actionTitle, res.descriptor().title(),
+                    actionId, actionTitle, actionDescription,
+                    operationKind, formMode, "POST", submitUrl, schemaUrl,
+                    "HIGH", true, true,
+                    orgId, orgLabel, "INCOMPLETE", null,
+                    true, null, null,
+                    Map.of(), List.of(), missingRequired);
+            return new AgentPreparedBulkOperation(
+                    base, null, confirmOpId, BulkMode.PER_ITEM_UPDATE.name(), atomicity,
+                    "EXPLICIT", "INCOMPLETE",
+                    0L, 0L, 0L, 0L,
+                    "Edição por item",
+                    Map.of("mode", "EXPLICIT", "targets", List.of()),
+                    List.of(), List.of(), List.of(), List.of(), List.of(), bulkContract, null);
+        }
+
+        List<Map<String, Object>> rawItems = request.items();
+        if (rawItems.size() > maxTargets) {
+            return blockedBulkResult(
+                    entityKey, resourceKey, resourcePath, actionId, actionTitle, actionDescription,
+                    BulkMode.PER_ITEM_UPDATE.name(), atomicity, "EXPLICIT",
+                    submitUrl, orgId, orgLabel, schemaUrl,
+                    "BULK_TARGET_LIMIT_EXCEEDED",
+                    "A seleção contém " + rawItems.size() + " itens, acima do limite de " + maxTargets + " registros.",
+                    Map.of(), List.of(), bulkContract);
+        }
+
+        record ParsedRawItem(String rawId, List<BulkFieldChange> domainChanges, List<Map<String, Object>> normalizedChanges) {}
+        List<ParsedRawItem> parsedItems = new ArrayList<>();
+        Set<String> seenRawIds = new LinkedHashSet<>();
+        for (Map<String, Object> itemMap : rawItems) {
+            if (itemMap == null || itemMap.get("id") == null || !StringUtils.hasText(itemMap.get("id").toString())) {
+                return blockedBulkResult(
+                        entityKey, resourceKey, resourcePath, actionId, actionTitle, actionDescription,
+                        BulkMode.PER_ITEM_UPDATE.name(), atomicity, "EXPLICIT",
+                        submitUrl, orgId, orgLabel, schemaUrl,
+                        "INVALID_INPUT_PAYLOAD", "Cada item de edição em lote deve informar 'id'.",
+                        Map.of(), List.of(), bulkContract);
+            }
+            String rawId = itemMap.get("id").toString().trim();
+            if (!seenRawIds.add(rawId)) {
+                return blockedBulkResult(
+                        entityKey, resourceKey, resourcePath, actionId, actionTitle, actionDescription,
+                        BulkMode.PER_ITEM_UPDATE.name(), atomicity, "EXPLICIT",
+                        submitUrl, orgId, orgLabel, schemaUrl,
+                        "INVALID_INPUT_PAYLOAD", "Identificador duplicado na edição por item: " + rawId,
+                        Map.of(), List.of(), bulkContract);
+            }
+            List<Map<String, Object>> rawItemChanges = extractItemChangeMaps(itemMap);
+            List<BulkFieldChange> domainItemChanges = new ArrayList<>();
+            List<Map<String, Object>> normItemChanges = new ArrayList<>();
+            String err = parseAndValidateFieldChanges(
+                    context, res, bulk, BulkMode.PER_ITEM_UPDATE, updateDtoType,
+                    rawItemChanges, domainItemChanges, normItemChanges);
+            if (err != null) {
+                return blockedBulkResult(
+                        entityKey, resourceKey, resourcePath, actionId, actionTitle, actionDescription,
+                        BulkMode.PER_ITEM_UPDATE.name(), atomicity, "EXPLICIT",
+                        submitUrl, orgId, orgLabel, schemaUrl,
+                        "BULK_FIELD_NOT_EDITABLE", err,
+                        Map.of(), List.of(), bulkContract);
+            }
+            if (domainItemChanges.isEmpty()) {
+                return blockedBulkResult(
+                        entityKey, resourceKey, resourcePath, actionId, actionTitle, actionDescription,
+                        BulkMode.PER_ITEM_UPDATE.name(), atomicity, "EXPLICIT",
+                        submitUrl, orgId, orgLabel, schemaUrl,
+                        "INVALID_INPUT_PAYLOAD", "Item '" + rawId + "' não informou campos para alteração.",
+                        Map.of(), List.of(), bulkContract);
+            }
+            parsedItems.add(new ParsedRawItem(rawId, domainItemChanges, normItemChanges));
+        }
+
+        List<BulkItemChange<Object>> engineItems = new ArrayList<>();
+        List<Map<String, Object>> normalizedItemsOut = new ArrayList<>();
+        List<Map<String, Object>> selectionTargets = new ArrayList<>();
+        Map<String, Map<String, Object>> uiPreviewByWire = new LinkedHashMap<>();
+        Map<String, Map<String, Object>> modelPreviewByWire = new LinkedHashMap<>();
+        int[] missingCount = {0};
+
+        executeIsolatedReadOnly(() -> {
+            for (ParsedRawItem parsed : parsedItems) {
+                Object convertedId = tryConvertId(parsed.rawId(), res.idType());
+                if (convertedId == null) {
+                    throw new IllegalArgumentException("Identificador inválido para " + entityKey + ": " + parsed.rawId());
+                }
+                Object wireId = enginePort.encodeWireId(convertedId);
+                String wireKey = String.valueOf(wireId);
+                String expectedVersion = resolveAuthoritativeVersion(res, enginePort, convertedId);
+                ResourceRepresentationResult<?> repr = expectedVersion != null
+                        ? tryFindById(res, convertedId)
+                        : null;
+                if (repr == null || repr.body() == null || !StringUtils.hasText(expectedVersion)) {
+                    missingCount[0]++;
+                    expectedVersion = "\"missing\"";
+                }
+                String title = wireKey;
+                String subtitle = null;
+                if (repr != null && repr.body() != null) {
+                    DualProjectedPayload proj = authorizationBridge.projectRecord(
+                            context, resourcePath, res.responseDtoType(), toMap(res, repr.body()));
+                    title = extractDisplayField(proj.uiRecord(), res.descriptor().titleField(), wireKey);
+                    subtitle = trimToNull(extractDisplayField(proj.uiRecord(), res.descriptor().subtitleField(), ""));
+                    if (uiPreviewByWire.size() < 20) {
+                        uiPreviewByWire.put(wireKey, buildBulkPreviewRow(wireId, expectedVersion, title, subtitle, proj.uiRecord()));
+                        modelPreviewByWire.put(wireKey, buildBulkPreviewRow(wireId, null, title, subtitle, proj.modelSafeRecord()));
+                    }
+                } else if (uiPreviewByWire.size() < 20) {
+                    uiPreviewByWire.put(wireKey, buildBulkPreviewRow(wireId, expectedVersion, wireKey, null, Map.of()));
+                    modelPreviewByWire.put(wireKey, buildBulkPreviewRow(wireId, null, wireKey, null, Map.of()));
+                }
+                engineItems.add(new BulkItemChange<>(wireId, expectedVersion, parsed.domainChanges()));
+                Map<String, Object> itemTarget = new LinkedHashMap<>();
+                itemTarget.put("id", wireId);
+                itemTarget.put("expectedVersion", expectedVersion);
+                itemTarget.put("title", title);
+                if (subtitle != null) {
+                    itemTarget.put("subtitle", subtitle);
+                }
+                selectionTargets.add(itemTarget);
+
+                Map<String, Object> itemChangeOut = new LinkedHashMap<>();
+                itemChangeOut.put("id", wireId);
+                itemChangeOut.put("expectedVersion", expectedVersion);
+                itemChangeOut.put("title", title);
+                if (subtitle != null) {
+                    itemChangeOut.put("subtitle", subtitle);
+                }
+                itemChangeOut.put("changes", parsed.normalizedChanges());
+                normalizedItemsOut.add(itemChangeOut);
+            }
+            return null;
+        });
+
+        if (missingCount[0] == parsedItems.size()) {
+            return blockedBulkResult(
+                    entityKey, resourceKey, resourcePath, actionId, actionTitle, actionDescription,
+                    BulkMode.PER_ITEM_UPDATE.name(), atomicity, "EXPLICIT",
+                    submitUrl, orgId, orgLabel, schemaUrl,
+                    "BULK_TARGET_NOT_FOUND", "Nenhum dos registros informados foi encontrado.",
+                    Map.of(), List.of(), bulkContract);
+        }
+
+        BulkProposal proposal;
+        CursorPage<BulkProposalItemResult<Object>> firstPage;
+        try {
+            proposal = enginePort.evaluateItems(
+                    confirmOpId, new BulkItemEvaluationRequest<>(BulkExecutionMode.SYNC, engineItems));
+            firstPage = enginePort.proposalResults(confirmOpId, UUID.fromString(proposal.proposalId()), 50, null);
+        } catch (RuntimeException ex) {
+            return mapBulkEvaluationException(
+                    ex, entityKey, resourceKey, resourcePath,
+                    actionId, actionTitle, actionDescription,
+                    BulkMode.PER_ITEM_UPDATE.name(), atomicity, "EXPLICIT",
+                    submitUrl, orgId, orgLabel, schemaUrl,
+                    Map.of(), List.of(), bulkContract);
+        }
+
+        String filterLabel = normalizedItemsOut.size() + (normalizedItemsOut.size() == 1
+                ? " item selecionado para edição individual"
+                : " itens selecionados para edição individual");
+        Map<String, Object> selectionPayload = new LinkedHashMap<>();
+        selectionPayload.put("mode", "EXPLICIT");
+        selectionPayload.put("targets", selectionTargets);
+
+        return assemblePreparedBulkOperation(
+                entityKey, resourceKey, resourcePath, res.descriptor().title(),
+                actionId, actionTitle, actionDescription, operationKind, formMode,
+                submitUrl, schemaUrl, orgId, orgLabel,
+                BulkMode.PER_ITEM_UPDATE.name(), confirmOpId, atomicity, "EXPLICIT",
+                filterLabel, selectionPayload,
+                List.of(), normalizedItemsOut,
+                Map.of(), List.of(), List.of(),
+                uiPreviewByWire, modelPreviewByWire,
+                proposal, firstPage, bulkContract);
+    }
+
+    @SuppressWarnings({"rawtypes", "unchecked"})
+    private BulkResolvedSelection resolveBulkSelectionTxA(
+            AgentExecutionContext context,
+            RegisteredResource res,
+            BulkEnginePort enginePort,
+            AgentPrepareBulkRequest request,
+            String normalizedMode,
+            int maxTargets) {
+        String resourcePath = res.descriptor().resourcePath();
+        boolean hasTargetIds = request.targetIds() != null && !request.targetIds().isEmpty();
+        boolean hasFilters = request.filters() != null && !request.filters().isEmpty();
+        if (!hasTargetIds && !hasFilters) {
+            return new BulkResolvedSelection("EXPLICIT", List.of(), null, List.of(), List.of(),
+                    Map.of(), Map.of(), 0, null, "BULK_SELECTION_REQUIRED",
+                    "Informe os registros-alvo ('targetIds') ou critérios de filtro ('filters') para preparar a operação em lote.");
+        }
+        String requestedSelMode = StringUtils.hasText(request.selectionMode())
+                ? request.selectionMode().trim().toUpperCase(Locale.ROOT)
+                : (hasTargetIds ? "EXPLICIT" : "QUERY");
+
+        if (!"EXPLICIT".equals(requestedSelMode) && !"QUERY".equals(requestedSelMode)) {
+            return new BulkResolvedSelection("EXPLICIT", List.of(), null, List.of(), List.of(),
+                    Map.of(), Map.of(), 0, null, "INVALID_SELECTION_MODE",
+                    "selectionMode deve ser EXPLICIT ou QUERY.");
+        }
+        if ("EXPLICIT".equals(requestedSelMode) && !hasTargetIds) {
+            if (hasFilters) {
+                requestedSelMode = "QUERY";
+            } else {
+                return new BulkResolvedSelection("EXPLICIT", List.of(), null, List.of(), List.of(),
+                        Map.of(), Map.of(), 0, null, "BULK_SELECTION_REQUIRED",
+                        "Informe 'targetIds' para seleção explícita em lote (ou use selectionMode='QUERY' com 'filters').");
+            }
+        }
+
+        if ("EXPLICIT".equals(requestedSelMode) && hasTargetIds) {
+            if (request.targetIds().size() > maxTargets) {
+                return new BulkResolvedSelection("EXPLICIT", List.of(), null, List.of(), List.of(),
+                        Map.of(), Map.of(), request.targetIds().size(), null, "BULK_TARGET_LIMIT_EXCEEDED",
+                        "A seleção contém " + request.targetIds().size() + " registros, acima do limite de " + maxTargets + ".");
+            }
+            List<BulkTarget<Object>> targets = new ArrayList<>();
+            List<Map<String, Object>> normalizedTargets = new ArrayList<>();
+            Map<String, Map<String, Object>> uiPreviewByWire = new LinkedHashMap<>();
+            Map<String, Map<String, Object>> modelPreviewByWire = new LinkedHashMap<>();
+            Set<String> seenWire = new LinkedHashSet<>();
+            int foundCount = 0;
+            for (String rawId : request.targetIds()) {
+                if (!StringUtils.hasText(rawId)) {
+                    continue;
+                }
+                Object convertedId = tryConvertId(rawId.trim(), res.idType());
+                if (convertedId == null) {
+                    return new BulkResolvedSelection("EXPLICIT", List.of(), null, List.of(), List.of(),
+                            Map.of(), Map.of(), 0, null, "INVALID_TARGET_ID",
+                            "Identificador inválido na seleção em lote: " + rawId);
+                }
+                Object wireId = enginePort.encodeWireId(convertedId);
+                String wireKey = String.valueOf(wireId);
+                if (!seenWire.add(wireKey)) {
+                    continue;
+                }
+                String expectedVersion = resolveAuthoritativeVersion(res, enginePort, convertedId);
+                ResourceRepresentationResult<?> repr = expectedVersion != null ? tryFindById(res, convertedId) : null;
+                if (repr == null || repr.body() == null || !StringUtils.hasText(expectedVersion)) {
+                    expectedVersion = "\"missing\"";
+                } else {
+                    foundCount++;
+                }
+                String title = wireKey;
+                String subtitle = null;
+                if (repr != null && repr.body() != null) {
+                    DualProjectedPayload proj = authorizationBridge.projectRecord(
+                            context, resourcePath, res.responseDtoType(), toMap(res, repr.body()));
+                    title = extractDisplayField(proj.uiRecord(), res.descriptor().titleField(), wireKey);
+                    subtitle = trimToNull(extractDisplayField(proj.uiRecord(), res.descriptor().subtitleField(), ""));
+                    if (uiPreviewByWire.size() < 20) {
+                        uiPreviewByWire.put(wireKey, buildBulkPreviewRow(wireId, expectedVersion, title, subtitle, proj.uiRecord()));
+                        modelPreviewByWire.put(wireKey, buildBulkPreviewRow(wireId, null, title, subtitle, proj.modelSafeRecord()));
+                    }
+                } else if (uiPreviewByWire.size() < 20) {
+                    uiPreviewByWire.put(wireKey, buildBulkPreviewRow(wireId, expectedVersion, wireKey, null, Map.of()));
+                    modelPreviewByWire.put(wireKey, buildBulkPreviewRow(wireId, null, wireKey, null, Map.of()));
+                }
+                targets.add(new BulkTarget<>(wireId, expectedVersion));
+                Map<String, Object> tMap = new LinkedHashMap<>();
+                tMap.put("id", wireId);
+                tMap.put("expectedVersion", expectedVersion);
+                tMap.put("title", title);
+                if (subtitle != null) {
+                    tMap.put("subtitle", subtitle);
+                }
+                normalizedTargets.add(tMap);
+            }
+            if (targets.isEmpty() || foundCount == 0) {
+                return new BulkResolvedSelection("EXPLICIT", List.of(), null, List.of(), List.of(),
+                        Map.of(), Map.of(), 0, null, "BULK_TARGET_NOT_FOUND",
+                        "Nenhum registro válido foi encontrado para os identificadores informados.");
+            }
+            String label = targets.size() + (targets.size() == 1 ? " registro selecionado" : " registros selecionados");
+            return new BulkResolvedSelection("EXPLICIT", targets, null, List.of(), normalizedTargets,
+                    uiPreviewByWire, modelPreviewByWire, targets.size(), label, null, null);
+        }
+
+        // QUERY mode (or EXPLICIT on DOMAIN_COMMAND resolved via filters).
+        GenericFilterDTO filterDto = populateFilterDto(res, request.filters());
+        if (filterDto == null) {
+            return new BulkResolvedSelection("EXPLICIT", List.of(), null, List.of(), List.of(),
+                    Map.of(), Map.of(), 0, null, "BULK_FILTER_UNAVAILABLE",
+                    "Este recurso não expõe contrato de filtro para seleção em lote.");
+        }
+
+        Set<String> excludedWireKeys = new LinkedHashSet<>();
+        List<Object> excludedWireIds = new ArrayList<>();
+        if (request.excludedIds() != null) {
+            for (String exRaw : request.excludedIds()) {
+                if (!StringUtils.hasText(exRaw)) {
+                    continue;
+                }
+                Object exConv = tryConvertId(exRaw.trim(), res.idType());
+                if (exConv == null) {
+                    return new BulkResolvedSelection("QUERY", List.of(), filterDto, List.of(), List.of(),
+                            Map.of(), Map.of(), 0, null, "INVALID_TARGET_ID",
+                            "Identificador inválido em excludedIds: " + exRaw);
+                }
+                Object wireId = enginePort.encodeWireId(exConv);
+                if (excludedWireKeys.add(String.valueOf(wireId))) {
+                    excludedWireIds.add(wireId);
+                }
+            }
+        }
+
+        BaseResourceQueryService service = res.service();
+        int queryLimit = Math.min(maxTargets + excludedWireIds.size() + 1, 500);
+        Page<?> page = service.filter(filterDto, PageRequest.of(0, queryLimit, service.getDefaultSort()), null);
+        List<BulkTarget<Object>> resolvedTargets = new ArrayList<>();
+        List<Map<String, Object>> normalizedTargets = new ArrayList<>();
+        Map<String, Map<String, Object>> uiPreviewByWire = new LinkedHashMap<>();
+        Map<String, Map<String, Object>> modelPreviewByWire = new LinkedHashMap<>();
+        for (Object dto : page.getContent()) {
+            Object rawId = extractIdValue(res, dto);
+            if (rawId == null) {
+                continue;
+            }
+            Object wireId = enginePort.encodeWireId(rawId);
+            String wireKey = String.valueOf(wireId);
+            if (excludedWireKeys.contains(wireKey)) {
+                continue;
+            }
+            if (resolvedTargets.size() >= maxTargets) {
+                return new BulkResolvedSelection(
+                        "DOMAIN_COMMAND".equals(normalizedMode) ? "EXPLICIT" : "QUERY",
+                        List.of(), filterDto, excludedWireIds, List.of(),
+                        Map.of(), Map.of(), page.getTotalElements(), null, "BULK_TARGET_LIMIT_EXCEEDED",
+                        "A seleção retornou mais de " + maxTargets + " registros (total estimado: "
+                                + page.getTotalElements() + "). Refine os filtros antes de prosseguir.");
+            }
+            String expectedVersion = "DOMAIN_COMMAND".equals(normalizedMode)
+                    ? resolveAuthoritativeVersion(res, enginePort, rawId)
+                    : null;
+            if ("DOMAIN_COMMAND".equals(normalizedMode)) {
+                if (!StringUtils.hasText(expectedVersion)) {
+                    expectedVersion = "\"missing\"";
+                }
+                resolvedTargets.add(new BulkTarget<>(wireId, expectedVersion));
+            }
+            DualProjectedPayload proj = authorizationBridge.projectRecord(
+                    context, resourcePath, res.responseDtoType(), toMap(res, dto));
+            String title = extractDisplayField(proj.uiRecord(), res.descriptor().titleField(), wireKey);
+            String subtitle = trimToNull(extractDisplayField(proj.uiRecord(), res.descriptor().subtitleField(), ""));
+            if (uiPreviewByWire.size() < 20) {
+                uiPreviewByWire.put(wireKey, buildBulkPreviewRow(wireId, expectedVersion, title, subtitle, proj.uiRecord()));
+                modelPreviewByWire.put(wireKey, buildBulkPreviewRow(wireId, null, title, subtitle, proj.modelSafeRecord()));
+            }
+            if ("DOMAIN_COMMAND".equals(normalizedMode)) {
+                Map<String, Object> tMap = new LinkedHashMap<>();
+                tMap.put("id", wireId);
+                tMap.put("expectedVersion", expectedVersion);
+                tMap.put("title", title);
+                if (subtitle != null) {
+                    tMap.put("subtitle", subtitle);
+                }
+                normalizedTargets.add(tMap);
+            }
+        }
+
+        long matchedCount = "DOMAIN_COMMAND".equals(normalizedMode)
+                ? resolvedTargets.size()
+                : Math.max(0L, page.getTotalElements() - excludedWireIds.size());
+        if (matchedCount == 0L || ("DOMAIN_COMMAND".equals(normalizedMode) && resolvedTargets.isEmpty())) {
+            return new BulkResolvedSelection(
+                    "DOMAIN_COMMAND".equals(normalizedMode) ? "EXPLICIT" : "QUERY",
+                    List.of(), filterDto, excludedWireIds, List.of(),
+                    Map.of(), Map.of(), 0, null, "EMPTY_SELECTION",
+                    "Nenhum registro encontrado para os filtros informados.");
+        }
+        String effectiveMode = "DOMAIN_COMMAND".equals(normalizedMode) ? "EXPLICIT" : "QUERY";
+        String filterLabel = matchedCount + (matchedCount == 1
+                ? " registro selecionado por filtro"
+                : " registros selecionados por filtro");
+        return new BulkResolvedSelection(
+                effectiveMode,
+                resolvedTargets,
+                filterDto,
+                excludedWireIds,
+                normalizedTargets,
+                uiPreviewByWire,
+                modelPreviewByWire,
+                matchedCount,
+                filterLabel,
+                null,
+                null);
+    }
+
+    private AgentPreparedBulkOperation assemblePreparedBulkOperation(
+            String entityKey,
+            String resourceKey,
+            String resourcePath,
+            String resourceTitle,
+            String actionId,
+            String actionTitle,
+            String actionDescription,
+            String operationKind,
+            String formMode,
+            String submitUrl,
+            String schemaUrl,
+            String orgId,
+            String orgLabel,
+            String normalizedMode,
+            String confirmOpId,
+            String atomicity,
+            String selectionMode,
+            String filterLabel,
+            Map<String, Object> selectionPayload,
+            List<Map<String, Object>> normalizedChanges,
+            List<Map<String, Object>> normalizedItemChanges,
+            Map<String, Object> mergedParams,
+            List<AgentActionInputField> inputFields,
+            List<String> missingRequired,
+            Map<String, Map<String, Object>> uiPreviewByWire,
+            Map<String, Map<String, Object>> modelPreviewByWire,
+            BulkProposal proposal,
+            CursorPage<BulkProposalItemResult<Object>> firstPage,
+            Map<String, Object> bulkContract) {
+        String domainStatus = proposal.status() != null ? proposal.status().name() : BulkProposalStatus.BLOCKED.name();
+        long targetCount = proposal.totals().targetCount();
+        long evaluatedCount = proposal.totals().evaluated();
+        long executableCount = proposal.totals().executable();
+        long blockedCount = proposal.totals().blocked();
+
+        List<Map<String, Object>> uiPreviewItems = new ArrayList<>();
+        List<Map<String, Object>> modelSafePreviewItems = new ArrayList<>();
+        List<Map<String, Object>> blockedDiagnostics = new ArrayList<>();
+        String firstBlockReason = null;
+
+        if (firstPage != null && firstPage.content() != null) {
+            for (BulkProposalItemResult<Object> item : firstPage.content()) {
+                String wireKey = String.valueOf(item.id());
+                String decision = item.decision() != null ? item.decision().name() : "BLOCKED";
+                Map<String, Object> baseUi = uiPreviewByWire.getOrDefault(wireKey, Map.of("id", item.id(), "title", wireKey));
+                Map<String, Object> baseModel = modelPreviewByWire.getOrDefault(wireKey, Map.of("id", item.id(), "title", wireKey));
+
+                List<Map<String, Object>> diags = new ArrayList<>();
+                if (item.diagnostics() != null) {
+                    for (var d : item.diagnostics()) {
+                        Map<String, Object> diagMap = new LinkedHashMap<>();
+                        if (StringUtils.hasText(d.code())) diagMap.put("code", d.code());
+                        if (d.category() != null) diagMap.put("category", d.category().name());
+                        if (StringUtils.hasText(d.message())) diagMap.put("issueNote", d.message());
+                        if (StringUtils.hasText(d.target())) diagMap.put("field", d.target());
+                        diags.add(diagMap);
+                        if (firstBlockReason == null && StringUtils.hasText(d.message())) {
+                            firstBlockReason = d.message();
+                        }
+                    }
+                }
+
+                if (uiPreviewItems.size() < 8) {
+                    Map<String, Object> uiEntry = new LinkedHashMap<>(baseUi);
+                    uiEntry.put("decision", decision);
+                    if (!diags.isEmpty()) {
+                        uiEntry.put("diagnostics", diags);
+                    }
+                    uiPreviewItems.add(uiEntry);
+
+                    Map<String, Object> modelEntry = new LinkedHashMap<>(baseModel);
+                    modelEntry.put("decision", decision);
+                    if (!diags.isEmpty()) {
+                        modelEntry.put("diagnostics", diags);
+                    }
+                    modelSafePreviewItems.add(OperationalAssistantBlockComposer.maskMod11InStructure(modelEntry));
+                }
+
+                if ("BLOCKED".equals(decision) && blockedDiagnostics.size() < 20) {
+                    Map<String, Object> blockedEntry = new LinkedHashMap<>();
+                    blockedEntry.put("id", item.id());
+                    blockedEntry.put("title", baseUi.getOrDefault("title", wireKey));
+                    blockedEntry.put("decision", decision);
+                    blockedEntry.put("diagnostics", diags);
+                    blockedDiagnostics.add(blockedEntry);
+                }
+            }
+        }
+
+        if (firstBlockReason == null && proposal.diagnostics() != null && !proposal.diagnostics().isEmpty()) {
+            firstBlockReason = proposal.diagnostics().get(0).message();
+        }
+
+        String blockedCode = null;
+        String impedimentNote = null;
+        if ("BLOCKED".equals(domainStatus)) {
+            if (executableCount == 0L) {
+                blockedCode = "BULK_NO_EXECUTABLE_TARGETS";
+                impedimentNote = firstNonBlank(
+                        firstBlockReason,
+                        "Nenhum registro da seleção está elegível para executar esta operação em lote.");
+            } else if ("ATOMIC".equalsIgnoreCase(atomicity)) {
+                blockedCode = "BULK_ATOMIC_BLOCKED";
+                impedimentNote = firstNonBlank(
+                        firstBlockReason,
+                        "O comando exige execução atômica, mas " + blockedCount + " registro(s) estão impedidos.");
+            } else {
+                impedimentNote = firstNonBlank(
+                        firstBlockReason,
+                        blockedCount + " de " + targetCount + " registro(s) com impedimento; revise e prossiga apenas com os " + executableCount + " elegíveis.");
+            }
+        }
+
+        AgentPreparedAction base = new AgentPreparedAction(
+                entityKey,
+                resourceKey,
+                resourcePath,
+                null,
+                firstNonBlank(filterLabel, actionTitle),
+                resourceTitle,
+                actionId,
+                actionTitle,
+                actionDescription,
+                operationKind,
+                formMode,
+                "POST",
+                submitUrl,
+                schemaUrl,
+                "HIGH",
+                true,
+                true,
+                orgId,
+                orgLabel,
+                domainStatus,
+                proposal.proposalId(),
+                true,
+                blockedCode,
+                impedimentNote,
+                mergedParams,
+                inputFields,
+                missingRequired);
+
+        return new AgentPreparedBulkOperation(
+                base,
+                proposal.proposalId(),
+                confirmOpId,
+                normalizedMode,
+                atomicity,
+                selectionMode,
+                domainStatus,
+                targetCount,
+                evaluatedCount,
+                executableCount,
+                blockedCount,
+                filterLabel,
+                selectionPayload,
+                normalizedChanges,
+                normalizedItemChanges,
+                uiPreviewItems,
+                modelSafePreviewItems,
+                blockedDiagnostics,
+                bulkContract,
+                proposal.expiresAt());
+    }
+
+    private static String normalizeBulkMode(AgentPrepareBulkRequest request) {
+        if (request == null) {
+            return "UNIFORM_UPDATE";
+        }
+        if (StringUtils.hasText(request.bulkMode())) {
+            return request.bulkMode().trim().toUpperCase(Locale.ROOT);
+        }
+        if (StringUtils.hasText(request.actionId())) {
+            return "DOMAIN_COMMAND";
+        }
+        if (request.items() != null && !request.items().isEmpty()) {
+            return "PER_ITEM_UPDATE";
+        }
+        return "UNIFORM_UPDATE";
+    }
+
+    private String parseAndValidateFieldChanges(
+            AgentExecutionContext context,
+            RegisteredResource res,
+            BulkResourceSupport bulk,
+            BulkMode mode,
+            Class<?> updateDtoType,
+            List<Map<String, Object>> rawChanges,
+            List<BulkFieldChange> outDomainChanges,
+            List<Map<String, Object>> outNormalized) {
+        if (rawChanges == null || rawChanges.isEmpty()) {
+            return null;
+        }
+        Set<String> touchedFields = new LinkedHashSet<>();
+        for (Map<String, Object> ch : rawChanges) {
+            if (ch == null || ch.get("field") == null || !StringUtils.hasText(ch.get("field").toString())) {
+                return "Cada alteração em lote deve informar 'field'.";
+            }
+            String field = ch.get("field").toString().trim();
+            if (!touchedFields.add(field)) {
+                return "Campo duplicado nas alterações em lote: " + field;
+            }
+            if (bulk.protectedUpdateFields().contains(field) || !bulk.isEditableField(field, mode)) {
+                return "O campo '" + field + "' não é editável no modo em lote " + mode.name() + ".";
+            }
+            String opRaw = ch.get("operator") != null && StringUtils.hasText(ch.get("operator").toString())
+                    ? ch.get("operator").toString().trim().toUpperCase(Locale.ROOT)
+                    : (ch.get("value") == null ? "CLEAR" : "SET");
+            if ("CLEAR".equals(opRaw)) {
+                if (!bulk.isClearAllowed(field, mode)) {
+                    return "O campo '" + field + "' não permite limpeza (CLEAR) em lote.";
+                }
+                outDomainChanges.add(BulkFieldChange.clear(field));
+                Map<String, Object> norm = new LinkedHashMap<>();
+                norm.put("field", field);
+                norm.put("operator", "CLEAR");
+                outNormalized.add(norm);
+            } else if ("SET".equals(opRaw)) {
+                Object val = ch.get("value");
+                if (val == null) {
+                    return "Alteração SET para '" + field + "' requer valor não nulo.";
+                }
+                JsonNode valNode = val instanceof JsonNode jn ? jn : objectMapper.valueToTree(val);
+                if (valNode == null || valNode.isNull() || valNode.isMissingNode()) {
+                    return "Alteração SET para '" + field + "' requer valor JSON válido.";
+                }
+                outDomainChanges.add(BulkFieldChange.set(field, valNode));
+                Map<String, Object> norm = new LinkedHashMap<>();
+                norm.put("field", field);
+                norm.put("operator", "SET");
+                norm.put("value", val);
+                outNormalized.add(norm);
+            } else {
+                return "Operador em lote não suportado para '" + field + "': " + opRaw;
+            }
+        }
+        if (updateDtoType != null
+                && !touchedFields.isEmpty()
+                && !authorizationBridge.canModifyFields(context, res.descriptor().resourcePath(), updateDtoType, touchedFields)) {
+            return "Usuário atual não possui permissão para alterar um ou mais campos solicitados em lote.";
+        }
+        return null;
+    }
+
+    @SuppressWarnings("unchecked")
+    private static List<Map<String, Object>> extractItemChangeMaps(Map<String, Object> itemMap) {
+        if (itemMap.get("changes") instanceof List<?> rawList) {
+            List<Map<String, Object>> out = new ArrayList<>();
+            for (Object elem : rawList) {
+                if (elem instanceof Map<?, ?> m) {
+                    Map<String, Object> copy = new LinkedHashMap<>();
+                    m.forEach((k, v) -> {
+                        if (k != null) copy.put(k.toString(), v);
+                    });
+                    out.add(copy);
+                }
+            }
+            return out;
+        }
+        if (itemMap.get("fields") instanceof Map<?, ?> fieldsMap) {
+            List<Map<String, Object>> out = new ArrayList<>();
+            for (Map.Entry<?, ?> entry : fieldsMap.entrySet()) {
+                if (entry.getKey() == null) {
+                    continue;
+                }
+                Map<String, Object> single = new LinkedHashMap<>();
+                single.put("field", entry.getKey().toString());
+                single.put("operator", entry.getValue() == null ? "CLEAR" : "SET");
+                if (entry.getValue() != null) {
+                    single.put("value", entry.getValue());
+                }
+                out.add(single);
+            }
+            return out;
+        }
+        if (itemMap.get("field") != null) {
+            return List.of(itemMap);
+        }
+        return List.of();
+    }
+
+    @SuppressWarnings({"rawtypes", "unchecked"})
+    private String resolveAuthoritativeVersion(
+            RegisteredResource res,
+            BulkEnginePort enginePort,
+            Object convertedId) {
+        if (enginePort != null) {
+            try {
+                String v = enginePort.currentVersion(convertedId);
+                if (StringUtils.hasText(v)) {
+                    return v;
+                }
+            } catch (RuntimeException ignored) {
+            }
+        }
+        if (resourceVersionEtagService != null && StringUtils.hasText(res.descriptor().resourceKey())) {
+            OptionalLong ver = OptionalLong.empty();
+            try {
+                ResourceRepresentationResult<?> repr = ((BaseResourceQueryService) res.service()).findById(convertedId);
+                ver = repr != null ? repr.persistedVersion() : OptionalLong.empty();
+            } catch (RuntimeException ignored) {
+            }
+            if (ver.isPresent()) {
+                return resourceVersionEtagService.create(
+                        currentResourceVersionScope(), res.descriptor().resourceKey(), convertedId, ver.getAsLong());
+            }
+        }
+        return null;
+    }
+
+    @SuppressWarnings({"rawtypes", "unchecked"})
+    private ResourceRepresentationResult<?> tryFindById(RegisteredResource res, Object convertedId) {
+        try {
+            return ((BaseResourceQueryService) res.service()).findById(convertedId);
+        } catch (RuntimeException ex) {
+            return null;
+        }
+    }
+
+    private static Map<String, Object> buildBulkPreviewRow(
+            Object wireId,
+            String expectedVersion,
+            String title,
+            String subtitle,
+            Map<String, Object> fields) {
+        Map<String, Object> row = new LinkedHashMap<>();
+        row.put("id", wireId);
+        if (StringUtils.hasText(expectedVersion)) {
+            row.put("expectedVersion", expectedVersion);
+        }
+        row.put("title", firstNonBlank(title, String.valueOf(wireId)));
+        if (StringUtils.hasText(subtitle)) {
+            row.put("subtitle", subtitle);
+        }
+        if (fields != null && !fields.isEmpty()) {
+            row.put("fields", fields);
+        }
+        return row;
+    }
+
+    @SuppressWarnings({"rawtypes", "unchecked"})
+    static BulkEnginePort resolveBulkEnginePort(
+            AbstractResourceQueryController<?, ?, ?> controller) {
+        if (!(controller instanceof AbstractBulkGovernedResourceController<?, ?, ?, ?, ?>)) {
+            return null;
+        }
+        Object target = AopProxyUtils.getSingletonTarget(controller);
+        Object targetObj = target != null ? target : controller;
+        if (targetObj instanceof BulkEnginePort port) {
+            return port;
+        }
+        JpaResourceBulkEngine<Object, Object> engine = extractBulkEngine(controller);
+        if (engine == null) {
+            return null;
+        }
+        BulkIdentityCodec<Object, Object> codec = extractEngineField(engine, "codec", BulkIdentityCodec.class);
+        BulkDomainResourceAdapter<Object, Object> domain = extractEngineField(engine, "domain", BulkDomainResourceAdapter.class);
+        if (codec == null || domain == null) {
+            return null;
+        }
+        return new BulkEnginePort() {
+            @Override
+            public Object encodeWireId(Object convertedId) {
+                return codec.encode(convertedId);
+            }
+
+            @Override
+            public String currentVersion(Object convertedId) {
+                return domain.currentVersion(convertedId);
+            }
+
+            @Override
+            public BulkProposal evaluateUniform(
+                    String operationId, BulkUniformEvaluationRequest<?, Object> request) {
+                return engine.evaluateUniform(operationId, request);
+            }
+
+            @Override
+            public BulkProposal evaluateItems(String operationId, BulkItemEvaluationRequest<?> request) {
+                return engine.evaluateItems(operationId, request);
+            }
+
+            @Override
+            public BulkProposal evaluateDomainCommand(
+                    String operationId, BulkCommandEvaluationRequest<Object, ?, Object> request) {
+                return engine.evaluateDomainCommand(operationId, request);
+            }
+
+            @Override
+            public CursorPage<BulkProposalItemResult<Object>> proposalResults(
+                    String operationId, UUID proposalId, int size, String after) {
+                return engine.proposalResults(operationId, proposalId, size, after);
+            }
+        };
+    }
+
+    @SuppressWarnings("unchecked")
+    private static JpaResourceBulkEngine<Object, Object> extractBulkEngine(
+            AbstractResourceQueryController<?, ?, ?> controller) {
+        if (!(controller instanceof AbstractBulkGovernedResourceController<?, ?, ?, ?, ?>)) {
+            return null;
+        }
+        Object target = AopProxyUtils.getSingletonTarget(controller);
+        Object targetObj = target != null ? target : controller;
+        Class<?> targetClass = AopUtils.getTargetClass(targetObj);
+        Method getter = ReflectionUtils.findMethod(targetClass, "getBulkEngine");
+        if (getter == null) {
+            getter = ReflectionUtils.findMethod(AbstractBulkGovernedResourceController.class, "getBulkEngine");
+        }
+        if (getter == null) {
+            return null;
+        }
+        ReflectionUtils.makeAccessible(getter);
+        Object engine = ReflectionUtils.invokeMethod(getter, targetObj);
+        return engine instanceof JpaResourceBulkEngine<?, ?> bulkEngine
+                ? (JpaResourceBulkEngine<Object, Object>) bulkEngine
+                : null;
+    }
+
+    @SuppressWarnings("unchecked")
+    private static <T> T extractEngineField(JpaResourceBulkEngine<?, ?> engine, String fieldName, Class<T> type) {
+        if (engine == null) {
+            return null;
+        }
+        Field field = ReflectionUtils.findField(JpaResourceBulkEngine.class, fieldName);
+        if (field == null) {
+            return null;
+        }
+        ReflectionUtils.makeAccessible(field);
+        Object value = ReflectionUtils.getField(field, engine);
+        return type.isInstance(value) ? (T) value : null;
+    }
+
+    private static Class<?> resolveUpdateDtoType(AbstractResourceQueryController<?, ?, ?> controller) {
+        if (controller == null) {
+            return null;
+        }
+        Class<?> targetClass = AopUtils.getTargetClass(controller);
+        if (!AbstractCreateUpdateResourceController.class.isAssignableFrom(targetClass)) {
+            return null;
+        }
+        return ResolvableType.forClass(targetClass).as(AbstractCreateUpdateResourceController.class)
+                .getGeneric(4).resolve(Object.class);
+    }
+
+    private AgentPreparedBulkOperation mapBulkEvaluationException(
+            RuntimeException ex,
+            String entityKey,
+            String resourceKey,
+            String resourcePath,
+            String actionId,
+            String actionTitle,
+            String actionDescription,
+            String bulkMode,
+            String atomicity,
+            String selectionMode,
+            String submitUrl,
+            String orgId,
+            String orgLabel,
+            String schemaUrl,
+            Map<String, Object> prefill,
+            List<AgentActionInputField> inputFields,
+            Map<String, Object> bulkContract) {
+        String className = ex.getClass().getName();
+        if (ex instanceof SecurityException
+                || className.endsWith(".AccessDeniedException")
+                || className.endsWith(".AuthorizationDeniedException")) {
+            return blockedBulkResult(
+                    entityKey, resourceKey, resourcePath, actionId, actionTitle, actionDescription,
+                    bulkMode, atomicity, selectionMode, submitUrl, orgId, orgLabel, schemaUrl,
+                    "ACCESS_DENIED",
+                    firstNonBlank(ex.getMessage(), "Autoridade insuficiente ou escopo somente leitura para operação em lote."),
+                    prefill, inputFields, bulkContract);
+        }
+        if (ex instanceof ResponseStatusException rse) {
+            int status = rse.getStatusCode().value();
+            String code = switch (status) {
+                case 403 -> "ACCESS_DENIED";
+                case 429 -> "BULK_PROPOSAL_QUOTA_EXCEEDED";
+                case 503 -> "BULK_NOT_READY";
+                default -> "BULK_EVALUATION_REJECTED";
+            };
+            String note = status == 429
+                    ? "Limite de propostas pendentes em lote atingido. Confirme ou aguarde expirar antes de gerar outra."
+                    : firstNonBlank(rse.getReason(), "Avaliação em lote recusada pelo motor de domínio.");
+            return blockedBulkResult(
+                    entityKey, resourceKey, resourcePath, actionId, actionTitle, actionDescription,
+                    bulkMode, atomicity, selectionMode, submitUrl, orgId, orgLabel, schemaUrl,
+                    code, note, prefill, inputFields, bulkContract);
+        }
+        if (ex instanceof PraxisRuleViolationException ruleEx) {
+            String note = firstNonBlank(ruleEx.getMessage(), "Execução em lote impedida por regra de negócio.");
+            return blockedBulkResult(
+                    entityKey, resourceKey, resourcePath, actionId, actionTitle, actionDescription,
+                    bulkMode, atomicity, selectionMode, submitUrl, orgId, orgLabel, schemaUrl,
+                    "RULE_VIOLATION", note, prefill, inputFields, bulkContract);
+        }
+        log.warn("[MetadataAgentBridge] Bulk evaluation rejected on {}: {}", entityKey, ex.getMessage());
+        return blockedBulkResult(
+                entityKey, resourceKey, resourcePath, actionId, actionTitle, actionDescription,
+                bulkMode, atomicity, selectionMode, submitUrl, orgId, orgLabel, schemaUrl,
+                "BULK_CONTRACT_REJECTED",
+                firstNonBlank(ex.getMessage(), "Os critérios ou campos informados não são aceitos para operação em lote."),
+                prefill, inputFields, bulkContract);
+    }
+
+    private AgentPreparedBulkOperation blockedBulkResult(
+            String entityKey,
+            String resourceKey,
+            String resourcePath,
+            String actionId,
+            String actionTitle,
+            String actionDescription,
+            String bulkMode,
+            String atomicity,
+            String selectionMode,
+            String submitUrl,
+            String orgId,
+            String orgLabel,
+            String schemaUrl,
+            String blockedCode,
+            String impedimentNote,
+            Map<String, Object> prefill,
+            List<AgentActionInputField> inputFields,
+            Map<String, Object> bulkContract) {
+        AgentPreparedAction base = new AgentPreparedAction(
+                entityKey,
+                resourceKey,
+                resourcePath,
+                null,
+                actionTitle,
+                actionTitle,
+                actionId,
+                actionTitle,
+                actionDescription,
+                "DOMAIN_COMMAND".equals(bulkMode) ? "bulk-command" : "bulk-update",
+                "DOMAIN_COMMAND".equals(bulkMode) ? "bulk-command"
+                        : ("PER_ITEM_UPDATE".equals(bulkMode) ? "bulk-edit-items" : "bulk-edit-uniform"),
+                "POST",
+                submitUrl,
+                schemaUrl,
+                "HIGH",
+                true,
+                true,
+                orgId,
+                orgLabel,
+                "BLOCKED",
+                null,
+                false,
+                blockedCode,
+                impedimentNote,
+                prefill,
+                inputFields,
+                List.of());
+        return new AgentPreparedBulkOperation(
+                base,
+                null,
+                null,
+                bulkMode,
+                atomicity,
+                selectionMode,
+                "BLOCKED",
+                0L, 0L, 0L, 0L,
+                actionTitle,
+                Map.of("mode", selectionMode),
+                List.of(),
+                List.of(),
+                List.of(),
+                List.of(),
+                List.of(),
+                bulkContract,
+                null);
     }
 
     @SuppressWarnings({"rawtypes", "unchecked"})
@@ -2309,6 +3735,7 @@ public class MetadataStarterInProcessAgentBridge implements AgentResourceExecuti
         List<DeterminationSummary> determinations = res.determinations() == null
                 ? List.of()
                 : res.determinations().stream().map(DeterminationEndpoint::toSummary).toList();
+        BulkCapabilityDigest bulkCapability = res.bulkSupport() != null ? res.bulkSupport().digest() : null;
         return new CompactAgentSchemaDigest(
                 d.entityKey(),
                 d.resourceKey(),
@@ -2328,7 +3755,8 @@ public class MetadataStarterInProcessAgentBridge implements AgentResourceExecuti
                 resourceFacts,
                 !calculationTrailIds.isEmpty(),
                 calculationTrailIds,
-                determinations);
+                determinations,
+                bulkCapability);
     }
 
     @SuppressWarnings({"rawtypes", "unchecked"})
@@ -3045,7 +4473,8 @@ public class MetadataStarterInProcessAgentBridge implements AgentResourceExecuti
                         res.filterFields(),
                         res.responseFields(),
                         res.determinations(),
-                        res.mutatingActions()));
+                        res.mutatingActions(),
+                        res.bulkSupport()));
             } else {
                 merged.add(new RegisteredResource(
                         mergeDescriptors(res.descriptor(), override),
@@ -3057,7 +4486,8 @@ public class MetadataStarterInProcessAgentBridge implements AgentResourceExecuti
                         res.filterFields(),
                         res.responseFields(),
                         res.determinations(),
-                        res.mutatingActions()));
+                        res.mutatingActions(),
+                        res.bulkSupport()));
             }
         }
         return merged;
@@ -3164,6 +4594,12 @@ public class MetadataStarterInProcessAgentBridge implements AgentResourceExecuti
                             updateDtoType,
                             AbstractCreateUpdateResourceController.class.isAssignableFrom(targetClass)
                                     && service instanceof BaseCreateUpdateResourceService<?, ?, ?, ?, ?>);
+            BulkResourceSupport bulkSupport =
+                    BridgeActionReflectionSupport.discoverBulkSupport(
+                            targetClass,
+                            basePath,
+                            updateDtoType,
+                            resourceKey);
 
             list.add(new RegisteredResource(
                     descriptor,
@@ -3175,7 +4611,8 @@ public class MetadataStarterInProcessAgentBridge implements AgentResourceExecuti
                     filterFields,
                     responseFields,
                     determinations,
-                    mutatingActions));
+                    mutatingActions,
+                    bulkSupport));
         }
         return List.copyOf(list);
     }

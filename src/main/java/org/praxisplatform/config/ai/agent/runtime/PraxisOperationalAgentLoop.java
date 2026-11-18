@@ -264,7 +264,8 @@ public class PraxisOperationalAgentLoop {
         sb.append("8. Para perguntas sobre fórmulas, contracheques, descontos, tetos ou composições de valores auditáveis, use 'explain_calculation_memory' (ou o campo 'calculationTrails' do dossiê) e explique apenas os passos retornados sem inventar parcelas.\n");
         sb.append("9. Para perguntas sobre leis, estatutos, regras declarativas ou motivos de bloqueio/validação, consulte 'search_domain_knowledge_and_rules' respeitando o tenant/ente ativo do contexto.\n");
         sb.append("10. Para simular cenários, prévias, saldos projetados ou elegibilidade sem gravar no banco, use 'simulate_determination_or_rules' informando 'draftFields' coerentes com o digest do recurso e deixe claro que é simulação não persistida.\n");
-        sb.append("11. Nunca efetue ou declare uma mutação de banco diretamente durante o turno. Quando o usuário solicitar executar uma ação ou edição (ex.: homologar, aprovar, cancelar ou editar registro), localize o registro real e chame 'prepare_action_or_mutation' para gerar o cartão de proposta governada com ETag, escopo organizacional e revisão humana explícita.\n");
+        sb.append("11. Nunca efetue ou declare uma mutação de banco diretamente durante o turno. Para ações ou edições individuais de 1 registro, chame 'prepare_action_or_mutation'. Para alterações em lote envolvendo múltiplos registros (UNIFORM_UPDATE ou PER_ITEM_UPDATE) ou comandos coletivos @WorkflowAction/@BulkOperation (DOMAIN_COMMAND), inspecione 'bulkCapability' no digest do recurso se necessário e chame 'prepare_bulk_operation' para avaliar sem escrita e gerar a proposta vinculada para revisão no modal dedicado.\n");
+        sb.append("12. Contexto focado (Fast Grounding): se 'Registro/escopo ativo em foco na conversa' já identificar inequivocamente o recurso ('resourcePath'/'entityKey') e/ou registro ('recordId'/'entityId') e a pergunta do usuário se referir diretamente ao item ou tela aberta (ex.: 'este registro', 'este cálculo', 'estes indicadores', 'homologar este item'), use diretamente 'get_entity_360_dossier', 'explain_calculation_memory', 'prepare_action_or_mutation' ou 'prepare_bulk_operation' sem repetir 'discover_topic_resources_and_schemas' nem 'search_and_resolve_entities'. Caso o usuário nomeie pessoa, matrícula, CPF/CNPJ, lotação ou recurso diferente do foco atual, chame 'search_and_resolve_entities' obrigatoriamente.\n");
         if (bridge != null) {
             try {
                 List<AgentTopicDescriptor> topics = bridge.listTopics(context);
@@ -294,8 +295,9 @@ public class PraxisOperationalAgentLoop {
                     .append(".\n");
         }
         if (context != null && context.activeSelectionHints() != null && !context.activeSelectionHints().isEmpty()) {
-            sb.append("Registro/escopo ativo em foco na conversa: ")
-                    .append(sanitizePromptHint(String.valueOf(context.activeSelectionHints()), 512))
+            Object scrubbedHints = OperationalAssistantBlockComposer.maskMod11InStructure(context.activeSelectionHints());
+            sb.append("Registro/escopo ativo em foco na conversa (somente leitura/referência; sanitizado): ")
+                    .append(sanitizePromptHint(OperationalAssistantBlockComposer.maskMod11TaxIds(String.valueOf(scrubbedHints)), 768))
                     .append(".\n");
         }
         return sb.toString();

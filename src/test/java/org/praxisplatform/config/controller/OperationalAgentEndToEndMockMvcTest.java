@@ -1,6 +1,8 @@
 package org.praxisplatform.config.controller;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.asyncDispatch;
@@ -30,6 +32,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.praxisplatform.config.TestApplication;
+import org.praxisplatform.config.ai.agent.bridge.MetadataStarterInProcessAgentBridge;
 import org.praxisplatform.config.ai.agent.model.AgentModelStreamListener;
 import org.praxisplatform.config.ai.agent.model.AgentModelTurnRequest;
 import org.praxisplatform.config.ai.agent.model.AgentModelTurnResponse;
@@ -66,9 +69,30 @@ import org.praxisplatform.uischema.stats.dto.GroupByBucket;
 import java.math.BigDecimal;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
+import org.praxisplatform.uischema.action.ActionCollectionAtomicity;
 import org.praxisplatform.uischema.action.ActionRequirement;
 import org.praxisplatform.uischema.action.ActionRiskLevel;
+import org.praxisplatform.uischema.action.ActionScope;
+import org.praxisplatform.uischema.annotation.BulkEditable;
+import org.praxisplatform.uischema.annotation.BulkOperation;
 import org.praxisplatform.uischema.annotation.WorkflowAction;
+import org.praxisplatform.uischema.bulk.BulkDomainResourceAdapter;
+import org.praxisplatform.uischema.bulk.BulkExecutionMode;
+import org.praxisplatform.uischema.bulk.BulkIdentityCodecs;
+import org.praxisplatform.uischema.bulk.BulkItemEvaluationRequest;
+import org.praxisplatform.uischema.bulk.BulkMode;
+import org.praxisplatform.uischema.bulk.BulkProposal;
+import org.praxisplatform.uischema.bulk.BulkProposalItemResult;
+import org.praxisplatform.uischema.bulk.BulkProposalStatus;
+import org.praxisplatform.uischema.bulk.BulkProposalTotals;
+import org.praxisplatform.uischema.bulk.BulkResourceOperations;
+import org.praxisplatform.uischema.command.ResourceCommandErrorCategory;
+import org.praxisplatform.uischema.command.ResourceCommandMessage;
+import org.praxisplatform.uischema.controller.base.AbstractBulkGovernedResourceController;
+import org.praxisplatform.uischema.bulk.BulkControllerOperationIds;
+import org.praxisplatform.uischema.bulk.JpaResourceBulkEngine;
+import org.praxisplatform.uischema.openapi.CanonicalOperationRef;
+import org.springframework.test.util.ReflectionTestUtils;
 import org.praxisplatform.uischema.capability.AvailabilityDecision;
 import org.praxisplatform.uischema.concurrency.ResourceRepresentationResult;
 import org.praxisplatform.uischema.concurrency.ResourceVersionEtagService;
@@ -90,6 +114,7 @@ import org.praxisplatform.uischema.options.OptionSourceDescriptor;
 import org.praxisplatform.uischema.options.OptionSourceFilterRequest;
 import org.praxisplatform.uischema.options.OptionSourceRegistry;
 import org.praxisplatform.uischema.service.base.BaseResourceQueryService;
+import org.praxisplatform.uischema.service.base.BaseResourceService;
 import org.praxisplatform.uischema.stats.StatsFieldRegistry;
 import org.praxisplatform.uischema.stats.StatsSupportMode;
 import org.praxisplatform.uischema.stats.dto.ComparisonStatsRequest;
@@ -517,6 +542,81 @@ class OperationalAgentEndToEndMockMvcTest {
         @Override protected Long getResponseId(LeaveRecordDto dto) { return dto.id; }
     }
 
+    public static class BulkParcelUpdateDto {
+        @UISchema(label = "Situação")
+        @BulkEditable(modes = {BulkMode.UNIFORM_UPDATE, BulkMode.PER_ITEM_UPDATE})
+        public String status;
+
+        public String getStatus() { return status; }
+        public void setStatus(String status) { this.status = status; }
+    }
+
+    @ApiResource(
+            value = "/api/workforce/bulk-leave-parcels",
+            resourceKey = "workforce.bulk-leave-parcels",
+            title = "Parcelas em Lote",
+            identity = @ResourceIdentity(keyField = "id", titleField = "employeeName", subtitleField = "status"))
+    @BulkResourceOperations(updateSourceOperationId = "workforce.bulk-leave-parcels.update")
+    public static class StubBulkLeaveParcelController
+            extends AbstractBulkGovernedResourceController<LeaveRecordDto, Long, PositionFilter, LeaveRecordDto, BulkParcelUpdateDto>
+            implements MetadataStarterInProcessAgentBridge.BulkEnginePort {
+        private final LeaveRecordDto r1 = new LeaveRecordDto(501L, "Lucas Andrade", "SCHEDULED");
+        private final LeaveRecordDto r2 = new LeaveRecordDto(502L, "Ana Maria", "CLOSED");
+        private final MetadataStarterInProcessAgentBridge.BulkEnginePort engine;
+
+        @SuppressWarnings("unchecked")
+        StubBulkLeaveParcelController(ResourceVersionEtagService etagService, ResourceVersionScopeProvider scopes) {
+            configureResourceVersioning(etagService, scopes);
+            this.engine = mock(MetadataStarterInProcessAgentBridge.BulkEnginePort.class);
+            when(this.engine.encodeWireId(any())).thenAnswer(inv -> String.valueOf((Object) inv.getArgument(0)));
+            when(this.engine.currentVersion(501L)).thenReturn("\"v-501\"");
+            when(this.engine.currentVersion(502L)).thenReturn("\"v-502\"");
+            String itemsConfirmOp = BulkControllerOperationIds.updateConfirmationId(StubBulkLeaveParcelController.class, true);
+            String mixedPropId = "11111111-1111-4111-8111-111111111111";
+            ObjectMapper om = new ObjectMapper().findAndRegisterModules();
+            when(this.engine.evaluateItems(eq(itemsConfirmOp), any(BulkItemEvaluationRequest.class)))
+                    .thenReturn(new BulkProposal(
+                            mixedPropId,
+                            new CanonicalOperationRef("workforce", itemsConfirmOp, "/api/workforce/bulk-leave-parcels/bulk/update-items", "POST"),
+                            BulkMode.PER_ITEM_UPDATE, BulkExecutionMode.SYNC, ActionCollectionAtomicity.PER_ITEM,
+                            BulkProposalStatus.BLOCKED, Instant.now().minusSeconds(1), Instant.now().plusSeconds(300),
+                            new BulkProposalTotals(2, 2, 1, 1), om.createObjectNode(),
+                            List.of(new ResourceCommandMessage(ResourceCommandErrorCategory.VALIDATION, "RULE_CLOSED", "Parcela 502 fechada.", null, Map.of())),
+                            List.of()));
+            when(this.engine.proposalResults(eq(itemsConfirmOp), eq(UUID.fromString(mixedPropId)), eq(50), eq(null)))
+                    .thenReturn(new CursorPage<>(List.of(
+                            new BulkProposalItemResult<>("501", BulkProposalItemResult.Decision.EXECUTABLE, List.of()),
+                            new BulkProposalItemResult<>("502", BulkProposalItemResult.Decision.BLOCKED,
+                                    List.of(new ResourceCommandMessage(ResourceCommandErrorCategory.VALIDATION, "RULE_CLOSED", "Parcela 502 fechada para alteração.", null, Map.of())))),
+                            null, null, 50));
+        }
+
+        @SuppressWarnings("unchecked")
+        private final BaseResourceService<LeaveRecordDto, Long, PositionFilter, LeaveRecordDto, BulkParcelUpdateDto> service = createBulkService();
+
+        @SuppressWarnings("unchecked")
+        private BaseResourceService<LeaveRecordDto, Long, PositionFilter, LeaveRecordDto, BulkParcelUpdateDto> createBulkService() {
+            BaseResourceService<LeaveRecordDto, Long, PositionFilter, LeaveRecordDto, BulkParcelUpdateDto> svc = mock(BaseResourceService.class);
+            when(svc.getIdFieldName()).thenReturn("id");
+            when(svc.getDefaultSort()).thenReturn(Sort.by("id"));
+            when(svc.findById(501L)).thenReturn(ResourceRepresentationResult.versioned(r1, 1L));
+            when(svc.findById(502L)).thenReturn(ResourceRepresentationResult.versioned(r2, 2L));
+            when(svc.filter(any(), any(), any())).thenReturn(new PageImpl<>(List.of(r1, r2)));
+            return svc;
+        }
+
+        @Override protected BaseResourceService<LeaveRecordDto, Long, PositionFilter, LeaveRecordDto, BulkParcelUpdateDto> getService() { return service; }
+        @Override protected Long getResponseId(LeaveRecordDto dto) { return dto.id; }
+        @Override protected JpaResourceBulkEngine<Long, PositionFilter> getBulkEngine() { return null; }
+
+        @Override public Object encodeWireId(Object convertedId) { return engine.encodeWireId(convertedId); }
+        @Override public String currentVersion(Object convertedId) { return engine.currentVersion(convertedId); }
+        @Override public BulkProposal evaluateUniform(String opId, org.praxisplatform.uischema.bulk.BulkUniformEvaluationRequest<?, Object> req) { return engine.evaluateUniform(opId, req); }
+        @Override public BulkProposal evaluateItems(String opId, BulkItemEvaluationRequest<?> req) { return engine.evaluateItems(opId, req); }
+        @Override public BulkProposal evaluateDomainCommand(String opId, org.praxisplatform.uischema.bulk.BulkCommandEvaluationRequest<Object, ?, Object> req) { return engine.evaluateDomainCommand(opId, req); }
+        @Override public CursorPage<BulkProposalItemResult<Object>> proposalResults(String opId, UUID propId, int size, String after) { return engine.proposalResults(opId, propId, size, after); }
+    }
+
     abstract static class SimpleQueryService<R, ID, F extends GenericFilterDTO> implements BaseResourceQueryService<R, ID, F> {
         @Override public String getIdFieldName() { return "id"; }
         @Override public Optional<String> getDatasetVersion() { return Optional.empty(); }
@@ -577,6 +677,13 @@ class OperationalAgentEndToEndMockMvcTest {
         }
 
         @Bean
+        StubBulkLeaveParcelController stubBulkLeaveParcelController(
+                ResourceVersionEtagService etagService,
+                ResourceVersionScopeProvider scopes) {
+            return new StubBulkLeaveParcelController(etagService, scopes);
+        }
+
+        @Bean
         AgentKnowledgeSearchContributor stubKnowledgeContributor() {
             return (ctx, query, topicKey, sourceFilter, limit) -> List.of(
                     new AgentKnowledgeDocument(
@@ -603,7 +710,10 @@ class OperationalAgentEndToEndMockMvcTest {
                             List.of("careerTrack"), null, "title", null, "/positions/{id}", "hr", 50),
                     new AgentEntityDescriptor("payroll.slips", "payroll.slips", "/api/payroll/slips",
                             "Folha Salarial", "Demonstrativos financeiros", "payments", "id", "periodLabel", "periodLabel",
-                            List.of("periodLabel"), null, "periodLabel", null, "/payroll/{id}", "payroll", 40, null, false));
+                            List.of("periodLabel"), null, "periodLabel", null, "/payroll/{id}", "payroll", 40, null, false),
+                    new AgentEntityDescriptor("workforce.bulk-leave-parcels", "workforce.bulk-leave-parcels", "/api/workforce/bulk-leave-parcels",
+                            "Parcelas em Lote", "Parcelas com suporte bulk", "event", "id", "employeeName", "status",
+                            List.of("status"), null, "employeeName", null, "/bulk-leave-parcels/{id}", "workforce", 30, null, false));
         }
 
         @Bean
@@ -708,6 +818,17 @@ class OperationalAgentEndToEndMockMvcTest {
                                             "sig-prep2", null)),
                                     new AgentTokenUsage(30, 15, 45), "tool_calls", "resp-prep2", Map.of());
                         }
+                        if (firstUserPrompt.startsWith("prepare bulk mixed")) {
+                            return new AgentModelTurnResponse("gemini", "gemini-2.5-flash", "",
+                                    List.of(new AgentToolCall("call-bulk-1", "prepare_bulk_operation",
+                                            Map.of("entityKey", "workforce.bulk-leave-parcels",
+                                                    "bulkMode", "PER_ITEM_UPDATE",
+                                                    "items", List.of(
+                                                            Map.of("id", "501", "changes", List.of(Map.of("field", "status", "operator", "SET", "value", "APPROVED"))),
+                                                            Map.of("id", "502", "changes", List.of(Map.of("field", "status", "operator", "SET", "value", "APPROVED"))))),
+                                            "sig-bulk1", null)),
+                                    new AgentTokenUsage(30, 15, 45), "tool_calls", "resp-bulk1", Map.of());
+                        }
                         return new AgentModelTurnResponse("gemini", "gemini-2.5-flash", "",
                                 List.of(new AgentToolCall("call-1", "search_and_resolve_entities",
                                         Map.of("query", firstUserPrompt), "c2ln", null)),
@@ -739,6 +860,11 @@ class OperationalAgentEndToEndMockMvcTest {
                         return new AgentModelTurnResponse("gemini", "gemini-2.5-flash",
                                 "Proposta governada pronta para revisão e confirmação humana.",
                                 List.of(), new AgentTokenUsage(45, 20, 65), "stop", "resp-prep2", Map.of());
+                    }
+                    if ("prepare_bulk_operation".equals(firstResult.name())) {
+                        return new AgentModelTurnResponse("gemini", "gemini-2.5-flash",
+                                "Proposta em lote avaliada abaixo; abra o modal dedicado para revisar e confirmar.",
+                                List.of(), new AgentTokenUsage(45, 20, 65), "stop", "resp-bulk2", Map.of());
                     }
                     if ("search_and_resolve_entities".equals(firstResult.name())) {
                         int count = ((Number) firstResult.output().getOrDefault("matchCount", 0)).intValue();
@@ -1035,7 +1161,14 @@ class OperationalAgentEndToEndMockMvcTest {
                 .findFirst()
                 .orElseThrow();
 
-        JsonNode proposalItem = resultEvent.getPayload().path("assistantContent").path("blocks").get(1).path("items").get(0);
+        JsonNode proposalItem = null;
+        for (JsonNode block : resultEvent.getPayload().path("assistantContent").path("blocks")) {
+            if ("action-proposals".equals(block.path("type").asText())) {
+                proposalItem = block.path("items").get(0);
+                break;
+            }
+        }
+        assertThat(proposalItem).isNotNull();
         String proposalId = proposalItem.path("proposalId").asText();
         String expectedEtag = proposalItem.path("expectedVersionTag").asText();
         assertThat(proposalItem.path("missingRequiredFields")).hasSize(1);
@@ -1090,7 +1223,14 @@ class OperationalAgentEndToEndMockMvcTest {
                 .filter(e -> "result".equals(e.getType()))
                 .findFirst()
                 .orElseThrow();
-        JsonNode proposalItem = resultEvent.getPayload().path("assistantContent").path("blocks").get(1).path("items").get(0);
+        JsonNode proposalItem = null;
+        for (JsonNode block : resultEvent.getPayload().path("assistantContent").path("blocks")) {
+            if ("action-proposals".equals(block.path("type").asText())) {
+                proposalItem = block.path("items").get(0);
+                break;
+            }
+        }
+        assertThat(proposalItem).isNotNull();
         String proposalId = proposalItem.path("proposalId").asText();
         String expectedEtag = proposalItem.path("expectedVersionTag").asText();
 
@@ -1146,7 +1286,14 @@ class OperationalAgentEndToEndMockMvcTest {
                 .filter(e -> "result".equals(e.getType()))
                 .findFirst()
                 .orElseThrow();
-        JsonNode proposalItem = resultEvent.getPayload().path("assistantContent").path("blocks").get(1).path("items").get(0);
+        JsonNode proposalItem = null;
+        for (JsonNode block : resultEvent.getPayload().path("assistantContent").path("blocks")) {
+            if ("action-proposals".equals(block.path("type").asText())) {
+                proposalItem = block.path("items").get(0);
+                break;
+            }
+        }
+        assertThat(proposalItem).isNotNull();
         String proposalId = proposalItem.path("proposalId").asText();
         String expectedEtag = proposalItem.path("expectedVersionTag").asText();
         assertThat(proposalItem.path("prefill").path("substituteTaxId").asText()).isEqualTo("***.982.247-**");
@@ -1292,6 +1439,73 @@ class OperationalAgentEndToEndMockMvcTest {
         assertThat(events).extracting(AiTurnEventEnvelope::getType).containsExactly("progress", "result");
         assertThat(events.get(1).getPayload().path("assistantMessage").asText())
                 .isEqualTo("Resposta gravada por outro pod.");
+    }
+
+    @Test
+    void scenarioN_prepareBulkOperationEmitsSafeSseBlocksBlocksChatConfirmAndCompletesViaModal() throws Exception {
+        AgenticAuthoringTurnStreamStartResponse start = startStream("prepare bulk mixed", "turn-bulk-mixed-1");
+        List<AiTurnEventEnvelope> events = readSseEvents(start.getStreamId());
+
+        AiTurnEventEnvelope resultEvent = events.stream()
+                .filter(e -> "result".equals(e.getType()))
+                .findFirst()
+                .orElseThrow();
+        String rawJson = objectMapper.writeValueAsString(resultEvent.getPayload());
+        assertThat(rawJson).doesNotContain("[REDACTED]");
+
+        JsonNode proposalItem = null;
+        for (JsonNode block : resultEvent.getPayload().path("assistantContent").path("blocks")) {
+            if ("action-proposals".equals(block.path("type").asText())) {
+                proposalItem = block.path("items").get(0);
+                break;
+            }
+        }
+        assertThat(proposalItem).isNotNull();
+        String proposalId = proposalItem.path("proposalId").asText();
+        assertThat(proposalItem.path("proposalStatus").asText()).isEqualTo("PENDING");
+        JsonNode bulkNode = proposalItem.path("bulk");
+        assertThat(bulkNode.path("domainProposalId").asText()).isEqualTo("11111111-1111-4111-8111-111111111111");
+        assertThat(bulkNode.path("domainProposalStatus").asText()).isEqualTo("BLOCKED");
+        assertThat(bulkNode.path("totals").path("executable").asLong()).isEqualTo(1L);
+        assertThat(bulkNode.path("totals").path("blocked").asLong()).isEqualTo(1L);
+        assertThat(bulkNode.path("blockedItems").get(0).path("diagnostics").get(0).path("issueNote").asText())
+                .isEqualTo("Parcela 502 fechada para alteração.");
+        assertThat(bulkNode.path("bulkContract").path("confirmUrl").asText())
+                .isEqualTo("/api/workforce/bulk-leave-parcels/bulk/update-items");
+
+        // Inline /confirm on a bulk proposal must return 409 BULK_REQUIRES_MODAL_REVIEW
+        MvcResult confirmErr = mockMvc.perform(post("/api/praxis/config/ai/agent/proposals/{proposalId}/confirm", proposalId)
+                        .requestAttr("tenantId", TENANT)
+                        .requestAttr("userId", USER)
+                        .requestAttr("environment", ENV)
+                        .header("Idempotency-Key", "idem-bulk-inline-block")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{}"))
+                .andExpect(status().isConflict())
+                .andReturn();
+        assertThat(objectMapper.readTree(confirmErr.getResponse().getContentAsByteArray()).path("outcomeCode").asText())
+                .isEqualTo("BULK_REQUIRES_MODAL_REVIEW");
+
+        // /complete-form reconciles modal execution counts and outcomeCode into ai_agent_action_proposal
+        MvcResult completeRes = mockMvc.perform(post("/api/praxis/config/ai/agent/proposals/{proposalId}/complete-form", proposalId)
+                        .requestAttr("tenantId", TENANT)
+                        .requestAttr("userId", USER)
+                        .requestAttr("environment", ENV)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"domainProposalId\":\"22222222-2222-4222-8222-222222222222\",\"bulkExecutionId\":\"exec-bulk-1\",\"bulkExecutionStatus\":\"COMPLETED_WITH_ERRORS\",\"confirmedCount\":1,\"unchangedCount\":0,\"failedCount\":1,\"idempotencyKey\":\"idem-modal-bulk-1\"}"))
+                .andExpect(status().isOk())
+                .andReturn();
+        JsonNode completeBody = objectMapper.readTree(completeRes.getResponse().getContentAsByteArray());
+        assertThat(completeBody.path("status").asText()).isEqualTo("CONFIRMED");
+        assertThat(completeBody.path("outcomeCode").asText()).isEqualTo("BULK_COMPLETED_WITH_ERRORS");
+
+        Map<String, Object> dbRow = jdbcTemplate.queryForMap(
+                "select bulk_proposal_id, bulk_execution_id, bulk_mode, bulk_totals_json from ai_agent_action_proposal where proposal_id = ?",
+                UUID.fromString(proposalId));
+        assertThat(dbRow.get("bulk_proposal_id")).isEqualTo("22222222-2222-4222-8222-222222222222");
+        assertThat(dbRow.get("bulk_execution_id")).isEqualTo("exec-bulk-1");
+        assertThat(dbRow.get("bulk_mode")).isEqualTo("PER_ITEM_UPDATE");
+        assertThat(String.valueOf(dbRow.get("bulk_totals_json"))).contains("\"confirmedCount\":1").contains("\"failedCount\":1");
     }
 
     private List<AiTurnEventEnvelope> parseSseBody(String body) throws Exception {

@@ -187,6 +187,12 @@ CREATE TABLE IF NOT EXISTS ai_agent_action_proposal (
     missing_fields_json TEXT,
     idempotency_key VARCHAR(160),
     execution_receipt_json TEXT,
+    bulk_proposal_id VARCHAR(120),
+    bulk_operation_id VARCHAR(200),
+    bulk_mode VARCHAR(40),
+    bulk_atomicity VARCHAR(32),
+    bulk_execution_id VARCHAR(120),
+    bulk_totals_json TEXT,
     created_at TIMESTAMP WITH TIME ZONE NOT NULL,
     expires_at TIMESTAMP WITH TIME ZONE NOT NULL,
     resolved_at TIMESTAMP WITH TIME ZONE
