@@ -83,6 +83,8 @@ public final class AgenticAuthoringTargetResolverRegistry {
             "x-ui-chart-events-selection-change",
             "x-ui-chart-legend-feature",
             "x-ui-chart-tooltip-feature",
+            "x-ui-chart-annotations",
+            "x-ui-chart-scalability-renderer",
             "default-effect-preset-by-key",
             "praxis-table-authoring-operation",
             "conditional-renderer-in-row",
@@ -255,7 +257,20 @@ public final class AgenticAuthoringTargetResolverRegistry {
             case "cron-preset-by-label-or-expression" -> addCronPresetMatches(candidates, config, targetValue);
             case "rich-block-by-id-or-index", "rich-block-node-by-id-or-path", "rich-text-node-by-id-or-path", "rich-media-node-by-id-or-path", "rich-link-node-by-id-or-path", "rich-timeline-node-by-id-or-path" -> addRichContentNodeMatches(candidates, config, resolver, targetValue, resolutionSpec);
             case "rich-timeline-item-by-block-id-and-item-id" -> addRichTimelineItemMatches(candidates, config, target, targetValue, resolutionSpec);
-            case "rule-by-id", "rule-by-id-or-name" -> addArrayMatches(candidates, config, "formRules[]", List.of("id", "name"), targetValue);
+            case "node-style-rule-by-id" -> {
+                if (hasResolutionSpec(resolutionSpec)) {
+                    addResolutionSpecMatches(candidates, config, resolutionSpec, target, targetValue);
+                } else {
+                    addArrayMatches(candidates, config, "rules.nodeStyles[]", List.of("id", "name", "ruleId"), targetValue);
+                }
+            }
+            case "rule-by-id", "rule-by-id-or-name" -> {
+                if (hasResolutionSpec(resolutionSpec) && !"formRules".equals(stripArraySuffix(resolutionSpec.path("paths").get(0).asText("")))) {
+                    addResolutionSpecMatches(candidates, config, resolutionSpec, target, targetValue);
+                } else {
+                    addArrayMatches(candidates, config, "formRules[]", List.of("id", "name"), targetValue);
+                }
+            }
             case "action-by-id", "form-action-by-id", "actions-by-id" -> {
                 addArrayMatches(candidates, config, "actions.custom[]", List.of("id", "name", "action"), targetValue);
                 addArrayMatches(candidates, config, "actions[]", List.of("id", "name", "action"), targetValue);
@@ -716,6 +731,7 @@ public final class AgenticAuthoringTargetResolverRegistry {
                 "rich-timeline-item-by-block-id-and-item-id",
                 "rule-by-id",
                 "rule-by-id-or-name",
+                "node-style-rule-by-id",
                 "action-by-id",
                 "actions-by-id",
                 "form-action-by-id",

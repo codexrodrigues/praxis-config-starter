@@ -665,7 +665,7 @@ public final class AgenticAuthoringValidatorRegistry {
                 case "computed-expression-valid" ->
                         validateCanonicalTableJsonLogicInput(operationId, planOperation.path("input"), failures);
                 case "renderer-supported", "renderer-type-supported" ->
-                        validateTableRendererType(operationId, planOperation, failures);
+                        validateRendererSupported(componentId, operationId, planOperation, failures);
                 case "renderer-config-match", "renderer-config-compatible" ->
                         validateTableRendererConfig(operationId, planOperation, failures);
                 case "renderer-fields-exist" ->
@@ -688,7 +688,13 @@ public final class AgenticAuthoringValidatorRegistry {
                 case "filter-fields-exist" ->
                         validateInputFieldsExist(operationId, planOperation.path("input"), config, failures, true);
                 case "control-type-unique" -> validateDynamicControlTypeUnique(operationId, planOperation, config, failures);
-                case "runtime-component-resolves" -> validateDynamicRuntimeComponentResolves(operationId, planOperation, config, failures);
+                case "runtime-component-resolves" -> {
+                    if ("praxis-dynamic-fields".equals(componentId)
+                            || planOperation.path("input").has("controlType")
+                            || "controlType.register".equals(operationId)) {
+                        validateDynamicRuntimeComponentResolves(operationId, planOperation, config, failures);
+                    }
+                }
                 case "field-metadata-compatible", "metadata-capability-aligned" -> validateDynamicFieldMetadataCompatible(operationId, planOperation, failures);
                 case "alias-resolves-deterministically" -> validateDynamicAliasDeterministic(operationId, planOperation, config, failures);
                 case "alias-exists" -> validateDynamicAliasExists(operationId, planOperation, config, failures);
@@ -1643,6 +1649,34 @@ public final class AgenticAuthoringValidatorRegistry {
                 composeItem ? "renderer.compose.item" : "renderer",
                 composeItem,
                 failures);
+    }
+
+    private void validateRendererSupported(
+            String componentId,
+            String operationId,
+            JsonNode planOperation,
+            List<String> failures) {
+        JsonNode input = planOperation.path("input");
+        if ("praxis-charts".equals(componentId)) {
+            JsonNode rendererNode = input.path("renderer");
+            if (rendererNode.isTextual()) {
+                String renderer = rendererNode.asText("").trim();
+                if (!Set.of("canvas", "svg").contains(renderer)) {
+                    failures.add("validator renderer-supported failed for " + operationId
+                            + ": unsupported renderer " + renderer);
+                }
+            }
+            return;
+        }
+        if ("praxis-analytics-presentation".equals(componentId)) {
+            String family = text(input, "family").trim();
+            if (!family.isBlank() && !Set.of("chart", "analytic-table", "kpi", "summary-list").contains(family)) {
+                failures.add("validator renderer-supported failed for " + operationId
+                        + ": unsupported presentation family " + family);
+            }
+            return;
+        }
+        validateTableRendererType(operationId, planOperation, failures);
     }
 
     private void validateTableRendererType(
@@ -3195,6 +3229,14 @@ public final class AgenticAuthoringValidatorRegistry {
 
     private void validateEditorialPresentationSupported(String operationId, JsonNode planOperation, List<String> failures) {
         JsonNode input = planOperation.path("input");
+        if (input.has("variant")) {
+            String variant = text(input, "variant").trim();
+            if (!variant.isBlank()
+                    && !Set.of("staircase", "pillars", "matrix-2d", "ribbon-compact").contains(variant)) {
+                failures.add("validator presentation-supported-by-runtime failed for " + operationId
+                        + ": unsupported ladder variant " + variant);
+            }
+        }
         if (input.has("layout") && input.path("layout").has("orientation")
                 && !Set.of("horizontal", "vertical").contains(text(input.path("layout"), "orientation"))) {
             failures.add("validator presentation-supported-by-runtime failed for " + operationId + ": unsupported layout orientation");
@@ -4051,10 +4093,10 @@ public final class AgenticAuthoringValidatorRegistry {
         }
         if (range.isTextual()) {
             String raw = range.asText("").trim();
-            if (!raw.matches("\\d{4}(-\\d{2})?")) {
+            if (!raw.matches("\\d{4}(-\\d{2}|-[SH][12])?")) {
                 failures.add("validator calendar-range-valid failed for " + operationId
-                        + ": calendar.range string must match YYYY or YYYY-MM");
-            } else if (raw.length() == 7) {
+                        + ": calendar.range string must match YYYY, YYYY-MM, YYYY-S1/S2 or YYYY-H1/H2");
+            } else if (raw.length() == 7 && Character.isDigit(raw.charAt(5))) {
                 int month = Integer.parseInt(raw.substring(5, 7));
                 if (month < 1 || month > 12) {
                     failures.add("validator calendar-range-valid failed for " + operationId
@@ -4232,9 +4274,24 @@ public final class AgenticAuthoringValidatorRegistry {
             JsonNode config,
             List<String> failures) {
         JsonNode input = planOperation.path("input");
+        String kind = chartKind(planOperation, config);
+        JsonNode lines = input.path("referenceLines").isArray()
+                ? input.path("referenceLines")
+                : config.path("chartDocument").path("referenceLines");
         JsonNode bands = input.path("referenceBands").isArray()
                 ? input.path("referenceBands")
                 : config.path("chartDocument").path("referenceBands");
+        JsonNode markers = input.path("targetMarkers").isArray()
+                ? input.path("targetMarkers")
+                : config.path("chartDocument").path("targetMarkers");
+        if ("calendar".equals(kind)
+                && ((lines.isArray() && !lines.isEmpty())
+                || (bands.isArray() && !bands.isEmpty())
+                || (markers.isArray() && !markers.isEmpty()))) {
+            failures.add("validator annotations-bounds-valid failed for " + operationId
+                    + ": calendar charts do not support cartesian annotations (referenceLines, referenceBands, targetMarkers)");
+            return;
+        }
         if (!bands.isArray()) {
             return;
         }
@@ -4254,9 +4311,20 @@ public final class AgenticAuthoringValidatorRegistry {
             JsonNode config,
             List<String> failures) {
         JsonNode input = planOperation.path("input");
-        JsonNode zoom = input.path("dataZoom").isObject()
+        String kind = chartKind(planOperation, config);
+        JsonNode zoom = input.has("dataZoom")
                 ? input.path("dataZoom")
                 : config.path("chartDocument").path("dataZoom");
+        JsonNode scaleBreak = input.has("axisScaleBreak")
+                ? input.path("axisScaleBreak")
+                : config.path("chartDocument").path("axisScaleBreak");
+        if ("calendar".equals(kind)
+                && (zoom.asBoolean(false) || (zoom.isObject() && !zoom.isEmpty())
+                || scaleBreak.asBoolean(false) || (scaleBreak.isObject() && !scaleBreak.isEmpty()))) {
+            failures.add("validator scalability-contract-valid failed for " + operationId
+                    + ": calendar charts do not support cartesian dataZoom or axisScaleBreak");
+            return;
+        }
         if (zoom.isObject()) {
             JsonNode start = zoom.path("startPercent");
             JsonNode end = zoom.path("endPercent");
@@ -4457,13 +4525,59 @@ public final class AgenticAuthoringValidatorRegistry {
         }
     }
 
+    private static final Set<String> BOXPLOT_QUARTILE_AGGREGATIONS = Set.of(
+            "min",
+            "max",
+            "median",
+            "percentile-10",
+            "percentile-25",
+            "percentile-50",
+            "percentile-75",
+            "percentile-90",
+            "percentile-95",
+            "percentile-99",
+            "count");
+
+    private static final Set<String> BOXPLOT_DEFAULT_AGGREGATIONS = Set.of(
+            "sum",
+            "avg",
+            "min",
+            "max",
+            "median",
+            "percentile-10",
+            "percentile-25",
+            "percentile-50",
+            "percentile-75",
+            "percentile-90",
+            "percentile-95",
+            "percentile-99",
+            "count",
+            "distinct-count");
+
     private void validateChartSeriesUnique(
             String operationId,
             JsonNode planOperation,
             JsonNode config,
             List<String> failures) {
         String field = text(planOperation.path("input"), "field");
-        if (!field.isBlank() && fieldExists(config.path("chartDocument").path("metrics"), field)) {
+        if (field.isBlank()) {
+            return;
+        }
+        JsonNode metrics = config.path("chartDocument").path("metrics");
+        if ("boxplot".equals(chartKind(planOperation, config))) {
+            String aggregation = text(planOperation.path("input"), "aggregation");
+            if (!aggregation.isBlank() && metrics.isArray()) {
+                for (JsonNode metric : metrics) {
+                    if (field.equals(text(metric, "field")) && aggregation.equals(text(metric, "aggregation"))) {
+                        failures.add("validator series-id-unique failed for " + operationId
+                                + ": duplicate boxplot metric " + field + " (" + aggregation + ")");
+                        return;
+                    }
+                }
+                return;
+            }
+        }
+        if (fieldExists(metrics, field)) {
             failures.add("validator series-id-unique failed for " + operationId + ": duplicate series field " + field);
         }
     }
@@ -4478,6 +4592,7 @@ public final class AgenticAuthoringValidatorRegistry {
         if (aggregation.isBlank()) {
             return;
         }
+        String kind = chartKind(planOperation, config);
         JsonNode fieldDescriptor = chartFieldDescriptor(config, field);
         if (!field.isBlank() && fieldDescriptor.isMissingNode() && !chartKnownFields(config).isEmpty()) {
             failures.add("validator series-field-aggregable failed for " + operationId
@@ -4485,7 +4600,18 @@ public final class AgenticAuthoringValidatorRegistry {
         }
         Set<String> allowed = chartAllowedAggregations(fieldDescriptor);
         if (allowed.isEmpty()) {
-            allowed = Set.of("sum", "avg", "min", "max", "count", "distinct-count");
+            allowed = "boxplot".equals(kind)
+                    ? BOXPLOT_DEFAULT_AGGREGATIONS
+                    : Set.of("sum", "avg", "min", "max", "count", "distinct-count");
+        } else if ("boxplot".equals(kind)
+                && (allowed.contains("min")
+                || allowed.contains("max")
+                || allowed.contains("avg")
+                || allowed.contains("sum")
+                || allowed.contains("median"))) {
+            Set<String> expanded = new HashSet<>(allowed);
+            expanded.addAll(BOXPLOT_QUARTILE_AGGREGATIONS);
+            allowed = expanded;
         }
         if (!allowed.contains(aggregation)) {
             failures.add("validator series-field-aggregable failed for " + operationId

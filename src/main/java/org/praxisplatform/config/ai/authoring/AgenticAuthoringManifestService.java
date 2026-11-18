@@ -239,10 +239,19 @@ public class AgenticAuthoringManifestService {
     private void appendApplicablePatchOperations(JsonNode compiledEffect, ArrayNode patchOperations) {
         String effectKind = text(compiledEffect, "effectKind");
         switch (effectKind) {
-            case "merge-by-key" -> appendReplaceOperations(
-                    pointerFromResolvedPath(text(compiledEffect, "resolvedPath")),
-                    compiledEffect.path("value"),
-                    patchOperations);
+            case "merge-by-key" -> {
+                if (compiledEffect.path("upsertInsert").asBoolean(false)) {
+                    patchOperations.add(baseApplicableOperation(
+                            "add",
+                            pointerForAppend(compiledEffect))
+                            .set("value", compiledEffect.path("value")));
+                } else {
+                    appendReplaceOperations(
+                            pointerFromResolvedPath(text(compiledEffect, "resolvedPath")),
+                            compiledEffect.path("value"),
+                            patchOperations);
+                }
+            }
             case "merge-object" -> appendReplaceOperations(
                     pointerFromResolvedPathOrConfigPath(
                             text(compiledEffect, "resolvedPath"),
@@ -353,10 +362,14 @@ public class AgenticAuthoringManifestService {
     }
 
     private String pointerFromResolvedPath(String resolvedPath) {
-        if (resolvedPath == null || resolvedPath.isBlank()) {
+        if (resolvedPath == null || resolvedPath.isBlank() || "$".equals(resolvedPath.trim())) {
             return "/";
         }
-        String normalized = resolvedPath.replace("[]/", "/").replace("[]", "");
+        String clean = resolvedPath.trim();
+        if (clean.startsWith("$.")) {
+            clean = clean.substring(2);
+        }
+        String normalized = clean.replace("[]/", "/").replace("[]", "");
         return joinPointer("/", pointerTokens(normalized));
     }
 
@@ -369,7 +382,14 @@ public class AgenticAuthoringManifestService {
         if (configPath == null || configPath.isBlank()) {
             return "";
         }
-        return configPath.replace("[]", "");
+        String clean = configPath.trim().replace("[]", "");
+        if ("$".equals(clean)) {
+            return "";
+        }
+        if (clean.startsWith("$.")) {
+            clean = clean.substring(2);
+        }
+        return clean;
     }
 
     private String[] pointerTokens(String path) {

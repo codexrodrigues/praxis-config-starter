@@ -376,8 +376,10 @@ public final class AgenticAuthoringEffectCompilerRegistry {
         compiled.set("affectedPaths", operation.path("affectedPaths"));
         compiled.set("submissionImpact", operation.path("submissionImpact"));
 
+        boolean allowUpsert = !operation.path("target").path("required").asBoolean(false);
+        String targetKeyHint = targetTextHint(planOperation.path("target"));
         switch (effectKind) {
-            case "merge-by-key" -> applyMergeByKey(effect, input, resolved, proposedConfig, compiled, failures);
+            case "merge-by-key" -> applyMergeByKey(effect, input, resolved, allowUpsert, targetKeyHint, proposedConfig, compiled, failures);
             case "remove-by-key" -> applyRemoveByKey(effect, resolved, proposedConfig, compiled, failures);
             case "set-value" -> applySetValue(effect, input, resolved, proposedConfig, compiled, failures);
             case "merge-object" -> applyMergeObject(effect, input, resolved, proposedConfig, compiled, failures);
@@ -390,7 +392,7 @@ public final class AgenticAuthoringEffectCompilerRegistry {
                 return null;
             }
         }
-        return compiled;
+        return compiled.path("skipped").asBoolean(false) ? null : compiled;
     }
 
     private ObjectNode compileDomainPatch(
@@ -5845,7 +5847,22 @@ public final class AgenticAuthoringEffectCompilerRegistry {
             failures.add("chart-series-add path is not an array: chartDocument.metrics[]");
             return null;
         }
-        if (indexOfObjectByKey(metrics, "field", field) >= 0) {
+        String chartKind = text(proposedConfig.path("chartDocument"), "kind");
+        String requestedAggregation = text(input, "aggregation");
+        if ("boxplot".equals(chartKind) && !requestedAggregation.isBlank()) {
+            boolean duplicatePair = false;
+            for (JsonNode existing : metrics) {
+                if (field.equals(text(existing, "field"))
+                        && requestedAggregation.equals(text(existing, "aggregation"))) {
+                    duplicatePair = true;
+                    break;
+                }
+            }
+            if (duplicatePair) {
+                failures.add("chart-series-add duplicate metric field and aggregation: " + field + " (" + requestedAggregation + ")");
+                return null;
+            }
+        } else if (indexOfObjectByKey(metrics, "field", field) >= 0) {
             failures.add("chart-series-add duplicate metric field: " + field);
             return null;
         }
@@ -6382,33 +6399,66 @@ public final class AgenticAuthoringEffectCompilerRegistry {
         return normalized;
     }
 
+    private String targetTextHint(JsonNode target) {
+        if (target == null || target.isMissingNode() || target.isNull()) {
+            return "";
+        }
+        if (target.isTextual()) {
+            return target.asText("");
+        }
+        return firstText(target, "id", "key", "ruleId", "laneKey", "field", "name");
+    }
+
     private void applyMergeByKey(
             JsonNode effect,
             JsonNode input,
             AgenticAuthoringResolvedTarget resolved,
+            boolean allowUpsert,
+            String targetKeyHint,
             ObjectNode proposedConfig,
             ObjectNode compiled,
             List<String> failures) {
         String path = text(effect, "path");
         String key = text(effect, "key");
         String keyValue = resolved != null ? text(resolved.value(), key) : "";
+        if (keyValue.isBlank()) {
+            keyValue = !text(input, key).isBlank() ? text(input, key) : targetKeyHint;
+        }
         ArrayNode array = parentArrayForEffect(proposedConfig, path, resolved);
+        if (array == null && allowUpsert) {
+            array = arrayAt(proposedConfig, collectionPath(path), true);
+        }
         if (array == null) {
             failures.add("merge-by-key path is not an array: " + path);
             return;
         }
-        ObjectNode target = findObjectByKey(array, key, keyValue);
-        if (target == null) {
-            int resolvedIndex = indexOfResolvedArrayTarget(resolved);
-            if (resolvedIndex >= 0 && resolvedIndex < array.size() && array.get(resolvedIndex) instanceof ObjectNode indexedTarget) {
-                target = indexedTarget;
-            }
+        int matchedIndex = indexOfObjectByKey(array, key, keyValue);
+        if (matchedIndex < 0) {
+            matchedIndex = indexOfResolvedArrayTarget(resolved);
         }
+        ObjectNode target = matchedIndex >= 0 && matchedIndex < array.size() && array.get(matchedIndex) instanceof ObjectNode indexedTarget
+                ? indexedTarget
+                : null;
         if (target == null) {
-            failures.add("merge-by-key target not found: " + path + " " + key + "=" + keyValue);
+            if (!allowUpsert || keyValue.isBlank()) {
+                failures.add("merge-by-key target not found: " + path + " " + key + "=" + keyValue);
+                return;
+            }
+            ObjectNode inserted = objectMapper.createObjectNode();
+            mergeObject(inserted, input);
+            array.add(inserted);
+            int insertedIndex = array.size() - 1;
+            compiled.put("upsertInsert", true);
+            compiled.put("insertedIndex", insertedIndex);
+            compiled.put("resolvedPath", collectionPath(path) + "[]/" + insertedIndex);
+            compiled.put("keyValue", keyValue);
+            compiled.set("value", inserted.deepCopy());
             return;
         }
         mergeObject(target, input);
+        if (resolved == null) {
+            compiled.put("resolvedPath", collectionPath(path) + "[]/" + matchedIndex);
+        }
         compiled.put("keyValue", keyValue);
         compiled.set("value", input);
     }
@@ -6462,6 +6512,7 @@ public final class AgenticAuthoringEffectCompilerRegistry {
             ObjectNode compiled,
             List<String> failures) {
         String path = text(effect, "path");
+        String inputPath = text(effect, "inputPath");
         if (path.equals("$resolvedPath") || path.startsWith("$resolvedPath.")) {
             if (resolved == null || resolved.path() == null || resolved.path().isBlank()) {
                 failures.add("set-value with $resolvedPath requires a resolved target");
@@ -6469,6 +6520,10 @@ public final class AgenticAuthoringEffectCompilerRegistry {
             }
             String subTail = path.equals("$resolvedPath") ? "" : path.substring("$resolvedPath.".length());
             JsonNode value = valueForSetEffect(effect, input, subTail);
+            if (!inputPath.isBlank() && value.isMissingNode()) {
+                compiled.put("skipped", true);
+                return;
+            }
             JsonNode targetNode = nodeAtResolvedPath(proposedConfig, resolved.path());
             if (!(targetNode instanceof ObjectNode targetObject)) {
                 failures.add("set-value resolved target is not an object: " + resolved.path());
@@ -6490,6 +6545,10 @@ public final class AgenticAuthoringEffectCompilerRegistry {
         }
         String tail = tailAfterArray(path);
         JsonNode value = valueForSetEffect(effect, input, tail);
+        if (!inputPath.isBlank() && value.isMissingNode()) {
+            compiled.put("skipped", true);
+            return;
+        }
         if (resolved != null && !tail.isBlank()) {
             JsonNode targetNode = nodeAtResolvedPath(proposedConfig, resolved.path());
             if (targetNode instanceof ObjectNode targetObject) {
@@ -8030,7 +8089,17 @@ public final class AgenticAuthoringEffectCompilerRegistry {
     }
 
     private String normalizeDottedPath(String path) {
-        return path == null ? "" : path.replace("[]", "");
+        if (path == null) {
+            return "";
+        }
+        String clean = path.trim().replace("[]", "");
+        if ("$".equals(clean)) {
+            return "";
+        }
+        if (clean.startsWith("$.")) {
+            clean = clean.substring(2);
+        }
+        return clean;
     }
 
     private String cleanPathSegment(String segment) {
