@@ -94,8 +94,12 @@ public class GetEntity360DossierTool implements OperationalAgentTool {
         output.put("resourceKey", dossier.entity().resourceKey());
         output.put("resourcePath", dossier.entity().resourcePath());
         output.put("entityId", dossier.entityId());
-        output.put("displayTitle", dossier.displayTitle());
-        output.put("displaySubtitle", dossier.displaySubtitle());
+        String safeTitle = safeDossierDisplayField(
+                dossier, dossier.entity().titleField(), dossier.displayTitle(), dossier.entityId());
+        String safeSubtitle = safeDossierDisplayField(
+                dossier, dossier.entity().subtitleField(), dossier.displaySubtitle(), "");
+        output.put("displayTitle", safeTitle);
+        output.put("displaySubtitle", safeSubtitle);
         output.put("record", dossier.modelSafeRecord());
         output.put("maskedForAiFields", dossier.maskedForAiFields());
         output.put("alerts", dossier.alerts().stream()
@@ -144,6 +148,24 @@ public class GetEntity360DossierTool implements OperationalAgentTool {
             output.put("calculationTrails", ExplainCalculationMemoryTool.mapModelSafeTrails(calc.modelSafeTrails()));
         }
         return output;
+    }
+
+    private static String safeDossierDisplayField(
+            AgentEntityDossier dossier,
+            String fieldName,
+            String uiDisplayValue,
+            String fallback) {
+        if (fieldName != null && !fieldName.isBlank()) {
+            if (dossier.maskedForAiFields().contains(fieldName) || dossier.hiddenFields().contains(fieldName)) {
+                Object maskedVal = dossier.modelSafeRecord().get(fieldName);
+                return maskedVal != null ? maskedVal.toString() : fallback;
+            }
+            Object safeVal = dossier.modelSafeRecord().get(fieldName);
+            if (safeVal != null && !safeVal.toString().isBlank()) {
+                return safeVal.toString();
+            }
+        }
+        return nonNullText(uiDisplayValue);
     }
 
     private static String nonNullText(String value) {

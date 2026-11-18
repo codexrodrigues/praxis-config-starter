@@ -104,6 +104,13 @@ public class OperationalAgentTurnStreamService {
     @Value("${praxis.ai.agent.stream.max-emitters-per-stream:4}")
     private int maxEmittersPerStream = 4;
 
+    @Value("${praxis.ai.security.corporate-mode:false}")
+    private boolean corporateMode = false;
+
+    public void setCorporateMode(boolean corporateMode) {
+        this.corporateMode = corporateMode;
+    }
+
     public OperationalAgentTurnStreamService(
             PraxisOperationalAgentLoop agentLoop,
             AiThreadService threadService,
@@ -157,7 +164,9 @@ public class OperationalAgentTurnStreamService {
                 sanitizedPrompt);
         UUID threadId = thread.getThreadId();
 
-        String requestHash = hashRequest(request, sanitizedPrompt, principalContext);
+        AgentExecutionContext preContext = buildExecutionContext(
+                threadId, turnId, null, request, principalContext, servletRequest);
+        String requestHash = hashRequest(request, sanitizedPrompt, principalContext, preContext.propagatedClaims());
         AiTurnEventService.StreamStartMetadata existing = turnEventService.findStartMetadata(threadId, turnId)
                 .orElse(null);
         if (existing != null) {
@@ -194,8 +203,19 @@ public class OperationalAgentTurnStreamService {
                     principalContext), false);
         }
 
-        AgentExecutionContext executionContext = buildExecutionContext(
-                threadId, turnId, streamId, request, principalContext, servletRequest);
+        AgentExecutionContext executionContext = new AgentExecutionContext(
+                preContext.threadId(),
+                preContext.turnId(),
+                streamId,
+                preContext.tenantId(),
+                preContext.userId(),
+                preContext.environment(),
+                preContext.principalName(),
+                preContext.authorities(),
+                preContext.activeScreenResourcePath(),
+                preContext.activeTopicKey(),
+                preContext.activeSelectionHints(),
+                preContext.propagatedClaims());
         AiCallConfig callConfig = resolveCallConfig(request, principalContext);
         AgentThreadContextPropagator.Snapshot propagatedSnapshot = contextPropagator.captureAll();
 
@@ -695,7 +715,7 @@ public class OperationalAgentTurnStreamService {
         AiCallConfig requested = AiCallConfig.builder()
                 .provider(request.provider())
                 .model(request.model())
-                .apiKey(request.apiKey())
+                .apiKey(corporateMode ? null : request.apiKey())
                 .tenantId(principalContext.tenantId())
                 .environment(principalContext.environment())
                 .build();
@@ -741,7 +761,8 @@ public class OperationalAgentTurnStreamService {
     private String hashRequest(
             OperationalAgentTurnStreamRequest request,
             String sanitizedPrompt,
-            AiPrincipalContext principalContext) {
+            AiPrincipalContext principalContext,
+            Map<String, Object> propagatedClaims) {
         try {
             MessageDigest md = MessageDigest.getInstance("SHA-256");
             String historyJson = request.conversationMessages() != null && !request.conversationMessages().isEmpty()
@@ -750,10 +771,23 @@ public class OperationalAgentTurnStreamService {
             String hintsJson = request.activeSelectionHints() != null && !request.activeSelectionHints().isEmpty()
                     ? objectMapper.writeValueAsString(request.activeSelectionHints())
                     : "";
+            String claimsScope = "";
+            if (propagatedClaims != null && !propagatedClaims.isEmpty()) {
+                java.util.TreeMap<String, Object> sortedClaims = new java.util.TreeMap<>();
+                for (Map.Entry<String, Object> entry : propagatedClaims.entrySet()) {
+                    if (StringUtils.hasText(entry.getKey()) && entry.getValue() != null) {
+                        sortedClaims.put(entry.getKey(), entry.getValue());
+                    }
+                }
+                if (!sortedClaims.isEmpty()) {
+                    claimsScope = objectMapper.writeValueAsString(sortedClaims);
+                }
+            }
             String payload = String.join("|",
                     safe(principalContext.tenantId()),
                     safe(principalContext.userId()),
                     safe(principalContext.environment()),
+                    safe(claimsScope),
                     safe(sanitizedPrompt),
                     safe(request.activeScreenResourcePath()),
                     safe(request.activeTopicKey()),

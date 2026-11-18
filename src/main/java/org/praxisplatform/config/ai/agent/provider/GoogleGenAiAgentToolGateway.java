@@ -6,6 +6,8 @@ import com.google.genai.types.AutomaticFunctionCallingConfig;
 import com.google.genai.types.Candidate;
 import com.google.genai.types.Content;
 import com.google.genai.types.FunctionCall;
+import com.google.genai.types.FunctionCallingConfig;
+import com.google.genai.types.FunctionCallingConfigMode;
 import com.google.genai.types.FunctionDeclaration;
 import com.google.genai.types.FunctionResponse;
 import com.google.genai.types.GenerateContentConfig;
@@ -13,9 +15,8 @@ import com.google.genai.types.GenerateContentResponse;
 import com.google.genai.types.GenerateContentResponseUsageMetadata;
 import com.google.genai.types.HttpOptions;
 import com.google.genai.types.Part;
-import com.google.genai.types.Schema;
 import com.google.genai.types.Tool;
-import com.google.genai.types.Type;
+import com.google.genai.types.ToolConfig;
 import jakarta.annotation.PreDestroy;
 import java.util.ArrayList;
 import java.util.Base64;
@@ -147,25 +148,30 @@ public class GoogleGenAiAgentToolGateway implements AiToolCallingProvider {
                             .build());
                 }
             } else if (item.role() == AgentConversationRole.ASSISTANT) {
-                List<Part> parts = new ArrayList<>();
-                if (StringUtils.hasText(item.text())) {
-                    parts.add(Part.fromText(item.text()));
-                }
-                for (AgentToolCall call : item.toolCalls()) {
-                    FunctionCall.Builder fcBuilder = FunctionCall.builder()
-                            .name(call.name())
-                            .args(call.arguments());
-                    if (StringUtils.hasText(call.callId()) && !call.callId().startsWith(SYNTHETIC_CALL_PREFIX)) {
-                        fcBuilder.id(call.callId());
+                List<Part> rawOpaqueParts = extractOpaqueGeminiParts(item);
+                if (!rawOpaqueParts.isEmpty()) {
+                    contents.add(Content.builder().role("model").parts(rawOpaqueParts).build());
+                } else {
+                    List<Part> parts = new ArrayList<>();
+                    if (StringUtils.hasText(item.text())) {
+                        parts.add(Part.fromText(item.text()));
                     }
-                    Part.Builder partBuilder = Part.builder().functionCall(fcBuilder.build());
-                    if (StringUtils.hasText(call.thoughtSignature())) {
-                        partBuilder.thoughtSignature(Base64.getDecoder().decode(call.thoughtSignature()));
+                    for (AgentToolCall call : item.toolCalls()) {
+                        FunctionCall.Builder fcBuilder = FunctionCall.builder()
+                                .name(call.name())
+                                .args(call.arguments());
+                        if (StringUtils.hasText(call.callId()) && !call.callId().startsWith(SYNTHETIC_CALL_PREFIX)) {
+                            fcBuilder.id(call.callId());
+                        }
+                        Part.Builder partBuilder = Part.builder().functionCall(fcBuilder.build());
+                        if (StringUtils.hasText(call.thoughtSignature())) {
+                            partBuilder.thoughtSignature(Base64.getDecoder().decode(call.thoughtSignature()));
+                        }
+                        parts.add(partBuilder.build());
                     }
-                    parts.add(partBuilder.build());
-                }
-                if (!parts.isEmpty()) {
-                    contents.add(Content.builder().role("model").parts(parts).build());
+                    if (!parts.isEmpty()) {
+                        contents.add(Content.builder().role("model").parts(parts).build());
+                    }
                 }
             } else if (item.role() == AgentConversationRole.TOOL_RESULT) {
                 List<Part> parts = new ArrayList<>();
@@ -191,7 +197,6 @@ public class GoogleGenAiAgentToolGateway implements AiToolCallingProvider {
                 .automaticFunctionCalling(AutomaticFunctionCallingConfig.builder().disable(true).build());
         if (StringUtils.hasText(request.systemInstruction())) {
             builder.systemInstruction(Content.builder()
-                    .role("user")
                     .parts(List.of(Part.fromText(request.systemInstruction())))
                     .build());
         }
@@ -207,86 +212,82 @@ public class GoogleGenAiAgentToolGateway implements AiToolCallingProvider {
                 FunctionDeclaration.Builder declBuilder = FunctionDeclaration.builder()
                         .name(tool.name())
                         .description(tool.description());
-                Schema schema = toGeminiSchema(tool);
-                if (schema != null) {
-                    declBuilder.parameters(schema);
+                Map<String, Object> jsonSchema = normalizeJsonSchemaMap(tool);
+                if (!jsonSchema.isEmpty()) {
+                    declBuilder.parametersJsonSchema(jsonSchema);
                 }
                 declarations.add(declBuilder.build());
             }
             builder.tools(List.of(Tool.builder().functionDeclarations(declarations).build()));
+            if (request.disableToolCalling()) {
+                builder.toolConfig(ToolConfig.builder()
+                        .functionCallingConfig(FunctionCallingConfig.builder()
+                                .mode(FunctionCallingConfigMode.Known.NONE)
+                                .build())
+                        .build());
+            }
         }
         return builder.build();
     }
 
-    private Schema toGeminiSchema(AgentToolDeclaration tool) {
-        Map<String, Object> raw = new LinkedHashMap<>(tool.parametersJsonSchema());
-        if (!raw.containsKey("type")) {
-            raw.put("type", "object");
+    private static List<Part> extractOpaqueGeminiParts(AgentConversationItem item) {
+        if (item == null || item.providerOpaqueState() == null) {
+            return List.of();
         }
-        if (!raw.containsKey("required") && !tool.requiredParameters().isEmpty()) {
+        Object raw = item.providerOpaqueState().get("geminiModelParts");
+        if (!(raw instanceof List<?> list) || list.isEmpty()) {
+            return List.of();
+        }
+        List<Part> result = new ArrayList<>(list.size());
+        for (Object entry : list) {
+            if (!(entry instanceof Part part)) {
+                return List.of();
+            }
+            result.add(part);
+        }
+        return result;
+    }
+
+    private Map<String, Object> normalizeJsonSchemaMap(AgentToolDeclaration tool) {
+        Map<String, Object> raw = tool.parametersJsonSchema() == null
+                ? new LinkedHashMap<>()
+                : new LinkedHashMap<>(tool.parametersJsonSchema());
+        raw.putIfAbsent("type", "object");
+        if (!raw.containsKey("required") && tool.requiredParameters() != null && !tool.requiredParameters().isEmpty()) {
             raw.put("required", tool.requiredParameters());
         }
-        return toGeminiSchemaNode(raw);
+        return normalizeSchemaNode(raw);
     }
 
     @SuppressWarnings("unchecked")
-    private Schema toGeminiSchemaNode(Map<String, Object> raw) {
+    private Map<String, Object> normalizeSchemaNode(Map<String, Object> raw) {
         if (raw == null || raw.isEmpty()) {
-            return Schema.builder().type(Type.Known.OBJECT).build();
+            return Map.of("type", "object");
         }
-        Schema.Builder builder = Schema.builder();
-        Object typeValue = raw.get("type");
-        if (typeValue instanceof String typeStr) {
-            builder.type(mapType(typeStr));
-        }
-        if (raw.get("description") instanceof String desc && StringUtils.hasText(desc)) {
-            builder.description(desc);
-        }
-        if (raw.get("nullable") instanceof Boolean nullable) {
-            builder.nullable(nullable);
-        }
-        if (raw.get("enum") instanceof List<?> enumValues && !enumValues.isEmpty()) {
-            List<String> normalizedEnums = enumValues.stream()
-                    .filter(Objects::nonNull)
-                    .map(Object::toString)
-                    .toList();
-            builder.enum_(normalizedEnums);
-        }
-        if (raw.get("required") instanceof List<?> requiredList && !requiredList.isEmpty()) {
-            List<String> required = requiredList.stream()
-                    .filter(Objects::nonNull)
-                    .map(Object::toString)
-                    .toList();
-            builder.required(required);
-        }
-        if (raw.get("properties") instanceof Map<?, ?> propsMap && !propsMap.isEmpty()) {
-            Map<String, Schema> convertedProps = new LinkedHashMap<>();
-            for (Map.Entry<?, ?> entry : propsMap.entrySet()) {
-                if (entry.getKey() != null && entry.getValue() instanceof Map<?, ?> nestedMap) {
-                    convertedProps.put(entry.getKey().toString(), toGeminiSchemaNode((Map<String, Object>) nestedMap));
+        Map<String, Object> out = new LinkedHashMap<>();
+        for (Map.Entry<String, Object> entry : raw.entrySet()) {
+            String key = entry.getKey();
+            Object val = entry.getValue();
+            if ("properties".equals(key) && val instanceof Map<?, ?> propsMap) {
+                Map<String, Object> normProps = new LinkedHashMap<>();
+                for (Map.Entry<?, ?> propEntry : propsMap.entrySet()) {
+                    if (propEntry.getKey() != null && propEntry.getValue() instanceof Map<?, ?> nested) {
+                        normProps.put(propEntry.getKey().toString(), normalizeSchemaNode((Map<String, Object>) nested));
+                    }
                 }
+                if (!normProps.isEmpty()) {
+                    out.put("properties", normProps);
+                }
+            } else if ("items".equals(key) && val instanceof Map<?, ?> itemsMap) {
+                out.put("items", normalizeSchemaNode((Map<String, Object>) itemsMap));
+            } else if (val != null) {
+                out.put(key, val);
             }
-            builder.properties(convertedProps);
         }
-        if (raw.get("items") instanceof Map<?, ?> itemsMap) {
-            builder.items(toGeminiSchemaNode((Map<String, Object>) itemsMap));
+        if (!out.containsKey("type") && !out.containsKey("enum") && !out.containsKey("$ref")) {
+            out.put("type", "object");
         }
-        return builder.build();
-    }
-
-    private Type.Known mapType(String jsonSchemaType) {
-        if (jsonSchemaType == null) {
-            return Type.Known.TYPE_UNSPECIFIED;
-        }
-        return switch (jsonSchemaType.trim().toLowerCase()) {
-            case "string" -> Type.Known.STRING;
-            case "integer" -> Type.Known.INTEGER;
-            case "number" -> Type.Known.NUMBER;
-            case "boolean" -> Type.Known.BOOLEAN;
-            case "array" -> Type.Known.ARRAY;
-            case "object" -> Type.Known.OBJECT;
-            default -> Type.Known.STRING;
-        };
+        return out;
     }
 
     private AgentModelTurnResponse fromGeminiResponse(
@@ -306,6 +307,7 @@ public class GoogleGenAiAgentToolGateway implements AiToolCallingProvider {
         }
         StringBuilder textBuilder = new StringBuilder();
         List<AgentToolCall> calls = new ArrayList<>();
+        List<Part> rawParts = List.of();
         String finishReason = null;
 
         List<Candidate> candidates = response.candidates().orElse(List.of());
@@ -313,6 +315,7 @@ public class GoogleGenAiAgentToolGateway implements AiToolCallingProvider {
             Candidate primary = candidates.get(0);
             finishReason = primary.finishReason().map(Object::toString).orElse(null);
             List<Part> parts = primary.content().flatMap(Content::parts).orElse(List.of());
+            rawParts = parts;
             for (int index = 0; index < parts.size(); index++) {
                 Part part = parts.get(index);
                 boolean isThought = part.thought().orElse(false);
@@ -352,6 +355,9 @@ public class GoogleGenAiAgentToolGateway implements AiToolCallingProvider {
         AgentTokenUsage usage = response.usageMetadata()
                 .map(this::toUsage)
                 .orElse(AgentTokenUsage.ZERO);
+        Map<String, Object> opaqueState = rawParts.isEmpty()
+                ? Map.of()
+                : Map.of("geminiModelParts", List.copyOf(rawParts));
         return new AgentModelTurnResponse(
                 PROVIDER_ID,
                 response.modelVersion().orElse(model),
@@ -360,7 +366,7 @@ public class GoogleGenAiAgentToolGateway implements AiToolCallingProvider {
                 usage,
                 finishReason,
                 response.responseId().orElse(null),
-                Map.of());
+                opaqueState);
     }
 
     private AgentTokenUsage toUsage(GenerateContentResponseUsageMetadata metadata) {

@@ -99,17 +99,22 @@ public final class AgentCalculationMemoryEvaluator {
             }
             Map<String, Object> trail = normalizeMap(rawTrail);
             String visibleWhen = asString(trail.get("visibleWhen"));
+            boolean uiVisible = true;
+            boolean safeVisible = true;
             if (StringUtils.hasText(visibleWhen)) {
-                EvalOutcome vis = evaluateExpr(visibleWhen, uiContext);
-                if (!isTruthy(vis.value())) {
+                uiVisible = isTruthy(evaluateExpr(visibleWhen, uiContext).value());
+                if (!uiVisible) {
                     continue;
                 }
+                safeVisible = isTruthy(evaluateExpr(visibleWhen, safeContext).value());
             }
 
             EvaluatedTrail uiTrail = evaluateTrail(trail, defaultLegalBasis, uiContext, hiddenSet, maskedSet, false);
-            EvaluatedTrail safeTrail = evaluateTrail(trail, modelSafeLegalBasis, safeContext, hiddenSet, maskedSet, true);
             uiTrails.add(uiTrail);
-            modelSafeTrails.add(safeTrail);
+            if (safeVisible) {
+                EvaluatedTrail safeTrail = evaluateTrail(trail, modelSafeLegalBasis, safeContext, hiddenSet, maskedSet, true);
+                modelSafeTrails.add(safeTrail);
+            }
         }
 
         if (uiTrails.isEmpty() && !StringUtils.hasText(emptyText)) {

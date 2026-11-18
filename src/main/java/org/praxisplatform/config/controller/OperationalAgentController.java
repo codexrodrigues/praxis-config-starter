@@ -176,7 +176,7 @@ public class OperationalAgentController {
         AiPrincipalContext principalContext = principalContextResolver.resolve(
                 servletRequest, tenantId, userId, environment);
         OperationalAgentProposalService.ConfirmHttpResult result =
-                proposalService.completeViaExternalForm(proposalId, principalContext, request);
+                proposalService.completeViaExternalForm(proposalId, principalContext, servletRequest, request);
         return ResponseEntity.status(result.httpStatus()).body(result.response());
     }
 

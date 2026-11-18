@@ -65,13 +65,34 @@ public class PrepareBulkOperationTool implements OperationalAgentTool {
                 "type", "array",
                 "items", Map.of("type", "string"),
                 "description", "Identificadores excluidos da selecao por filtro quando selectionMode=QUERY."));
+        Map<String, Object> uniformChangeItemProps = new LinkedHashMap<>();
+        uniformChangeItemProps.put("field", Map.of("type", "string", "description", "Campo @BulkEditable alvo."));
+        uniformChangeItemProps.put("operator", Map.of("type", "string", "enum", List.of("SET", "CLEAR"), "description", "Operador de atualizacao: SET ou CLEAR."));
+        uniformChangeItemProps.put("value", Map.of("type", "string", "description", "Novo valor serializado quando operator=SET."));
+        uniformChangeItemProps.put("clearValue", Map.of("type", "boolean", "description", "Opcional: true para limpar o campo quando permitido."));
         properties.put("changes", Map.of(
                 "type", "array",
-                "items", Map.of("type", "object"),
+                "items", Map.of(
+                        "type", "object",
+                        "properties", uniformChangeItemProps),
                 "description", "Alteracoes uniformes [{field, operator: SET|CLEAR, value}] para UNIFORM_UPDATE."));
+
+        Map<String, Object> perItemProps = new LinkedHashMap<>();
+        perItemProps.put("id", Map.of("type", "string", "description", "Identificador canonico do registro alvo."));
+        perItemProps.put("expectedVersion", Map.of("type", "string", "description", "Opcional: versao/ETag esperada do item."));
+        perItemProps.put("values", Map.of("type", "object", "description", "Mapa opcional campo->valor para alteracao do item."));
+        perItemProps.put("clearFields", Map.of("type", "array", "items", Map.of("type", "string"), "description", "Lista opcional de campos a limpar no item."));
+        perItemProps.put("changes", Map.of(
+                "type", "array",
+                "items", Map.of(
+                        "type", "object",
+                        "properties", uniformChangeItemProps),
+                "description", "Lista opcional de mudancas [{field, operator, value}] do item."));
         properties.put("items", Map.of(
                 "type", "array",
-                "items", Map.of("type", "object"),
+                "items", Map.of(
+                        "type", "object",
+                        "properties", perItemProps),
                 "description", "Alteracoes distintas por item [{id, changes: [{field, operator, value}]}] para PER_ITEM_UPDATE."));
         properties.put("parameters", Map.of(
                 "type", "object",

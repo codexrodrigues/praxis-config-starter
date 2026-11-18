@@ -129,6 +129,7 @@ public class PraxisOperationalAgentLoop {
         String systemInstruction = buildSystemInstruction(context);
         AgentTokenUsage totalUsage = AgentTokenUsage.ZERO;
         String finalText = "";
+        String lastFinishReason = null;
         String provider = callConfig != null ? callConfig.getProvider() : null;
         String model = callConfig != null ? callConfig.getModel() : null;
         int rounds = 0;
@@ -152,6 +153,9 @@ public class PraxisOperationalAgentLoop {
             }
             if (StringUtils.hasText(response.model())) {
                 model = response.model();
+            }
+            if (StringUtils.hasText(response.finishReason())) {
+                lastFinishReason = response.finishReason();
             }
             totalUsage = totalUsage.plus(response.usage());
 
@@ -180,7 +184,10 @@ public class PraxisOperationalAgentLoop {
                     error = true;
                 } else {
                     try {
-                        output = tool.execute(context, vault, artifacts, call.arguments());
+                        Map<String, Object> rawOutput = tool.execute(context, vault, artifacts, call.arguments());
+                        output = rawOutput == null
+                                ? Map.of()
+                                : vault.scrubOutboundForModel(OperationalAssistantBlockComposer.maskMod11InStructure(rawOutput));
                     } catch (Exception ex) {
                         log.warn("[OperationalAgentLoop] Tool '{}' failed: {}", call.name(), ex.getMessage(), ex);
                         output = Map.of("error", "Falha ao executar ferramenta operacional.");
@@ -195,7 +202,7 @@ public class PraxisOperationalAgentLoop {
             conversation.add(AgentConversationItem.toolResults(results));
             if (round == maxIterations && !progress.isCancelled()) {
                 AgentModelTurnResponse synthesis = toolCallingProvider.generateTurn(
-                        new AgentModelTurnRequest(systemInstruction, conversation, List.of(), callConfig),
+                        new AgentModelTurnRequest(systemInstruction, conversation, declarations, callConfig, true),
                         AgentModelStreamListener.NOOP);
                 if (StringUtils.hasText(synthesis.provider())) {
                     provider = synthesis.provider();
@@ -211,7 +218,7 @@ public class PraxisOperationalAgentLoop {
         }
 
         if (!StringUtils.hasText(finalText)) {
-            finalText = buildFallbackNarrative(artifacts);
+            finalText = buildFallbackNarrative(artifacts, lastFinishReason);
         }
         finalText = OperationalAssistantBlockComposer.maskMod11TaxIds(finalText);
         OperationalAssistantBlockComposer.ComposedAssistantOutput composed =
@@ -238,7 +245,7 @@ public class PraxisOperationalAgentLoop {
                 if (entry == null || !StringUtils.hasText(entry.text())) {
                     continue;
                 }
-                String safeHistory = TurnScopedPiiVault.tokenize(entry.text()).sanitizedPrompt();
+                String safeHistory = vault.tokenizeAdditional(entry.text());
                 if ("assistant".equalsIgnoreCase(entry.role())) {
                     items.add(AgentConversationItem.assistantText(safeHistory));
                 } else {
@@ -254,7 +261,7 @@ public class PraxisOperationalAgentLoop {
         StringBuilder sb = new StringBuilder();
         sb.append("Você é o assistente operacional da plataforma Praxis.\n");
         sb.append("Regras obrigatórias:\n");
-        sb.append("1. Sempre comece por 'search_and_resolve_entities' quando o usuário informar um documento ([TAX_ID_n]), código, matrícula, nome ou termo curto sem entidade inequívoca.\n");
+        sb.append("1. Sempre comece por 'search_and_resolve_entities' quando o usuário informar um documento ([TAX_ID_n]), e-mail ([EMAIL_n]), código, matrícula, nome ou termo curto sem entidade inequívoca.\n");
         sb.append("2. Se 'search_and_resolve_entities' retornar exatamente 1 candidato (SINGLE_MATCH) e já incluir 'autoLoadedDossier', não chame 'get_entity_360_dossier' novamente; responda diretamente consolidando os dados, alertas e ações já retornados. Chame 'get_entity_360_dossier' apenas quando 'autoLoadedDossier' não estiver presente ou quando o usuário escolher um candidato específico.\n");
         sb.append("3. Se 'search_and_resolve_entities' retornar múltiplos candidatos (MULTIPLE_CANDIDATES), nunca escolha um deles por conta própria; apresente a síntese e peça ao usuário para escolher na lista.\n");
         sb.append("4. Para listar coleções ou aplicar filtros específicos, use 'discover_topic_resources_and_schemas' e 'query_resource_records'. Se não houver correspondência relevante na busca polimórfica global, responda de forma objetiva sem repetir múltiplas consultas vazias.\n");
@@ -297,7 +304,10 @@ public class PraxisOperationalAgentLoop {
         if (context != null && context.activeSelectionHints() != null && !context.activeSelectionHints().isEmpty()) {
             Object scrubbedHints = OperationalAssistantBlockComposer.maskMod11InStructure(context.activeSelectionHints());
             sb.append("Registro/escopo ativo em foco na conversa (somente leitura/referência; sanitizado): ")
-                    .append(sanitizePromptHint(OperationalAssistantBlockComposer.maskMod11TaxIds(String.valueOf(scrubbedHints)), 768))
+                    .append(sanitizePromptHint(
+                            TurnScopedPiiVault.maskRawEmails(
+                                    OperationalAssistantBlockComposer.maskMod11TaxIds(String.valueOf(scrubbedHints))),
+                            768))
                     .append(".\n");
         }
         return sb.toString();
@@ -327,7 +337,7 @@ public class PraxisOperationalAgentLoop {
         return output.size();
     }
 
-    private static String buildFallbackNarrative(AgentTurnArtifactStore artifacts) {
+    private static String buildFallbackNarrative(AgentTurnArtifactStore artifacts, String lastFinishReason) {
         if (!artifacts.actionProposals().isEmpty()) {
             return "Proposta governada preparada abaixo. Revise os dados antes de confirmar a execução.";
         }
@@ -351,6 +361,13 @@ public class PraxisOperationalAgentLoop {
         }
         if (!artifacts.queryResults().isEmpty()) {
             return "Consulta concluída com os registros retornados abaixo.";
+        }
+        if (artifacts.traces().isEmpty()) {
+            String reason = StringUtils.hasText(lastFinishReason)
+                    ? " (motivo: " + lastFinishReason + ")"
+                    : "";
+            return "O provedor de IA encerrou o turno sem texto nem consulta às ferramentas operacionais"
+                    + reason + ". Tente reformular a solicitação ou iniciar uma nova consulta.";
         }
         return "Não foram encontrados registros para os critérios informados.";
     }

@@ -83,8 +83,12 @@ import org.praxisplatform.uischema.action.ActionCatalogResponse;
 import org.praxisplatform.uischema.action.ActionCatalogService;
 import org.praxisplatform.uischema.action.ActionDefinitionRegistry;
 import org.praxisplatform.uischema.action.ActionScope;
+import org.praxisplatform.uischema.annotation.AiVisibilityMode;
 import org.praxisplatform.uischema.annotation.ApiResource;
+import org.praxisplatform.uischema.annotation.DomainClassification;
+import org.praxisplatform.uischema.annotation.DomainDataCategory;
 import org.praxisplatform.uischema.annotation.DomainGovernance;
+import org.praxisplatform.uischema.annotation.DomainGovernancePreset;
 import org.praxisplatform.uischema.annotation.ResourceIdentity;
 import org.praxisplatform.uischema.annotation.UiOption;
 import org.praxisplatform.uischema.bulk.BulkCommandEvaluationRequest;
@@ -813,6 +817,24 @@ public class MetadataStarterInProcessAgentBridge implements AgentResourceExecuti
             } catch (Throwable ex) {
                 return mapExecutionException(context, res, convertedId, canonicalId, ex);
             }
+        } else if (context != null && context.propagatedClaims() != null && !context.propagatedClaims().isEmpty()) {
+            Map<String, Object> claims = context.propagatedClaims();
+            if (isReadOnlyConsolidationClaim(claims)) {
+                return failureOutcome(
+                        409,
+                        "READ_ONLY_CONSOLIDATION",
+                        "Grupo consolidado em modo somente relatórios; selecione uma empresa operacional para gravar.");
+            }
+            if (StringUtils.hasText(request.organizationId()) && !isMultiOrganizationClaim(claims)) {
+                String activeOrg = resolveSinglePrimaryOrganizationClaim(claims);
+                if (StringUtils.hasText(activeOrg)
+                        && !request.organizationId().trim().equalsIgnoreCase(activeOrg.trim())) {
+                    return failureOutcome(
+                            409,
+                            "ORGANIZATION_SCOPE_CHANGED",
+                            "O escopo organizacional ativo diverge da organização vinculada à proposta.");
+                }
+            }
         }
 
         Object requestDto = null;
@@ -1537,8 +1559,10 @@ public class MetadataStarterInProcessAgentBridge implements AgentResourceExecuti
                     title = extractDisplayField(proj.uiRecord(), res.descriptor().titleField(), wireKey);
                     subtitle = trimToNull(extractDisplayField(proj.uiRecord(), res.descriptor().subtitleField(), ""));
                     if (uiPreviewByWire.size() < 20) {
+                        String modelTitle = extractDisplayField(proj.modelSafeRecord(), res.descriptor().titleField(), wireKey);
+                        String modelSubtitle = trimToNull(extractDisplayField(proj.modelSafeRecord(), res.descriptor().subtitleField(), ""));
                         uiPreviewByWire.put(wireKey, buildBulkPreviewRow(wireId, expectedVersion, title, subtitle, proj.uiRecord()));
-                        modelPreviewByWire.put(wireKey, buildBulkPreviewRow(wireId, null, title, subtitle, proj.modelSafeRecord()));
+                        modelPreviewByWire.put(wireKey, buildBulkPreviewRow(wireId, null, modelTitle, modelSubtitle, proj.modelSafeRecord()));
                     }
                 } else if (uiPreviewByWire.size() < 20) {
                     uiPreviewByWire.put(wireKey, buildBulkPreviewRow(wireId, expectedVersion, wireKey, null, Map.of()));
@@ -1687,8 +1711,10 @@ public class MetadataStarterInProcessAgentBridge implements AgentResourceExecuti
                     title = extractDisplayField(proj.uiRecord(), res.descriptor().titleField(), wireKey);
                     subtitle = trimToNull(extractDisplayField(proj.uiRecord(), res.descriptor().subtitleField(), ""));
                     if (uiPreviewByWire.size() < 20) {
+                        String modelTitle = extractDisplayField(proj.modelSafeRecord(), res.descriptor().titleField(), wireKey);
+                        String modelSubtitle = trimToNull(extractDisplayField(proj.modelSafeRecord(), res.descriptor().subtitleField(), ""));
                         uiPreviewByWire.put(wireKey, buildBulkPreviewRow(wireId, expectedVersion, title, subtitle, proj.uiRecord()));
-                        modelPreviewByWire.put(wireKey, buildBulkPreviewRow(wireId, null, title, subtitle, proj.modelSafeRecord()));
+                        modelPreviewByWire.put(wireKey, buildBulkPreviewRow(wireId, null, modelTitle, modelSubtitle, proj.modelSafeRecord()));
                     }
                 } else if (uiPreviewByWire.size() < 20) {
                     uiPreviewByWire.put(wireKey, buildBulkPreviewRow(wireId, expectedVersion, wireKey, null, Map.of()));
@@ -1781,8 +1807,10 @@ public class MetadataStarterInProcessAgentBridge implements AgentResourceExecuti
             String title = extractDisplayField(proj.uiRecord(), res.descriptor().titleField(), wireKey);
             String subtitle = trimToNull(extractDisplayField(proj.uiRecord(), res.descriptor().subtitleField(), ""));
             if (uiPreviewByWire.size() < 20) {
+                String modelTitle = extractDisplayField(proj.modelSafeRecord(), res.descriptor().titleField(), wireKey);
+                String modelSubtitle = trimToNull(extractDisplayField(proj.modelSafeRecord(), res.descriptor().subtitleField(), ""));
                 uiPreviewByWire.put(wireKey, buildBulkPreviewRow(wireId, expectedVersion, title, subtitle, proj.uiRecord()));
-                modelPreviewByWire.put(wireKey, buildBulkPreviewRow(wireId, null, title, subtitle, proj.modelSafeRecord()));
+                modelPreviewByWire.put(wireKey, buildBulkPreviewRow(wireId, null, modelTitle, modelSubtitle, proj.modelSafeRecord()));
             }
             if ("DOMAIN_COMMAND".equals(normalizedMode)) {
                 Map<String, Object> tMap = new LinkedHashMap<>();
@@ -3277,8 +3305,8 @@ public class MetadataStarterInProcessAgentBridge implements AgentResourceExecuti
         for (AgentProactiveAlertContributor contributor : alertContributors) {
             if (contributor.supportsEntity(entityKey)) {
                 try {
-                    List<AgentProactiveAlert> found = executeIsolatedReadOnly(() -> contributor.evaluateAlerts(
-                            context, entityKey, entityId, authoritativeRecord));
+                    List<AgentProactiveAlert> found = contributor.evaluateAlerts(
+                            context, entityKey, entityId, authoritativeRecord);
                     if (found != null) {
                         alerts.addAll(found);
                     }
@@ -4728,12 +4756,13 @@ public class MetadataStarterInProcessAgentBridge implements AgentResourceExecuti
         }
         List<ResponseFieldMeta> list = new ArrayList<>();
         Set<String> seen = new LinkedHashSet<>();
+        DomainGovernance classGov = AnnotatedElementUtils.findMergedAnnotation(dtoType, DomainGovernance.class);
         if (dtoType.isRecord()) {
             for (RecordComponent component : dtoType.getRecordComponents()) {
                 UISchema ui = component.getAnnotation(UISchema.class);
                 DomainGovernance gov = component.getAnnotation(DomainGovernance.class);
                 seen.add(component.getName());
-                list.add(toResponseFieldMeta(component.getName(), ui, gov));
+                list.add(toResponseFieldMeta(component.getName(), ui, gov != null ? gov : classGov));
             }
         }
         Class<?> current = dtoType;
@@ -4744,7 +4773,7 @@ public class MetadataStarterInProcessAgentBridge implements AgentResourceExecuti
                 }
                 UISchema ui = AnnotatedElementUtils.findMergedAnnotation(field, UISchema.class);
                 DomainGovernance gov = AnnotatedElementUtils.findMergedAnnotation(field, DomainGovernance.class);
-                list.add(toResponseFieldMeta(field.getName(), ui, gov));
+                list.add(toResponseFieldMeta(field.getName(), ui, gov != null ? gov : classGov));
             }
             current = current.getSuperclass();
         }
@@ -4756,9 +4785,7 @@ public class MetadataStarterInProcessAgentBridge implements AgentResourceExecuti
         String label = ui != null && StringUtils.hasText(ui.label()) ? ui.label().trim() : name;
         String desc = ui != null ? ui.description() : "";
         FieldControlType ctrl = ui != null ? ui.controlType() : FieldControlType.AUTO;
-        String aiVis = gov != null && gov.aiUsage() != null
-                ? gov.aiUsage().visibility().wireValue()
-                : "allow";
+        String aiVis = resolveEffectiveAiVisibilityWireValue(gov);
         boolean quickViewVisible = ui != null && ui.quickViewVisible();
         int order = ui != null ? ui.order() : 0;
         int quickViewOrder = ui != null ? (ui.quickViewOrder() != 0 ? ui.quickViewOrder() : ui.order()) : 0;
@@ -4781,6 +4808,82 @@ public class MetadataStarterInProcessAgentBridge implements AgentResourceExecuti
                 labelTrue,
                 labelFalse,
                 optionLabels);
+    }
+
+    private static boolean isReadOnlyConsolidationClaim(Map<String, Object> claims) {
+        if (Boolean.TRUE.equals(claims.get("readOnlyConsolidation"))) {
+            return true;
+        }
+        for (Map.Entry<String, Object> entry : claims.entrySet()) {
+            if (entry.getKey() != null
+                    && entry.getKey().toLowerCase(Locale.ROOT).endsWith("readonlyconsolidation")
+                    && Boolean.TRUE.equals(entry.getValue())) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean isMultiOrganizationClaim(Map<String, Object> claims) {
+        if (Boolean.TRUE.equals(claims.get("multiOrganizationScope"))) {
+            return true;
+        }
+        for (Map.Entry<String, Object> entry : claims.entrySet()) {
+            if (entry.getKey() != null
+                    && entry.getKey().toLowerCase(Locale.ROOT).endsWith("multiorganizationscope")
+                    && Boolean.TRUE.equals(entry.getValue())) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static String resolveSinglePrimaryOrganizationClaim(Map<String, Object> claims) {
+        for (String key : List.of("primaryOrganization", "organizationId")) {
+            Object direct = claims.get(key);
+            if (direct != null && StringUtils.hasText(direct.toString())) {
+                return direct.toString();
+            }
+        }
+        for (Map.Entry<String, Object> entry : claims.entrySet()) {
+            if (entry.getKey() != null
+                    && entry.getKey().toLowerCase(Locale.ROOT).endsWith("primaryorganization")
+                    && entry.getValue() != null
+                    && StringUtils.hasText(entry.getValue().toString())) {
+                return entry.getValue().toString();
+            }
+        }
+        return null;
+    }
+
+    private static String resolveEffectiveAiVisibilityWireValue(DomainGovernance gov) {
+        if (gov == null) {
+            return "allow";
+        }
+        DomainGovernancePreset preset = gov.preset() != null ? gov.preset() : DomainGovernancePreset.NONE;
+        AiVisibilityMode explicitAi = gov.aiUsage() != null ? gov.aiUsage().visibility() : AiVisibilityMode.ALLOW;
+        AiVisibilityMode aiMode = explicitAi != AiVisibilityMode.ALLOW
+                ? explicitAi
+                : (preset != DomainGovernancePreset.NONE ? preset.aiVisibility() : AiVisibilityMode.ALLOW);
+        DomainClassification classification = gov.classification() != DomainClassification.INTERNAL
+                ? gov.classification()
+                : (preset != DomainGovernancePreset.NONE ? preset.classification() : DomainClassification.INTERNAL);
+        DomainDataCategory dataCategory = gov.dataCategory() != DomainDataCategory.OPERATIONAL
+                ? gov.dataCategory()
+                : (preset != DomainGovernancePreset.NONE ? preset.dataCategory() : DomainDataCategory.OPERATIONAL);
+        if (dataCategory == DomainDataCategory.CREDENTIAL) {
+            return AiVisibilityMode.DENY.wireValue();
+        }
+        if (aiMode != null && aiMode != AiVisibilityMode.ALLOW) {
+            return aiMode.wireValue();
+        }
+        if (dataCategory == DomainDataCategory.SENSITIVE_PERSONAL) {
+            return AiVisibilityMode.DENY.wireValue();
+        }
+        if (classification == DomainClassification.RESTRICTED || dataCategory == DomainDataCategory.PERSONAL) {
+            return AiVisibilityMode.MASK.wireValue();
+        }
+        return AiVisibilityMode.ALLOW.wireValue();
     }
 
     private static Map<String, String> extractOptionLabels(UISchema ui) {

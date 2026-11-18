@@ -177,7 +177,7 @@ public class OperationalAgentAutoConfiguration {
     @ConditionalOnMissingBean
     public OpenAiResponsesAgentToolGateway openAiResponsesAgentToolGateway(
             ObjectProvider<ObjectMapper> objectMapperProvider,
-            @Value("${spring.ai.openai.api-key:}") String apiKey,
+            @Value("${spring.ai.openai.api-key:${OPENAI_API_KEY:}}") String apiKey,
             @Value("${spring.ai.openai.base-url:}") String baseUrl,
             @Value("${spring.ai.openai.chat.options.model:gpt-4o-mini}") String model) {
         return new OpenAiResponsesAgentToolGateway(

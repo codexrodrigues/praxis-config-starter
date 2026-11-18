@@ -14,7 +14,9 @@ import com.openai.models.responses.ResponseInputItem;
 import com.openai.models.responses.ResponseOutputItem;
 import com.openai.models.responses.ResponseOutputMessage;
 import com.openai.models.responses.ResponseUsage;
+import com.openai.models.responses.ToolChoiceOptions;
 import jakarta.annotation.PreDestroy;
+import java.net.URI;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -65,7 +67,7 @@ public class OpenAiResponsesAgentToolGateway implements AiToolCallingProvider {
     @Autowired
     public OpenAiResponsesAgentToolGateway(
             ObjectMapper objectMapper,
-            @Value("${spring.ai.openai.api-key:}") String defaultApiKey,
+            @Value("${spring.ai.openai.api-key:${OPENAI_API_KEY:}}") String defaultApiKey,
             @Value("${spring.ai.openai.base-url:}") String defaultBaseUrl,
             @Value("${spring.ai.openai.chat.options.model:" + DEFAULT_MODEL + "}") String defaultModel) {
         this(objectMapper, defaultApiKey, defaultBaseUrl, defaultModel, OpenAiResponsesAgentToolGateway::invokeSdk);
@@ -79,7 +81,7 @@ public class OpenAiResponsesAgentToolGateway implements AiToolCallingProvider {
             OpenAiExchange exchange) {
         this.objectMapper = objectMapper == null ? new ObjectMapper() : objectMapper;
         this.defaultApiKey = trimToNull(defaultApiKey);
-        this.defaultBaseUrl = trimToNull(defaultBaseUrl);
+        this.defaultBaseUrl = normalizeBaseUrl(defaultBaseUrl);
         this.defaultModel = StringUtils.hasText(defaultModel) ? defaultModel.trim() : DEFAULT_MODEL;
         this.exchange = Objects.requireNonNull(exchange, "exchange is required");
     }
@@ -117,45 +119,60 @@ public class OpenAiResponsesAgentToolGateway implements AiToolCallingProvider {
         List<AgentConversationItem> conversation = request.conversation() == null
                 ? List.of()
                 : request.conversation();
-        String previousResponseId = null;
-        int resumeAfterIndex = -1;
-        for (int i = conversation.size() - 1; i >= 0; i--) {
-            AgentConversationItem item = conversation.get(i);
-            if (item != null
-                    && item.role() == AgentConversationRole.ASSISTANT
-                    && item.providerOpaqueState() != null
-                    && item.providerOpaqueState().get("previousResponseId") instanceof String prevId
-                    && StringUtils.hasText(prevId)
-                    && i < conversation.size() - 1) {
-                previousResponseId = prevId.trim();
-                resumeAfterIndex = i;
-                break;
-            }
-        }
-
-        List<ResponseInputItem> inputItems = previousResponseId != null
-                ? toInputItems(conversation.subList(resumeAfterIndex + 1, conversation.size()))
-                : toInputItems(conversation);
+        List<ResponseInputItem> inputItems = toInputItems(conversation);
 
         ResponseCreateParams.Builder builder = ResponseCreateParams.builder()
                 .model(model)
+                .store(false)
                 .inputOfResponse(inputItems);
-        if (previousResponseId != null) {
-            builder.previousResponseId(previousResponseId);
-        }
         if (StringUtils.hasText(request.systemInstruction())) {
             builder.instructions(request.systemInstruction());
         }
-        if (callConfig != null && callConfig.getTemperature() != null) {
+        if (callConfig != null && callConfig.getTemperature() != null && !isReasoningModel(model)) {
             builder.temperature(callConfig.getTemperature());
         }
         if (callConfig != null && callConfig.getMaxTokens() != null) {
             builder.maxOutputTokens(callConfig.getMaxTokens().longValue());
         }
-        for (AgentToolDeclaration tool : request.tools()) {
-            builder.addTool(toFunctionTool(tool));
+        if (!request.tools().isEmpty()) {
+            for (AgentToolDeclaration tool : request.tools()) {
+                builder.addTool(toFunctionTool(tool));
+            }
+            if (request.disableToolCalling()) {
+                builder.toolChoice(ToolChoiceOptions.NONE);
+            }
         }
         return builder.build();
+    }
+
+    static String normalizeBaseUrl(String raw) {
+        String trimmed = trimToNull(raw);
+        if (trimmed == null) {
+            return null;
+        }
+        String withoutTrailingSlash = trimmed.replaceAll("/+$", "");
+        try {
+            URI uri = URI.create(withoutTrailingSlash);
+            String host = uri.getHost();
+            String path = uri.getPath();
+            if ("api.openai.com".equalsIgnoreCase(host) && (path == null || path.isEmpty())) {
+                return withoutTrailingSlash + "/v1";
+            }
+        } catch (IllegalArgumentException ignored) {
+            // Keep caller-supplied URI if non-standard
+        }
+        return withoutTrailingSlash;
+    }
+
+    private static boolean isReasoningModel(String model) {
+        if (!StringUtils.hasText(model)) {
+            return false;
+        }
+        String lower = model.trim().toLowerCase(java.util.Locale.ROOT);
+        return lower.startsWith("o1")
+                || lower.startsWith("o3")
+                || lower.startsWith("o4")
+                || lower.startsWith("gpt-5");
     }
 
     private List<ResponseInputItem> toInputItems(List<AgentConversationItem> conversation) {

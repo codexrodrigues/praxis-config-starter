@@ -469,6 +469,14 @@ public class OperationalAgentProposalService {
             UUID proposalId,
             AiPrincipalContext principal,
             AgentProposalExternalCompletionRequest request) {
+        return completeViaExternalForm(proposalId, principal, null, request);
+    }
+
+    public ConfirmHttpResult completeViaExternalForm(
+            UUID proposalId,
+            AiPrincipalContext principal,
+            HttpServletRequest servletRequest,
+            AgentProposalExternalCompletionRequest request) {
         if (principal == null || !StringUtils.hasText(principal.tenantId()) || !StringUtils.hasText(principal.userId())) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Principal context is required.");
         }
@@ -530,8 +538,68 @@ public class OperationalAgentProposalService {
                     Map.of(),
                     Map.of()));
         }
+        if (proposal.getStatus() == AiAgentActionProposalStatus.STALE) {
+            Map<String, Object> storedSnapshot = readMap(proposal.getExecutionReceiptJson());
+            return new ConfirmHttpResult(412, new AgentProposalConfirmResponse(
+                    proposalId,
+                    AiAgentActionProposalStatus.STALE.name(),
+                    false,
+                    "STALE_RESOURCE_VERSION",
+                    "A versão do registro mudou desde o preparo. Revalide a proposta com o estado atual.",
+                    storedSnapshot.get("expectedVersionTag") instanceof String s ? s : proposal.getExpectedVersionTag(),
+                    storedSnapshot.get("recordLifecycleState") instanceof String s ? s : proposal.getRecordLifecycleState(),
+                    Map.of(),
+                    List.of(),
+                    Map.of(),
+                    storedSnapshot));
+        }
 
         Instant resolvedAt = Instant.now();
+        if (proposal.getStatus() == AiAgentActionProposalStatus.EXPIRED
+                || (proposal.getExpiresAt() != null && resolvedAt.isAfter(proposal.getExpiresAt()))) {
+            if (proposal.getStatus() != AiAgentActionProposalStatus.EXPIRED) {
+                markProposalExpired(proposalId, resolvedAt);
+            }
+            return expiredConflict(proposalId, proposal);
+        }
+
+        AgentExecutionContext confirmContext = buildConfirmContext(principal, proposal, servletRequest);
+        Map<String, Object> claims = confirmContext.propagatedClaims();
+        if (claims != null && !claims.isEmpty()) {
+            if (isReadOnlyConsolidationClaim(claims)) {
+                return new ConfirmHttpResult(409, new AgentProposalConfirmResponse(
+                        proposalId,
+                        proposal.getStatus().name(),
+                        false,
+                        "READ_ONLY_CONSOLIDATION",
+                        "Grupo consolidado em modo somente relatórios; selecione uma empresa operacional para gravar.",
+                        proposal.getExpectedVersionTag(),
+                        proposal.getRecordLifecycleState(),
+                        Map.of(),
+                        List.of(),
+                        Map.of(),
+                        Map.of()));
+            }
+            if (StringUtils.hasText(proposal.getOrganizationId()) && !isMultiOrganizationClaim(claims)) {
+                String activeOrg = resolveSinglePrimaryOrganizationClaim(claims);
+                if (StringUtils.hasText(activeOrg)
+                        && !proposal.getOrganizationId().trim().equalsIgnoreCase(activeOrg.trim())) {
+                    return new ConfirmHttpResult(409, new AgentProposalConfirmResponse(
+                            proposalId,
+                            proposal.getStatus().name(),
+                            false,
+                            "ORGANIZATION_SCOPE_CHANGED",
+                            "O escopo organizacional ativo diverge da organização vinculada à proposta.",
+                            proposal.getExpectedVersionTag(),
+                            proposal.getRecordLifecycleState(),
+                            Map.of(),
+                            List.of(),
+                            Map.of(),
+                            Map.of()));
+                }
+            }
+        }
+
         String updatedVersion = request != null ? firstNonBlank(request.updatedVersionTag(), proposal.getExpectedVersionTag()) : proposal.getExpectedVersionTag();
         String updatedState = request != null ? firstNonBlank(request.updatedLifecycleState(), proposal.getRecordLifecycleState()) : proposal.getRecordLifecycleState();
         String idemKey = request != null ? firstNonBlank(request.idempotencyKey(), "proposal-form-" + proposalId) : "proposal-form-" + proposalId;
@@ -575,9 +643,19 @@ public class OperationalAgentProposalService {
             }
         }
 
-        inConfigWriteTx(() -> {
+        int claimed = inConfigWriteTx(() -> {
+            int updated = proposalRepository.transitionStatusIfCurrent(
+                    proposalId,
+                    principal.tenantId(),
+                    principal.userId(),
+                    env,
+                    AiAgentActionProposalStatus.PENDING,
+                    AiAgentActionProposalStatus.CONFIRMED,
+                    resolvedAt);
+            if (updated == 0) {
+                return 0;
+            }
             AiAgentActionProposal managed = proposalRepository.findById(proposalId).orElseThrow();
-            managed.setStatus(AiAgentActionProposalStatus.CONFIRMED);
             managed.setIdempotencyKey(truncate(idemKey, 160));
             managed.setResolvedAt(resolvedAt);
             if (StringUtils.hasText(updatedVersion)) {
@@ -596,8 +674,21 @@ public class OperationalAgentProposalService {
                 managed.setBulkTotalsJson(writeJson(mergedTotals));
             }
             managed.setExecutionReceiptJson(writeJson(okResponse));
-            return proposalRepository.save(managed);
+            proposalRepository.save(managed);
+            return 1;
         });
+        if (claimed == 0) {
+            AiAgentActionProposal latest = loadOwnedProposal(proposalId, principal.tenantId(), principal.userId(), env);
+            ConfirmHttpResult concurrent = evaluatePreClaimStatus(proposalId, latest, idemKey);
+            if (concurrent != null) {
+                return concurrent;
+            }
+            if (latest.getExpiresAt() != null && Instant.now().isAfter(latest.getExpiresAt())) {
+                markProposalExpired(proposalId, Instant.now());
+                return expiredConflict(proposalId, latest);
+            }
+            return executionInProgressConflict(proposalId, latest);
+        }
         return new ConfirmHttpResult(200, okResponse);
     }
 
@@ -967,6 +1058,52 @@ public class OperationalAgentProposalService {
         }
         String trimmed = value.trim();
         return trimmed.length() > maxLen ? trimmed.substring(0, maxLen) : trimmed;
+    }
+
+    private static boolean isReadOnlyConsolidationClaim(Map<String, Object> claims) {
+        if (Boolean.TRUE.equals(claims.get("readOnlyConsolidation"))) {
+            return true;
+        }
+        for (Map.Entry<String, Object> entry : claims.entrySet()) {
+            if (entry.getKey() != null
+                    && entry.getKey().toLowerCase(java.util.Locale.ROOT).endsWith("readonlyconsolidation")
+                    && Boolean.TRUE.equals(entry.getValue())) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean isMultiOrganizationClaim(Map<String, Object> claims) {
+        if (Boolean.TRUE.equals(claims.get("multiOrganizationScope"))) {
+            return true;
+        }
+        for (Map.Entry<String, Object> entry : claims.entrySet()) {
+            if (entry.getKey() != null
+                    && entry.getKey().toLowerCase(java.util.Locale.ROOT).endsWith("multiorganizationscope")
+                    && Boolean.TRUE.equals(entry.getValue())) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static String resolveSinglePrimaryOrganizationClaim(Map<String, Object> claims) {
+        for (String key : List.of("primaryOrganization", "organizationId")) {
+            Object direct = claims.get(key);
+            if (direct != null && StringUtils.hasText(direct.toString())) {
+                return direct.toString();
+            }
+        }
+        for (Map.Entry<String, Object> entry : claims.entrySet()) {
+            if (entry.getKey() != null
+                    && entry.getKey().toLowerCase(java.util.Locale.ROOT).endsWith("primaryorganization")
+                    && entry.getValue() != null
+                    && StringUtils.hasText(entry.getValue().toString())) {
+                return entry.getValue().toString();
+            }
+        }
+        return null;
     }
 
     private static String firstNonBlank(String... candidates) {

@@ -21,7 +21,9 @@ import org.praxisplatform.config.ai.agent.spi.DualProjectedPayload;
 import org.praxisplatform.uischema.annotation.AiVisibilityMode;
 import org.praxisplatform.uischema.annotation.ApiResource;
 import org.praxisplatform.uischema.annotation.DomainClassification;
+import org.praxisplatform.uischema.annotation.DomainDataCategory;
 import org.praxisplatform.uischema.annotation.DomainGovernance;
+import org.praxisplatform.uischema.annotation.DomainGovernancePreset;
 import org.praxisplatform.uischema.annotation.ResourceIdentity;
 import org.praxisplatform.uischema.annotation.ResourceIntent;
 import org.praxisplatform.uischema.annotation.UiSurface;
@@ -58,10 +60,12 @@ public class DefaultMetadataGovernanceAgentAuthorizationBridge implements AgentA
             Set<String> editableForAuthorities,
             boolean readOnly,
             AiVisibilityMode aiVisibility,
-            DomainClassification classification
+            DomainClassification classification,
+            DomainDataCategory dataCategory
     ) {
         static final FieldGovernanceRule OPEN = new FieldGovernanceRule(
-                false, Set.of(), Set.of(), false, AiVisibilityMode.ALLOW, DomainClassification.INTERNAL);
+                false, Set.of(), Set.of(), false, AiVisibilityMode.ALLOW,
+                DomainClassification.INTERNAL, DomainDataCategory.OPERATIONAL);
     }
 
     private record ActionAuthRule(
@@ -585,10 +589,17 @@ public class DefaultMetadataGovernanceAgentAuthorizationBridge implements AgentA
     }
 
     private static AiVisibilityMode effectiveAiMode(FieldGovernanceRule rule) {
+        if (rule.dataCategory() == DomainDataCategory.CREDENTIAL) {
+            return AiVisibilityMode.DENY;
+        }
         if (rule.aiVisibility() != null && rule.aiVisibility() != AiVisibilityMode.ALLOW) {
             return rule.aiVisibility();
         }
-        if (rule.classification() == DomainClassification.RESTRICTED) {
+        if (rule.dataCategory() == DomainDataCategory.SENSITIVE_PERSONAL) {
+            return AiVisibilityMode.DENY;
+        }
+        if (rule.classification() == DomainClassification.RESTRICTED
+                || rule.dataCategory() == DomainDataCategory.PERSONAL) {
             return AiVisibilityMode.MASK;
         }
         return AiVisibilityMode.ALLOW;
@@ -624,6 +635,7 @@ public class DefaultMetadataGovernanceAgentAuthorizationBridge implements AgentA
         if (dtoType == null || Object.class.equals(dtoType)) {
             return Map.of();
         }
+        DomainGovernance classGov = AnnotatedElementUtils.findMergedAnnotation(dtoType, DomainGovernance.class);
         if (dtoType.isRecord()) {
             for (RecordComponent component : dtoType.getRecordComponents()) {
                 rules.put(component.getName(), extractRule(
@@ -632,7 +644,7 @@ public class DefaultMetadataGovernanceAgentAuthorizationBridge implements AgentA
                         findFieldAnnotation(dtoType, component.getName(), UISchema.class),
                         findFieldAnnotation(dtoType, component.getName(), DomainGovernance.class),
                         findMethodAnnotation(component.getAccessor(), UISchema.class),
-                        findMethodAnnotation(component.getAccessor(), DomainGovernance.class)));
+                        firstNonNull(findMethodAnnotation(component.getAccessor(), DomainGovernance.class), classGov)));
             }
         }
         for (PropertyDescriptor pd : BeanUtils.getPropertyDescriptors(dtoType)) {
@@ -645,7 +657,7 @@ public class DefaultMetadataGovernanceAgentAuthorizationBridge implements AgentA
                     findMethodAnnotation(pd.getReadMethod(), UISchema.class),
                     findMethodAnnotation(pd.getReadMethod(), DomainGovernance.class),
                     null,
-                    null);
+                    classGov);
             rules.putIfAbsent(pd.getName(), rule);
         }
         Class<?> current = dtoType;
@@ -657,7 +669,7 @@ public class DefaultMetadataGovernanceAgentAuthorizationBridge implements AgentA
                         null,
                         null,
                         null,
-                        null));
+                        classGov));
             }
             current = current.getSuperclass();
         }
@@ -684,19 +696,29 @@ public class DefaultMetadataGovernanceAgentAuthorizationBridge implements AgentA
                         .filter(StringUtils::hasText)
                         .collect(java.util.stream.Collectors.toUnmodifiableSet());
         boolean readOnly = uiSchema != null && uiSchema.readOnly();
-        AiVisibilityMode aiMode = governance != null && governance.aiUsage() != null
+        DomainGovernancePreset preset = governance != null && governance.preset() != null
+                ? governance.preset()
+                : DomainGovernancePreset.NONE;
+        AiVisibilityMode explicitAi = governance != null && governance.aiUsage() != null
                 ? governance.aiUsage().visibility()
                 : AiVisibilityMode.ALLOW;
-        DomainClassification classification = governance != null
+        AiVisibilityMode aiMode = explicitAi != AiVisibilityMode.ALLOW
+                ? explicitAi
+                : (preset != DomainGovernancePreset.NONE ? preset.aiVisibility() : AiVisibilityMode.ALLOW);
+        DomainClassification classification = governance != null && governance.classification() != DomainClassification.INTERNAL
                 ? governance.classification()
-                : DomainClassification.INTERNAL;
+                : (preset != DomainGovernancePreset.NONE ? preset.classification() : DomainClassification.INTERNAL);
+        DomainDataCategory dataCategory = governance != null && governance.dataCategory() != DomainDataCategory.OPERATIONAL
+                ? governance.dataCategory()
+                : (preset != DomainGovernancePreset.NONE ? preset.dataCategory() : DomainDataCategory.OPERATIONAL);
         return new FieldGovernanceRule(
                 uiSchema != null,
                 visibleAuthorities,
                 editableAuthorities,
                 readOnly,
                 aiMode,
-                classification);
+                classification,
+                dataCategory);
     }
 
     private static <A extends Annotation> A findFieldAnnotation(
