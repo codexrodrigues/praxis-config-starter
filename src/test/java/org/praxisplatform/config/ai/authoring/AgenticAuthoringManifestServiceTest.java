@@ -3236,6 +3236,51 @@ class AgenticAuthoringManifestServiceTest {
         assertThat(compileResult.patch()).isEmpty();
     }
 
+    @Test
+    void evolvesValidationConfigAcrossMultiOpPlanSoLaterOperationsTargetInsertedElements() throws Exception {
+        String registryPayload = payloadFromClasspathSnapshot("praxis-table");
+        AgenticAuthoringManifestService service = serviceWithPayload("praxis-table", registryPayload);
+        JsonNode requestJson = objectMapper.readTree("""
+                {
+                  "config": {
+                    "columns": [
+                      { "field": "email", "header": "Email" }
+                    ]
+                  },
+                  "plan": {
+                    "operations": [
+                      {
+                        "operationId": "column.add",
+                        "target": {},
+                        "input": { "field": "status", "header": "Status" }
+                      },
+                      {
+                        "operationId": "column.header.set",
+                        "target": "status",
+                        "input": { "header": "Situação" }
+                      }
+                    ]
+                  }
+                }
+                """);
+        AgenticAuthoringManifestEditPlanRequest request = objectMapper.treeToValue(
+                requestJson,
+                AgenticAuthoringManifestEditPlanRequest.class);
+
+        AgenticAuthoringManifestValidationResult validation = service.validateEditPlan("praxis-table", request);
+        assertThat(validation.valid()).isTrue();
+        assertThat(validation.failures()).isEmpty();
+        assertThat(request.config().path("columns")).hasSize(1);
+
+        AgenticAuthoringManifestCompileResult compileResult = service.compilePatch("praxis-table", request);
+        assertThat(compileResult.compiled()).isTrue();
+        assertThat(compileResult.failures()).isEmpty();
+        JsonNode columns = compileResult.patch().path("proposedConfig").path("columns");
+        assertThat(columns).hasSize(2);
+        assertThat(columns.get(1).path("field").asText()).isEqualTo("status");
+        assertThat(columns.get(1).path("header").asText()).isEqualTo("Situação");
+    }
+
     private AgenticAuthoringManifestService serviceWithPayload(String payload) {
         return serviceWithPayload(COMPONENT_ID, payload);
     }

@@ -104,7 +104,11 @@ public class AgenticAuthoringManifestService {
         List<String> failures = new ArrayList<>();
         List<String> warnings = new ArrayList<>();
         failures.addAll(manifestContractValidator.validate(manifest));
-        JsonNode validationConfig = validationConfig(request);
+        JsonNode baseValidationConfig = validationConfig(request);
+        ObjectNode workingValidationConfig = baseValidationConfig != null && baseValidationConfig.isObject()
+                ? (ObjectNode) baseValidationConfig.deepCopy()
+                : objectMapper.createObjectNode();
+        JsonNode requestValidationContext = request == null ? null : request.validationContext();
         ArrayNode normalizedOperations = objectMapper.createArrayNode();
         List<JsonNode> planOperations = operationsFromPlan(request == null ? null : request.plan());
         if (planOperations.isEmpty()) {
@@ -117,8 +121,17 @@ public class AgenticAuthoringManifestService {
                 failures.add("operation not found: " + operationId);
                 continue;
             }
-            validatePlanOperation(componentId, operation, planOperation, validationConfig, failures, warnings);
+            int failureCountBefore = failures.size();
+            validatePlanOperation(componentId, operation, planOperation, workingValidationConfig, failures, warnings);
             normalizedOperations.add(planOperation);
+            if (failures.size() == failureCountBefore) {
+                workingValidationConfig = evolveValidationConfigAfterOperation(
+                        componentId,
+                        operation,
+                        planOperation,
+                        workingValidationConfig,
+                        requestValidationContext);
+            }
         }
         ObjectNode normalizedPlan = objectMapper.createObjectNode();
         normalizedPlan.put("componentId", componentId);
@@ -128,6 +141,35 @@ public class AgenticAuthoringManifestService {
                 List.copyOf(failures),
                 List.copyOf(warnings),
                 normalizedPlan);
+    }
+
+    private ObjectNode evolveValidationConfigAfterOperation(
+            String componentId,
+            JsonNode operation,
+            JsonNode planOperation,
+            ObjectNode currentValidationConfig,
+            JsonNode requestValidationContext) {
+        ObjectNode nextValidationConfig = currentValidationConfig.deepCopy();
+        List<String> evolutionFailures = new ArrayList<>();
+        List<String> evolutionWarnings = new ArrayList<>();
+        effectCompilerRegistry.appendCompiledEffects(
+                componentId,
+                operation,
+                planOperation,
+                nextValidationConfig,
+                objectMapper.createArrayNode(),
+                evolutionFailures,
+                evolutionWarnings);
+        if (!evolutionFailures.isEmpty()) {
+            return currentValidationConfig;
+        }
+        if (requestValidationContext != null
+                && !requestValidationContext.isNull()
+                && !requestValidationContext.isMissingNode()
+                && !nextValidationConfig.has("validationContext")) {
+            nextValidationConfig.set("validationContext", requestValidationContext);
+        }
+        return nextValidationConfig;
     }
 
     private JsonNode validationConfig(AgenticAuthoringManifestEditPlanRequest request) {
@@ -735,6 +777,8 @@ public class AgenticAuthoringManifestService {
         }
         String trimmed = path.trim();
         if (trimmed.startsWith("/")) {
+            // RFC 6901 defines "" as the root document pointer; accept "/" as a root alias
+            // so pointer resolution yields zero tokens instead of a spurious empty segment.
             if ("/".equals(trimmed)) {
                 return new String[0];
             }
