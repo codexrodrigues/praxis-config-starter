@@ -19,13 +19,13 @@ import org.springframework.core.io.ClassPathResource;
 class AiRegistrySnapshotContractTest {
 
     private static final String EXPECTED_SNAPSHOT_HASH =
-            "6c2ee2470d0f022640102f5b4930c1df919fa512982249cd302438e34f80364a";
+            "91929e0cd310560f1e9dbc74e76b76b50a21c3c84957ce2aee6338e498b19e8e";
     private static final String EXPECTED_VERSION = "1.0.0";
-    private static final String EXPECTED_GENERATED_AT = "2026-11-19T02:29:15.250Z";
+    private static final String EXPECTED_GENERATED_AT = "2026-11-19T03:40:24.375Z";
     private static final int EXPECTED_COMPONENT_COUNT = 118;
     private static final int EXPECTED_AUTHORING_MANIFEST_COUNT = 103;
     private static final int EXPECTED_CHUNKED_COMPONENT_COUNT = 118;
-    private static final int EXPECTED_CHUNK_COUNT = 2722;
+    private static final int EXPECTED_CHUNK_COUNT = 2724;
 
     private final ObjectMapper objectMapper = new ObjectMapper();
 
@@ -434,6 +434,8 @@ class AiRegistrySnapshotContractTest {
                 "praxis-expansion",
                 "praxis-organogram",
                 "praxis-progression-ladder",
+                "praxis-timeline-lanes",
+                "praxis-relationship-graph",
                 "pdx-cron-builder",
                 "praxis-files-upload",
                 "praxis-rich-content",

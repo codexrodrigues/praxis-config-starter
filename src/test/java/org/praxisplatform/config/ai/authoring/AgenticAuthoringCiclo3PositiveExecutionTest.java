@@ -268,6 +268,7 @@ class AgenticAuthoringCiclo3PositiveExecutionTest {
                         """));
         assertThat(ladderOk.compiled()).as("ladder failures=%s", ladderOk.failures()).isTrue();
         assertThat(ladderOk.patch().path("proposedConfig").path("document").path("variant").asText()).isEqualTo("matrix-2d");
+        assertNoRootPatchPointer(ladderOk);
 
         AgenticAuthoringManifestValidationResult ladderBad = service.validateEditPlan(
                 "praxis-progression-ladder",
@@ -296,6 +297,172 @@ class AgenticAuthoringCiclo3PositiveExecutionTest {
                         { "operationId": "analytics.presentation.prefer-family", "input": { "family": "carousel" } }
                         """));
         assertThat(analyticsBad.valid()).isFalse();
+    }
+
+    @Test
+    void doesNotEmitRootPointerForSetValueOnProgressionLadderOrganogramAndStepper() throws Exception {
+        JsonNode ladderConfig = OBJECT_MAPPER.readTree("""
+                { "document": { "variant": "staircase", "showFinancialDetails": false, "steps": [] } }
+                """);
+        AgenticAuthoringManifestCompileResult ladderResult = service.compilePatch(
+                "praxis-progression-ladder",
+                editRequest(ladderConfig, """
+                        { "operationId": "progressionLadder.variant.set", "input": { "variant": "pillars" } }
+                        """));
+        assertThat(ladderResult.compiled()).as("ladderResult failures=%s", ladderResult.failures()).isTrue();
+        assertNoRootPatchPointer(ladderResult);
+        assertThat(ladderResult.patch().path("patchOperations").get(0).path("path").asText())
+                .isEqualTo("/document/variant");
+
+        JsonNode organogramConfig = OBJECT_MAPPER.readTree("""
+                { "layout": { "topology": "orthogonal-compact" }, "nodes": [] }
+                """);
+        AgenticAuthoringManifestCompileResult organogramResult = service.compilePatch(
+                "praxis-organogram",
+                editRequest(organogramConfig, """
+                        { "operationId": "organogram.topology.set", "input": { "topology": "radial-360" } }
+                        """));
+        assertThat(organogramResult.compiled()).as("organogramResult failures=%s", organogramResult.failures()).isTrue();
+        assertNoRootPatchPointer(organogramResult);
+        assertThat(organogramResult.patch().path("patchOperations").get(0).path("path").asText())
+                .isEqualTo("/layout/topology");
+
+        JsonNode stepperConfig = OBJECT_MAPPER.readTree("""
+                { "orientation": "horizontal", "headerPosition": "top", "steps": [{ "id": "s1", "label": "S1" }] }
+                """);
+        AgenticAuthoringManifestCompileResult stepperResult = service.compilePatch(
+                "praxis-stepper",
+                editRequest(stepperConfig, """
+                        { "operationId": "orientation.set", "input": { "orientation": "vertical", "headerPosition": "bottom" } }
+                        """));
+        assertThat(stepperResult.compiled()).as("stepperResult failures=%s", stepperResult.failures()).isTrue();
+        assertNoRootPatchPointer(stepperResult);
+        assertThat(stepperResult.patch().path("patchOperations"))
+                .extracting(op -> op.path("path").asText())
+                .contains("/orientation", "/headerPosition");
+    }
+
+    @Test
+    void executesCrudGovernanceContextKpiBandFilterBarAndListSurfaceExtras() throws Exception {
+        ObjectNode crudConfig = (ObjectNode) OBJECT_MAPPER.readTree("""
+                {
+                  "crudId": "employees-crud",
+                  "resource": { "path": "/funcionarios", "resourceKey": "human-resources.funcionarios", "idField": "id" },
+                  "table": { "columns": [] }
+                }
+                """);
+
+        AgenticAuthoringManifestCompileResult attachGov = service.compilePatch(
+                "praxis-crud",
+                editRequest(crudConfig, """
+                        {
+                          "operationId": "domain.governanceContext.attach",
+                          "target": "domainCatalog:human-resources.funcionarios:cpf",
+                          "input": {
+                            "resourceKey": "human-resources.funcionarios",
+                            "releaseId": "2026.1",
+                            "query": "cpf",
+                            "itemTypes": ["governance"],
+                            "intent": "authoring"
+                          }
+                        }
+                        """));
+        assertThat(attachGov.compiled()).as("attachGov failures=%s", attachGov.failures()).isTrue();
+        assertThat(attachGov.patch().path("proposedConfig").path("queryContext").path("meta").path("domainCatalog")
+                .path("resourceKey").asText()).isEqualTo("human-resources.funcionarios");
+        assertThat(attachGov.patch().path("proposedConfig").path("queryContext").path("meta").path("domainCatalog")
+                .path("query").asText()).isEqualTo("cpf");
+
+        ObjectNode current = (ObjectNode) attachGov.patch().path("proposedConfig");
+        AgenticAuthoringManifestCompileResult kpiBand = service.compilePatch(
+                "praxis-crud",
+                editRequest(current, """
+                        {
+                          "operationId": "list.kpiBand.configure",
+                          "input": {
+                            "enabled": true,
+                            "columns": 2,
+                            "cards": [
+                              {
+                                "id": "ativos",
+                                "label": "Ativos",
+                                "valueExpr": "${totalCount}",
+                                "visualization": { "kind": "delta", "value": 12, "fallbackText": "+12" }
+                              }
+                            ]
+                          }
+                        }
+                        """));
+        assertThat(kpiBand.compiled()).as("kpiBand failures=%s", kpiBand.failures()).isTrue();
+        assertThat(kpiBand.patch().path("proposedConfig").path("kpiBand").path("cards").get(0).path("label").asText())
+                .isEqualTo("Ativos");
+
+        current = (ObjectNode) kpiBand.patch().path("proposedConfig");
+        AgenticAuthoringManifestCompileResult filterBar = service.compilePatch(
+                "praxis-crud",
+                editRequest(current, """
+                        {
+                          "operationId": "list.filterBar.configure",
+                          "input": {
+                            "inlineFields": ["nome"],
+                            "quickFilters": [
+                              { "id": "ativos", "label": "Ativos", "filter": { "ativo": true } }
+                            ],
+                            "showAdvanced": true
+                          }
+                        }
+                        """));
+        assertThat(filterBar.compiled()).as("filterBar failures=%s", filterBar.failures()).isTrue();
+        assertThat(filterBar.patch().path("proposedConfig").path("filterBar").path("quickFilters")).hasSize(1);
+
+        current = (ObjectNode) filterBar.patch().path("proposedConfig");
+        AgenticAuthoringManifestCompileResult listSurface = service.compilePatch(
+                "praxis-crud",
+                editRequest(current, """
+                        {
+                          "operationId": "list.surface.configure",
+                          "input": {
+                            "pageHeader": { "title": "Funcionários", "domain": { "label": "RH", "tone": "primary" } },
+                            "kpiBand": { "enabled": true, "cards": [{ "label": "Total", "value": 42 }] },
+                            "filterBar": { "inlineFields": ["departamento"], "showAdvanced": false }
+                          }
+                        }
+                        """));
+        assertThat(listSurface.compiled()).as("listSurface failures=%s", listSurface.failures()).isTrue();
+        assertThat(listSurface.patch().path("proposedConfig").path("pageHeader").path("title").asText())
+                .isEqualTo("Funcionários");
+        assertThat(listSurface.patch().path("proposedConfig").path("kpiBand").path("cards")).hasSize(1);
+        assertThat(listSurface.patch().path("proposedConfig").path("filterBar").path("inlineFields").get(0).asText())
+                .isEqualTo("departamento");
+
+        AgenticAuthoringManifestValidationResult forbiddenGov = service.validateEditPlan(
+                "praxis-crud",
+                editRequest(crudConfig, """
+                        {
+                          "operationId": "domain.governanceContext.attach",
+                          "target": "domainCatalog:human-resources.funcionarios:cpf",
+                          "input": {
+                            "resourceKey": "human-resources.funcionarios",
+                            "query": "cpf",
+                            "aiUsage": { "visibility": "forbidden" },
+                            "rules": [{ "field": "cpf", "required": true }]
+                          }
+                        }
+                        """));
+        assertThat(forbiddenGov.valid()).isFalse();
+        assertThat(forbiddenGov.failures()).anyMatch(msg -> msg.contains("ai-usage-visibility-respected"));
+        assertThat(forbiddenGov.failures()).anyMatch(msg -> msg.contains("no-form-config-rule-materialization"));
+    }
+
+    private void assertNoRootPatchPointer(AgenticAuthoringManifestCompileResult result) {
+        JsonNode patchOperations = result.patch().path("patchOperations");
+        assertThat(patchOperations.isArray()).isTrue();
+        assertThat(patchOperations).isNotEmpty();
+        for (JsonNode patchOperation : patchOperations) {
+            assertThat(patchOperation.path("path").asText())
+                    .as("patchOperation must not overwrite root document: %s", patchOperation)
+                    .isNotEqualTo("/");
+        }
     }
 
     private AgenticAuthoringManifestEditPlanRequest editRequest(JsonNode config, String planJson) throws Exception {

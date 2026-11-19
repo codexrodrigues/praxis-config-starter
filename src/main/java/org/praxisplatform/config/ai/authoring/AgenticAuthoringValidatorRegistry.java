@@ -850,6 +850,10 @@ public final class AgenticAuthoringValidatorRegistry {
                 case "back-policy-valid", "settings-panel-shell-compatible" -> validateCrudSerializableObjectInputs(operationId, planOperation, failures);
                 case "child-manifest-available", "child-operation-known", "delegation-target-valid" -> validateCrudChildDelegation(operationId, planOperation, failures);
                 case "no-local-form-config-write", "no-local-table-config-write" -> validateCrudNoLocalChildConfigWrite(operationId, planOperation, failures);
+                case "domain-catalog-context-resolvable" -> validateCrudDomainCatalogContextResolvable(operationId, planOperation, failures);
+                case "domain-catalog-read-only" -> validateCrudDomainCatalogReadOnly(operationId, planOperation, failures);
+                case "ai-usage-visibility-respected" -> validateCrudAiUsageVisibility(operationId, planOperation, config, failures);
+                case "no-form-config-rule-materialization" -> validateCrudNoFormConfigRuleMaterialization(operationId, planOperation, failures);
                 case "chart-document-shape" -> validateChartDocumentShape(operationId, planOperation, config, failures);
                 case "chart-version-supported" -> validateChartVersionSupported(operationId, planOperation, config, failures);
                 case "chart-type-supported" -> validateChartTypeSupported(operationId, planOperation, config, failures);
@@ -1657,7 +1661,7 @@ public final class AgenticAuthoringValidatorRegistry {
             JsonNode planOperation,
             List<String> failures) {
         JsonNode input = planOperation.path("input");
-        if ("praxis-charts".equals(componentId)) {
+        if ("praxis-chart".equals(componentId) || "praxis-charts".equals(componentId)) {
             JsonNode rendererNode = input.path("renderer");
             if (rendererNode.isTextual()) {
                 String renderer = rendererNode.asText("").trim();
@@ -3698,7 +3702,7 @@ public final class AgenticAuthoringValidatorRegistry {
 
     private void validateCrudResourceKeyStable(String operationId, JsonNode planOperation, List<String> failures) {
         String resourceKey = text(planOperation.path("input"), "resourceKey");
-        if (!resourceKey.isBlank() && !resourceKey.matches("^[A-Za-z][A-Za-z0-9_-]*$")) {
+        if (!resourceKey.isBlank() && !resourceKey.matches("^[A-Za-z][A-Za-z0-9_.-]*$")) {
             failures.add("validator resource-key-stable failed for " + operationId + ": resourceKey must be stable identifier text");
         }
     }
@@ -3847,6 +3851,75 @@ public final class AgenticAuthoringValidatorRegistry {
         JsonNode input = planOperation.path("input");
         if (input.has("formConfig") || input.has("tableConfig")) {
             failures.add("validator no-local-child-config-write failed for " + operationId + ": child config must be delegated");
+        }
+    }
+
+    private void validateCrudDomainCatalogContextResolvable(String operationId, JsonNode planOperation, List<String> failures) {
+        JsonNode input = planOperation.path("input");
+        String resourceKey = text(input, "resourceKey");
+        String query = text(input, "query");
+        if (resourceKey.isBlank() || query.isBlank()) {
+            failures.add("validator domain-catalog-context-resolvable failed for " + operationId
+                    + ": resourceKey and query are required");
+        }
+        if (input.has("itemTypes")) {
+            JsonNode itemTypes = input.path("itemTypes");
+            if (!itemTypes.isArray()) {
+                failures.add("validator domain-catalog-context-resolvable failed for " + operationId
+                        + ": itemTypes must be an array");
+            } else {
+                for (JsonNode itemType : itemTypes) {
+                    String value = itemType.asText("").trim();
+                    if (!Set.of("governance", "vocabulary", "relationship").contains(value)) {
+                        failures.add("validator domain-catalog-context-resolvable failed for " + operationId
+                                + ": unsupported itemType " + value);
+                    }
+                }
+            }
+        }
+        String intent = text(input, "intent");
+        if (!intent.isBlank() && !Set.of("authoring", "explain", "validate", "ai-access-control").contains(intent)) {
+            failures.add("validator domain-catalog-context-resolvable failed for " + operationId
+                    + ": unsupported intent " + intent);
+        }
+    }
+
+    private void validateCrudDomainCatalogReadOnly(String operationId, JsonNode planOperation, List<String> failures) {
+        JsonNode input = planOperation.path("input");
+        if (input.has("rules") || input.has("validationRules") || input.has("copiedRules")) {
+            failures.add("validator domain-catalog-read-only failed for " + operationId
+                    + ": Domain Catalog governance context is read-only and must not persist copied rules");
+        }
+        if (input.path("readOnly").isBoolean() && !input.path("readOnly").asBoolean(true)) {
+            failures.add("validator domain-catalog-read-only failed for " + operationId
+                    + ": Domain Catalog governance context must remain read-only");
+        }
+    }
+
+    private void validateCrudAiUsageVisibility(String operationId, JsonNode planOperation, JsonNode config, List<String> failures) {
+        JsonNode input = planOperation.path("input");
+        String visibility = firstNonBlank(
+                text(input.path("aiUsage"), "visibility"),
+                text(input, "aiUsageVisibility"),
+                text(config.path("aiUsage"), "visibility")).trim().toLowerCase();
+        if (input.path("aiUsageForbidden").asBoolean(false)
+                || "forbidden".equals(visibility)
+                || "hidden".equals(visibility)
+                || "private".equals(visibility)) {
+            failures.add("validator ai-usage-visibility-respected failed for " + operationId
+                    + ": aiUsage visibility forbids authoring exposure");
+        }
+    }
+
+    private void validateCrudNoFormConfigRuleMaterialization(String operationId, JsonNode planOperation, List<String> failures) {
+        JsonNode input = planOperation.path("input");
+        if (input.has("formConfig")
+                || input.has("fieldMetadata")
+                || input.has("rules")
+                || input.has("validationRules")
+                || input.path("materializeFormRules").asBoolean(false)) {
+            failures.add("validator no-form-config-rule-materialization failed for " + operationId
+                    + ": domain governance rules must not be materialized into FormConfig");
         }
     }
 

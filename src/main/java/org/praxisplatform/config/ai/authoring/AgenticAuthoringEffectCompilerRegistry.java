@@ -272,7 +272,10 @@ public final class AgenticAuthoringEffectCompilerRegistry {
                 || "metadata-date-range-shortcuts-configure".equals(handler)
                 || "metadata-normalization-apply".equals(handler)
                 || "crud-resource-bind".equals(handler)
+                || "crud-domain-governance-context-attach".equals(handler)
                 || "crud-list-surface-configure".equals(handler)
+                || "crud-kpi-band-configure".equals(handler)
+                || "crud-filter-bar-configure".equals(handler)
                 || "crud-create-surface-configure".equals(handler)
                 || "crud-edit-surface-configure".equals(handler)
                 || "crud-view-surface-configure".equals(handler)
@@ -760,12 +763,33 @@ public final class AgenticAuthoringEffectCompilerRegistry {
                     planOperation,
                     proposedConfig,
                     failures);
+            case "crud-domain-governance-context-attach" -> compileCrudDomainGovernanceContextAttach(
+                    componentId,
+                    operation,
+                    effect,
+                    planOperation,
+                    proposedConfig,
+                    failures);
             case "crud-list-surface-configure" -> compileCrudListSurfaceConfigure(
                     componentId,
                     operation,
                     effect,
                     planOperation,
                     proposedConfig);
+            case "crud-kpi-band-configure" -> compileCrudKpiBandConfigure(
+                    componentId,
+                    operation,
+                    effect,
+                    planOperation,
+                    proposedConfig,
+                    failures);
+            case "crud-filter-bar-configure" -> compileCrudFilterBarConfigure(
+                    componentId,
+                    operation,
+                    effect,
+                    planOperation,
+                    proposedConfig,
+                    failures);
             case "crud-create-surface-configure" -> compileCrudActionSurfaceConfigure(
                     componentId,
                     operation,
@@ -4118,6 +4142,16 @@ public final class AgenticAuthoringEffectCompilerRegistry {
         if (input.has("filterCriteria")) {
             proposedConfig.set("filterCriteria", input.path("filterCriteria").deepCopy());
         }
+        if (input.has("pageHeader") && input.path("pageHeader").isObject()) {
+            ObjectNode pageHeader = objectAt(proposedConfig, "pageHeader", true);
+            mergeObject(pageHeader, input.path("pageHeader"));
+        }
+        if (input.has("kpiBand") && input.path("kpiBand").isObject()) {
+            proposedConfig.set("kpiBand", input.path("kpiBand").deepCopy());
+        }
+        if (input.has("filterBar") && input.path("filterBar").isObject()) {
+            proposedConfig.set("filterBar", input.path("filterBar").deepCopy());
+        }
 
         ObjectNode compiled = baseDomainPatch(componentId, operation, effect, planOperation, null);
         compiled.put("op", "configure-crud-list-surface");
@@ -4126,6 +4160,131 @@ public final class AgenticAuthoringEffectCompilerRegistry {
         compiled.set("table", proposedConfig.path("table"));
         compiled.set("queryContext", proposedConfig.path("queryContext"));
         compiled.set("filterCriteria", proposedConfig.path("filterCriteria"));
+        if (proposedConfig.has("pageHeader")) {
+            compiled.set("pageHeader", proposedConfig.path("pageHeader"));
+        }
+        if (proposedConfig.has("kpiBand")) {
+            compiled.set("kpiBand", proposedConfig.path("kpiBand"));
+        }
+        if (proposedConfig.has("filterBar")) {
+            compiled.set("filterBar", proposedConfig.path("filterBar"));
+        }
+        return compiled;
+    }
+
+    private ObjectNode compileCrudDomainGovernanceContextAttach(
+            String componentId,
+            JsonNode operation,
+            JsonNode effect,
+            JsonNode planOperation,
+            ObjectNode proposedConfig,
+            List<String> failures) {
+        JsonNode input = planOperation.path("input");
+        String resourceKey = text(input, "resourceKey");
+        String query = text(input, "query");
+        if (resourceKey.isBlank() || query.isBlank()) {
+            failures.add("crud-domain-governance-context-attach requires resourceKey and query");
+            return null;
+        }
+        ObjectNode queryContext = objectAt(proposedConfig, "queryContext", true);
+        ObjectNode meta = objectAt(queryContext, "meta", true);
+        JsonNode previousDomainCatalog = meta.path("domainCatalog").deepCopy();
+        ObjectNode domainCatalog = objectMapper.createObjectNode();
+        domainCatalog.put("resourceKey", resourceKey);
+        domainCatalog.put("query", query);
+        String releaseId = text(input, "releaseId");
+        if (!releaseId.isBlank()) {
+            domainCatalog.put("releaseId", releaseId);
+        }
+        if (input.has("itemTypes") && input.path("itemTypes").isArray()) {
+            domainCatalog.set("itemTypes", input.path("itemTypes").deepCopy());
+        }
+        String intent = text(input, "intent");
+        if (!intent.isBlank()) {
+            domainCatalog.put("intent", intent);
+        }
+        meta.set("domainCatalog", domainCatalog);
+
+        ObjectNode compiled = baseDomainPatch(componentId, operation, effect, planOperation, null);
+        compiled.put("op", "attach-crud-domain-governance-context");
+        compiled.put("path", "queryContext.meta.domainCatalog");
+        compiled.set("previousDomainCatalog", previousDomainCatalog);
+        compiled.set("domainCatalog", domainCatalog.deepCopy());
+        return compiled;
+    }
+
+    private ObjectNode compileCrudKpiBandConfigure(
+            String componentId,
+            JsonNode operation,
+            JsonNode effect,
+            JsonNode planOperation,
+            ObjectNode proposedConfig,
+            List<String> failures) {
+        JsonNode input = planOperation.path("input");
+        if (!input.isObject()) {
+            failures.add("crud-kpi-band-configure requires an object input");
+            return null;
+        }
+        if (input.has("cards")) {
+            JsonNode cards = input.path("cards");
+            if (!cards.isArray()) {
+                failures.add("crud-kpi-band-configure cards must be an array");
+                return null;
+            }
+            for (JsonNode card : cards) {
+                if (!card.isObject() || text(card, "label").isBlank()) {
+                    failures.add("crud-kpi-band-configure requires each kpi card to declare label");
+                    return null;
+                }
+            }
+        }
+        JsonNode previousKpiBand = proposedConfig.path("kpiBand").deepCopy();
+        proposedConfig.set("kpiBand", input.deepCopy());
+
+        ObjectNode compiled = baseDomainPatch(componentId, operation, effect, planOperation, null);
+        compiled.put("op", "configure-crud-kpi-band");
+        compiled.put("path", "kpiBand");
+        compiled.set("previousKpiBand", previousKpiBand);
+        compiled.set("kpiBand", proposedConfig.path("kpiBand").deepCopy());
+        return compiled;
+    }
+
+    private ObjectNode compileCrudFilterBarConfigure(
+            String componentId,
+            JsonNode operation,
+            JsonNode effect,
+            JsonNode planOperation,
+            ObjectNode proposedConfig,
+            List<String> failures) {
+        JsonNode input = planOperation.path("input");
+        if (!input.isObject()) {
+            failures.add("crud-filter-bar-configure requires an object input");
+            return null;
+        }
+        if (input.has("quickFilters") && !input.path("quickFilters").isBoolean()) {
+            JsonNode quickFilters = input.path("quickFilters");
+            if (!quickFilters.isArray()) {
+                failures.add("crud-filter-bar-configure quickFilters must be a boolean or array");
+                return null;
+            }
+            for (JsonNode item : quickFilters) {
+                if (!item.isObject()
+                        || text(item, "id").isBlank()
+                        || text(item, "label").isBlank()
+                        || !item.path("filter").isObject()) {
+                    failures.add("crud-filter-bar-configure quickFilters items require id, label, and object filter");
+                    return null;
+                }
+            }
+        }
+        JsonNode previousFilterBar = proposedConfig.path("filterBar").deepCopy();
+        proposedConfig.set("filterBar", input.deepCopy());
+
+        ObjectNode compiled = baseDomainPatch(componentId, operation, effect, planOperation, null);
+        compiled.put("op", "configure-crud-filter-bar");
+        compiled.put("path", "filterBar");
+        compiled.set("previousFilterBar", previousFilterBar);
+        compiled.set("filterBar", proposedConfig.path("filterBar").deepCopy());
         return compiled;
     }
 
@@ -6456,7 +6615,7 @@ public final class AgenticAuthoringEffectCompilerRegistry {
             return;
         }
         mergeObject(target, input);
-        if (resolved == null) {
+        if (resolved == null || "$".equals(resolved.path())) {
             compiled.put("resolvedPath", collectionPath(path) + "[]/" + matchedIndex);
         }
         compiled.put("keyValue", keyValue);
@@ -6502,6 +6661,9 @@ public final class AgenticAuthoringEffectCompilerRegistry {
         }
         compiled.put("keyValue", keyValue);
         compiled.put("removedIndex", index);
+        if (resolved == null || "$".equals(resolved.path())) {
+            compiled.put("resolvedPath", collectionPath(path) + "[]/" + index);
+        }
     }
 
     private void applySetValue(
@@ -6559,7 +6721,9 @@ public final class AgenticAuthoringEffectCompilerRegistry {
                 return;
             }
         } else {
-            setDottedValue(proposedConfig, normalizeDottedPath(path), value);
+            String normalizedPath = normalizeDottedPath(path);
+            setDottedValue(proposedConfig, normalizedPath, value);
+            compiled.put("resolvedPath", normalizedPath);
         }
         compiled.set("value", value);
     }

@@ -2646,6 +2646,30 @@ class AgenticAuthoringValidatorRegistryTest {
                         + "canonical page-builder target-registry preflight delegation is required");
     }
 
+    @Test
+    void shouldValidatePraxisChartRendererSupportedAndRejectUnsupportedRenderer() throws Exception {
+        JsonNode op = operationWithValidators("chart.renderer.set", false, "renderer-supported");
+        List<String> failures = new ArrayList<>();
+
+        registry.executeOperationValidators(
+                "praxis-chart",
+                op,
+                plan("{}", "{ \"renderer\": \"svg\" }"),
+                objectMapper.readTree("{}"),
+                failures,
+                new ArrayList<>());
+        assertThat(failures).isEmpty();
+
+        registry.executeOperationValidators(
+                "praxis-chart",
+                op,
+                plan("{}", "{ \"renderer\": \"webgl\" }"),
+                objectMapper.readTree("{}"),
+                failures,
+                new ArrayList<>());
+        assertThat(failures).containsExactly("validator renderer-supported failed for chart.renderer.set: unsupported renderer webgl");
+    }
+
     private JsonNode operationWithSchema(String inputSchemaJson) throws Exception {
         return objectMapper.readTree("""
                 {
