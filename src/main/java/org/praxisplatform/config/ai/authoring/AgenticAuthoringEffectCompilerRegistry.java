@@ -384,7 +384,7 @@ public final class AgenticAuthoringEffectCompilerRegistry {
         switch (effectKind) {
             case "merge-by-key" -> applyMergeByKey(effect, input, resolved, allowUpsert, targetKeyHint, proposedConfig, compiled, failures);
             case "remove-by-key" -> applyRemoveByKey(effect, resolved, proposedConfig, compiled, failures);
-            case "set-value" -> applySetValue(effect, input, resolved, proposedConfig, compiled, failures);
+            case "set-value" -> applySetValue(operation, effect, input, resolved, proposedConfig, compiled, failures);
             case "merge-object" -> applyMergeObject(effect, input, resolved, proposedConfig, compiled, failures);
             case "reorder-by-key" -> applyReorderByKey(effect, input, resolved, proposedConfig, compiled, failures);
             case "append", "append-to-array" -> applyAppend(effect, input, resolved, proposedConfig, compiled, failures);
@@ -6667,6 +6667,7 @@ public final class AgenticAuthoringEffectCompilerRegistry {
     }
 
     private void applySetValue(
+            JsonNode operation,
             JsonNode effect,
             JsonNode input,
             AgenticAuthoringResolvedTarget resolved,
@@ -6674,27 +6675,38 @@ public final class AgenticAuthoringEffectCompilerRegistry {
             ObjectNode compiled,
             List<String> failures) {
         String path = text(effect, "path");
-        String inputPath = text(effect, "inputPath");
         if (path.equals("$resolvedPath") || path.startsWith("$resolvedPath.")) {
             if (resolved == null || resolved.path() == null || resolved.path().isBlank()) {
                 failures.add("set-value with $resolvedPath requires a resolved target");
                 return;
             }
             String subTail = path.equals("$resolvedPath") ? "" : path.substring("$resolvedPath.".length());
-            JsonNode value = valueForSetEffect(effect, input, subTail);
-            if (!inputPath.isBlank() && value.isMissingNode()) {
-                compiled.put("skipped", true);
-                return;
-            }
             JsonNode targetNode = nodeAtResolvedPath(proposedConfig, resolved.path());
             if (!(targetNode instanceof ObjectNode targetObject)) {
                 failures.add("set-value resolved target is not an object: " + resolved.path());
                 return;
             }
-            if (!subTail.isBlank()) {
-                setDottedValue(targetObject, subTail, value);
-                compiled.put("resolvedPath", resolved.path() + "." + normalizeDottedPath(subTail));
+            String normalizedSubTail = normalizeDottedPath(subTail);
+            JsonNode existingTarget = normalizedSubTail.isBlank()
+                    ? targetObject
+                    : resolvePath(targetObject, normalizedSubTail);
+            JsonNode value = valueForSetEffect(
+                    operation,
+                    effect,
+                    input,
+                    normalizedSubTail,
+                    subTail.isBlank(),
+                    existingTarget);
+            if (value.isMissingNode()) {
+                compiled.put("skipped", true);
+                return;
+            }
+            if (!normalizedSubTail.isBlank()) {
+                setDottedValue(targetObject, normalizedSubTail, value);
+                String prefix = "$".equals(resolved.path().trim()) ? "" : resolved.path().trim() + ".";
+                compiled.put("resolvedPath", prefix + normalizedSubTail);
             } else if (value.isObject()) {
+                recordRemovedObjectKeys(targetObject, value, compiled);
                 targetObject.removeAll();
                 mergeObject(targetObject, value);
                 compiled.put("resolvedPath", resolved.path());
@@ -6706,26 +6718,63 @@ public final class AgenticAuthoringEffectCompilerRegistry {
             return;
         }
         String tail = tailAfterArray(path);
-        JsonNode value = valueForSetEffect(effect, input, tail);
-        if (!inputPath.isBlank() && value.isMissingNode()) {
-            compiled.put("skipped", true);
-            return;
-        }
+        String normalizedPath = normalizeDottedPath(path);
         if (resolved != null && !tail.isBlank()) {
             JsonNode targetNode = nodeAtResolvedPath(proposedConfig, resolved.path());
-            if (targetNode instanceof ObjectNode targetObject) {
-                setDottedValue(targetObject, tail, value);
-                compiled.put("resolvedPath", resolved.path() + "." + tail);
-            } else {
+            if (!(targetNode instanceof ObjectNode targetObject)) {
                 failures.add("set-value resolved target is not an object: " + resolved.path());
                 return;
             }
-        } else {
-            String normalizedPath = normalizeDottedPath(path);
-            setDottedValue(proposedConfig, normalizedPath, value);
-            compiled.put("resolvedPath", normalizedPath);
+            String normalizedTail = normalizeDottedPath(tail);
+            JsonNode existingTarget = resolvePath(targetObject, normalizedTail);
+            JsonNode value = valueForSetEffect(operation, effect, input, normalizedTail, false, existingTarget);
+            if (value.isMissingNode()) {
+                compiled.put("skipped", true);
+                return;
+            }
+            setDottedValue(targetObject, normalizedTail, value);
+            String prefix = "$".equals(resolved.path().trim()) ? "" : resolved.path().trim() + ".";
+            compiled.put("resolvedPath", prefix + normalizedTail);
+            compiled.set("value", value);
+            return;
         }
+        if (normalizedPath.isBlank()) {
+            JsonNode value = valueForSetEffect(operation, effect, input, "", true, proposedConfig);
+            if (value.isMissingNode()) {
+                compiled.put("skipped", true);
+                return;
+            }
+            if (!value.isObject()) {
+                failures.add("set-value on root path requires an object value");
+                return;
+            }
+            recordRemovedObjectKeys(proposedConfig, value, compiled);
+            proposedConfig.removeAll();
+            mergeObject(proposedConfig, value);
+            compiled.put("resolvedPath", "$");
+            compiled.set("value", value);
+            return;
+        }
+        JsonNode existingTarget = resolvePath(proposedConfig, normalizedPath);
+        JsonNode value = valueForSetEffect(operation, effect, input, normalizedPath, false, existingTarget);
+        if (value.isMissingNode()) {
+            compiled.put("skipped", true);
+            return;
+        }
+        setDottedValue(proposedConfig, normalizedPath, value);
+        compiled.put("resolvedPath", normalizedPath);
         compiled.set("value", value);
+    }
+
+    private void recordRemovedObjectKeys(ObjectNode currentObject, JsonNode replacementObject, ObjectNode compiled) {
+        ArrayNode removedKeys = compiled.putArray("removedKeys");
+        Iterator<String> fieldNames = currentObject.fieldNames();
+        while (fieldNames.hasNext()) {
+            String fieldName = fieldNames.next();
+            if (!replacementObject.has(fieldName)) {
+                removedKeys.add(fieldName);
+            }
+        }
     }
 
     private void applyMergeObject(
@@ -7144,7 +7193,13 @@ public final class AgenticAuthoringEffectCompilerRegistry {
         return array;
     }
 
-    private JsonNode valueForSetEffect(JsonNode effect, JsonNode input, String tail) {
+    private JsonNode valueForSetEffect(
+            JsonNode operation,
+            JsonNode effect,
+            JsonNode input,
+            String targetPropertyPath,
+            boolean rootObjectReplacement,
+            JsonNode existingTargetNode) {
         String inputPath = text(effect, "inputPath");
         if (!inputPath.isBlank()) {
             JsonNode value = resolvePath(input, inputPath);
@@ -7153,10 +7208,39 @@ public final class AgenticAuthoringEffectCompilerRegistry {
         if (effect.has("value")) {
             return effect.path("value");
         }
-        if (!tail.isBlank() && input != null && input.has(tail)) {
-            return input.path(tail);
+        if (input == null || input.isMissingNode()) {
+            return MissingNode.getInstance();
         }
-        return input == null ? MissingNode.getInstance() : input;
+        if (rootObjectReplacement) {
+            return input;
+        }
+        if (input.isObject() && targetPropertyPath != null && !targetPropertyPath.isBlank()) {
+            if (input.has(targetPropertyPath)) {
+                return input.path(targetPropertyPath);
+            }
+            if (targetPropertyPath.contains(".")) {
+                JsonNode nested = resolvePath(input, targetPropertyPath);
+                if (!nested.isMissingNode()) {
+                    return nested;
+                }
+            }
+            int dot = targetPropertyPath.lastIndexOf('.');
+            String leaf = dot >= 0 ? targetPropertyPath.substring(dot + 1) : targetPropertyPath;
+            if (!leaf.isBlank() && input.has(leaf)) {
+                return input.path(leaf);
+            }
+            // Only fall back to returning the whole input ObjectNode for single-effect
+            // object-level operations whose schema does not wrap the leaf property name.
+            boolean singleEffect = operation == null || operation.path("effects").size() <= 1;
+            JsonNode inputSchema = operation == null ? MissingNode.getInstance() : operation.path("inputSchema");
+            boolean wrapsLeafInSchema = !leaf.isBlank() && inputSchema.path("properties").has(leaf);
+            boolean wholeObjectTarget = inputSchema.isObject() || existingTargetNode instanceof ObjectNode;
+            if (singleEffect && !wrapsLeafInSchema && wholeObjectTarget) {
+                return input;
+            }
+            return MissingNode.getInstance();
+        }
+        return input;
     }
 
     private void copyIfPresent(JsonNode source, ObjectNode target, String field) {
@@ -8203,12 +8287,19 @@ public final class AgenticAuthoringEffectCompilerRegistry {
         parent.set(cleanPathSegment(field), value);
     }
 
-    private JsonNode nodeAtResolvedPath(ObjectNode root, String resolvedPath) {
+    JsonNode nodeAtResolvedPath(ObjectNode root, String resolvedPath) {
         JsonNode current = root;
         if (resolvedPath == null || resolvedPath.isBlank()) {
             return current;
         }
-        for (String segment : resolvedPath.split("\\.")) {
+        String clean = resolvedPath.trim();
+        if ("$".equals(clean)) {
+            return root;
+        }
+        if (clean.startsWith("$.")) {
+            clean = clean.substring(2);
+        }
+        for (String segment : clean.split("\\.")) {
             if (segment.isBlank()) {
                 continue;
             }

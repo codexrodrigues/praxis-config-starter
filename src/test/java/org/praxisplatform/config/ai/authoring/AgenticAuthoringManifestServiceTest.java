@@ -521,6 +521,135 @@ class AgenticAuthoringManifestServiceTest {
     }
 
     @Test
+    void emitsRfc6901RootPointerRemovedKeysAndMissingParentAddContainersInJsonPatch() throws Exception {
+        String customPayload = """
+                {
+                  "componentDefinition": {
+                    "jsonSchema": {
+                      "authoringManifest": {
+                        "schemaVersion": "1.0.0",
+                        "componentId": "praxis-table",
+                        "manifestVersion": "1.0.0",
+                        "editableTargets": [
+                          { "kind": "rootDoc", "resolver": "root-doc" },
+                          { "kind": "layoutAppearance", "resolver": "layout-appearance" }
+                        ],
+                        "operations": [
+                          {
+                            "operationId": "document.replace",
+                            "target": {
+                              "kind": "rootDoc",
+                              "resolver": "root-doc",
+                              "ambiguityPolicy": "fail",
+                              "required": true,
+                              "resolutionSpec": {
+                                "strategy": "root-path",
+                                "paths": ["$"],
+                                "allowIndex": false
+                              }
+                            },
+                            "inputSchema": {
+                              "type": "object",
+                              "additionalProperties": true
+                            },
+                            "effects": [
+                              { "kind": "set-value", "path": "$resolvedPath" }
+                            ],
+                            "affectedPaths": ["$"],
+                            "preconditions": ["config-initialized"],
+                            "validators": ["editor-runtime-round-trip"],
+                            "submissionImpact": "config-only"
+                          },
+                          {
+                            "operationId": "layout.appearance.merge",
+                            "target": {
+                              "kind": "layoutAppearance",
+                              "resolver": "layout-appearance",
+                              "ambiguityPolicy": "fail",
+                              "required": false
+                            },
+                            "inputSchema": {
+                              "type": "object",
+                              "properties": {
+                                "density": { "type": "string" }
+                              }
+                            },
+                            "effects": [
+                              { "kind": "merge-object", "path": "layout.appearance" }
+                            ],
+                            "affectedPaths": ["layout.appearance.density"],
+                            "preconditions": ["config-initialized"],
+                            "validators": ["editor-runtime-round-trip"],
+                            "submissionImpact": "visual-only"
+                          }
+                        ],
+                        "validators": [
+                          { "validatorId": "editor-runtime-round-trip" }
+                        ]
+                      }
+                    }
+                  }
+                }
+                """;
+        AgenticAuthoringManifestService service = serviceWithPayload(customPayload);
+
+        JsonNode rootReplaceReq = objectMapper.readTree("""
+                {
+                  "config": {
+                    "legacyFlag": true,
+                    "title": "Antigo"
+                  },
+                  "plan": {
+                    "operationId": "document.replace",
+                    "target": {},
+                    "input": {
+                      "title": "Novo",
+                      "density": "compact"
+                    }
+                  }
+                }
+                """);
+        AgenticAuthoringManifestCompileResult rootReplace = service.compilePatch(
+                COMPONENT_ID,
+                objectMapper.treeToValue(rootReplaceReq, AgenticAuthoringManifestEditPlanRequest.class));
+        assertThat(rootReplace.compiled()).isTrue();
+        JsonNode rootOps = rootReplace.patch().path("patchOperations");
+        assertThat(rootOps).hasSize(2);
+        assertThat(rootOps.get(0).path("op").asText()).isEqualTo("remove");
+        assertThat(rootOps.get(0).path("path").asText()).isEqualTo("/legacyFlag");
+        assertThat(rootOps.get(1).path("op").asText()).isEqualTo("replace");
+        assertThat(rootOps.get(1).path("path").asText()).isEmpty();
+        assertThat(rootReplace.patch().path("proposedConfig").has("legacyFlag")).isFalse();
+        assertThat(rootReplace.patch().path("proposedConfig").path("title").asText()).isEqualTo("Novo");
+
+        JsonNode missingParentReq = objectMapper.readTree("""
+                {
+                  "config": {},
+                  "plan": {
+                    "operationId": "layout.appearance.merge",
+                    "target": {},
+                    "input": { "density": "compact" }
+                  }
+                }
+                """);
+        AgenticAuthoringManifestCompileResult missingParent = service.compilePatch(
+                COMPONENT_ID,
+                objectMapper.treeToValue(missingParentReq, AgenticAuthoringManifestEditPlanRequest.class));
+        assertThat(missingParent.compiled()).isTrue();
+        JsonNode mergeOps = missingParent.patch().path("patchOperations");
+        assertThat(mergeOps).hasSize(3);
+        assertThat(mergeOps.get(0).path("op").asText()).isEqualTo("add");
+        assertThat(mergeOps.get(0).path("path").asText()).isEqualTo("/layout");
+        assertThat(mergeOps.get(0).path("value").isObject()).isTrue();
+        assertThat(mergeOps.get(1).path("op").asText()).isEqualTo("add");
+        assertThat(mergeOps.get(1).path("path").asText()).isEqualTo("/layout/appearance");
+        assertThat(mergeOps.get(1).path("value").isObject()).isTrue();
+        assertThat(mergeOps.get(2).path("op").asText()).isEqualTo("add");
+        assertThat(mergeOps.get(2).path("path").asText()).isEqualTo("/layout/appearance/density");
+        assertThat(mergeOps.get(2).path("value").asText()).isEqualTo("compact");
+    }
+
+    @Test
     void enforcesDynamicFormRuleRemovalConfirmationFromClasspathRegistrySnapshot() throws Exception {
         AgenticAuthoringManifestService service = serviceWithPayload(
                 "praxis-dynamic-form",

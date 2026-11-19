@@ -4525,6 +4525,67 @@ class AgenticAuthoringEffectCompilerRegistryTest {
                 """);
     }
 
+    @Test
+    void shouldCompileResolvedPathRootDollarAndStripDollarDotPrefix() throws Exception {
+        ObjectNode rootConfig = (ObjectNode) objectMapper.readTree("""
+                {
+                  "legacyKey": "drop-me",
+                  "meta": {
+                    "title": "Before"
+                  }
+                }
+                """);
+        JsonNode rootReplaceOp = objectMapper.readTree("""
+                {
+                  "operationId": "document.replace",
+                  "target": {
+                    "kind": "rootDoc",
+                    "resolver": "root-doc",
+                    "ambiguityPolicy": "fail",
+                    "required": true,
+                    "resolutionSpec": {
+                      "strategy": "root-path",
+                      "paths": ["$"],
+                      "allowIndex": false
+                    }
+                  },
+                  "effects": [
+                    { "kind": "set-value", "path": "$resolvedPath" }
+                  ],
+                  "affectedPaths": ["$"],
+                  "submissionImpact": "config-only"
+                }
+                """);
+        ArrayNode rootPatchOps = objectMapper.createArrayNode();
+        List<String> rootFailures = new ArrayList<>();
+        registry.appendCompiledEffects(
+                "praxis-table",
+                rootReplaceOp,
+                plan("{}", "{ \"meta\": { \"title\": \"Keep\" } }"),
+                rootConfig,
+                rootPatchOps,
+                rootFailures,
+                new ArrayList<>());
+
+        assertThat(rootFailures).isEmpty();
+        assertThat(rootConfig.has("legacyKey")).isFalse();
+        assertThat(rootConfig.path("meta").path("title").asText()).isEqualTo("Keep");
+        assertThat(rootPatchOps).hasSize(1);
+        assertThat(rootPatchOps.get(0).path("resolvedPath").asText()).isEqualTo("$");
+        assertThat(rootPatchOps.get(0).path("removedKeys")).extracting(JsonNode::asText).containsExactly("legacyKey");
+
+        ObjectNode dollarDotConfig = (ObjectNode) objectMapper.readTree("""
+                {
+                  "meta": {
+                    "title": "Old"
+                  }
+                }
+                """);
+        assertThat(registry.nodeAtResolvedPath(dollarDotConfig, "$")).isSameAs(dollarDotConfig);
+        assertThat(registry.nodeAtResolvedPath(dollarDotConfig, "$.meta").path("title").asText()).isEqualTo("Old");
+        assertThat(registry.nodeAtResolvedPath(dollarDotConfig, "$.meta.title").asText()).isEqualTo("Old");
+    }
+
     private JsonNode operation(
             String operationId,
             String targetKind,

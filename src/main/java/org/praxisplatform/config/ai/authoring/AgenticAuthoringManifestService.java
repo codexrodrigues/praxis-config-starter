@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.MissingNode;
+import com.fasterxml.jackson.databind.node.NullNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.util.ArrayList;
 import java.util.Iterator;
@@ -175,9 +176,10 @@ public class AgenticAuthoringManifestService {
         ArrayNode compiledEffects = objectMapper.createArrayNode();
         List<String> warnings = new ArrayList<>(validation.warnings());
         List<String> failures = new ArrayList<>();
-        ObjectNode proposedConfig = request != null && request.config() != null && request.config().isObject()
-                ? request.config().deepCopy()
+        ObjectNode initialConfig = request != null && request.config() != null && request.config().isObject()
+                ? (ObjectNode) request.config()
                 : objectMapper.createObjectNode();
+        ObjectNode proposedConfig = initialConfig.deepCopy();
         for (JsonNode planOperation : validation.normalizedPlan().path("operations")) {
             JsonNode operation = findOperation(manifest, text(planOperation, "operationId"));
             effectCompilerRegistry.appendCompiledEffects(
@@ -208,7 +210,7 @@ public class AgenticAuthoringManifestService {
         patch.put("manifestVersion", text(manifest, "manifestVersion"));
         patch.put("patchKind", "component-config-patch");
         ArrayNode compiledOperations = toCompiledOperations(compiledEffects);
-        ArrayNode applicablePatchOperations = toApplicablePatchOperations(compiledEffects);
+        ArrayNode applicablePatchOperations = toApplicablePatchOperations(compiledEffects, initialConfig);
         patch.set("compiledOperations", compiledOperations);
         patch.set("operations", compiledEffects.deepCopy());
         patch.set("patchOperations", applicablePatchOperations);
@@ -228,28 +230,33 @@ public class AgenticAuthoringManifestService {
         return compiledOperations;
     }
 
-    private ArrayNode toApplicablePatchOperations(ArrayNode compiledEffects) {
+    private ArrayNode toApplicablePatchOperations(ArrayNode compiledEffects, ObjectNode initialConfig) {
+        ObjectNode baseline = initialConfig != null ? initialConfig.deepCopy() : objectMapper.createObjectNode();
         ArrayNode patchOperations = objectMapper.createArrayNode();
         for (JsonNode compiledEffect : compiledEffects) {
-            appendApplicablePatchOperations(compiledEffect, patchOperations);
+            appendApplicablePatchOperations(compiledEffect, patchOperations, baseline);
         }
         return patchOperations;
     }
 
-    private void appendApplicablePatchOperations(JsonNode compiledEffect, ArrayNode patchOperations) {
+    private void appendApplicablePatchOperations(
+            JsonNode compiledEffect,
+            ArrayNode patchOperations,
+            ObjectNode baseline) {
         String effectKind = text(compiledEffect, "effectKind");
         switch (effectKind) {
             case "merge-by-key" -> {
                 if (compiledEffect.path("upsertInsert").asBoolean(false)) {
-                    patchOperations.add(baseApplicableOperation(
-                            "add",
-                            pointerForAppend(compiledEffect))
+                    String appendPointer = pointerForAppend(compiledEffect);
+                    patchOperations.add(baseApplicableOperation("add", appendPointer)
                             .set("value", compiledEffect.path("value")));
+                    setPointerValueOnBaseline(baseline, appendPointer, compiledEffect.path("value"));
                 } else {
                     appendReplaceOperations(
                             pointerFromResolvedPath(text(compiledEffect, "resolvedPath")),
                             compiledEffect.path("value"),
-                            patchOperations);
+                            patchOperations,
+                            baseline);
                 }
             }
             case "merge-object" -> appendReplaceOperations(
@@ -257,38 +264,61 @@ public class AgenticAuthoringManifestService {
                             text(compiledEffect, "resolvedPath"),
                             text(compiledEffect, "path")),
                     compiledEffect.path("value"),
-                    patchOperations);
-            case "set-value" -> patchOperations.add(baseApplicableOperation(
-                    "replace",
-                    pointerFromResolvedPathOrConfigPath(
-                            text(compiledEffect, "resolvedPath"),
-                            text(compiledEffect, "path")))
-                    .set("value", compiledEffect.path("value")));
-            case "remove-by-key" -> patchOperations.add(baseApplicableOperation(
-                    "remove",
-                    pointerFromResolvedPathOrRemovedIndex(
-                            text(compiledEffect, "resolvedPath"),
-                            text(compiledEffect, "path"),
-                            compiledEffect.path("removedIndex").asInt(-1))));
-            case "append", "append-to-array", "append-unique" -> patchOperations.add(baseApplicableOperation(
-                    "add",
-                    pointerForAppend(compiledEffect))
-                    .set("value", compiledEffect.path("value")));
+                    patchOperations,
+                    baseline);
+            case "set-value" -> {
+                String targetPointer = pointerFromResolvedPathOrConfigPath(
+                        text(compiledEffect, "resolvedPath"),
+                        text(compiledEffect, "path"));
+                JsonNode removedKeys = compiledEffect.path("removedKeys");
+                if (removedKeys.isArray()) {
+                    for (JsonNode removedKey : removedKeys) {
+                        String key = removedKey.asText("");
+                        if (!key.isBlank()) {
+                            String removePointer = joinPointer(targetPointer, key);
+                            patchOperations.add(baseApplicableOperation("remove", removePointer));
+                            removePointerOnBaseline(baseline, removePointer);
+                        }
+                    }
+                }
+                ensureParentContainers(targetPointer, patchOperations, baseline);
+                String op = (!targetPointer.isEmpty() && baseline.at(targetPointer).isMissingNode())
+                        ? "add"
+                        : "replace";
+                JsonNode setValue = compiledEffect.path("value");
+                patchOperations.add(baseApplicableOperation(op, targetPointer)
+                        .set("value", setValue.deepCopy()));
+                setPointerValueOnBaseline(baseline, targetPointer, setValue);
+            }
+            case "remove-by-key" -> {
+                String removePointer = pointerFromResolvedPathOrRemovedIndex(
+                        text(compiledEffect, "resolvedPath"),
+                        text(compiledEffect, "path"),
+                        compiledEffect.path("removedIndex").asInt(-1));
+                patchOperations.add(baseApplicableOperation("remove", removePointer));
+                removePointerOnBaseline(baseline, removePointer);
+            }
+            case "append", "append-to-array", "append-unique" -> {
+                String appendPointer = pointerForAppend(compiledEffect);
+                patchOperations.add(baseApplicableOperation("add", appendPointer)
+                        .set("value", compiledEffect.path("value")));
+                setPointerValueOnBaseline(baseline, appendPointer, compiledEffect.path("value"));
+            }
             case "insert-positioned" -> {
                 int replacedIdx = compiledEffect.path("replacedIndex").asInt(-1);
                 int insertedIdx = compiledEffect.path("insertedIndex").asInt(-1);
                 if (replacedIdx >= 0) {
-                    patchOperations.add(baseApplicableOperation(
-                            "replace",
-                            pointerForArrayIndex(text(compiledEffect, "path"), replacedIdx))
+                    String replacePointer = pointerForArrayIndex(text(compiledEffect, "path"), replacedIdx);
+                    patchOperations.add(baseApplicableOperation("replace", replacePointer)
                             .set("value", compiledEffect.path("value")));
+                    setPointerValueOnBaseline(baseline, replacePointer, compiledEffect.path("value"));
                 } else {
-                    patchOperations.add(baseApplicableOperation(
-                            "add",
-                            insertedIdx >= 0
-                                    ? pointerForArrayIndex(text(compiledEffect, "path"), insertedIdx)
-                                    : pointerForAppend(compiledEffect))
+                    String insertPointer = insertedIdx >= 0
+                            ? pointerForArrayIndex(text(compiledEffect, "path"), insertedIdx)
+                            : pointerForAppend(compiledEffect);
+                    patchOperations.add(baseApplicableOperation("add", insertPointer)
                             .set("value", compiledEffect.path("value")));
+                    setPointerValueOnBaseline(baseline, insertPointer, compiledEffect.path("value"));
                 }
             }
             case "reorder-by-key" -> {
@@ -303,20 +333,169 @@ public class AgenticAuthoringManifestService {
         }
     }
 
-    private void appendReplaceOperations(String basePointer, JsonNode value, ArrayNode patchOperations) {
+    private void appendReplaceOperations(
+            String basePointer,
+            JsonNode value,
+            ArrayNode patchOperations,
+            ObjectNode baseline) {
         if (value == null || value.isMissingNode() || value.isNull()) {
-            patchOperations.add(baseApplicableOperation("replace", basePointer).putNull("value"));
+            ensureParentContainers(basePointer, patchOperations, baseline);
+            String op = (!basePointer.isEmpty() && baseline.at(basePointer).isMissingNode()) ? "add" : "replace";
+            patchOperations.add(baseApplicableOperation(op, basePointer).putNull("value"));
+            setPointerValueOnBaseline(baseline, basePointer, NullNode.getInstance());
             return;
         }
         if (value.isObject()) {
+            if (value.isEmpty()) {
+                if (!basePointer.isEmpty()) {
+                    ensureParentContainers(basePointer, patchOperations, baseline);
+                    String op = baseline.at(basePointer).isMissingNode() ? "add" : "replace";
+                    patchOperations.add(baseApplicableOperation(op, basePointer)
+                            .set("value", objectMapper.createObjectNode()));
+                    setPointerValueOnBaseline(baseline, basePointer, objectMapper.createObjectNode());
+                }
+                return;
+            }
             Iterator<String> fieldNames = value.fieldNames();
             while (fieldNames.hasNext()) {
                 String field = fieldNames.next();
-                appendReplaceOperations(joinPointer(basePointer, field), value.path(field), patchOperations);
+                appendReplaceOperations(joinPointer(basePointer, field), value.path(field), patchOperations, baseline);
             }
             return;
         }
-        patchOperations.add(baseApplicableOperation("replace", basePointer).set("value", value.deepCopy()));
+        ensureParentContainers(basePointer, patchOperations, baseline);
+        String op = (!basePointer.isEmpty() && baseline.at(basePointer).isMissingNode()) ? "add" : "replace";
+        patchOperations.add(baseApplicableOperation(op, basePointer).set("value", value.deepCopy()));
+        setPointerValueOnBaseline(baseline, basePointer, value);
+    }
+
+    private void ensureParentContainers(String pointer, ArrayNode patchOperations, ObjectNode baseline) {
+        if (pointer == null || pointer.isEmpty() || !pointer.startsWith("/")) {
+            return;
+        }
+        String[] rawTokens = pointer.substring(1).split("/", -1);
+        if (rawTokens.length <= 1) {
+            return;
+        }
+        JsonNode current = baseline;
+        StringBuilder prefix = new StringBuilder();
+        for (int i = 0; i < rawTokens.length - 1; i++) {
+            String segment = unescapePointerToken(rawTokens[i]);
+            prefix.append('/').append(rawTokens[i]);
+            if (current instanceof ObjectNode currentObject) {
+                if (!currentObject.has(segment)) {
+                    ObjectNode emptyContainer = objectMapper.createObjectNode();
+                    patchOperations.add(baseApplicableOperation("add", prefix.toString())
+                            .set("value", emptyContainer.deepCopy()));
+                    current = currentObject.putObject(segment);
+                } else {
+                    current = currentObject.get(segment);
+                }
+            } else if (current instanceof ArrayNode currentArray) {
+                try {
+                    int idx = Integer.parseInt(segment);
+                    if (idx < 0 || idx >= currentArray.size()) {
+                        return;
+                    }
+                    current = currentArray.get(idx);
+                } catch (NumberFormatException ex) {
+                    return;
+                }
+            } else {
+                return;
+            }
+        }
+    }
+
+    private void setPointerValueOnBaseline(ObjectNode baseline, String pointer, JsonNode value) {
+        if (baseline == null || pointer == null) {
+            return;
+        }
+        JsonNode copiedValue = (value == null || value.isMissingNode()) ? NullNode.getInstance() : value.deepCopy();
+        if (pointer.isEmpty()) {
+            if (copiedValue.isObject()) {
+                baseline.removeAll();
+                mergeObject(baseline, copiedValue);
+            }
+            return;
+        }
+        if (!pointer.startsWith("/")) {
+            return;
+        }
+        String[] rawTokens = pointer.substring(1).split("/", -1);
+        JsonNode current = baseline;
+        for (int i = 0; i < rawTokens.length - 1; i++) {
+            String segment = unescapePointerToken(rawTokens[i]);
+            if (current instanceof ObjectNode currentObject) {
+                current = currentObject.get(segment);
+            } else if (current instanceof ArrayNode currentArray) {
+                try {
+                    int idx = Integer.parseInt(segment);
+                    current = (idx >= 0 && idx < currentArray.size()) ? currentArray.get(idx) : null;
+                } catch (NumberFormatException ex) {
+                    return;
+                }
+            } else {
+                return;
+            }
+        }
+        String leaf = unescapePointerToken(rawTokens[rawTokens.length - 1]);
+        if (current instanceof ObjectNode parentObject) {
+            parentObject.set(leaf, copiedValue);
+        } else if (current instanceof ArrayNode parentArray) {
+            if ("-".equals(leaf)) {
+                parentArray.add(copiedValue);
+            } else {
+                try {
+                    int idx = Integer.parseInt(leaf);
+                    if (idx >= 0 && idx < parentArray.size()) {
+                        parentArray.set(idx, copiedValue);
+                    } else if (idx == parentArray.size()) {
+                        parentArray.add(copiedValue);
+                    }
+                } catch (NumberFormatException ignored) {
+                }
+            }
+        }
+    }
+
+    private void removePointerOnBaseline(ObjectNode baseline, String pointer) {
+        if (baseline == null || pointer == null || !pointer.startsWith("/") || pointer.isEmpty()) {
+            return;
+        }
+        String[] rawTokens = pointer.substring(1).split("/", -1);
+        JsonNode current = baseline;
+        for (int i = 0; i < rawTokens.length - 1; i++) {
+            String segment = unescapePointerToken(rawTokens[i]);
+            if (current instanceof ObjectNode currentObject) {
+                current = currentObject.get(segment);
+            } else if (current instanceof ArrayNode currentArray) {
+                try {
+                    int idx = Integer.parseInt(segment);
+                    current = (idx >= 0 && idx < currentArray.size()) ? currentArray.get(idx) : null;
+                } catch (NumberFormatException ex) {
+                    return;
+                }
+            } else {
+                return;
+            }
+        }
+        String leaf = unescapePointerToken(rawTokens[rawTokens.length - 1]);
+        if (current instanceof ObjectNode parentObject) {
+            parentObject.remove(leaf);
+        } else if (current instanceof ArrayNode parentArray) {
+            try {
+                int idx = Integer.parseInt(leaf);
+                if (idx >= 0 && idx < parentArray.size()) {
+                    parentArray.remove(idx);
+                }
+            } catch (NumberFormatException ignored) {
+            }
+        }
+    }
+
+    private String unescapePointerToken(String token) {
+        return token.replace("~1", "/").replace("~0", "~");
     }
 
     private ObjectNode baseApplicableOperation(String op, String path) {
@@ -353,7 +532,9 @@ public class AgenticAuthoringManifestService {
         } else {
             collectionPointer = pointerFromConfigPath(collectionPath(path));
         }
-        return collectionPointer.endsWith("/") ? collectionPointer + "-" : collectionPointer + "/-";
+        return (collectionPointer.isEmpty() || collectionPointer.endsWith("/"))
+                ? collectionPointer + "-"
+                : collectionPointer + "/-";
     }
 
     private String pointerForArrayIndex(String configPath, int index) {
@@ -363,19 +544,19 @@ public class AgenticAuthoringManifestService {
 
     private String pointerFromResolvedPath(String resolvedPath) {
         if (resolvedPath == null || resolvedPath.isBlank() || "$".equals(resolvedPath.trim())) {
-            return "/";
+            return "";
         }
         String clean = resolvedPath.trim();
         if (clean.startsWith("$.")) {
             clean = clean.substring(2);
         }
         String normalized = clean.replace("[]/", "/").replace("[]", "");
-        return joinPointer("/", pointerTokens(normalized));
+        return joinPointer("", pointerTokens(normalized));
     }
 
     private String pointerFromConfigPath(String configPath) {
         String normalized = normalizeConfigPath(configPath);
-        return joinPointer("/", pointerTokens(normalized));
+        return joinPointer("", pointerTokens(normalized));
     }
 
     private String normalizeConfigPath(String configPath) {
@@ -401,21 +582,19 @@ public class AgenticAuthoringManifestService {
     }
 
     private String joinPointer(String basePointer, String... tokens) {
-        String pointer = (basePointer == null || basePointer.isBlank()) ? "/" : basePointer;
-        if (pointer.endsWith("/") && pointer.length() > 1) {
+        String pointer = basePointer == null ? "" : basePointer.trim();
+        if ("/".equals(pointer)) {
+            pointer = "";
+        } else if (pointer.endsWith("/") && pointer.length() > 1) {
             pointer = pointer.substring(0, pointer.length() - 1);
         }
         for (String token : tokens) {
             if (token == null || token.isBlank()) {
                 continue;
             }
-            if ("/".equals(pointer)) {
-                pointer = "/" + escapePointerToken(token);
-            } else {
-                pointer = pointer + "/" + escapePointerToken(token);
-            }
+            pointer = pointer + "/" + escapePointerToken(token);
         }
-        return pointer.isBlank() ? "/" : pointer;
+        return pointer;
     }
 
     private String escapePointerToken(String token) {

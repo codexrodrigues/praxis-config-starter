@@ -337,9 +337,30 @@ class AgenticAuthoringCiclo3PositiveExecutionTest {
                         """));
         assertThat(stepperResult.compiled()).as("stepperResult failures=%s", stepperResult.failures()).isTrue();
         assertNoRootPatchPointer(stepperResult);
-        assertThat(stepperResult.patch().path("patchOperations"))
+        JsonNode stepperPatchOps = stepperResult.patch().path("patchOperations");
+        assertThat(stepperPatchOps).hasSize(2);
+        assertThat(stepperPatchOps)
                 .extracting(op -> op.path("path").asText())
-                .contains("/orientation", "/headerPosition");
+                .containsExactlyInAnyOrder("/orientation", "/headerPosition");
+        assertThat(stepperPatchOps.get(0).path("value").asText()).isEqualTo("vertical");
+        assertThat(stepperPatchOps.get(1).path("value").asText()).isEqualTo("bottom");
+        JsonNode stepperProposed = stepperResult.patch().path("proposedConfig");
+        assertThat(stepperProposed.path("orientation").asText()).isEqualTo("vertical");
+        assertThat(stepperProposed.path("headerPosition").asText()).isEqualTo("bottom");
+        assertThat(stepperProposed.has("labelPosition")).isFalse();
+        assertThat(stepperProposed.has("density")).isFalse();
+
+        AgenticAuthoringManifestCompileResult navResult = service.compilePatch(
+                "praxis-stepper",
+                editRequest(stepperProposed, """
+                        { "operationId": "navigation.mode.set", "input": { "linear": true, "nextLabel": "Avançar" } }
+                        """));
+        assertThat(navResult.compiled()).as("navResult failures=%s", navResult.failures()).isTrue();
+        JsonNode navProposed = navResult.patch().path("proposedConfig");
+        assertThat(navProposed.path("linear").asBoolean()).isTrue();
+        assertThat(navProposed.path("navigation").path("nextLabel").asText()).isEqualTo("Avançar");
+        assertThat(navProposed.path("navigation").has("linear")).isFalse();
+        assertThat(navProposed.path("navigation").has("prevLabel")).isFalse();
     }
 
     @Test

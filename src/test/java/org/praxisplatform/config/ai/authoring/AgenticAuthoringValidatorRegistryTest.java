@@ -2670,6 +2670,51 @@ class AgenticAuthoringValidatorRegistryTest {
         assertThat(failures).containsExactly("validator renderer-supported failed for chart.renderer.set: unsupported renderer webgl");
     }
 
+    @Test
+    void shouldEnforceCalendarRangeMax732DaysAndIncludeSemesterHalfYearHints() throws Exception {
+        JsonNode op = operationWithValidators("calendar.range.set", false, "calendar-range-valid");
+        JsonNode calendarConfig = objectMapper.readTree("""
+                {
+                  "chartDocument": {
+                    "kind": "calendar",
+                    "calendar": { "range": "2025-S1" }
+                  }
+                }
+                """);
+
+        List<String> okFailures = new ArrayList<>();
+        registry.executeOperationValidators(
+                "praxis-chart",
+                op,
+                plan("{}", "{ \"calendar\": { \"range\": [\"2025-01-01\", \"2027-01-02\"] } }"),
+                calendarConfig,
+                okFailures,
+                new ArrayList<>());
+        assertThat(okFailures).isEmpty();
+
+        List<String> overLimitFailures = new ArrayList<>();
+        registry.executeOperationValidators(
+                "praxis-chart",
+                op,
+                plan("{}", "{ \"calendar\": { \"range\": [\"2025-01-01\", \"2027-01-03\"] } }"),
+                calendarConfig,
+                overLimitFailures,
+                new ArrayList<>());
+        assertThat(overLimitFailures).containsExactly(
+                "validator calendar-range-valid failed for calendar.range.set: calendar.range tuple must span at most 732 days");
+
+        List<String> typeFailures = new ArrayList<>();
+        registry.executeOperationValidators(
+                "praxis-chart",
+                op,
+                plan("{}", "{ \"calendar\": { \"range\": 2025 } }"),
+                calendarConfig,
+                typeFailures,
+                new ArrayList<>());
+        assertThat(typeFailures).containsExactly(
+                "validator calendar-range-valid failed for calendar.range.set: calendar.range must be a 'YYYY' | 'YYYY-MM' | 'YYYY-S1' | 'YYYY-S2' | 'YYYY-H1' | 'YYYY-H2' string or [start, end] tuple");
+    }
+
     private JsonNode operationWithSchema(String inputSchemaJson) throws Exception {
         return objectMapper.readTree("""
                 {

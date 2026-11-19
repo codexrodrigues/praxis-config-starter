@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.node.MissingNode;
 import java.time.LocalDate;
 import java.time.ZoneId;
 import java.time.format.DateTimeParseException;
+import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.Iterator;
@@ -4190,6 +4191,9 @@ public final class AgenticAuthoringValidatorRegistry {
                 if (end.isBefore(start)) {
                     failures.add("validator calendar-range-valid failed for " + operationId
                             + ": calendar.range endDate must not be before startDate");
+                } else if (ChronoUnit.DAYS.between(start, end) + 1 > 732) {
+                    failures.add("validator calendar-range-valid failed for " + operationId
+                            + ": calendar.range tuple must span at most 732 days");
                 }
             } catch (DateTimeParseException ex) {
                 failures.add("validator calendar-range-valid failed for " + operationId
@@ -4198,7 +4202,7 @@ public final class AgenticAuthoringValidatorRegistry {
             return;
         }
         failures.add("validator calendar-range-valid failed for " + operationId
-                + ": calendar.range must be a YYYY/YYYY-MM string or [start, end] tuple");
+                + ": calendar.range must be a 'YYYY' | 'YYYY-MM' | 'YYYY-S1' | 'YYYY-S2' | 'YYYY-H1' | 'YYYY-H2' string or [start, end] tuple");
     }
 
     private void validateChartWaterfallRoles(
