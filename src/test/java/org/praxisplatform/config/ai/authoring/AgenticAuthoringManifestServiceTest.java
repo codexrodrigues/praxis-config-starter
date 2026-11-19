@@ -650,6 +650,213 @@ class AgenticAuthoringManifestServiceTest {
     }
 
     @Test
+    void hardensRfc6901PointersNullScalarParentsMissingArraysAndSelectionReconciliation() throws Exception {
+        String customPayload = """
+                {
+                  "componentDefinition": {
+                    "jsonSchema": {
+                      "authoringManifest": {
+                        "schemaVersion": "1.0.0",
+                        "componentId": "praxis-table",
+                        "manifestVersion": "1.0.0",
+                        "editableTargets": [
+                          { "kind": "nav", "resolver": "component-config" },
+                          { "kind": "stepAppend", "resolver": "component-config" },
+                          { "kind": "step", "resolver": "step-by-id", "resolutionSpec": { "strategy": "array-match", "paths": ["steps[]"], "matchFields": ["id"] } }
+                        ],
+                        "operations": [
+                          {
+                            "operationId": "nav.nextLabel.set",
+                            "target": { "kind": "nav", "resolver": "component-config", "ambiguityPolicy": "fail", "required": false },
+                            "inputSchema": {
+                              "type": "object",
+                              "properties": { "nextLabel": { "type": "string" } }
+                            },
+                            "effects": [
+                              { "kind": "set-value", "path": "navigation.nextLabel", "inputPath": "nextLabel" }
+                            ],
+                            "affectedPaths": ["navigation.nextLabel"],
+                            "preconditions": ["config-initialized"],
+                            "validators": ["editor-runtime-round-trip"],
+                            "submissionImpact": "visual-only"
+                          },
+                          {
+                            "operationId": "step.append",
+                            "target": { "kind": "stepAppend", "resolver": "component-config", "ambiguityPolicy": "fail", "required": false },
+                            "inputSchema": {
+                              "type": "object",
+                              "properties": { "id": { "type": "string" }, "label": { "type": "string" } }
+                            },
+                            "effects": [
+                              { "kind": "append", "path": "wizard.steps[]" }
+                            ],
+                            "affectedPaths": ["wizard.steps[]"],
+                            "preconditions": ["config-initialized"],
+                            "validators": ["editor-runtime-round-trip"],
+                            "submissionImpact": "config-only"
+                          },
+                          {
+                            "operationId": "step.reorder",
+                            "target": { "kind": "step", "resolver": "step-by-id", "ambiguityPolicy": "fail", "required": true, "resolutionSpec": { "strategy": "array-match", "paths": ["steps[]"], "matchFields": ["id"] } },
+                            "inputSchema": {
+                              "type": "object",
+                              "properties": { "index": { "type": "number" } }
+                            },
+                            "effects": [
+                              {
+                                "kind": "reorder-by-key",
+                                "path": "steps[]",
+                                "key": "id",
+                                "selectionReconciliation": {
+                                  "selectedIndexPath": "selection.index",
+                                  "selectedIdPath": "selection.id"
+                                }
+                              }
+                            ],
+                            "affectedPaths": ["steps[]", "selection.index", "selection.id"],
+                            "preconditions": ["config-initialized"],
+                            "validators": ["editor-runtime-round-trip"],
+                            "submissionImpact": "config-only"
+                          },
+                          {
+                            "operationId": "step.label.set",
+                            "target": { "kind": "step", "resolver": "step-by-id", "ambiguityPolicy": "fail", "required": true, "resolutionSpec": { "strategy": "array-match", "paths": ["steps[]"], "matchFields": ["id"] } },
+                            "inputSchema": {
+                              "type": "object",
+                              "properties": { "label": { "type": "string" } }
+                            },
+                            "effects": [
+                              { "kind": "set-value", "path": "steps[].label", "inputPath": "label" }
+                            ],
+                            "affectedPaths": ["steps[].label"],
+                            "preconditions": ["config-initialized"],
+                            "validators": ["editor-runtime-round-trip"],
+                            "submissionImpact": "visual-only"
+                          },
+                          {
+                            "operationId": "step.remove",
+                            "destructive": true,
+                            "requiresConfirmation": true,
+                            "target": { "kind": "step", "resolver": "step-by-id", "ambiguityPolicy": "fail", "required": true, "resolutionSpec": { "strategy": "array-match", "paths": ["steps[]"], "matchFields": ["id"] } },
+                            "inputSchema": { "type": "object", "properties": {} },
+                            "effects": [
+                              {
+                                "kind": "remove-by-key",
+                                "path": "steps[]",
+                                "key": "id",
+                                "selectionReconciliation": {
+                                  "selectedIndexPath": "selection.index",
+                                  "selectedIdPath": "selection.id",
+                                  "onRemovedActive": "clamp"
+                                }
+                              }
+                            ],
+                            "affectedPaths": ["steps[]", "selection.index", "selection.id"],
+                            "preconditions": ["config-initialized"],
+                            "validators": ["editor-runtime-round-trip"],
+                            "submissionImpact": "config-only"
+                          }
+                        ],
+                        "validators": [
+                          { "validatorId": "editor-runtime-round-trip" }
+                        ]
+                      }
+                    }
+                  }
+                }
+                """;
+        AgenticAuthoringManifestService service = serviceWithPayload(customPayload);
+
+        // 1. NullNode & scalar legacy parent overwrite on set-value
+        JsonNode nullParentReq = objectMapper.readTree("""
+                {
+                  "config": { "navigation": null },
+                  "plan": { "operationId": "nav.nextLabel.set", "target": {}, "input": { "nextLabel": "Next" } }
+                }
+                """);
+        AgenticAuthoringManifestCompileResult nullParentRes = service.compilePatch(
+                COMPONENT_ID,
+                objectMapper.treeToValue(nullParentReq, AgenticAuthoringManifestEditPlanRequest.class));
+        assertThat(nullParentRes.compiled()).as("nullParent failures=%s", nullParentRes.failures()).isTrue();
+        assertThat(nullParentRes.patch().path("proposedConfig").path("navigation").path("nextLabel").asText()).isEqualTo("Next");
+        JsonNode nullParentOps = nullParentRes.patch().path("patchOperations");
+        assertThat(nullParentOps).hasSize(2);
+        assertThat(nullParentOps.get(0).path("op").asText()).isEqualTo("replace");
+        assertThat(nullParentOps.get(0).path("path").asText()).isEqualTo("/navigation");
+        assertThat(nullParentOps.get(0).path("value").isObject()).isTrue();
+        assertThat(nullParentOps.get(1).path("op").asText()).isEqualTo("add");
+        assertThat(nullParentOps.get(1).path("path").asText()).isEqualTo("/navigation/nextLabel");
+        assertThat(nullParentOps.get(1).path("value").asText()).isEqualTo("Next");
+
+        // 2. append initializes missing parent & non-array scalar legacy container []
+        JsonNode scalarArrayReq = objectMapper.readTree("""
+                {
+                  "config": { "wizard": { "steps": false } },
+                  "plan": { "operationId": "step.append", "target": {}, "input": { "id": "s1", "label": "Step 1" } }
+                }
+                """);
+        AgenticAuthoringManifestCompileResult scalarArrayRes = service.compilePatch(
+                COMPONENT_ID,
+                objectMapper.treeToValue(scalarArrayReq, AgenticAuthoringManifestEditPlanRequest.class));
+        assertThat(scalarArrayRes.compiled()).as("scalarArray failures=%s", scalarArrayRes.failures()).isTrue();
+        assertThat(scalarArrayRes.patch().path("proposedConfig").path("wizard").path("steps")).hasSize(1);
+        JsonNode appendOps = scalarArrayRes.patch().path("patchOperations");
+        assertThat(appendOps).hasSize(2);
+        assertThat(appendOps.get(0).path("op").asText()).isEqualTo("replace");
+        assertThat(appendOps.get(0).path("path").asText()).isEqualTo("/wizard/steps");
+        assertThat(appendOps.get(0).path("value").isArray()).isTrue();
+        assertThat(appendOps.get(1).path("op").asText()).isEqualTo("add");
+        assertThat(appendOps.get(1).path("path").asText()).isEqualTo("/wizard/steps/-");
+
+        // 3. pointerForAppend("") -> "/-" and slash-in-key / escaped pointer preservation
+        ObjectNode emptyPathEffect = objectMapper.createObjectNode().put("path", "");
+        assertThat(service.pointerForAppend(emptyPathEffect)).isEqualTo("/-");
+        assertThat(service.pointerFromConfigPath("endpoints./api/v1")).isEqualTo("/endpoints/~1api~1v1");
+        assertThat(service.pointerFromConfigPath("/endpoints/~1api~1v1")).isEqualTo("/endpoints/~1api~1v1");
+
+        // 4. reorder-by-key updates baseline indices for sequential ops and emits selection patch ops
+        JsonNode sequentialReq = objectMapper.readTree("""
+                {
+                  "config": {
+                    "steps": [
+                      { "id": "a", "label": "A" },
+                      { "id": "b", "label": "B" },
+                      { "id": "c", "label": "C" }
+                    ],
+                    "selection": { "index": 2, "id": "c" }
+                  },
+                  "plan": {
+                    "operations": [
+                      { "operationId": "step.reorder", "target": "c", "input": { "index": 0 } },
+                      { "operationId": "step.label.set", "target": "c", "input": { "label": "C-updated" } },
+                      { "operationId": "step.remove", "target": "c", "confirmed": true, "input": {} }
+                    ]
+                  }
+                }
+                """);
+        AgenticAuthoringManifestCompileResult sequentialRes = service.compilePatch(
+                COMPONENT_ID,
+                objectMapper.treeToValue(sequentialReq, AgenticAuthoringManifestEditPlanRequest.class));
+        assertThat(sequentialRes.compiled()).as("failures=%s", sequentialRes.failures()).isTrue();
+        JsonNode seqOps = sequentialRes.patch().path("patchOperations");
+        assertThat(seqOps).hasSize(5);
+        assertThat(seqOps.get(0).path("op").asText()).isEqualTo("move");
+        assertThat(seqOps.get(0).path("from").asText()).isEqualTo("/steps/2");
+        assertThat(seqOps.get(0).path("path").asText()).isEqualTo("/steps/0");
+        assertThat(seqOps.get(1).path("op").asText()).isEqualTo("replace");
+        assertThat(seqOps.get(1).path("path").asText()).isEqualTo("/selection/index");
+        assertThat(seqOps.get(1).path("value").asInt()).isZero();
+        assertThat(seqOps.get(2).path("op").asText()).isEqualTo("replace");
+        assertThat(seqOps.get(2).path("path").asText()).isEqualTo("/steps/0/label");
+        assertThat(seqOps.get(2).path("value").asText()).isEqualTo("C-updated");
+        assertThat(seqOps.get(3).path("op").asText()).isEqualTo("remove");
+        assertThat(seqOps.get(3).path("path").asText()).isEqualTo("/steps/0");
+        assertThat(seqOps.get(4).path("op").asText()).isEqualTo("replace");
+        assertThat(seqOps.get(4).path("path").asText()).isEqualTo("/selection/id");
+        assertThat(seqOps.get(4).path("value").asText()).isEqualTo("a");
+    }
+
+    @Test
     void enforcesDynamicFormRuleRemovalConfirmationFromClasspathRegistrySnapshot() throws Exception {
         AgenticAuthoringManifestService service = serviceWithPayload(
                 "praxis-dynamic-form",

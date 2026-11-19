@@ -6657,7 +6657,8 @@ public final class AgenticAuthoringEffectCompilerRegistry {
                     array,
                     key,
                     keyValue,
-                    index);
+                    index,
+                    compiled);
         }
         compiled.put("keyValue", keyValue);
         compiled.put("removedIndex", index);
@@ -6876,7 +6877,8 @@ public final class AgenticAuthoringEffectCompilerRegistry {
                     effect.path("selectionReconciliation"),
                     previousArray,
                     array,
-                    key);
+                    key,
+                    compiled);
         }
         compiled.put("keyValue", keyValue);
         compiled.put("fromIndex", fromIndex);
@@ -6995,7 +6997,8 @@ public final class AgenticAuthoringEffectCompilerRegistry {
             ArrayNode currentArray,
             String defaultKeyField,
             String removedKeyValue,
-            int removedIndex) {
+            int removedIndex,
+            ObjectNode compiled) {
         String selectedIndexPath = firstNonBlank(text(reconciliation, "selectedIndexPath"), text(reconciliation, "activeIndexPath"));
         String selectedIdPath = firstNonBlank(text(reconciliation, "selectedIdPath"), text(reconciliation, "activeIdPath"));
         String itemKeyField = firstNonBlank(text(reconciliation, "itemKeyField"), defaultKeyField, "id");
@@ -7013,10 +7016,10 @@ public final class AgenticAuthoringEffectCompilerRegistry {
 
         if (currentArray.isEmpty()) {
             if (!selectedIndexPath.isBlank()) {
-                setDottedValue(proposedConfig, selectedIndexPath, objectMapper.getNodeFactory().numberNode(-1));
+                setSelectionDottedValue(proposedConfig, selectedIndexPath, objectMapper.getNodeFactory().numberNode(-1), compiled);
             }
             if (!selectedIdPath.isBlank()) {
-                setDottedValue(proposedConfig, selectedIdPath, objectMapper.getNodeFactory().textNode(""));
+                setSelectionDottedValue(proposedConfig, selectedIdPath, objectMapper.getNodeFactory().textNode(""), compiled);
             }
             return;
         }
@@ -7039,15 +7042,15 @@ public final class AgenticAuthoringEffectCompilerRegistry {
                 }
             }
             if (!selectedIndexPath.isBlank()) {
-                setDottedValue(proposedConfig, selectedIndexPath, objectMapper.getNodeFactory().numberNode(nextIndex));
+                setSelectionDottedValue(proposedConfig, selectedIndexPath, objectMapper.getNodeFactory().numberNode(nextIndex), compiled);
             }
             if (!selectedIdPath.isBlank()) {
-                setDottedValue(proposedConfig, selectedIdPath, objectMapper.getNodeFactory().textNode(nextId));
+                setSelectionDottedValue(proposedConfig, selectedIdPath, objectMapper.getNodeFactory().textNode(nextId), compiled);
             }
         } else if (!activeId.isBlank()) {
             int newIdx = indexOfObjectByKey(currentArray, itemKeyField, activeId);
             if (newIdx >= 0 && !selectedIndexPath.isBlank()) {
-                setDottedValue(proposedConfig, selectedIndexPath, objectMapper.getNodeFactory().numberNode(newIdx));
+                setSelectionDottedValue(proposedConfig, selectedIndexPath, objectMapper.getNodeFactory().numberNode(newIdx), compiled);
             }
         }
     }
@@ -7057,7 +7060,8 @@ public final class AgenticAuthoringEffectCompilerRegistry {
             JsonNode reconciliation,
             ArrayNode previousArray,
             ArrayNode currentArray,
-            String defaultKeyField) {
+            String defaultKeyField,
+            ObjectNode compiled) {
         String selectedIndexPath = firstNonBlank(text(reconciliation, "selectedIndexPath"), text(reconciliation, "activeIndexPath"));
         String selectedIdPath = firstNonBlank(text(reconciliation, "selectedIdPath"), text(reconciliation, "activeIdPath"));
         String itemKeyField = firstNonBlank(text(reconciliation, "itemKeyField"), defaultKeyField, "id");
@@ -7077,11 +7081,36 @@ public final class AgenticAuthoringEffectCompilerRegistry {
         int newIdx = indexOfObjectByKey(currentArray, itemKeyField, activeId);
         if (newIdx >= 0) {
             if (!selectedIndexPath.isBlank()) {
-                setDottedValue(proposedConfig, selectedIndexPath, objectMapper.getNodeFactory().numberNode(newIdx));
+                setSelectionDottedValue(proposedConfig, selectedIndexPath, objectMapper.getNodeFactory().numberNode(newIdx), compiled);
             }
             if (!selectedIdPath.isBlank()) {
-                setDottedValue(proposedConfig, selectedIdPath, objectMapper.getNodeFactory().textNode(activeId));
+                setSelectionDottedValue(proposedConfig, selectedIdPath, objectMapper.getNodeFactory().textNode(activeId), compiled);
             }
+        }
+    }
+
+    private void setSelectionDottedValue(
+            ObjectNode proposedConfig,
+            String dottedPath,
+            JsonNode value,
+            ObjectNode compiled) {
+        JsonNode previous = resolvePath(proposedConfig, normalizeDottedPath(dottedPath));
+        setDottedValue(proposedConfig, dottedPath, value);
+        if (compiled == null || dottedPath == null || dottedPath.isBlank()) {
+            return;
+        }
+        if (previous != null && !previous.isMissingNode() && previous.equals(value)) {
+            return;
+        }
+        ArrayNode selectionUpdates = compiled.path("selectionUpdates").isArray()
+                ? (ArrayNode) compiled.path("selectionUpdates")
+                : compiled.putArray("selectionUpdates");
+        ObjectNode update = selectionUpdates.addObject();
+        update.put("path", normalizeDottedPath(dottedPath));
+        if (value == null || value.isMissingNode()) {
+            update.put("op", "remove");
+        } else {
+            update.set("value", value.deepCopy());
         }
     }
 
@@ -8250,6 +8279,9 @@ public final class AgenticAuthoringEffectCompilerRegistry {
     }
 
     private JsonNode nodeAt(ObjectNode root, String dottedPath, boolean create, boolean objectLeaf) {
+        if (root == null) {
+            return MissingNode.getInstance();
+        }
         if (dottedPath == null || dottedPath.isBlank()) {
             return root;
         }
@@ -8260,7 +8292,10 @@ public final class AgenticAuthoringEffectCompilerRegistry {
             boolean last = i == segments.length - 1;
             JsonNode child = current.path(segment);
             if (last) {
-                if ((child == null || child.isMissingNode()) && create) {
+                if (create && (child == null
+                        || child.isMissingNode()
+                        || child.isNull()
+                        || (objectLeaf ? !child.isObject() : !child.isArray()))) {
                     child = objectLeaf ? current.putObject(segment) : current.putArray(segment);
                 }
                 return child;
@@ -8280,11 +8315,23 @@ public final class AgenticAuthoringEffectCompilerRegistry {
     }
 
     private void setDottedValue(ObjectNode root, String dottedPath, JsonNode value) {
+        if (root == null) {
+            return;
+        }
         String normalized = normalizeDottedPath(dottedPath);
+        if (normalized.isBlank()) {
+            return;
+        }
         int lastDot = normalized.lastIndexOf('.');
         ObjectNode parent = lastDot < 0 ? root : objectAt(root, normalized.substring(0, lastDot), true);
-        String field = lastDot < 0 ? normalized : normalized.substring(lastDot + 1);
-        parent.set(cleanPathSegment(field), value);
+        if (parent == null) {
+            return;
+        }
+        String field = cleanPathSegment(lastDot < 0 ? normalized : normalized.substring(lastDot + 1));
+        if (field.isBlank()) {
+            return;
+        }
+        parent.set(field, value);
     }
 
     JsonNode nodeAtResolvedPath(ObjectNode root, String resolvedPath) {

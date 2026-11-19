@@ -4167,7 +4167,7 @@ public final class AgenticAuthoringValidatorRegistry {
         }
         if (range.isTextual()) {
             String raw = range.asText("").trim();
-            if (!raw.matches("\\d{4}(-\\d{2}|-[SH][12])?")) {
+            if (!raw.matches("\\d{4}(-\\d{2}|-[sShH][12])?")) {
                 failures.add("validator calendar-range-valid failed for " + operationId
                         + ": calendar.range string must match YYYY, YYYY-MM, YYYY-S1/S2 or YYYY-H1/H2");
             } else if (raw.length() == 7 && Character.isDigit(raw.charAt(5))) {

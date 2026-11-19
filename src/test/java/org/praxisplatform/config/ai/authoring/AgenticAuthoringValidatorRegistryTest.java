@@ -2692,6 +2692,23 @@ class AgenticAuthoringValidatorRegistryTest {
                 new ArrayList<>());
         assertThat(okFailures).isEmpty();
 
+        List<String> lowercaseSemesterFailures = new ArrayList<>();
+        registry.executeOperationValidators(
+                "praxis-chart",
+                op,
+                plan("{}", "{ \"calendar\": { \"range\": \"2026-s1\" } }"),
+                calendarConfig,
+                lowercaseSemesterFailures,
+                new ArrayList<>());
+        registry.executeOperationValidators(
+                "praxis-chart",
+                op,
+                plan("{}", "{ \"calendar\": { \"range\": \"2026-h2\" } }"),
+                calendarConfig,
+                lowercaseSemesterFailures,
+                new ArrayList<>());
+        assertThat(lowercaseSemesterFailures).isEmpty();
+
         List<String> overLimitFailures = new ArrayList<>();
         registry.executeOperationValidators(
                 "praxis-chart",

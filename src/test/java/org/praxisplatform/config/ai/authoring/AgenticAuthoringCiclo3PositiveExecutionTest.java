@@ -195,8 +195,16 @@ class AgenticAuthoringCiclo3PositiveExecutionTest {
         assertThat(insertRule.compiled()).as("insert rule failures=%s", insertRule.failures()).isTrue();
         JsonNode afterInsert = insertRule.patch().path("proposedConfig");
         assertThat(afterInsert.path("rules").path("nodeStyles")).hasSize(1);
-        assertThat(insertRule.patch().path("patchOperations").get(0).path("op").asText()).isEqualTo("add");
-        assertThat(insertRule.patch().path("patchOperations").get(0).path("path").asText()).isEqualTo("/rules/nodeStyles/-");
+        JsonNode insertPatchOps = insertRule.patch().path("patchOperations");
+        assertThat(insertPatchOps).hasSize(3);
+        assertThat(insertPatchOps.get(0).path("op").asText()).isEqualTo("add");
+        assertThat(insertPatchOps.get(0).path("path").asText()).isEqualTo("/rules");
+        assertThat(insertPatchOps.get(0).path("value").isObject()).isTrue();
+        assertThat(insertPatchOps.get(1).path("op").asText()).isEqualTo("add");
+        assertThat(insertPatchOps.get(1).path("path").asText()).isEqualTo("/rules/nodeStyles");
+        assertThat(insertPatchOps.get(1).path("value").isArray()).isTrue();
+        assertThat(insertPatchOps.get(2).path("op").asText()).isEqualTo("add");
+        assertThat(insertPatchOps.get(2).path("path").asText()).isEqualTo("/rules/nodeStyles/-");
 
         AgenticAuthoringManifestCompileResult updateRule = service.compilePatch(
                 "praxis-relationship-graph",
