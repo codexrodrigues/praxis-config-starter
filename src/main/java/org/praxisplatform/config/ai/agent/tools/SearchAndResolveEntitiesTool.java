@@ -10,6 +10,7 @@ import org.praxisplatform.config.ai.agent.model.AgentToolDeclaration;
 import org.praxisplatform.config.ai.agent.runtime.AgentTurnArtifactStore;
 import org.praxisplatform.config.ai.agent.runtime.Mod11IdentifierHintExtractor;
 import org.praxisplatform.config.ai.agent.runtime.Mod11IdentifierHintExtractor.TaxIdMatch;
+import org.praxisplatform.config.ai.agent.runtime.OperationalAssistantBlockComposer;
 import org.praxisplatform.config.ai.agent.runtime.TurnScopedPiiVault;
 import org.praxisplatform.config.ai.agent.spi.AgentEntityMatch;
 import org.praxisplatform.config.ai.agent.spi.AgentEntitySearchRequest;
@@ -41,7 +42,7 @@ public class SearchAndResolveEntitiesTool implements OperationalAgentTool {
         Map<String, Object> properties = new LinkedHashMap<>();
         properties.put("query", Map.of(
                 "type", "string",
-                "description", "Texto, nome, codigo, matricula ou placeholder [TAX_ID_n] informado pelo usuario."));
+                "description", "Texto, nome, codigo, matricula ou placeholder [TAX_ID_n] / [EMAIL_n] informado pelo usuario."));
         properties.put("entityKeys", Map.of(
                 "type", "array",
                 "description", "Opcional: lista de entityKeys/resourceKeys candidatos para restringir a busca.",
@@ -109,8 +110,8 @@ public class SearchAndResolveEntitiesTool implements OperationalAgentTool {
             entry.put("resourcePath", match.resourcePath());
             entry.put("entityTitle", match.entityTitle());
             entry.put("entityId", match.entityId());
-            entry.put("title", match.title());
-            entry.put("subtitle", match.subtitle());
+            entry.put("title", safeDisplayText(match.title(), match.uiSummary(), match.modelSafeSummary(), match.entityId()));
+            entry.put("subtitle", safeDisplayText(match.subtitle(), match.uiSummary(), match.modelSafeSummary(), ""));
             entry.put("matchedBy", match.matchedBy());
             entry.put("confidence", match.confidence());
             entry.put("fromActiveScreenScope", match.fromActiveScreenScope());
@@ -144,7 +145,30 @@ public class SearchAndResolveEntitiesTool implements OperationalAgentTool {
         if (autoLoadedDossier != null) {
             result.put("autoLoadedDossier", autoLoadedDossier);
         }
-        return piiVault != null ? piiVault.scrubOutboundForModel(result) : result;
+        if (matches.isEmpty()) {
+            result.put("hint", "Nenhum registro correspondeu na busca polimorfica global; responda de forma objetiva informando que nao houve correspondencia, sem repetir varias chamadas query_resource_records vazias.");
+        }
+        Map<String, Object> scrubbed = piiVault != null ? piiVault.scrubOutboundForModel(result) : result;
+        return OperationalAssistantBlockComposer.maskMod11InStructure(scrubbed);
+    }
+
+    private static String safeDisplayText(
+            String uiDisplayValue,
+            Map<String, Object> uiSummary,
+            Map<String, Object> modelSafeSummary,
+            String fallback) {
+        if (!StringUtils.hasText(uiDisplayValue)) {
+            return fallback;
+        }
+        if (uiSummary != null && !uiSummary.isEmpty()) {
+            for (Map.Entry<String, Object> entry : uiSummary.entrySet()) {
+                if (entry.getValue() != null && uiDisplayValue.equals(entry.getValue().toString())) {
+                    Object modelVal = modelSafeSummary != null ? modelSafeSummary.get(entry.getKey()) : null;
+                    return modelVal != null && StringUtils.hasText(modelVal.toString()) ? modelVal.toString() : fallback;
+                }
+            }
+        }
+        return uiDisplayValue;
     }
 
     private static String asString(Object value) {

@@ -53,4 +53,41 @@ class TurnScopedPiiVaultAndMod11Test {
                 .doesNotContain("529.982.247-25");
         assertThat(((Map<?, ?>) scrubbed.get("nested")).get("digits")).isEqualTo("[TAX_ID_1]");
     }
+
+    @Test
+    void tokenizesRehydratesAndScrubsUnmaskedEmailsWithoutAffectingTaxIdTokens() {
+        String raw = "Consultar CPF 529.982.247-25 e email maria.clara@servidor.gov.br (copia m***@servidor.gov.br).";
+        TurnScopedPiiVault vault = TurnScopedPiiVault.tokenize(raw);
+
+        assertThat(vault.tokens()).containsExactly("[TAX_ID_1]");
+        assertThat(vault.emailTokens()).containsExactly("[EMAIL_1]");
+        assertThat(vault.sanitizedPrompt())
+                .contains("[TAX_ID_1]")
+                .contains("[EMAIL_1]")
+                .contains("m***@servidor.gov.br")
+                .doesNotContain("529.982.247-25")
+                .doesNotContain("52998224725")
+                .doesNotContain("maria.clara@servidor.gov.br");
+
+        assertThat(vault.rehydrateText("buscar [EMAIL_1] para [TAX_ID_1]"))
+                .isEqualTo("buscar maria.clara@servidor.gov.br para 52998224725");
+        Map<String, Object> rehydratedArgs = vault.rehydrateArguments(Map.of(
+                "query", "[EMAIL_1]",
+                "filters", Map.of("email", "[EMAIL_1]")));
+        assertThat(rehydratedArgs.get("query")).isEqualTo("maria.clara@servidor.gov.br");
+        assertThat(((Map<?, ?>) rehydratedArgs.get("filters")).get("email"))
+                .isEqualTo("maria.clara@servidor.gov.br");
+
+        Map<String, Object> scrubbed = vault.scrubOutboundForModel(Map.of(
+                "matched", "Contato maria.clara@servidor.gov.br",
+                "other", "copia carlos.silva@servidor.gov.br",
+                "alreadyMasked", "m***@servidor.gov.br"));
+        assertThat(scrubbed.get("matched").toString())
+                .contains("[EMAIL_1]")
+                .doesNotContain("maria.clara@servidor.gov.br");
+        assertThat(scrubbed.get("other").toString())
+                .contains("c***@servidor.gov.br")
+                .doesNotContain("carlos.silva@servidor.gov.br");
+        assertThat(scrubbed.get("alreadyMasked")).isEqualTo("m***@servidor.gov.br");
+    }
 }

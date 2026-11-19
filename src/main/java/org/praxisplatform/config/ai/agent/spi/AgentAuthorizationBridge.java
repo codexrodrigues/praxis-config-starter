@@ -1,6 +1,7 @@
 package org.praxisplatform.config.ai.agent.spi;
 
 import java.util.Map;
+import java.util.Set;
 
 /**
  * SPI de autorizacao e dupla projecao de dados para o agente operacional.
@@ -18,6 +19,14 @@ public interface AgentAuthorizationBridge {
             String resourcePath,
             String actionId,
             Object entityId);
+
+    default boolean canModifyFields(
+            AgentExecutionContext context,
+            String resourcePath,
+            Class<?> dtoType,
+            Set<String> fieldNames) {
+        return true;
+    }
 
     DualProjectedPayload projectRecord(
             AgentExecutionContext context,

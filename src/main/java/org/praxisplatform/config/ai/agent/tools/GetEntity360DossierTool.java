@@ -7,8 +7,10 @@ import java.util.Objects;
 import java.util.Optional;
 import org.praxisplatform.config.ai.agent.model.AgentToolDeclaration;
 import org.praxisplatform.config.ai.agent.runtime.AgentTurnArtifactStore;
+import org.praxisplatform.config.ai.agent.runtime.OperationalAssistantBlockComposer;
 import org.praxisplatform.config.ai.agent.runtime.TurnScopedPiiVault;
 import org.praxisplatform.config.ai.agent.spi.AgentEntityDossier;
+import org.praxisplatform.config.ai.agent.spi.AgentEvaluatedCalculationMemory;
 import org.praxisplatform.config.ai.agent.spi.AgentExecutionContext;
 import org.praxisplatform.config.ai.agent.spi.AgentResourceExecutionBridge;
 
@@ -59,7 +61,9 @@ public class GetEntity360DossierTool implements OperationalAgentTool {
             TurnScopedPiiVault piiVault,
             AgentTurnArtifactStore artifacts,
             Map<String, Object> rawArguments) {
-        Map<String, Object> args = rawArguments == null ? Map.of() : rawArguments;
+        Map<String, Object> args = piiVault != null && rawArguments != null
+                ? piiVault.rehydrateArguments(rawArguments)
+                : (rawArguments == null ? Map.of() : rawArguments);
         String entityKey = args.get("entityKey") == null ? null : args.get("entityKey").toString().trim();
         String entityId = args.get("entityId") == null ? null : args.get("entityId").toString().trim();
         List<String> relatedSurfaces = args.get("includeRelatedSurfaces") instanceof List<?> list
@@ -68,16 +72,19 @@ public class GetEntity360DossierTool implements OperationalAgentTool {
 
         Optional<AgentEntityDossier> found = bridge.loadEntityDossier(context, entityKey, entityId, relatedSurfaces);
         if (found.isEmpty()) {
-            return Map.of(
+            Map<String, Object> missing = Map.of(
                     "found", false,
                     "entityKey", entityKey == null ? "" : entityKey,
                     "entityId", entityId == null ? "" : entityId);
+            return OperationalAssistantBlockComposer.maskMod11InStructure(
+                    piiVault != null ? piiVault.scrubOutboundForModel(missing) : missing);
         }
         AgentEntityDossier dossier = found.get();
         artifacts.recordDossier(dossier);
 
         Map<String, Object> output = toModelSafeMap(dossier);
-        return piiVault != null ? piiVault.scrubOutboundForModel(output) : output;
+        Map<String, Object> scrubbed = piiVault != null ? piiVault.scrubOutboundForModel(output) : output;
+        return OperationalAssistantBlockComposer.maskMod11InStructure(scrubbed);
     }
 
     public static Map<String, Object> toModelSafeMap(AgentEntityDossier dossier) {
@@ -87,8 +94,12 @@ public class GetEntity360DossierTool implements OperationalAgentTool {
         output.put("resourceKey", dossier.entity().resourceKey());
         output.put("resourcePath", dossier.entity().resourcePath());
         output.put("entityId", dossier.entityId());
-        output.put("displayTitle", dossier.displayTitle());
-        output.put("displaySubtitle", dossier.displaySubtitle());
+        String safeTitle = safeDossierDisplayField(
+                dossier, dossier.entity().titleField(), dossier.displayTitle(), dossier.entityId());
+        String safeSubtitle = safeDossierDisplayField(
+                dossier, dossier.entity().subtitleField(), dossier.displaySubtitle(), "");
+        output.put("displayTitle", safeTitle);
+        output.put("displaySubtitle", safeSubtitle);
         output.put("record", dossier.modelSafeRecord());
         output.put("maskedForAiFields", dossier.maskedForAiFields());
         output.put("alerts", dossier.alerts().stream()
@@ -131,7 +142,30 @@ public class GetEntity360DossierTool implements OperationalAgentTool {
                     return item;
                 })
                 .toList());
+        AgentEvaluatedCalculationMemory calc = dossier.calculationMemory();
+        if (calc != null && !calc.modelSafeTrails().isEmpty()) {
+            output.put("calculationMemoryAvailable", true);
+            output.put("calculationTrails", ExplainCalculationMemoryTool.mapModelSafeTrails(calc.modelSafeTrails()));
+        }
         return output;
+    }
+
+    private static String safeDossierDisplayField(
+            AgentEntityDossier dossier,
+            String fieldName,
+            String uiDisplayValue,
+            String fallback) {
+        if (fieldName != null && !fieldName.isBlank()) {
+            if (dossier.maskedForAiFields().contains(fieldName) || dossier.hiddenFields().contains(fieldName)) {
+                Object maskedVal = dossier.modelSafeRecord().get(fieldName);
+                return maskedVal != null ? maskedVal.toString() : fallback;
+            }
+            Object safeVal = dossier.modelSafeRecord().get(fieldName);
+            if (safeVal != null && !safeVal.toString().isBlank()) {
+                return safeVal.toString();
+            }
+        }
+        return nonNullText(uiDisplayValue);
     }
 
     private static String nonNullText(String value) {

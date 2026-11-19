@@ -1,12 +1,17 @@
 package org.praxisplatform.config.ai.agent.bridge;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import jakarta.validation.Validation;
+import jakarta.validation.Validator;
+import jakarta.validation.constraints.NotBlank;
+import java.time.Instant;
 import java.time.LocalDate;
 import java.util.Collection;
 import java.util.List;
@@ -28,26 +33,94 @@ import org.praxisplatform.config.ai.agent.runtime.PraxisOperationalAgentLoop;
 import org.praxisplatform.config.ai.agent.runtime.TurnScopedPiiVault;
 import org.praxisplatform.config.ai.agent.spi.AgentActionAffordance;
 import org.praxisplatform.config.ai.agent.spi.AgentActionAffordanceContributor;
+import org.praxisplatform.config.ai.agent.spi.AgentActionExecutionOutcome;
+import org.praxisplatform.config.ai.agent.spi.AgentActionPreparationContributor;
 import org.praxisplatform.config.ai.agent.spi.AgentAuthorizationBridge;
+import org.praxisplatform.config.ai.agent.spi.AgentDeterminationRequest;
 import org.praxisplatform.config.ai.agent.spi.AgentEntityCatalogContributor;
 import org.praxisplatform.config.ai.agent.spi.AgentEntityDescriptor;
 import org.praxisplatform.config.ai.agent.spi.AgentEntityDossier;
 import org.praxisplatform.config.ai.agent.spi.AgentEntityMatch;
 import org.praxisplatform.config.ai.agent.spi.AgentEntitySearchRequest;
+import org.praxisplatform.config.ai.agent.spi.AgentExecuteActionRequest;
 import org.praxisplatform.config.ai.agent.spi.AgentExecutionContext;
+import org.praxisplatform.config.ai.agent.spi.AgentPrepareActionRequest;
+import org.praxisplatform.config.ai.agent.spi.AgentPreparedAction;
+import org.praxisplatform.config.ai.agent.spi.AgentPrepareBulkRequest;
+import org.praxisplatform.config.ai.agent.spi.AgentPreparedBulkOperation;
 import org.praxisplatform.config.ai.agent.spi.AgentProactiveAlert;
+import org.praxisplatform.config.ai.agent.spi.CompactAgentSchemaDigest;
+import org.praxisplatform.config.ai.agent.spi.CompactAgentSchemaDigest.BulkCapabilityDigest;
 import org.praxisplatform.config.ai.agent.spi.AgentProactiveAlertContributor;
+import org.praxisplatform.config.ai.agent.spi.AgentKnowledgeDocument;
+import org.praxisplatform.config.ai.agent.spi.AgentSimulationPreview;
+import org.praxisplatform.config.ai.agent.spi.AgentStatsAggregationRequest;
+import org.praxisplatform.config.ai.agent.spi.AgentStatsResult;
+import org.praxisplatform.config.ai.agent.tools.AggregateResourceStatsTool;
 import org.praxisplatform.config.ai.agent.tools.DiscoverTopicResourcesAndSchemasTool;
+import org.praxisplatform.config.ai.agent.tools.ExplainCalculationMemoryTool;
 import org.praxisplatform.config.ai.agent.tools.GetEntity360DossierTool;
 import org.praxisplatform.config.ai.agent.tools.QueryResourceRecordsTool;
 import org.praxisplatform.config.ai.agent.tools.SearchAndResolveEntitiesTool;
+import org.praxisplatform.config.ai.agent.tools.SearchDomainKnowledgeAndRulesTool;
+import org.praxisplatform.config.domain.DomainRuleDefinition;
+import org.praxisplatform.config.repository.DomainRuleDefinitionRepository;
 import org.praxisplatform.config.service.AiCallConfig;
+import org.praxisplatform.rules.contract.DecisionSource;
+import org.praxisplatform.rules.contract.DecisionStage;
+import org.praxisplatform.rules.contract.RuleDecision;
+import org.praxisplatform.rules.violation.PraxisRuleViolationException;
+import org.praxisplatform.rules.violation.SlotViolationDetail;
 import org.praxisplatform.uischema.action.ActionCatalogItem;
 import org.praxisplatform.uischema.action.ActionCatalogResponse;
 import org.praxisplatform.uischema.action.ActionCatalogService;
+import org.praxisplatform.uischema.action.ActionCollectionAtomicity;
 import org.praxisplatform.uischema.action.ActionExecutionContract;
+import org.praxisplatform.uischema.action.ActionRequirement;
+import org.praxisplatform.uischema.action.ActionRiskLevel;
 import org.praxisplatform.uischema.action.ActionScope;
+import org.praxisplatform.uischema.annotation.BulkEditable;
+import org.praxisplatform.uischema.annotation.BulkOperation;
+import org.praxisplatform.uischema.annotation.CalculationMemory;
+import org.praxisplatform.uischema.annotation.CalculationTrail;
+import org.praxisplatform.uischema.annotation.FilterCriterion;
+import org.praxisplatform.uischema.annotation.QuickFilter;
+import org.praxisplatform.uischema.annotation.WorkflowAction;
+import org.praxisplatform.uischema.bulk.BulkCommandEvaluationRequest;
+import org.praxisplatform.uischema.bulk.BulkConfirmationRequest;
+import org.praxisplatform.uischema.bulk.BulkControllerOperationIds;
+import org.praxisplatform.uischema.bulk.BulkDomainResourceAdapter;
+import org.praxisplatform.uischema.bulk.BulkExecution;
+import org.praxisplatform.uischema.bulk.BulkExecutionMode;
+import org.praxisplatform.uischema.bulk.BulkIdentityCodecs;
+import org.praxisplatform.uischema.bulk.BulkItemEvaluationRequest;
+import org.praxisplatform.uischema.bulk.BulkMode;
+import org.praxisplatform.uischema.bulk.BulkProposal;
+import org.praxisplatform.uischema.bulk.BulkProposalItemResult;
+import org.praxisplatform.uischema.bulk.BulkProposalStatus;
+import org.praxisplatform.uischema.bulk.BulkProposalTotals;
+import org.praxisplatform.uischema.bulk.BulkResourceOperation;
+import org.praxisplatform.uischema.bulk.BulkResourceOperations;
+import org.praxisplatform.uischema.bulk.BulkSelectionMode;
+import org.praxisplatform.uischema.bulk.BulkUniformEvaluationRequest;
+import org.praxisplatform.uischema.bulk.JpaResourceBulkEngine;
+import org.praxisplatform.uischema.command.ResourceCommandErrorCategory;
+import org.praxisplatform.uischema.command.ResourceCommandMessage;
+import org.praxisplatform.uischema.controller.base.AbstractBulkGovernedResourceController;
+import org.praxisplatform.uischema.openapi.CanonicalOperationRef;
+import org.praxisplatform.uischema.rest.response.RestApiResponse;
+import org.springframework.test.util.ReflectionTestUtils;
+import org.praxisplatform.uischema.fact.ResourceFact;
 import org.praxisplatform.uischema.capability.AvailabilityDecision;
+import org.praxisplatform.uischema.concurrency.ResourceVersionEtagService;
+import org.praxisplatform.uischema.concurrency.ResourceVersionPreconditions;
+import org.praxisplatform.uischema.concurrency.ResourceVersionScope;
+import org.praxisplatform.uischema.concurrency.ResourceVersionScopeProvider;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.core.convert.converter.Converter;
 import org.springframework.core.convert.support.DefaultConversionService;
 import org.springframework.data.domain.Page;
@@ -77,14 +150,22 @@ import org.praxisplatform.uischema.options.OptionSourceDescriptor;
 import org.praxisplatform.uischema.options.OptionSourceFilterRequest;
 import org.praxisplatform.uischema.options.OptionSourceRegistry;
 import org.praxisplatform.uischema.service.base.BaseResourceQueryService;
+import org.praxisplatform.uischema.service.base.BaseResourceService;
+import org.praxisplatform.uischema.stats.StatsBucketOrder;
+import org.praxisplatform.uischema.stats.StatsFieldDescriptor;
 import org.praxisplatform.uischema.stats.StatsFieldRegistry;
+import org.praxisplatform.uischema.stats.StatsMetric;
 import org.praxisplatform.uischema.stats.StatsSupportMode;
 import org.praxisplatform.uischema.stats.dto.ComparisonStatsRequest;
 import org.praxisplatform.uischema.stats.dto.ComparisonStatsResponse;
+import org.praxisplatform.uischema.stats.dto.DistributionBucket;
 import org.praxisplatform.uischema.stats.dto.DistributionStatsRequest;
 import org.praxisplatform.uischema.stats.dto.DistributionStatsResponse;
+import org.praxisplatform.uischema.stats.dto.GroupByBucket;
 import org.praxisplatform.uischema.stats.dto.GroupByStatsRequest;
 import org.praxisplatform.uischema.stats.dto.GroupByStatsResponse;
+import org.praxisplatform.uischema.stats.dto.StatsMetricRequest;
+import org.praxisplatform.uischema.stats.dto.TimeSeriesPoint;
 import org.praxisplatform.uischema.stats.dto.TimeSeriesStatsRequest;
 import org.praxisplatform.uischema.stats.dto.TimeSeriesStatsResponse;
 
@@ -448,8 +529,13 @@ class MetadataStarterInProcessAgentBridgeTest {
         }
 
         public NullableEmployeeDto(Long id, String fullName) {
+            this(id, fullName, null);
+        }
+
+        public NullableEmployeeDto(Long id, String fullName, String departmentName) {
             this.id = id;
             this.fullName = fullName;
+            this.departmentName = departmentName;
         }
 
         public Long getId() { return id; }
@@ -471,7 +557,15 @@ class MetadataStarterInProcessAgentBridgeTest {
                     metadataFields = {"departmentName", "optionalNote"}))
     public static class NullableEmployeeController
             extends AbstractResourceQueryController<NullableEmployeeDto, Long, EmployeeFilterDto> {
-        private final NullableEmployeeDto row = new NullableEmployeeDto(2002L, "Carlos Alberto");
+        private final NullableEmployeeDto row;
+
+        public NullableEmployeeController() {
+            this(new NullableEmployeeDto(2002L, "Carlos Alberto"));
+        }
+
+        public NullableEmployeeController(NullableEmployeeDto row) {
+            this.row = row;
+        }
 
         private final BaseResourceQueryService<NullableEmployeeDto, Long, EmployeeFilterDto> service =
                 new BaseResourceQueryService<>() {
@@ -831,5 +925,1368 @@ class MetadataStarterInProcessAgentBridgeTest {
                 .hasSize(1)
                 .extracting(AgentEntityMatch::entityKey)
                 .containsExactly("hr.persons");
+    }
+
+    @Test
+    void isolatesRollbackOnlyCandidateFailureDuringPolymorphicSearchAndPreservesActiveScreenOrder() {
+        List<Integer> propagations = new java.util.ArrayList<>();
+        java.util.Deque<java.util.concurrent.atomic.AtomicBoolean> txStack = new java.util.ArrayDeque<>();
+        org.springframework.transaction.PlatformTransactionManager txManager =
+                new org.springframework.transaction.PlatformTransactionManager() {
+                    @Override
+                    public org.springframework.transaction.TransactionStatus getTransaction(
+                            org.springframework.transaction.TransactionDefinition definition) {
+                        int prop = definition != null
+                                ? definition.getPropagationBehavior()
+                                : org.springframework.transaction.TransactionDefinition.PROPAGATION_REQUIRED;
+                        propagations.add(prop);
+                        boolean createNew = txStack.isEmpty()
+                                || prop == org.springframework.transaction.TransactionDefinition.PROPAGATION_REQUIRES_NEW;
+                        if (createNew) {
+                            txStack.push(new java.util.concurrent.atomic.AtomicBoolean(false));
+                        }
+                        return new org.springframework.transaction.support.SimpleTransactionStatus(createNew) {
+                            @Override
+                            public void setRollbackOnly() {
+                                super.setRollbackOnly();
+                                if (!txStack.isEmpty()) {
+                                    txStack.peek().set(true);
+                                }
+                            }
+
+                            @Override
+                            public boolean isRollbackOnly() {
+                                return super.isRollbackOnly() || (!txStack.isEmpty() && txStack.peek().get());
+                            }
+                        };
+                    }
+
+                    @Override
+                    public void commit(org.springframework.transaction.TransactionStatus status) {
+                        boolean rollbackOnly = (!txStack.isEmpty() && txStack.peek().get()) || status.isRollbackOnly();
+                        if (status.isNewTransaction() && !txStack.isEmpty()) {
+                            txStack.pop();
+                        }
+                        if (rollbackOnly) {
+                            throw new org.springframework.transaction.UnexpectedRollbackException(
+                                    "Simulated shared TX rollback-only");
+                        }
+                    }
+
+                    @Override
+                    public void rollback(org.springframework.transaction.TransactionStatus status) {
+                        if (status.isNewTransaction() && !txStack.isEmpty()) {
+                            txStack.pop();
+                        }
+                    }
+                };
+
+        StubEmployeeController assignmentsController = new StubEmployeeController();
+        SharedPersonsController personsController = new SharedPersonsController();
+        AbstractResourceQueryController<NullableEmployeeDto, String, EmployeeFilterDto> failingUnitController =
+                createStringIdFailingController(txStack);
+
+        MetadataStarterInProcessAgentBridge bridge = new MetadataStarterInProcessAgentBridge(
+                List.of(failingUnitController, assignmentsController, personsController),
+                List.of(ctx -> List.of(
+                        new AgentEntityDescriptor(
+                                "hr.failing-units", "hr.failing-units", "/api/human-resources/failing-units",
+                                "Failing Units", "Simulates rollback-only failure", "domain",
+                                "id", "fullName", "departmentName", List.of("departmentName"),
+                                null, "fullName", null, "/units/{id}", "hr", 95,
+                                null, true),
+                        new AgentEntityDescriptor(
+                                "hr.assignments", "hr.assignments", "/api/human-resources/employees",
+                                "Assignments", "Workforce assignments", "badge",
+                                "id", "fullName", "departmentName", List.of("departmentName"),
+                                "taxId", "fullName", null, "/assignments/{id}", "hr", 90,
+                                null, true),
+                        new AgentEntityDescriptor(
+                                "hr.persons", "hr.persons", "/api/human-resources/shared-persons",
+                                "Persons", "Civil registry", "person",
+                                "id", "fullName", "departmentName", List.of("departmentName"),
+                                "taxId", "fullName", null, "/persons/{id}", "hr", 50,
+                                null, true))),
+                List.of(),
+                List.of(),
+                null,
+                null,
+                null,
+                new DefaultMetadataGovernanceAgentAuthorizationBridge(),
+                new DefaultConversionService(),
+                new ObjectMapper().findAndRegisterModules(),
+                txManager);
+
+        AgentExecutionContext ctx = new AgentExecutionContext(
+                UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID(),
+                "tenant-1", "user-1", "prod", "user-1",
+                Set.of("ROLE_USER"), "/api/human-resources/shared-persons", null, Map.of(), Map.of());
+
+        List<AgentEntityMatch> matches = bridge.searchEntities(
+                ctx, new AgentEntitySearchRequest("Ana", null, false, List.of(), 5));
+
+        assertThat(matches)
+                .hasSize(2)
+                .extracting(AgentEntityMatch::entityKey)
+                .containsExactly("hr.persons", "hr.assignments");
+        assertThat(matches.get(0).fromActiveScreenScope()).isTrue();
+        assertThat(propagations)
+                .contains(org.springframework.transaction.TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+        assertThat(txStack).isEmpty();
+    }
+
+    @ApiResource(
+            value = "/api/human-resources/failing-units",
+            resourceKey = "hr.failing-units",
+            title = "Failing Units",
+            identity = @ResourceIdentity(
+                    keyField = "id",
+                    titleField = "fullName",
+                    subtitleField = "departmentName",
+                    metadataFields = {"departmentName"}))
+    public static class FailingUnitController
+            extends AbstractResourceQueryController<NullableEmployeeDto, String, EmployeeFilterDto> {
+        private final BaseResourceQueryService<NullableEmployeeDto, String, EmployeeFilterDto> service;
+
+        public FailingUnitController(java.util.Deque<java.util.concurrent.atomic.AtomicBoolean> txStack) {
+            this.service = new BaseResourceQueryService<>() {
+                @Override public String getIdFieldName() { return "id"; }
+                @Override public Sort getDefaultSort() { return Sort.by("fullName"); }
+                @Override public Optional<String> getDatasetVersion() { return Optional.empty(); }
+                @Override public StatsSupportMode getGroupByStatsSupportMode() { return StatsSupportMode.DISABLED; }
+                @Override public StatsSupportMode getTimeSeriesStatsSupportMode() { return StatsSupportMode.DISABLED; }
+                @Override public StatsSupportMode getDistributionStatsSupportMode() { return StatsSupportMode.DISABLED; }
+                @Override public StatsFieldRegistry getStatsFieldRegistry() { return null; }
+                @Override public OptionSourceRegistry getOptionSourceRegistry() { return null; }
+                @Override public boolean hasOptionSource(String k) { return false; }
+                @Override public OptionSourceDescriptor resolveOptionSource(String k) { return null; }
+                @Override public List<NullableEmployeeDto> findAll() { return List.of(); }
+                @Override public List<NullableEmployeeDto> findAllById(Collection<String> ids) { return List.of(); }
+                @Override public ResourceRepresentationResult<NullableEmployeeDto> findById(String id) {
+                    if (!txStack.isEmpty()) {
+                        txStack.peek().set(true);
+                    }
+                    throw new IllegalStateException("Simulated String ID lookup failure");
+                }
+                @Override public Page<NullableEmployeeDto> filter(EmployeeFilterDto f, Pageable p, Collection<String> ids) {
+                    if (!txStack.isEmpty()) {
+                        txStack.peek().set(true);
+                    }
+                    throw new IllegalStateException("Simulated candidate filter failure");
+                }
+                @Override public CursorPage<NullableEmployeeDto> filterByCursor(EmployeeFilterDto f, Sort s, String a, String c, int l) { return null; }
+                @Override public java.util.OptionalLong locate(EmployeeFilterDto f, Sort s, String id) { return java.util.OptionalLong.empty(); }
+                @Override public Page<org.praxisplatform.uischema.dto.OptionDTO<String>> filterOptions(EmployeeFilterDto f, Pageable p) { return Page.empty(); }
+                @Override public List<org.praxisplatform.uischema.dto.OptionDTO<String>> byIdsOptions(Collection<String> ids) { return List.of(); }
+                @Override public Page<org.praxisplatform.uischema.dto.OptionDTO<Object>> filterOptionSourceOptions(String k, OptionSourceFilterRequest<EmployeeFilterDto> r, Pageable p) { return Page.empty(); }
+                @Override public List<org.praxisplatform.uischema.dto.OptionDTO<Object>> byIdsOptionSourceOptions(String k, Collection<Object> ids) { return List.of(); }
+                @Override public GroupByStatsResponse groupByStats(GroupByStatsRequest<EmployeeFilterDto> r) { return null; }
+                @Override public TimeSeriesStatsResponse timeSeriesStats(TimeSeriesStatsRequest<EmployeeFilterDto> r) { return null; }
+                @Override public DistributionStatsResponse distributionStats(DistributionStatsRequest<EmployeeFilterDto> r) { return null; }
+                @Override public ComparisonStatsResponse comparisonStats(ComparisonStatsRequest<EmployeeFilterDto> r) { return null; }
+            };
+        }
+
+        @Override protected BaseResourceQueryService<NullableEmployeeDto, String, EmployeeFilterDto> getService() { return service; }
+        @Override protected String getResponseId(NullableEmployeeDto dto) { return dto.getId() != null ? String.valueOf(dto.getId()) : null; }
+    }
+
+    private static AbstractResourceQueryController<NullableEmployeeDto, String, EmployeeFilterDto> createStringIdFailingController(
+            java.util.Deque<java.util.concurrent.atomic.AtomicBoolean> txStack) {
+        return new FailingUnitController(txStack);
+    }
+
+    public static class CuratedRestrictedDto {
+        public Long id;
+        public String title;
+
+        @UISchema(
+                label = "Status funcional",
+                quickViewVisible = true,
+                quickViewOrder = 10,
+                editableForAuthorities = {"HR_WRITE"},
+                optionItems = {@org.praxisplatform.uischema.annotation.UiOption(value = "AT", label = "Ativo no órgão")})
+        public String statusCode;
+
+        @UISchema(
+                label = "Em exercício",
+                quickViewVisible = true,
+                quickViewOrder = 20,
+                labelTrue = "Sim, em exercício",
+                labelFalse = "Afastado",
+                editableForAuthorities = {"HR_WRITE"})
+        public Boolean active;
+
+        @UISchema(label = "Segredo interno", hidden = true, editableForAuthorities = {"HR_WRITE"})
+        public String internalCode;
+    }
+
+    @org.springframework.security.access.prepost.PreAuthorize("hasAuthority('HR_SECRET')")
+    @ApiResource(
+            value = "/api/human-resources/protected-curated",
+            resourceKey = "hr.protected-curated",
+            title = "Protected Curated")
+    public static class ProtectedCuratedController
+            extends AbstractResourceQueryController<CuratedRestrictedDto, Long, EmployeeFilterDto> {
+        private final BaseResourceQueryService<CuratedRestrictedDto, Long, EmployeeFilterDto> service =
+                new BaseResourceQueryService<>() {
+                    @Override public String getIdFieldName() { return "id"; }
+                    @Override public Sort getDefaultSort() { return Sort.by("title"); }
+                    @Override public Optional<String> getDatasetVersion() { return Optional.empty(); }
+                    @Override public StatsSupportMode getGroupByStatsSupportMode() { return StatsSupportMode.DISABLED; }
+                    @Override public StatsSupportMode getTimeSeriesStatsSupportMode() { return StatsSupportMode.DISABLED; }
+                    @Override public StatsSupportMode getDistributionStatsSupportMode() { return StatsSupportMode.DISABLED; }
+                    @Override public StatsFieldRegistry getStatsFieldRegistry() { return null; }
+                    @Override public OptionSourceRegistry getOptionSourceRegistry() { return null; }
+                    @Override public boolean hasOptionSource(String k) { return false; }
+                    @Override public OptionSourceDescriptor resolveOptionSource(String k) { return null; }
+                    @Override public List<CuratedRestrictedDto> findAll() { return List.of(); }
+                    @Override public List<CuratedRestrictedDto> findAllById(Collection<Long> ids) { return List.of(); }
+                    @Override public ResourceRepresentationResult<CuratedRestrictedDto> findById(Long id) { return null; }
+                    @Override public Page<CuratedRestrictedDto> filter(EmployeeFilterDto f, Pageable p, Collection<Long> ids) { return Page.empty(); }
+                    @Override public CursorPage<CuratedRestrictedDto> filterByCursor(EmployeeFilterDto f, Sort s, String a, String c, int l) { return null; }
+                    @Override public java.util.OptionalLong locate(EmployeeFilterDto f, Sort s, Long id) { return java.util.OptionalLong.empty(); }
+                    @Override public Page<org.praxisplatform.uischema.dto.OptionDTO<Long>> filterOptions(EmployeeFilterDto f, Pageable p) { return Page.empty(); }
+                    @Override public List<org.praxisplatform.uischema.dto.OptionDTO<Long>> byIdsOptions(Collection<Long> ids) { return List.of(); }
+                    @Override public Page<org.praxisplatform.uischema.dto.OptionDTO<Object>> filterOptionSourceOptions(String k, OptionSourceFilterRequest<EmployeeFilterDto> r, Pageable p) { return Page.empty(); }
+                    @Override public List<org.praxisplatform.uischema.dto.OptionDTO<Object>> byIdsOptionSourceOptions(String k, Collection<Object> ids) { return List.of(); }
+                    @Override public GroupByStatsResponse groupByStats(GroupByStatsRequest<EmployeeFilterDto> r) { return null; }
+                    @Override public TimeSeriesStatsResponse timeSeriesStats(TimeSeriesStatsRequest<EmployeeFilterDto> r) { return null; }
+                    @Override public DistributionStatsResponse distributionStats(DistributionStatsRequest<EmployeeFilterDto> r) { return null; }
+                    @Override public ComparisonStatsResponse comparisonStats(ComparisonStatsRequest<EmployeeFilterDto> r) { return null; }
+                };
+
+        @Override protected BaseResourceQueryService<CuratedRestrictedDto, Long, EmployeeFilterDto> getService() { return service; }
+        @Override protected Long getResponseId(CuratedRestrictedDto dto) { return dto.id; }
+    }
+
+    @Test
+    void enforcesControllerPreAuthorizeEditableForAuthoritiesCuratedUiSchemaLabelsAndDropsEmptyRelatedDatasets() {
+        ProtectedCuratedController controller = new ProtectedCuratedController();
+        DefaultMetadataGovernanceAgentAuthorizationBridge authBridge =
+                new DefaultMetadataGovernanceAgentAuthorizationBridge(List.of(controller));
+
+        AgentExecutionContext readerOnly = new AgentExecutionContext(
+                UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID(),
+                "t", "u", "prod", "u", Set.of("HR_READ"), null, null, Map.of(), Map.of());
+        AgentExecutionContext secretNoWrite = new AgentExecutionContext(
+                UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID(),
+                "t", "u", "prod", "u", Set.of("HR_SECRET"), null, null, Map.of(), Map.of());
+        AgentExecutionContext secretWithWrite = new AgentExecutionContext(
+                UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID(),
+                "t", "u", "prod", "u", Set.of("HR_SECRET", "HR_WRITE"), null, null, Map.of(), Map.of());
+
+        assertThat(authBridge.canReadResource(readerOnly, "/api/human-resources/protected-curated")).isFalse();
+        assertThat(authBridge.canReadResource(secretNoWrite, "/api/human-resources/protected-curated")).isTrue();
+        assertThat(authBridge.canInvokeAction(secretNoWrite, "/api/human-resources/protected-curated", "update", 1L)).isFalse();
+        assertThat(authBridge.canInvokeAction(secretWithWrite, "/api/human-resources/protected-curated", "update", 1L)).isTrue();
+
+        AgentEntityDescriptor descriptor = new AgentEntityDescriptor(
+                "hr.curated", "hr.protected-curated", "/api/human-resources/protected-curated",
+                "Curated", "Curated entity", "badge", "id", "title", null, List.of(),
+                null, null, null, "/curated/{id}", "hr", 100);
+        List<org.praxisplatform.config.ai.agent.spi.AgentFieldDescriptor> fieldDescriptors = List.of(
+                new org.praxisplatform.config.ai.agent.spi.AgentFieldDescriptor(
+                        "statusCode", "Status funcional", 10, true, 10, false, false, "", "", Map.of("AT", "Ativo no órgão")),
+                new org.praxisplatform.config.ai.agent.spi.AgentFieldDescriptor(
+                        "active", "Em exercício", 20, true, 20, false, false, "Sim, em exercício", "Afastado", Map.of()),
+                new org.praxisplatform.config.ai.agent.spi.AgentFieldDescriptor(
+                        "internalCode", "Segredo interno", 30, false, 30, true, true, "", "", Map.of()));
+        AgentEntityDossier dossier = new AgentEntityDossier(
+                descriptor, "1", "Helena", "Cargo",
+                Map.of("id", 1L, "title", "Helena", "statusCode", "AT", "active", true, "internalCode", "XYZ"),
+                Map.of("id", 1L, "title", "Helena", "statusCode", "AT", "active", true, "internalCode", "XYZ"),
+                List.of(), List.of(),
+                List.of(new org.praxisplatform.config.ai.agent.spi.AgentRelatedDataset(
+                        "empty-child", "Vazia", "hr.child", "/api/child", "parentId", 0L, List.of(), List.of())),
+                List.of(), List.of(), List.of(), fieldDescriptors);
+
+        AgentTurnArtifactStore artifacts = new AgentTurnArtifactStore();
+        artifacts.recordDossier(dossier);
+
+        OperationalAssistantBlockComposer composer = new OperationalAssistantBlockComposer(
+                new ObjectMapper().findAndRegisterModules());
+        var composed = composer.compose("Síntese executiva.", artifacts);
+        com.fasterxml.jackson.databind.JsonNode blocks = composed.assistantContent().path("blocks");
+        assertThat(blocks).hasSize(2);
+        assertThat(blocks.get(1).path("type").asText()).isEqualTo("widget-block");
+
+        com.fasterxml.jackson.databind.JsonNode fields =
+                blocks.get(1).path("widget").path("inputs").path("document").path("nodes").get(0).path("fields");
+        assertThat(fields).hasSize(2);
+        assertThat(fields.get(0).path("label").asText()).isEqualTo("Status funcional");
+        assertThat(fields.get(0).path("value").asText()).isEqualTo("Ativo no órgão");
+        assertThat(fields.get(1).path("label").asText()).isEqualTo("Em exercício");
+        assertThat(fields.get(1).path("value").asText()).isEqualTo("Sim, em exercício");
+    }
+
+    @CalculationMemory(
+            title = "Composição financeira",
+            trails = {
+                @CalculationTrail(
+                        id = "net-pay",
+                        title = "Salário líquido",
+                        ruleCode = "WF-PAY-NET",
+                        formula = "Bruto - Descontos",
+                        baseLabel = "Bruto",
+                        baseExpr = "row.grossAmount",
+                        baseFormat = "currency:BRL",
+                        deductionLabel = "Descontos",
+                        deductionExpr = "row.deductionAmount",
+                        deductionFormat = "currency:BRL",
+                        resultLabel = "Líquido",
+                        resultExpr = "row.grossAmount - row.deductionAmount",
+                        resultFormat = "currency:BRL")
+            })
+    public static class PayrollSlipDto {
+        public Long id = 77L;
+        @UISchema(label = "Folha")
+        public String label = "Competência 2026-03";
+        @UISchema(label = "Situação", optionItems = {@org.praxisplatform.uischema.annotation.UiOption(value = "OPEN", label = "Aberta")})
+        public String status = "OPEN";
+        public java.math.BigDecimal grossAmount = new java.math.BigDecimal("8000.00");
+        public java.math.BigDecimal deductionAmount = new java.math.BigDecimal("1200.00");
+        public Long getId() { return id; }
+        public String getLabel() { return label; }
+        public String getStatus() { return status; }
+        public java.math.BigDecimal getGrossAmount() { return grossAmount; }
+        public java.math.BigDecimal getDeductionAmount() { return deductionAmount; }
+    }
+
+    public static class PayrollSlipFilter implements GenericFilterDTO {
+        @Filterable(operation = Filterable.FilterOperation.EQUAL)
+        private String status;
+        public String getStatus() { return status; }
+        public void setStatus(String status) { this.status = status; }
+    }
+
+    @ApiResource(
+            value = "/api/payroll/slips",
+            resourceKey = "payroll.slips",
+            title = "Lançamentos financeiros",
+            identity = @ResourceIdentity(keyField = "id", titleField = "label", subtitleField = "status"),
+            quickFilters = {
+                @QuickFilter(id = "open-slips", label = "Abertas", description = "Somente abertas",
+                        criteria = {@FilterCriterion(field = "status", values = {"OPEN"})})
+            })
+    @ResourceFact(key = "netPayFact", label = "Valor líquido", dataType = "currency", description = "Líquido apurado")
+    public static class PayrollSlipController extends AbstractResourceQueryController<PayrollSlipDto, Long, PayrollSlipFilter> {
+        private final PayrollSlipDto fixture = new PayrollSlipDto();
+        private final StatsFieldRegistry statsRegistry = StatsFieldRegistry.builder()
+                .add(StatsFieldDescriptor.groupByBucket("status", "status", Set.of(StatsMetric.COUNT, StatsMetric.SUM)))
+                .add(StatsFieldDescriptor.timeSeriesField("payDate", "payDate"))
+                .add(StatsFieldDescriptor.metricField("grossAmount", "grossAmount", Set.of(StatsMetric.SUM, StatsMetric.AVG)))
+                .build();
+
+        private final BaseResourceQueryService<PayrollSlipDto, Long, PayrollSlipFilter> service = new BaseResourceQueryService<>() {
+            @Override public String getIdFieldName() { return "id"; }
+            @Override public Sort getDefaultSort() { return Sort.by("id"); }
+            @Override public Optional<String> getDatasetVersion() { return Optional.empty(); }
+            @Override public StatsSupportMode getGroupByStatsSupportMode() { return StatsSupportMode.AUTO; }
+            @Override public StatsSupportMode getTimeSeriesStatsSupportMode() { return StatsSupportMode.AUTO; }
+            @Override public StatsSupportMode getDistributionStatsSupportMode() { return StatsSupportMode.AUTO; }
+            @Override public StatsFieldRegistry getStatsFieldRegistry() { return statsRegistry; }
+            @Override public OptionSourceRegistry getOptionSourceRegistry() { return null; }
+            @Override public boolean hasOptionSource(String k) { return false; }
+            @Override public OptionSourceDescriptor resolveOptionSource(String k) { return null; }
+            @Override public List<PayrollSlipDto> findAll() { return List.of(fixture); }
+            @Override public List<PayrollSlipDto> findAllById(Collection<Long> ids) { return List.of(fixture); }
+            @Override public ResourceRepresentationResult<PayrollSlipDto> findById(Long id) {
+                return Long.valueOf(77L).equals(id) ? ResourceRepresentationResult.unversioned(fixture) : null;
+            }
+            @Override public Page<PayrollSlipDto> filter(PayrollSlipFilter f, Pageable p, Collection<Long> ids) {
+                return new PageImpl<>(List.of(fixture));
+            }
+            @Override public CursorPage<PayrollSlipDto> filterByCursor(PayrollSlipFilter f, Sort s, String a, String c, int l) { return null; }
+            @Override public java.util.OptionalLong locate(PayrollSlipFilter f, Sort s, Long id) { return java.util.OptionalLong.empty(); }
+            @Override public Page<org.praxisplatform.uischema.dto.OptionDTO<Long>> filterOptions(PayrollSlipFilter f, Pageable p) { return Page.empty(); }
+            @Override public List<org.praxisplatform.uischema.dto.OptionDTO<Long>> byIdsOptions(Collection<Long> ids) { return List.of(); }
+            @Override public Page<org.praxisplatform.uischema.dto.OptionDTO<Object>> filterOptionSourceOptions(String k, OptionSourceFilterRequest<PayrollSlipFilter> r, Pageable p) { return Page.empty(); }
+            @Override public List<org.praxisplatform.uischema.dto.OptionDTO<Object>> byIdsOptionSourceOptions(String k, Collection<Object> ids) { return List.of(); }
+            @Override public GroupByStatsResponse groupByStats(GroupByStatsRequest<PayrollSlipFilter> r) {
+                return new GroupByStatsResponse(r.field(), r.metric(),
+                        List.of(new GroupByBucket("OPEN", "OPEN", 12, 12)));
+            }
+            @Override public TimeSeriesStatsResponse timeSeriesStats(TimeSeriesStatsRequest<PayrollSlipFilter> r) {
+                return new TimeSeriesStatsResponse(r.field(), r.granularity(), r.metric(),
+                        List.of(new TimeSeriesPoint(LocalDate.of(2026, 3, 1), LocalDate.of(2026, 3, 31), "2026-03", new java.math.BigDecimal("8000"), 1)));
+            }
+            @Override public DistributionStatsResponse distributionStats(DistributionStatsRequest<PayrollSlipFilter> r) {
+                return new DistributionStatsResponse(r.field(), r.mode(), r.metric(),
+                        List.of(new DistributionBucket(null, null, "OPEN", "OPEN", 12, 12)));
+            }
+            @Override public ComparisonStatsResponse comparisonStats(ComparisonStatsRequest<PayrollSlipFilter> r) { return null; }
+        };
+
+        @Override protected BaseResourceQueryService<PayrollSlipDto, Long, PayrollSlipFilter> getService() { return service; }
+        @Override protected Long getResponseId(PayrollSlipDto dto) { return dto.id; }
+    }
+
+    @Test
+    void enrichesDigestExecutesPhase2ToolsAndComposesChartCalcAndKnowledgeBlocks() {
+        MetadataStarterInProcessAgentBridge bridge = new MetadataStarterInProcessAgentBridge(
+                List.of(new PayrollSlipController()),
+                List.of(ctx -> List.of(new AgentEntityDescriptor(
+                        "payroll.slips", "payroll.slips", "/api/payroll/slips",
+                        "Lançamentos financeiros", "Folha salarial", "payments",
+                        "id", "label", "status", List.of("status"),
+                        null, "label", null, "/payroll/{id}", "payroll", 90))),
+                List.of(),
+                List.of(),
+                null, null, null,
+                new DefaultMetadataGovernanceAgentAuthorizationBridge(List.of(new PayrollSlipController())),
+                new DefaultConversionService(),
+                new ObjectMapper().findAndRegisterModules(),
+                null);
+
+        AgentExecutionContext ctx = new AgentExecutionContext(
+                UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID(),
+                "tenant-a", "user-a", "prod", "user-a", Set.of("READ"), null, null, Map.of(), Map.of());
+
+        var digest = bridge.describeEntitySchema(ctx, "payroll.slips").orElseThrow();
+        assertThat(digest.statsCapability()).isNotNull();
+        assertThat(digest.statsCapability().fields()).hasSize(3);
+        assertThat(digest.quickFilters()).extracting(q -> q.id()).containsExactly("open-slips");
+        assertThat(digest.resourceFacts()).extracting(f -> f.key()).containsExactly("netPayFact");
+        assertThat(digest.calculationMemoryAvailable()).isTrue();
+        assertThat(digest.calculationTrailIds()).containsExactly("net-pay");
+
+        AgentTurnArtifactStore artifacts = new AgentTurnArtifactStore();
+        TurnScopedPiiVault vault = TurnScopedPiiVault.tokenize("Analise a folha");
+
+        var statsTool = new AggregateResourceStatsTool(bridge);
+        Map<String, Object> statsOut = statsTool.execute(ctx, vault, artifacts, Map.of(
+                "entityKey", "payroll.slips",
+                "operationKind", "GROUP_BY",
+                "field", "status"));
+        assertThat(statsOut.get("chartKind")).isEqualTo("donut");
+        assertThat(statsOut.get("totalElements")).isEqualTo(12L);
+
+        var tsResult = bridge.aggregateStats(ctx, new AgentStatsAggregationRequest(
+                "payroll.slips", "TIMESERIES", "payDate", "SUM", "grossAmount", "MONTH", null, null, null, Map.of(), 10));
+        assertThat(tsResult.chartKind()).isEqualTo("line");
+        assertThat(tsResult.buckets()).hasSize(1);
+
+        var calcTool = new ExplainCalculationMemoryTool(bridge);
+        Map<String, Object> calcOut = calcTool.execute(ctx, vault, artifacts, Map.of(
+                "entityKey", "payroll.slips",
+                "entityId", "77"));
+        assertThat(calcOut.get("found")).isEqualTo(true);
+
+        var kbTool = new SearchDomainKnowledgeAndRulesTool(List.of((c, q, t, s, l) -> List.of(
+                new AgentKnowledgeDocument("statute-1", "STATUTE", "Teto Remuneratório", "Art. 37, XI, CF/88",
+                        "Geral", "Nenhum subsídio ou remuneração excederá o teto constitucional.", List.of("teto"), 0.95d, null, Map.of()))));
+        Map<String, Object> kbOut = kbTool.execute(ctx, vault, artifacts, Map.of("query", "teto"));
+        assertThat(kbOut.get("count")).isEqualTo(1);
+
+        OperationalAssistantBlockComposer composer = new OperationalAssistantBlockComposer(new ObjectMapper().findAndRegisterModules());
+        var composed = composer.compose("Análise concluída.", artifacts);
+        com.fasterxml.jackson.databind.JsonNode blocks = composed.assistantContent().path("blocks");
+        assertThat(blocks).hasSize(4);
+        assertThat(blocks.get(1).path("type").asText()).isEqualTo("calculation-memory");
+        assertThat(blocks.get(1).path("trails").get(0).path("resultFormatted").asText()).isEqualTo("R$ 6.800,00");
+        assertThat(blocks.get(2).path("type").asText()).isEqualTo("widget-block");
+        assertThat(blocks.get(2).path("widgetType").asText()).isEqualTo("praxis-chart");
+        assertThat(blocks.get(2).path("widget").path("inputs").path("chartDocument").path("source").path("kind").asText()).isEqualTo("derived");
+        assertThat(blocks.get(2).path("widget").path("inputs").path("chartDocument").has("title")).isFalse();
+        assertThat(blocks.get(2).path("widget").path("inputs").path("config").has("title")).isFalse();
+        assertThat(blocks.get(2).path("subtitle").asText()).startsWith("Quantidade por ");
+        assertThat(blocks.get(3).path("type").asText()).isEqualTo("knowledge-citations");
+    }
+
+    public static class GovernedStatsDto {
+        public Long id = 1L;
+        @UISchema(label = "Situação")
+        public String status = "ACTIVE";
+        @UISchema(label = "Remuneração Restrita", visibleForAuthorities = {"FINANCE_ADMIN"})
+        public java.math.BigDecimal restrictedSalary = new java.math.BigDecimal("10000.00");
+        @DomainGovernance(classification = DomainClassification.RESTRICTED,
+                aiUsage = @AiUsagePolicy(visibility = AiVisibilityMode.DENY))
+        @UISchema(label = "Fator Confidencial")
+        public java.math.BigDecimal aiDeniedFactor = new java.math.BigDecimal("1.25");
+
+        public Long getId() { return id; }
+        public String getStatus() { return status; }
+        public java.math.BigDecimal getRestrictedSalary() { return restrictedSalary; }
+        public java.math.BigDecimal getAiDeniedFactor() { return aiDeniedFactor; }
+    }
+
+    @ApiResource(
+            value = "/api/payroll/governed-stats",
+            resourceKey = "payroll.governed-stats",
+            title = "Estatísticas Governadas",
+            identity = @ResourceIdentity(keyField = "id", titleField = "status"))
+    public static class GovernedStatsController extends AbstractResourceQueryController<GovernedStatsDto, Long, PayrollSlipFilter> {
+        private final StatsFieldRegistry registry = StatsFieldRegistry.builder()
+                .add(StatsFieldDescriptor.groupByBucket("status", "status", Set.of(StatsMetric.COUNT)))
+                .add(StatsFieldDescriptor.metricField("restrictedSalary", "restrictedSalary", Set.of(StatsMetric.SUM)))
+                .add(StatsFieldDescriptor.metricField("aiDeniedFactor", "aiDeniedFactor", Set.of(StatsMetric.AVG)))
+                .build();
+        private final BaseResourceQueryService<GovernedStatsDto, Long, PayrollSlipFilter> service = new BaseResourceQueryService<>() {
+            @Override public String getIdFieldName() { return "id"; }
+            @Override public Sort getDefaultSort() { return Sort.by("id"); }
+            @Override public Optional<String> getDatasetVersion() { return Optional.empty(); }
+            @Override public StatsSupportMode getGroupByStatsSupportMode() { return StatsSupportMode.AUTO; }
+            @Override public StatsSupportMode getTimeSeriesStatsSupportMode() { return StatsSupportMode.DISABLED; }
+            @Override public StatsSupportMode getDistributionStatsSupportMode() { return StatsSupportMode.DISABLED; }
+            @Override public StatsFieldRegistry getStatsFieldRegistry() { return registry; }
+            @Override public OptionSourceRegistry getOptionSourceRegistry() { return null; }
+            @Override public boolean hasOptionSource(String k) { return false; }
+            @Override public OptionSourceDescriptor resolveOptionSource(String k) { return null; }
+            @Override public List<GovernedStatsDto> findAll() { return List.of(); }
+            @Override public List<GovernedStatsDto> findAllById(Collection<Long> ids) { return List.of(); }
+            @Override public ResourceRepresentationResult<GovernedStatsDto> findById(Long id) { return null; }
+            @Override public Page<GovernedStatsDto> filter(PayrollSlipFilter f, Pageable p, Collection<Long> ids) { return Page.empty(); }
+            @Override public CursorPage<GovernedStatsDto> filterByCursor(PayrollSlipFilter f, Sort s, String a, String c, int l) { return null; }
+            @Override public java.util.OptionalLong locate(PayrollSlipFilter f, Sort s, Long id) { return java.util.OptionalLong.empty(); }
+            @Override public Page<org.praxisplatform.uischema.dto.OptionDTO<Long>> filterOptions(PayrollSlipFilter f, Pageable p) { return Page.empty(); }
+            @Override public List<org.praxisplatform.uischema.dto.OptionDTO<Long>> byIdsOptions(Collection<Long> ids) { return List.of(); }
+            @Override public Page<org.praxisplatform.uischema.dto.OptionDTO<Object>> filterOptionSourceOptions(String k, OptionSourceFilterRequest<PayrollSlipFilter> r, Pageable p) { return Page.empty(); }
+            @Override public List<org.praxisplatform.uischema.dto.OptionDTO<Object>> byIdsOptionSourceOptions(String k, Collection<Object> ids) { return List.of(); }
+            @Override public GroupByStatsResponse groupByStats(GroupByStatsRequest<PayrollSlipFilter> r) {
+                return new GroupByStatsResponse(r.field(), r.metric(),
+                        List.of(new GroupByBucket("ACTIVE", "ACTIVE", 3, 3)));
+            }
+            @Override public TimeSeriesStatsResponse timeSeriesStats(TimeSeriesStatsRequest<PayrollSlipFilter> r) { return null; }
+            @Override public DistributionStatsResponse distributionStats(DistributionStatsRequest<PayrollSlipFilter> r) { return null; }
+            @Override public ComparisonStatsResponse comparisonStats(ComparisonStatsRequest<PayrollSlipFilter> r) { return null; }
+        };
+        @Override protected BaseResourceQueryService<GovernedStatsDto, Long, PayrollSlipFilter> getService() { return service; }
+        @Override protected Long getResponseId(GovernedStatsDto dto) { return dto.id; }
+    }
+
+    @Test
+    void enforcesStatsFieldGovernanceScopesDiscoveryAndTokenizesDomainRules() {
+        MetadataStarterInProcessAgentBridge bridge = new MetadataStarterInProcessAgentBridge(
+                List.of(new GovernedStatsController(), new PayrollSlipController()),
+                List.of(),
+                List.of(),
+                List.of(),
+                null, null, null,
+                new DefaultMetadataGovernanceAgentAuthorizationBridge(
+                        List.of(new GovernedStatsController(), new PayrollSlipController())),
+                new DefaultConversionService(),
+                new ObjectMapper().findAndRegisterModules(),
+                null);
+
+        AgentExecutionContext standardCtx = new AgentExecutionContext(
+                UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID(),
+                "tenant-a", "user-a", "prod", "user-a", Set.of("READ"), null, null, Map.of(), Map.of());
+
+        var digest = bridge.describeEntitySchema(standardCtx, "payroll.governed-stats").orElseThrow();
+        assertThat(digest.statsCapability().fields())
+                .extracting(f -> f.field())
+                .containsExactly("status");
+
+        assertThatThrownBy(() -> bridge.aggregateStats(standardCtx, new AgentStatsAggregationRequest(
+                "payroll.governed-stats", "GROUP_BY", "restrictedSalary", "COUNT", null, null, null, null, null, Map.of(), 10)))
+                .isInstanceOf(SecurityException.class);
+        assertThatThrownBy(() -> bridge.aggregateStats(standardCtx, new AgentStatsAggregationRequest(
+                "payroll.governed-stats", "GROUP_BY", "status", "AVG", "aiDeniedFactor", null, null, null, null, Map.of(), 10)))
+                .isInstanceOf(SecurityException.class);
+
+        var okStats = bridge.aggregateStats(standardCtx, new AgentStatsAggregationRequest(
+                "payroll.governed-stats", "GROUP_BY", "status", "COUNT", null, null, null, null, null, Map.of(), 10));
+        assertThat(okStats.subtitle()).isEqualTo("Quantidade por Situação");
+
+        // Discover tool with entityKey and blank topicOrQuery scopes entities list cleanly
+        var discoverTool = new DiscoverTopicResourcesAndSchemasTool(bridge);
+        Map<String, Object> discoveryOut = discoverTool.execute(
+                standardCtx,
+                null,
+                new AgentTurnArtifactStore(),
+                Map.of("entityKey", "payroll.slips"));
+        @SuppressWarnings("unchecked")
+        List<AgentEntityDescriptor> scopedEntities = (List<AgentEntityDescriptor>) discoveryOut.get("entities");
+        assertThat(scopedEntities).extracting(AgentEntityDescriptor::resourceKey).containsExactly("payroll.slips");
+
+        // ConfigDomainRuleKnowledgeContributor tokenized fallback for natural-language query
+        DomainRuleDefinitionRepository ruleRepo = mock(DomainRuleDefinitionRepository.class);
+        DomainRuleDefinition marginRule = DomainRuleDefinition.builder()
+                .id(UUID.randomUUID())
+                .tenantId("tenant-a")
+                .environment("prod")
+                .ruleKey("wf-payroll-consignable-margin")
+                .version(2)
+                .ruleType("business_constraint")
+                .status("PUBLISHED")
+                .contextKey("payroll.margin.ceiling")
+                .resourceKey("payroll.slips")
+                .semanticOwner("HR Core")
+                .build();
+        when(ruleRepo.searchCatalogCandidates(eq("tenant-a"), eq("prod"), eq("consignable margin"), any(), any(), any(), any()))
+                .thenReturn(Page.empty());
+        when(ruleRepo.searchCatalogCandidates(eq("tenant-a"), eq("prod"), eq(""), any(), any(), any(), any()))
+                .thenReturn(new PageImpl<>(List.of(marginRule)));
+        ConfigDomainRuleKnowledgeContributor kbContributor = new ConfigDomainRuleKnowledgeContributor(ruleRepo, null);
+        List<AgentKnowledgeDocument> matched = kbContributor.searchKnowledge(
+                standardCtx, "consignable margin", null, "DOMAIN_RULE", 5);
+        assertThat(matched).hasSize(1);
+        assertThat(matched.get(0).title()).isEqualTo("wf-payroll-consignable-margin");
+
+        // Tokenized match should also work even when partial query tokens match hyphenated ruleKey
+        when(ruleRepo.searchCatalogCandidates(eq("tenant-a"), eq("prod"), eq("payroll limit margin"), any(), any(), any(), any()))
+                .thenReturn(Page.empty());
+        List<AgentKnowledgeDocument> tokenMatched = kbContributor.searchKnowledge(
+                standardCtx, "payroll limit margin", null, "DOMAIN_RULE", 5);
+        assertThat(tokenMatched).hasSize(1);
+        assertThat(tokenMatched.get(0).score()).isGreaterThan(0.55d);
+    }
+
+    public record LeaveRequestDto(
+            Long id,
+            @UISchema(label = "Colaborador") String employeeName,
+            @UISchema(label = "Situação") String status,
+            @UISchema(label = "Dias solicitados") Integer daysRequested
+    ) {
+    }
+
+    public static class LeavePreviewDraft {
+        @jakarta.validation.constraints.NotNull
+        private Long periodId;
+        private Integer daysRequested;
+        public Long getPeriodId() { return periodId; }
+        public void setPeriodId(Long periodId) { this.periodId = periodId; }
+        public Integer getDaysRequested() { return daysRequested; }
+        public void setDaysRequested(Integer daysRequested) { this.daysRequested = daysRequested; }
+    }
+
+    public static class LeavePreviewResult {
+        @UISchema(label = "Saldo remanescente")
+        private Integer remainingBalance;
+        @DomainGovernance(classification = DomainClassification.RESTRICTED, aiUsage = @AiUsagePolicy(visibility = AiVisibilityMode.DENY))
+        private Integer internalAuditScore;
+        public LeavePreviewResult() {}
+        public LeavePreviewResult(Integer remainingBalance, Integer internalAuditScore) {
+            this.remainingBalance = remainingBalance;
+            this.internalAuditScore = internalAuditScore;
+        }
+        public Integer getRemainingBalance() { return remainingBalance; }
+        public Integer getInternalAuditScore() { return internalAuditScore; }
+    }
+
+    public static class ApproveLeaveInput {
+        @NotBlank(message = "Justificativa é obrigatória")
+        @UISchema(label = "Observações", controlType = FieldControlType.TEXTAREA)
+        private String notes;
+        @UISchema(label = "Alçada especial", editableForAuthorities = {"HR_ADMIN"})
+        private String specialApprovalCode;
+        public String getNotes() { return notes; }
+        public void setNotes(String notes) { this.notes = notes; }
+        public String getSpecialApprovalCode() { return specialApprovalCode; }
+        public void setSpecialApprovalCode(String specialApprovalCode) { this.specialApprovalCode = specialApprovalCode; }
+    }
+
+    @ApiResource(
+            value = "/api/workforce/leave-requests",
+            resourceKey = "workforce.leave-requests",
+            title = "Solicitações de Afastamento",
+            identity = @ResourceIdentity(keyField = "id", titleField = "employeeName", subtitleField = "status"))
+    public static class LeaveRequestWorkflowController
+            extends AbstractResourceQueryController<LeaveRequestDto, Long, PayrollSlipFilter> {
+
+        private final ResourceVersionEtagService etags;
+        private final ResourceVersionScopeProvider scopes = () -> ResourceVersionScope.GLOBAL;
+        private final AtomicInteger version = new AtomicInteger(1);
+        private final AtomicBoolean simulatedRollbackObserved = new AtomicBoolean(false);
+        private volatile LeaveRequestDto current = new LeaveRequestDto(701L, "Ana Paula Martins", "REQUESTED", 10);
+
+        LeaveRequestWorkflowController(ResourceVersionEtagService etags) {
+            this.etags = etags;
+            configureResourceVersioning(etags, scopes);
+        }
+
+        private final BaseResourceQueryService<LeaveRequestDto, Long, PayrollSlipFilter> service =
+                new BaseResourceQueryService<>() {
+                    @Override public String getIdFieldName() { return "id"; }
+                    @Override public Sort getDefaultSort() { return Sort.by("id"); }
+                    @Override public Optional<String> getDatasetVersion() { return Optional.empty(); }
+                    @Override public StatsSupportMode getGroupByStatsSupportMode() { return StatsSupportMode.DISABLED; }
+                    @Override public StatsSupportMode getTimeSeriesStatsSupportMode() { return StatsSupportMode.DISABLED; }
+                    @Override public StatsSupportMode getDistributionStatsSupportMode() { return StatsSupportMode.DISABLED; }
+                    @Override public StatsFieldRegistry getStatsFieldRegistry() { return null; }
+                    @Override public OptionSourceRegistry getOptionSourceRegistry() { return null; }
+                    @Override public boolean hasOptionSource(String k) { return false; }
+                    @Override public OptionSourceDescriptor resolveOptionSource(String k) { return null; }
+                    @Override public List<LeaveRequestDto> findAll() { return List.of(current); }
+                    @Override public List<LeaveRequestDto> findAllById(Collection<Long> ids) { return List.of(current); }
+                    @Override public ResourceRepresentationResult<LeaveRequestDto> findById(Long id) {
+                        return Long.valueOf(701L).equals(id)
+                                ? ResourceRepresentationResult.versioned(current, version.get())
+                                : null;
+                    }
+                    @Override public Page<LeaveRequestDto> filter(PayrollSlipFilter f, Pageable p, Collection<Long> ids) {
+                        return new PageImpl<>(List.of(current));
+                    }
+                    @Override public CursorPage<LeaveRequestDto> filterByCursor(PayrollSlipFilter f, Sort s, String a, String c, int l) { return null; }
+                    @Override public java.util.OptionalLong locate(PayrollSlipFilter f, Sort s, Long id) { return java.util.OptionalLong.empty(); }
+                    @Override public Page<org.praxisplatform.uischema.dto.OptionDTO<Long>> filterOptions(PayrollSlipFilter f, Pageable p) { return Page.empty(); }
+                    @Override public List<org.praxisplatform.uischema.dto.OptionDTO<Long>> byIdsOptions(Collection<Long> ids) { return List.of(); }
+                    @Override public Page<org.praxisplatform.uischema.dto.OptionDTO<Object>> filterOptionSourceOptions(String k, OptionSourceFilterRequest<PayrollSlipFilter> r, Pageable p) { return Page.empty(); }
+                    @Override public List<org.praxisplatform.uischema.dto.OptionDTO<Object>> byIdsOptionSourceOptions(String k, Collection<Object> ids) { return List.of(); }
+                    @Override public GroupByStatsResponse groupByStats(GroupByStatsRequest<PayrollSlipFilter> r) { return null; }
+                    @Override public TimeSeriesStatsResponse timeSeriesStats(TimeSeriesStatsRequest<PayrollSlipFilter> r) { return null; }
+                    @Override public DistributionStatsResponse distributionStats(DistributionStatsRequest<PayrollSlipFilter> r) { return null; }
+                    @Override public ComparisonStatsResponse comparisonStats(ComparisonStatsRequest<PayrollSlipFilter> r) { return null; }
+                };
+
+        @PostMapping("/determinations/preview")
+        public ResponseEntity<LeavePreviewResult> preview(@jakarta.validation.Valid @RequestBody LeavePreviewDraft draft) {
+            if (TransactionSynchronizationManager.isActualTransactionActive()
+                    && !TransactionSynchronizationManager.isCurrentTransactionReadOnly()) {
+                simulatedRollbackObserved.set(true);
+            }
+            int remaining = 30 - (draft.getDaysRequested() != null ? draft.getDaysRequested() : 0);
+            return ResponseEntity.ok(new LeavePreviewResult(remaining, 999));
+        }
+
+        @PostMapping("/{id}/actions/approve-leave")
+        @WorkflowAction(
+                id = "approve-leave",
+                title = "Aprovar afastamento",
+                description = "Aprova formalmente a parcela programada",
+                scope = ActionScope.ITEM,
+                requiredAuthorities = {"WORKFORCE_WRITE"},
+                allowedStates = {"REQUESTED"},
+                riskLevel = ActionRiskLevel.HIGH,
+                confirmationRequired = true,
+                resourceVersion = ActionRequirement.REQUIRED)
+        public ResponseEntity<LeaveRequestDto> approveLeave(
+                @PathVariable Long id,
+                @RequestHeader(value = "If-Match", required = false) String ifMatch,
+                @jakarta.validation.Valid @RequestBody ApproveLeaveInput input) {
+            ResourceVersionPreconditions.requireMatch(
+                    etags, ifMatch, ResourceVersionScope.GLOBAL, "workforce.leave-requests", id, version.get());
+            if ("RULE_BLOCK".equalsIgnoreCase(input.getNotes())) {
+                throw new PraxisRuleViolationException(List.of(new SlotViolationDetail(
+                        "WF-LEAVE-001", "approval.guard", "default", DecisionSource.PRODUCT,
+                        DecisionStage.DOMAIN_DECISION, RuleDecision.DENY, "notes",
+                        "Parcela conflita com escala do setor.", null, "BUSINESS_LOGIC")));
+            }
+            long nextVer = version.incrementAndGet();
+            current = new LeaveRequestDto(id, current.employeeName(), "APPROVED", current.daysRequested());
+            return ResponseEntity.ok()
+                    .eTag(etags.create(ResourceVersionScope.GLOBAL, "workforce.leave-requests", id, nextVer))
+                    .body(current);
+        }
+
+        @Override protected BaseResourceQueryService<LeaveRequestDto, Long, PayrollSlipFilter> getService() { return service; }
+        @Override protected Long getResponseId(LeaveRequestDto dto) { return dto.id(); }
+    }
+
+    @Test
+    void simulatesDeterminationRollbackOnlyAndPreparesExecutesActionWithVersioningAndRules() {
+        ResourceVersionEtagService etags = new ResourceVersionEtagService("unit-test-secret-0123456789abcdef012345");
+        ResourceVersionScopeProvider scopeProvider = () -> ResourceVersionScope.GLOBAL;
+        LeaveRequestWorkflowController controller = new LeaveRequestWorkflowController(etags);
+        Validator validator = Validation.buildDefaultValidatorFactory().getValidator();
+
+        AtomicBoolean lastStatusRollback = new AtomicBoolean(false);
+        PlatformTransactionManager txManager = new PlatformTransactionManager() {
+            @Override
+            public TransactionStatus getTransaction(TransactionDefinition definition) {
+                TransactionSynchronizationManager.setActualTransactionActive(true);
+                TransactionSynchronizationManager.setCurrentTransactionReadOnly(definition != null && definition.isReadOnly());
+                return new SimpleTransactionStatus();
+            }
+            @Override
+            public void commit(TransactionStatus status) {
+                lastStatusRollback.set(status.isRollbackOnly());
+                TransactionSynchronizationManager.setActualTransactionActive(false);
+                TransactionSynchronizationManager.setCurrentTransactionReadOnly(false);
+            }
+            @Override
+            public void rollback(TransactionStatus status) {
+                lastStatusRollback.set(true);
+                TransactionSynchronizationManager.setActualTransactionActive(false);
+                TransactionSynchronizationManager.setCurrentTransactionReadOnly(false);
+            }
+        };
+
+        AgentActionPreparationContributor orgContributor = (ctx, entity, entityId, actionId, raw, inputs) -> {
+            if (Boolean.TRUE.equals(ctx.propagatedClaims().get("readOnlyScope"))) {
+                return AgentActionPreparationContributor.ActionGuardAssessment.block(
+                        "READ_ONLY_CONSOLIDATION_SCOPE",
+                        "Grupo consolidado em modo somente relatórios.",
+                        "02",
+                        "Org 02");
+            }
+            return AgentActionPreparationContributor.ActionGuardAssessment.allow("02", "Org 02", Map.of());
+        };
+
+        MetadataStarterInProcessAgentBridge bridge = new MetadataStarterInProcessAgentBridge(
+                List.of(controller),
+                List.of(), List.of(), List.of(),
+                null, null, null,
+                new DefaultMetadataGovernanceAgentAuthorizationBridge(List.of(controller)),
+                new DefaultConversionService(),
+                new ObjectMapper().findAndRegisterModules(),
+                txManager,
+                List.of(),
+                null,
+                List.of(),
+                null,
+                etags,
+                scopeProvider,
+                validator,
+                List.of(orgContributor));
+
+        AgentExecutionContext writerCtx = new AgentExecutionContext(
+                UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID(),
+                "tenant-a", "op-1", "prod", "op-1",
+                Set.of("WORKFORCE_READ", "WORKFORCE_WRITE"),
+                null, null, Map.of(), Map.of());
+        AgentExecutionContext readerCtx = new AgentExecutionContext(
+                UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID(),
+                "tenant-a", "reader-1", "prod", "reader-1",
+                Set.of("WORKFORCE_READ"),
+                null, null, Map.of(), Map.of());
+
+        var digest = bridge.describeEntitySchema(writerCtx, "workforce.leave-requests").orElseThrow();
+        assertThat(digest.determinations()).hasSize(1);
+        assertThat(digest.determinations().get(0).id()).isEqualTo("preview");
+
+        // 1. Simulate determination (non-persistent rollback-only)
+        AgentSimulationPreview sim = bridge.simulateDetermination(
+                writerCtx,
+                new AgentDeterminationRequest("workforce.leave-requests", "preview", Map.of("periodId", 10L, "daysRequested", 12)));
+        assertThat(controller.simulatedRollbackObserved.get()).isTrue();
+        assertThat(lastStatusRollback.get()).isTrue();
+        assertThat(sim.uiPreview()).containsEntry("remainingBalance", 18).containsEntry("internalAuditScore", 999);
+        assertThat(sim.modelSafePreview()).containsEntry("remainingBalance", 18).doesNotContainKey("internalAuditScore");
+
+        // 2. Prepare action with read-only consolidation claim -> blocked
+        AgentExecutionContext readOnlyCtx = new AgentExecutionContext(
+                UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID(),
+                "tenant-a", "op-1", "prod", "op-1",
+                Set.of("WORKFORCE_WRITE"),
+                null, null, Map.of(), Map.of("readOnlyScope", true));
+        AgentPreparedAction blockedPrep = bridge.prepareAction(
+                readOnlyCtx,
+                new AgentPrepareActionRequest("workforce.leave-requests", "701", "approve-leave", Map.of()));
+        assertThat(blockedPrep.allowed()).isFalse();
+        assertThat(blockedPrep.blockedCode()).isEqualTo("READ_ONLY_CONSOLIDATION_SCOPE");
+        assertThat(blockedPrep.organizationId()).isEqualTo("02");
+
+        // 3. Prepare action for authorized writer -> captures ETag & missing required field
+        AgentPreparedAction prepared = bridge.prepareAction(
+                writerCtx,
+                new AgentPrepareActionRequest("workforce.leave-requests", "701", "approve-leave", Map.of()));
+        assertThat(prepared.allowed()).isTrue();
+        assertThat(prepared.expectedVersionTag()).isNotBlank();
+        assertThat(prepared.recordLifecycleState()).isEqualTo("REQUESTED");
+        assertThat(prepared.missingRequiredFields()).containsExactly("notes");
+
+        // 4. Reader cannot confirm
+        AgentActionExecutionOutcome denied = bridge.executeConfirmedAction(
+                readerCtx,
+                new AgentExecuteActionRequest("workforce.leave-requests", "701", "approve-leave",
+                        prepared.expectedVersionTag(), "k-1", "02", Map.of("notes", "OK")));
+        assertThat(denied.httpStatus()).isEqualTo(403);
+
+        // 5. Missing @NotBlank notes -> 422 fieldErrors
+        AgentActionExecutionOutcome validationErr = bridge.executeConfirmedAction(
+                writerCtx,
+                new AgentExecuteActionRequest("workforce.leave-requests", "701", "approve-leave",
+                        prepared.expectedVersionTag(), "k-2", "02", Map.of()));
+        assertThat(validationErr.httpStatus()).isEqualTo(422);
+        assertThat(validationErr.fieldErrors()).containsKey("notes");
+
+        // 6. Rule violation -> 422 ruleViolations
+        AgentActionExecutionOutcome ruleErr = bridge.executeConfirmedAction(
+                writerCtx,
+                new AgentExecuteActionRequest("workforce.leave-requests", "701", "approve-leave",
+                        prepared.expectedVersionTag(), "k-3", "02", Map.of("notes", "RULE_BLOCK")));
+        assertThat(ruleErr.httpStatus()).isEqualTo(422);
+        assertThat(ruleErr.ruleViolations()).hasSize(1);
+
+        // 7. Concurrent version bump -> 412 STALE with refreshedSnapshot
+        controller.version.incrementAndGet();
+        AgentActionExecutionOutcome stale = bridge.executeConfirmedAction(
+                writerCtx,
+                new AgentExecuteActionRequest("workforce.leave-requests", "701", "approve-leave",
+                        prepared.expectedVersionTag(), "k-4", "02", Map.of("notes", "Aprovado")));
+        assertThat(stale.httpStatus()).isEqualTo(412);
+        assertThat(stale.outcomeCode()).isEqualTo("STALE_RESOURCE_VERSION");
+        assertThat(stale.updatedVersionTag()).isNotBlank().isNotEqualTo(prepared.expectedVersionTag());
+        assertThat(stale.refreshedSnapshot()).containsKey("record");
+
+        // 8. Execute with current ETag -> 200 CONFIRMED & state APPROVED
+        AgentActionExecutionOutcome ok = bridge.executeConfirmedAction(
+                writerCtx,
+                new AgentExecuteActionRequest("workforce.leave-requests", "701", "approve-leave",
+                        stale.updatedVersionTag(), "k-5", "02", Map.of("notes", "Escala homologada")));
+        assertThat(ok.succeeded()).isTrue();
+        assertThat(ok.httpStatus()).isEqualTo(200);
+        assertThat(ok.updatedLifecycleState()).isEqualTo("APPROVED");
+    }
+
+    @Test
+    void enforcesFailClosedSimulationNestedTxReuseOrgScopeFieldEditAndOutboundMod11Scrubbing() {
+        ResourceVersionEtagService etags = new ResourceVersionEtagService("unit-test-secret-0123456789abcdef012345");
+        ResourceVersionScopeProvider scopeProvider = () -> ResourceVersionScope.GLOBAL;
+        LeaveRequestWorkflowController workflowController = new LeaveRequestWorkflowController(etags);
+        Validator validator = Validation.buildDefaultValidatorFactory().getValidator();
+
+        AtomicInteger txOpenCount = new AtomicInteger(0);
+        PlatformTransactionManager countingTxManager = new PlatformTransactionManager() {
+            @Override
+            public TransactionStatus getTransaction(TransactionDefinition definition) {
+                txOpenCount.incrementAndGet();
+                TransactionSynchronizationManager.setActualTransactionActive(true);
+                TransactionSynchronizationManager.setCurrentTransactionReadOnly(definition != null && definition.isReadOnly());
+                return new SimpleTransactionStatus();
+            }
+
+            @Override
+            public void commit(TransactionStatus status) {
+                TransactionSynchronizationManager.setActualTransactionActive(false);
+                TransactionSynchronizationManager.setCurrentTransactionReadOnly(false);
+            }
+
+            @Override
+            public void rollback(TransactionStatus status) {
+                TransactionSynchronizationManager.setActualTransactionActive(false);
+                TransactionSynchronizationManager.setCurrentTransactionReadOnly(false);
+            }
+        };
+
+        AgentActionPreparationContributor orgContributor = (ctx, entity, entityId, actionId, raw, inputs) ->
+                AgentActionPreparationContributor.ActionGuardAssessment.allow("02", "Org 02", Map.of());
+
+        MetadataStarterInProcessAgentBridge noTxBridge = new MetadataStarterInProcessAgentBridge(
+                List.of(workflowController),
+                List.of(), List.of(), List.of(),
+                null, null, null,
+                new DefaultMetadataGovernanceAgentAuthorizationBridge(List.of(workflowController)),
+                new DefaultConversionService(),
+                new ObjectMapper().findAndRegisterModules(),
+                null);
+        AgentExecutionContext writerCtx = new AgentExecutionContext(
+                UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID(),
+                "tenant-a", "op-1", "prod", "op-1",
+                Set.of("WORKFORCE_READ", "WORKFORCE_WRITE"),
+                null, null, Map.of(), Map.of());
+        AgentExecutionContext hrAdminCtx = new AgentExecutionContext(
+                UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID(),
+                "tenant-a", "op-admin", "prod", "op-admin",
+                Set.of("WORKFORCE_READ", "WORKFORCE_WRITE", "HR_ADMIN"),
+                null, null, Map.of(), Map.of());
+
+        // 1. simulateDetermination without PlatformTransactionManager must fail closed
+        assertThatThrownBy(() -> noTxBridge.simulateDetermination(
+                writerCtx,
+                new AgentDeterminationRequest("workforce.leave-requests", "preview", Map.of("periodId", 10L, "daysRequested", 12))))
+                .isInstanceOf(IllegalStateException.class);
+
+        NullableEmployeeController embeddedCpfController = new NullableEmployeeController(
+                new NullableEmployeeDto(2002L, "Carlos 529.982.247-25 Alberto", "Setor 11144477735"));
+        MetadataStarterInProcessAgentBridge bridge = new MetadataStarterInProcessAgentBridge(
+                List.of(workflowController, embeddedCpfController),
+                List.of(ctx -> List.of(new AgentEntityDescriptor(
+                        "hr.nullable-employees", "hr.nullable-employees", "/api/human-resources/nullable-employees",
+                        "Colaboradores Opcionais", "Cadastro", "badge",
+                        "id", "fullName", "departmentName", List.of("departmentName"),
+                        null, "fullName", null, "/nullable-employees/{id}", "hr", 100))),
+                List.of(), List.of(),
+                null, null, null,
+                new DefaultMetadataGovernanceAgentAuthorizationBridge(List.of(workflowController, embeddedCpfController)),
+                new DefaultConversionService(),
+                new ObjectMapper().findAndRegisterModules(),
+                countingTxManager,
+                List.of(),
+                null,
+                List.of(),
+                null,
+                etags,
+                scopeProvider,
+                validator,
+                List.of(orgContributor));
+
+        // 2. prepareAction calls executeIsolatedReadOnly -> resolveItemStateSnapshot also calls executeIsolatedReadOnly;
+        //    must reuse the already active read-only tx (txOpenCount == 1, no nested REQUIRES_NEW).
+        txOpenCount.set(0);
+        AgentPreparedAction restrictedPrep = bridge.prepareAction(
+                writerCtx,
+                new AgentPrepareActionRequest("workforce.leave-requests", "701", "approve-leave",
+                        Map.of("specialApprovalCode", "OVERRIDE-99")));
+        assertThat(txOpenCount.get()).isEqualTo(1);
+        assertThat(restrictedPrep.allowed()).isFalse();
+        assertThat(restrictedPrep.blockedCode()).isEqualTo("FIELD_EDIT_DENIED");
+
+        // 3. Valid preparation for writer without specialApprovalCode, then confirm checks:
+        AgentPreparedAction prepared = bridge.prepareAction(
+                writerCtx,
+                new AgentPrepareActionRequest("workforce.leave-requests", "701", "approve-leave", Map.of()));
+        assertThat(prepared.allowed()).isTrue();
+
+        // 3a. Organization scope mismatch ("01" != "02") -> 409 ORGANIZATION_SCOPE_CHANGED
+        AgentActionExecutionOutcome orgMismatch = bridge.executeConfirmedAction(
+                writerCtx,
+                new AgentExecuteActionRequest("workforce.leave-requests", "701", "approve-leave",
+                        prepared.expectedVersionTag(), "k-org", "01", Map.of("notes", "OK")));
+        assertThat(orgMismatch.httpStatus()).isEqualTo(409);
+        assertThat(orgMismatch.outcomeCode()).isEqualTo("ORGANIZATION_SCOPE_CHANGED");
+
+        // 3b. Restricted field edit without HR_ADMIN authority -> 403 FIELD_EDIT_DENIED
+        AgentActionExecutionOutcome fieldDenied = bridge.executeConfirmedAction(
+                writerCtx,
+                new AgentExecuteActionRequest("workforce.leave-requests", "701", "approve-leave",
+                        prepared.expectedVersionTag(), "k-fld", "02",
+                        Map.of("notes", "OK", "specialApprovalCode", "OVERRIDE-99")));
+        assertThat(fieldDenied.httpStatus()).isEqualTo(403);
+        assertThat(fieldDenied.outcomeCode()).isEqualTo("FIELD_EDIT_DENIED");
+
+        // 3c. With HR_ADMIN authority, restricted field is allowed -> 200 CONFIRMED
+        AgentActionExecutionOutcome fieldAllowed = bridge.executeConfirmedAction(
+                hrAdminCtx,
+                new AgentExecuteActionRequest("workforce.leave-requests", "701", "approve-leave",
+                        prepared.expectedVersionTag(), "k-admin", "02",
+                        Map.of("notes", "OK", "specialApprovalCode", "OVERRIDE-99")));
+        assertThat(fieldAllowed.succeeded()).isTrue();
+        assertThat(fieldAllowed.httpStatus()).isEqualTo(200);
+
+        // 4. Outbound Mod-11 scrubbing on name-search & auto-loaded dossier model output
+        SearchAndResolveEntitiesTool searchTool = new SearchAndResolveEntitiesTool(bridge);
+        GetEntity360DossierTool dossierTool = new GetEntity360DossierTool(bridge);
+        AgentTurnArtifactStore artifacts = new AgentTurnArtifactStore();
+
+        Map<String, Object> searchOut = searchTool.execute(
+                writerCtx, null, artifacts, Map.of("query", "Carlos"));
+        String searchOutJson = searchOut.toString();
+        assertThat(searchOutJson)
+                .doesNotContain("529.982.247-25")
+                .doesNotContain("52998224725")
+                .doesNotContain("11144477735");
+        assertThat(artifacts.dossiers()).hasSize(1);
+        assertThat(artifacts.dossiers().get(0).uiRecord().get("fullName"))
+                .isEqualTo("Carlos 529.982.247-25 Alberto");
+
+        Map<String, Object> dossierOut = dossierTool.execute(
+                writerCtx, null, artifacts, Map.of("entityKey", "hr.nullable-employees", "entityId", "2002"));
+        assertThat(dossierOut.toString())
+                .doesNotContain("529.982.247-25")
+                .doesNotContain("52998224725")
+                .doesNotContain("11144477735");
+    }
+
+    public static class BulkLeaveUpdateDto {
+        @UISchema(label = "Observações")
+        @BulkEditable(modes = {BulkMode.UNIFORM_UPDATE, BulkMode.PER_ITEM_UPDATE}, allowClear = true)
+        public String notes;
+        @UISchema(label = "Situação")
+        @BulkEditable(modes = {BulkMode.UNIFORM_UPDATE})
+        public String status;
+        @UISchema(label = "Campo protegido")
+        @BulkEditable(modes = {BulkMode.UNIFORM_UPDATE})
+        public String lockedNotes;
+
+        public String getNotes() { return notes; }
+        public void setNotes(String notes) { this.notes = notes; }
+        public String getStatus() { return status; }
+        public void setStatus(String status) { this.status = status; }
+        public String getLockedNotes() { return lockedNotes; }
+        public void setLockedNotes(String lockedNotes) { this.lockedNotes = lockedNotes; }
+    }
+
+    public static class ApproveBatchParams {
+        @NotBlank
+        @UISchema(label = "Portaria")
+        public String portaria;
+
+        public String getPortaria() { return portaria; }
+        public void setPortaria(String portaria) { this.portaria = portaria; }
+    }
+
+    public static class BulkLeaveFilter implements GenericFilterDTO {
+        @Filterable(operation = Filterable.FilterOperation.LIKE)
+        private String q;
+
+        public String getQ() { return q; }
+        public void setQ(String q) { this.q = q; }
+    }
+
+    @ApiResource(
+            value = "/api/workforce/bulk-leaves",
+            resourceKey = "workforce.bulk-leaves",
+            title = "Parcelas em Lote",
+            identity = @ResourceIdentity(keyField = "id", titleField = "fullName", subtitleField = "departmentName"))
+    @BulkResourceOperations(
+            updateSourceOperationId = "workforce.bulk-leaves.update",
+            protectedUpdateFields = {"lockedNotes"})
+    static class StubBulkLeaveController
+            extends AbstractBulkGovernedResourceController<NullableEmployeeDto, Long, BulkLeaveFilter, NullableEmployeeDto, BulkLeaveUpdateDto>
+            implements MetadataStarterInProcessAgentBridge.BulkEnginePort {
+        private final BaseResourceService<NullableEmployeeDto, Long, BulkLeaveFilter, NullableEmployeeDto, BulkLeaveUpdateDto> service;
+        private final MetadataStarterInProcessAgentBridge.BulkEnginePort bulkPort;
+
+        StubBulkLeaveController(
+                BaseResourceService<NullableEmployeeDto, Long, BulkLeaveFilter, NullableEmployeeDto, BulkLeaveUpdateDto> service,
+                MetadataStarterInProcessAgentBridge.BulkEnginePort bulkPort) {
+            this.service = service;
+            this.bulkPort = bulkPort;
+        }
+
+        @Override
+        protected BaseResourceService<NullableEmployeeDto, Long, BulkLeaveFilter, NullableEmployeeDto, BulkLeaveUpdateDto> getService() {
+            return service;
+        }
+
+        @Override
+        protected Long getResponseId(NullableEmployeeDto dto) {
+            return dto.getId();
+        }
+
+        @Override
+        protected JpaResourceBulkEngine<Long, BulkLeaveFilter> getBulkEngine() {
+            return null;
+        }
+
+        @Override public Object encodeWireId(Object convertedId) { return bulkPort.encodeWireId(convertedId); }
+        @Override public String currentVersion(Object convertedId) { return bulkPort.currentVersion(convertedId); }
+        @Override public BulkProposal evaluateUniform(String opId, BulkUniformEvaluationRequest<?, Object> req) { return bulkPort.evaluateUniform(opId, req); }
+        @Override public BulkProposal evaluateItems(String opId, BulkItemEvaluationRequest<?> req) { return bulkPort.evaluateItems(opId, req); }
+        @Override public BulkProposal evaluateDomainCommand(String opId, BulkCommandEvaluationRequest<Object, ?, Object> req) { return bulkPort.evaluateDomainCommand(opId, req); }
+        @Override public CursorPage<BulkProposalItemResult<Object>> proposalResults(String opId, UUID propId, int size, String after) { return bulkPort.proposalResults(opId, propId, size, after); }
+
+        @PostMapping("/bulk/approve-batch/evaluation")
+        @io.swagger.v3.oas.annotations.Operation(operationId = "workforce.bulk-leaves.approve-batch.evaluation")
+        public ResponseEntity<RestApiResponse<BulkProposal>> evalApproveBatch(
+                @RequestBody BulkCommandEvaluationRequest<ApproveBatchParams, ?, BulkLeaveFilter> req) {
+            return evaluateBulkDomainCommand("approve-batch", req);
+        }
+
+        @PostMapping("/actions/approve-batch")
+        @WorkflowAction(
+                id = "approve-batch",
+                title = "Homologar parcelas em lote",
+                description = "Homologa coletivamente",
+                scope = ActionScope.COLLECTION,
+                requiredAuthorities = {"WORKFORCE_WRITE"},
+                confirmationRequired = true,
+                atomicity = ActionCollectionAtomicity.PER_ITEM,
+                maxSelection = 50)
+        @BulkOperation(
+                mode = BulkMode.DOMAIN_COMMAND,
+                evaluationOperationId = "workforce.bulk-leaves.approve-batch.evaluation",
+                atomicity = ActionCollectionAtomicity.PER_ITEM)
+        @io.swagger.v3.oas.annotations.Operation(operationId = "workforce.bulk-leaves.approve-batch")
+        public ResponseEntity<RestApiResponse<BulkExecution>> confirmApproveBatch(
+                @RequestBody BulkConfirmationRequest req,
+                @RequestHeader("Idempotency-Key") String key) {
+            return confirmBulkDomainCommand("approve-batch", req, key);
+        }
+    }
+
+    @Test
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    void discoversBulkCapabilitiesPreparesNonTransactionallyPreservesQuotaAndScrubsFastGrounding() {
+        ObjectMapper om = new ObjectMapper().findAndRegisterModules();
+        NullableEmployeeDto r1 = new NullableEmployeeDto(101L, "Maria 529.982.247-25", "SCHEDULED");
+        NullableEmployeeDto r2 = new NullableEmployeeDto(102L, "Joao Silva", "BLOCKED");
+
+        BaseResourceService<NullableEmployeeDto, Long, BulkLeaveFilter, NullableEmployeeDto, BulkLeaveUpdateDto> service = mock(BaseResourceService.class);
+        when(service.getIdFieldName()).thenReturn("id");
+        when(service.getDefaultSort()).thenReturn(Sort.by("id"));
+        when(service.findById(101L)).thenReturn(ResourceRepresentationResult.versioned(r1, 1L));
+        when(service.findById(102L)).thenReturn(ResourceRepresentationResult.versioned(r2, 2L));
+        when(service.filter(any(), any(), any())).thenReturn(new PageImpl<>(List.of(r1, r2)));
+
+        MetadataStarterInProcessAgentBridge.BulkEnginePort engine = mock(MetadataStarterInProcessAgentBridge.BulkEnginePort.class);
+        when(engine.encodeWireId(any())).thenAnswer(inv -> String.valueOf((Object) inv.getArgument(0)));
+        when(engine.currentVersion(101L)).thenReturn("\"etag-101\"");
+        when(engine.currentVersion(102L)).thenReturn("\"etag-102\"");
+
+        StubBulkLeaveController controller = new StubBulkLeaveController(service, engine);
+        ResourceVersionEtagService etags = new ResourceVersionEtagService("unit-test-secret-0123456789abcdef012345");
+        ResourceVersionScopeProvider scopeProvider = () -> ResourceVersionScope.GLOBAL;
+        Validator validator = Validation.buildDefaultValidatorFactory().getValidator();
+
+        PlatformTransactionManager txManager = new PlatformTransactionManager() {
+            @Override
+            public TransactionStatus getTransaction(TransactionDefinition def) {
+                TransactionSynchronizationManager.setActualTransactionActive(true);
+                TransactionSynchronizationManager.setCurrentTransactionReadOnly(def != null && def.isReadOnly());
+                return new SimpleTransactionStatus();
+            }
+            @Override public void commit(TransactionStatus s) {
+                TransactionSynchronizationManager.setActualTransactionActive(false);
+                TransactionSynchronizationManager.setCurrentTransactionReadOnly(false);
+            }
+            @Override public void rollback(TransactionStatus s) {
+                TransactionSynchronizationManager.setActualTransactionActive(false);
+                TransactionSynchronizationManager.setCurrentTransactionReadOnly(false);
+            }
+        };
+
+        MetadataStarterInProcessAgentBridge bridge = new MetadataStarterInProcessAgentBridge(
+                List.of(controller),
+                List.of(ctx -> List.of(new AgentEntityDescriptor(
+                        "workforce.bulk-leaves", "workforce.bulk-leaves", "/api/workforce/bulk-leaves",
+                        "Parcelas em Lote", "Parcelas", "event",
+                        "id", "fullName", "departmentName", List.of("departmentName"),
+                        null, "fullName", null, "/bulk-leaves/{id}", "workforce", 100))),
+                List.of(), List.of(), null, null, null,
+                new DefaultMetadataGovernanceAgentAuthorizationBridge(List.of(controller)),
+                new DefaultConversionService(), om, txManager, List.of(), null, List.of(), null,
+                etags, scopeProvider, validator, List.of());
+
+        AgentExecutionContext writerCtx = new AgentExecutionContext(
+                UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID(),
+                "tenant-a", "op-1", "prod", "op-1",
+                Set.of("WORKFORCE_WRITE"),
+                "/api/workforce/bulk-leaves",
+                null,
+                Map.of("recordId", "101", "cpfHint", "529.982.247-25"),
+                Map.of());
+
+        CompactAgentSchemaDigest digest = bridge.describeEntitySchema(writerCtx, "workforce.bulk-leaves").orElseThrow();
+        BulkCapabilityDigest bulkCap = digest.bulkCapability();
+        assertThat(bulkCap).isNotNull();
+        assertThat(bulkCap.uniformUpdateSupported()).isTrue();
+        assertThat(bulkCap.perItemUpdateSupported()).isTrue();
+        assertThat(bulkCap.editableFields()).extracting(CompactAgentSchemaDigest.BulkEditableFieldDigest::name)
+                .containsExactlyInAnyOrder("notes", "status")
+                .doesNotContain("lockedNotes");
+        assertThat(bulkCap.domainCommands()).extracting(CompactAgentSchemaDigest.BulkCommandDigest::actionId)
+                .containsExactly("approve-batch");
+        // @BulkOperation method must not appear in single-item prepareAction
+        assertThatThrownBy(() -> bridge.prepareAction(
+                writerCtx, new AgentPrepareActionRequest("workforce.bulk-leaves", "101", "approve-batch", Map.of())))
+                .isInstanceOf(IllegalArgumentException.class);
+
+        // Missing required param ("portaria") returns INCOMPLETE without burning engine evaluation quota
+        AgentPreparedBulkOperation incomplete = bridge.prepareBulkOperation(
+                writerCtx,
+                new AgentPrepareBulkRequest("workforce.bulk-leaves", "DOMAIN_COMMAND", "approve-batch",
+                        "EXPLICIT", Map.of("q", "a"), List.of(), List.of(), List.of(), List.of(), Map.of(), null));
+        assertThat(incomplete.base().allowed()).isTrue();
+        assertThat(incomplete.domainProposalId()).isNull();
+        assertThat(incomplete.domainProposalStatus()).isEqualTo("INCOMPLETE");
+        assertThat(incomplete.base().missingRequiredFields()).containsExactly("portaria");
+        assertThat(incomplete.targetCount()).isEqualTo(2L);
+
+        // Protected/non-editable field rejected before calling engine
+        AgentPreparedBulkOperation deniedField = bridge.prepareBulkOperation(
+                writerCtx,
+                new AgentPrepareBulkRequest("workforce.bulk-leaves", "UNIFORM_UPDATE", null,
+                        "QUERY", Map.of("q", "a"), List.of(), List.of(),
+                        List.of(Map.of("field", "lockedNotes", "operator", "SET", "value", "x")),
+                        List.of(), Map.of(), null));
+        assertThat(deniedField.base().allowed()).isFalse();
+        assertThat(deniedField.base().blockedCode()).isEqualTo("BULK_FIELD_NOT_EDITABLE");
+
+        // Uniform QUERY evaluation runs OUTSIDE tx with confirmation operationId and Mod-11 scrubbed preview
+        String uniformConfirmOp = BulkControllerOperationIds.updateConfirmationId(StubBulkLeaveController.class, false);
+        String uniformPropId = UUID.randomUUID().toString();
+        when(engine.evaluateUniform(eq(uniformConfirmOp), any(BulkUniformEvaluationRequest.class))).thenAnswer(inv -> {
+            assertThat(TransactionSynchronizationManager.isActualTransactionActive()).isFalse();
+            BulkUniformEvaluationRequest req = inv.getArgument(1);
+            assertThat(req.selection().mode()).isEqualTo(BulkSelectionMode.QUERY);
+            return new BulkProposal(
+                    uniformPropId,
+                    new CanonicalOperationRef("workforce", uniformConfirmOp, "/api/workforce/bulk-leaves/bulk/update", "POST"),
+                    BulkMode.UNIFORM_UPDATE, BulkExecutionMode.SYNC, ActionCollectionAtomicity.PER_ITEM,
+                    BulkProposalStatus.READY, Instant.now().minusSeconds(1), Instant.now().plusSeconds(300),
+                    new BulkProposalTotals(2, 2, 2, 0), om.createObjectNode(), List.of(), List.of());
+        });
+        when(engine.proposalResults(eq(uniformConfirmOp), eq(UUID.fromString(uniformPropId)), eq(50), eq(null)))
+                .thenReturn(new CursorPage<>(List.of(
+                        new BulkProposalItemResult<>("101", BulkProposalItemResult.Decision.EXECUTABLE, List.of()),
+                        new BulkProposalItemResult<>("102", BulkProposalItemResult.Decision.EXECUTABLE, List.of())),
+                        null, null, 50));
+
+        AgentPreparedBulkOperation uniformOk = bridge.prepareBulkOperation(
+                writerCtx,
+                new AgentPrepareBulkRequest("workforce.bulk-leaves", "UNIFORM_UPDATE", null,
+                        "QUERY", Map.of("q", "a"), List.of(), List.of(),
+                        List.of(Map.of("field", "notes", "operator", "SET", "value", "Atualizado")),
+                        List.of(), Map.of(), "Teste"));
+        assertThat(uniformOk.base().allowed()).isTrue();
+        assertThat(uniformOk.domainProposalStatus()).isEqualTo("READY");
+        assertThat(uniformOk.executableCount()).isEqualTo(2L);
+        assertThat(uniformOk.modelSafePreviewItems().toString()).doesNotContain("529.982.247-25").doesNotContain("52998224725");
+
+        // Mixed PER_ITEM keeps base.allowed=true and maps blockedDiagnostics cleanly
+        String itemConfirmOp = BulkControllerOperationIds.updateConfirmationId(StubBulkLeaveController.class, true);
+        String mixedPropId = UUID.randomUUID().toString();
+        when(engine.evaluateItems(eq(itemConfirmOp), any(BulkItemEvaluationRequest.class))).thenAnswer(inv -> {
+            assertThat(TransactionSynchronizationManager.isActualTransactionActive()).isFalse();
+            return new BulkProposal(
+                    mixedPropId,
+                    new CanonicalOperationRef("workforce", itemConfirmOp, "/api/workforce/bulk-leaves/bulk/update-items", "POST"),
+                    BulkMode.PER_ITEM_UPDATE, BulkExecutionMode.SYNC, ActionCollectionAtomicity.PER_ITEM,
+                    BulkProposalStatus.BLOCKED, Instant.now().minusSeconds(1), Instant.now().plusSeconds(300),
+                    new BulkProposalTotals(2, 2, 1, 1), om.createObjectNode(),
+                    List.of(new ResourceCommandMessage(ResourceCommandErrorCategory.VALIDATION, "RULE_X", "1 item bloqueado", null, Map.of())),
+                    List.of());
+        });
+        when(engine.proposalResults(eq(itemConfirmOp), eq(UUID.fromString(mixedPropId)), eq(50), eq(null)))
+                .thenReturn(new CursorPage<>(List.of(
+                        new BulkProposalItemResult<>("101", BulkProposalItemResult.Decision.EXECUTABLE, List.of()),
+                        new BulkProposalItemResult<>("102", BulkProposalItemResult.Decision.BLOCKED,
+                                List.of(new ResourceCommandMessage(ResourceCommandErrorCategory.VALIDATION, "RULE_X", "Parcela bloqueada", null, Map.of())))),
+                        null, null, 50));
+
+        AgentPreparedBulkOperation mixed = bridge.prepareBulkOperation(
+                writerCtx,
+                new AgentPrepareBulkRequest("workforce.bulk-leaves", "PER_ITEM_UPDATE", null,
+                        "EXPLICIT", Map.of(), List.of(), List.of(), List.of(),
+                        List.of(
+                                Map.of("id", "101", "changes", List.of(Map.of("field", "notes", "operator", "SET", "value", "Ok"))),
+                                Map.of("id", "102", "changes", List.of(Map.of("field", "notes", "operator", "SET", "value", "Try")))),
+                        Map.of(), null));
+        assertThat(mixed.base().allowed()).isTrue();
+        assertThat(mixed.domainProposalStatus()).isEqualTo("BLOCKED");
+        assertThat(mixed.executableCount()).isEqualTo(1L);
+        assertThat(mixed.blockedCount()).isEqualTo(1L);
+        assertThat(mixed.blockedDiagnostics()).hasSize(1);
+        assertThat(mixed.blockedDiagnostics().get(0).get("diagnostics").toString()).contains("Parcela bloqueada");
+
+        // DOMAIN_COMMAND with filters resolves targets + currentVersion in Tx A, then evaluates EXPLICIT outside Tx
+        String cmdPropId = UUID.randomUUID().toString();
+        when(engine.evaluateDomainCommand(eq("workforce.bulk-leaves.approve-batch"), any(BulkCommandEvaluationRequest.class)))
+                .thenAnswer(inv -> {
+                    assertThat(TransactionSynchronizationManager.isActualTransactionActive()).isFalse();
+                    BulkCommandEvaluationRequest req = inv.getArgument(1);
+                    assertThat(req.selection().mode()).isEqualTo(BulkSelectionMode.EXPLICIT);
+                    assertThat(req.selection().targets()).hasSize(2);
+                    return new BulkProposal(
+                            cmdPropId,
+                            new CanonicalOperationRef("workforce", "workforce.bulk-leaves.approve-batch", "/api/workforce/bulk-leaves/actions/approve-batch", "POST"),
+                            BulkMode.DOMAIN_COMMAND, BulkExecutionMode.SYNC, ActionCollectionAtomicity.PER_ITEM,
+                            BulkProposalStatus.READY, Instant.now().minusSeconds(1), Instant.now().plusSeconds(300),
+                            new BulkProposalTotals(2, 2, 2, 0), om.createObjectNode(), List.of(), List.of());
+                });
+        when(engine.proposalResults(eq("workforce.bulk-leaves.approve-batch"), eq(UUID.fromString(cmdPropId)), eq(50), eq(null)))
+                .thenReturn(new CursorPage<>(List.of(), null, null, 50));
+
+        AgentPreparedBulkOperation cmdPrepared = bridge.prepareBulkOperation(
+                writerCtx,
+                new AgentPrepareBulkRequest("workforce.bulk-leaves", "DOMAIN_COMMAND", "approve-batch",
+                        "QUERY", Map.of("q", "a"), List.of(), List.of(), List.of(), List.of(),
+                        Map.of("portaria", "PORT-99/2026"), null));
+        assertThat(cmdPrepared.base().allowed()).isTrue();
+        assertThat(cmdPrepared.domainProposalId()).isEqualTo(cmdPropId);
+
+        // Step 2A Fast Grounding + Mod-11 scrubbing in PraxisOperationalAgentLoop
+        AiToolCallingProvider capturingProvider = new AiToolCallingProvider() {
+            @Override public String providerId() { return "gemini"; }
+            @Override public AgentModelTurnResponse generateTurn(
+                    org.praxisplatform.config.ai.agent.model.AgentModelTurnRequest request,
+                    org.praxisplatform.config.ai.agent.model.AgentModelStreamListener listener) {
+                assertThat(request.systemInstruction())
+                        .contains("Fast Grounding")
+                        .contains("prepare_bulk_operation")
+                        .contains("***.982.247-**")
+                        .doesNotContain("529.982.247-25")
+                        .doesNotContain("52998224725");
+                return new AgentModelTurnResponse("gemini", "gemini-2.5-flash", "Ok.", List.of(),
+                        new AgentTokenUsage(10, 5, 15), "stop", "resp-fg", Map.of());
+            }
+        };
+        PraxisOperationalAgentLoop loop = new PraxisOperationalAgentLoop(
+                capturingProvider, List.of(), new OperationalAssistantBlockComposer(om), 4, bridge);
+        loop.execute(writerCtx, "Explique este registro.", null, List.of(), null, null);
     }
 }

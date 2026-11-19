@@ -65,11 +65,23 @@ public class DiscoverTopicResourcesAndSchemasTool implements OperationalAgentToo
 
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("topics", topics);
-        result.put("entities", entities);
         if (StringUtils.hasText(entityKey)) {
-            bridge.describeEntitySchema(context, entityKey)
-                    .ifPresent(digest -> result.put("schemaDigest", digest));
+            bridge.describeEntitySchema(context, entityKey).ifPresent(digest -> {
+                result.put("schemaDigest", digest);
+            });
+            if (!StringUtils.hasText(topicOrQuery)) {
+                String target = entityKey.trim();
+                List<AgentEntityDescriptor> scoped = entities.stream()
+                        .filter(e -> target.equalsIgnoreCase(e.entityKey())
+                                || target.equalsIgnoreCase(e.resourceKey())
+                                || target.equalsIgnoreCase(e.resourcePath()))
+                        .toList();
+                if (!scoped.isEmpty()) {
+                    entities = scoped;
+                }
+            }
         }
+        result.put("entities", entities);
         return result;
     }
 }

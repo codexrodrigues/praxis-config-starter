@@ -14,12 +14,16 @@ import com.openai.models.responses.ResponseInputItem;
 import com.openai.models.responses.ResponseOutputItem;
 import com.openai.models.responses.ResponseOutputMessage;
 import com.openai.models.responses.ResponseUsage;
+import com.openai.models.responses.ToolChoiceOptions;
+import jakarta.annotation.PreDestroy;
+import java.net.URI;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.concurrent.ConcurrentHashMap;
 import org.praxisplatform.config.ai.agent.model.AgentConversationItem;
 import org.praxisplatform.config.ai.agent.model.AgentConversationRole;
 import org.praxisplatform.config.ai.agent.model.AgentModelStreamListener;
@@ -43,7 +47,11 @@ public class OpenAiResponsesAgentToolGateway implements AiToolCallingProvider {
 
     public static final String PROVIDER_ID = "openai";
     private static final String DEFAULT_MODEL = "gpt-4o-mini";
+    private static final int MAX_CACHED_CLIENTS = 32;
     private static final TypeReference<Map<String, Object>> MAP_TYPE = new TypeReference<>() {};
+    private static final Map<ClientKey, OpenAIClient> CLIENT_CACHE = new ConcurrentHashMap<>();
+
+    private record ClientKey(String apiKey, String baseUrl, Integer timeoutSeconds) {}
 
     @FunctionalInterface
     public interface OpenAiExchange {
@@ -59,7 +67,7 @@ public class OpenAiResponsesAgentToolGateway implements AiToolCallingProvider {
     @Autowired
     public OpenAiResponsesAgentToolGateway(
             ObjectMapper objectMapper,
-            @Value("${spring.ai.openai.api-key:}") String defaultApiKey,
+            @Value("${spring.ai.openai.api-key:${OPENAI_API_KEY:}}") String defaultApiKey,
             @Value("${spring.ai.openai.base-url:}") String defaultBaseUrl,
             @Value("${spring.ai.openai.chat.options.model:" + DEFAULT_MODEL + "}") String defaultModel) {
         this(objectMapper, defaultApiKey, defaultBaseUrl, defaultModel, OpenAiResponsesAgentToolGateway::invokeSdk);
@@ -73,7 +81,7 @@ public class OpenAiResponsesAgentToolGateway implements AiToolCallingProvider {
             OpenAiExchange exchange) {
         this.objectMapper = objectMapper == null ? new ObjectMapper() : objectMapper;
         this.defaultApiKey = trimToNull(defaultApiKey);
-        this.defaultBaseUrl = trimToNull(defaultBaseUrl);
+        this.defaultBaseUrl = normalizeBaseUrl(defaultBaseUrl);
         this.defaultModel = StringUtils.hasText(defaultModel) ? defaultModel.trim() : DEFAULT_MODEL;
         this.exchange = Objects.requireNonNull(exchange, "exchange is required");
     }
@@ -108,22 +116,63 @@ public class OpenAiResponsesAgentToolGateway implements AiToolCallingProvider {
             AgentModelTurnRequest request,
             String model,
             AiCallConfig callConfig) {
+        List<AgentConversationItem> conversation = request.conversation() == null
+                ? List.of()
+                : request.conversation();
+        List<ResponseInputItem> inputItems = toInputItems(conversation);
+
         ResponseCreateParams.Builder builder = ResponseCreateParams.builder()
                 .model(model)
-                .inputOfResponse(toInputItems(request.conversation()));
+                .store(false)
+                .inputOfResponse(inputItems);
         if (StringUtils.hasText(request.systemInstruction())) {
             builder.instructions(request.systemInstruction());
         }
-        if (callConfig != null && callConfig.getTemperature() != null) {
+        if (callConfig != null && callConfig.getTemperature() != null && !isReasoningModel(model)) {
             builder.temperature(callConfig.getTemperature());
         }
         if (callConfig != null && callConfig.getMaxTokens() != null) {
             builder.maxOutputTokens(callConfig.getMaxTokens().longValue());
         }
-        for (AgentToolDeclaration tool : request.tools()) {
-            builder.addTool(toFunctionTool(tool));
+        if (!request.tools().isEmpty()) {
+            for (AgentToolDeclaration tool : request.tools()) {
+                builder.addTool(toFunctionTool(tool));
+            }
+            if (request.disableToolCalling()) {
+                builder.toolChoice(ToolChoiceOptions.NONE);
+            }
         }
         return builder.build();
+    }
+
+    static String normalizeBaseUrl(String raw) {
+        String trimmed = trimToNull(raw);
+        if (trimmed == null) {
+            return null;
+        }
+        String withoutTrailingSlash = trimmed.replaceAll("/+$", "");
+        try {
+            URI uri = URI.create(withoutTrailingSlash);
+            String host = uri.getHost();
+            String path = uri.getPath();
+            if ("api.openai.com".equalsIgnoreCase(host) && (path == null || path.isEmpty())) {
+                return withoutTrailingSlash + "/v1";
+            }
+        } catch (IllegalArgumentException ignored) {
+            // Keep caller-supplied URI if non-standard
+        }
+        return withoutTrailingSlash;
+    }
+
+    private static boolean isReasoningModel(String model) {
+        if (!StringUtils.hasText(model)) {
+            return false;
+        }
+        String lower = model.trim().toLowerCase(java.util.Locale.ROOT);
+        return lower.startsWith("o1")
+                || lower.startsWith("o3")
+                || lower.startsWith("o4")
+                || lower.startsWith("gpt-5");
     }
 
     private List<ResponseInputItem> toInputItems(List<AgentConversationItem> conversation) {
@@ -235,6 +284,9 @@ public class OpenAiResponsesAgentToolGateway implements AiToolCallingProvider {
                 .map(this::toUsage)
                 .orElse(AgentTokenUsage.ZERO);
         String finishReason = response.status().map(Object::toString).orElse("completed");
+        Map<String, Object> opaqueState = StringUtils.hasText(response.id())
+                ? Map.of("previousResponseId", response.id())
+                : Map.of();
         return new AgentModelTurnResponse(
                 PROVIDER_ID,
                 model,
@@ -243,7 +295,7 @@ public class OpenAiResponsesAgentToolGateway implements AiToolCallingProvider {
                 usage,
                 finishReason,
                 response.id(),
-                Map.of());
+                opaqueState);
     }
 
     private AgentTokenUsage toUsage(ResponseUsage usage) {
@@ -258,7 +310,9 @@ public class OpenAiResponsesAgentToolGateway implements AiToolCallingProvider {
             Map<String, Object> parsed = objectMapper.readValue(json, MAP_TYPE);
             return parsed == null ? Map.of() : parsed;
         } catch (Exception ex) {
-            return Map.of("_rawArguments", json);
+            return Map.of(
+                    "_argumentParseError", "Invalid tool arguments JSON",
+                    "_rawArguments", json);
         }
     }
 
@@ -275,18 +329,47 @@ public class OpenAiResponsesAgentToolGateway implements AiToolCallingProvider {
             String baseUrl,
             Integer timeoutSeconds,
             ResponseCreateParams params) {
-        OpenAIOkHttpClient.Builder clientBuilder = OpenAIOkHttpClient.builder().apiKey(apiKey);
-        if (StringUtils.hasText(baseUrl)) {
-            clientBuilder.baseUrl(baseUrl);
+        ClientKey key = new ClientKey(
+                apiKey,
+                StringUtils.hasText(baseUrl) ? baseUrl.trim() : "",
+                timeoutSeconds);
+        OpenAIClient cached = CLIENT_CACHE.get(key);
+        if (cached != null) {
+            return cached.responses().create(params);
         }
-        if (timeoutSeconds != null && timeoutSeconds > 0) {
-            clientBuilder.timeout(Duration.ofSeconds(timeoutSeconds));
-        }
-        OpenAIClient client = clientBuilder.build();
-        try {
+        if (CLIENT_CACHE.size() < MAX_CACHED_CLIENTS) {
+            OpenAIClient client = CLIENT_CACHE.computeIfAbsent(key, OpenAiResponsesAgentToolGateway::buildClient);
             return client.responses().create(params);
+        }
+        OpenAIClient transientClient = buildClient(key);
+        try {
+            return transientClient.responses().create(params);
         } finally {
-            client.close();
+            transientClient.close();
+        }
+    }
+
+    private static OpenAIClient buildClient(ClientKey key) {
+        OpenAIOkHttpClient.Builder clientBuilder = OpenAIOkHttpClient.builder().apiKey(key.apiKey());
+        if (StringUtils.hasText(key.baseUrl())) {
+            clientBuilder.baseUrl(key.baseUrl());
+        }
+        if (key.timeoutSeconds() != null && key.timeoutSeconds() > 0) {
+            clientBuilder.timeout(Duration.ofSeconds(key.timeoutSeconds()));
+        }
+        return clientBuilder.build();
+    }
+
+    @PreDestroy
+    void closeCachedClients() {
+        List<OpenAIClient> snapshot = new ArrayList<>(CLIENT_CACHE.values());
+        CLIENT_CACHE.clear();
+        for (OpenAIClient client : snapshot) {
+            try {
+                client.close();
+            } catch (Exception ignored) {
+                // ignore shutdown cleanup noise
+            }
         }
     }
 

@@ -46,6 +46,9 @@ public class SecurityContextAgentThreadContextPropagator
             return null;
         }
         Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+        if (auth == null && request != null && request.getUserPrincipal() instanceof Authentication requestAuth) {
+            auth = requestAuth;
+        }
         if (auth == null) {
             return current;
         }

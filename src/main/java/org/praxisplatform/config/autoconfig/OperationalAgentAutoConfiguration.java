@@ -1,42 +1,61 @@
 package org.praxisplatform.config.autoconfig;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import jakarta.validation.Validator;
 import java.util.List;
+import org.praxisplatform.config.ai.agent.bridge.ConfigDomainRuleKnowledgeContributor;
 import org.praxisplatform.config.ai.agent.bridge.DefaultMetadataGovernanceAgentAuthorizationBridge;
 import org.praxisplatform.config.ai.agent.bridge.MetadataStarterInProcessAgentBridge;
 import org.praxisplatform.config.ai.agent.model.AiToolCallingProvider;
 import org.praxisplatform.config.ai.agent.provider.GoogleGenAiAgentToolGateway;
 import org.praxisplatform.config.ai.agent.provider.OpenAiResponsesAgentToolGateway;
 import org.praxisplatform.config.ai.agent.provider.RoutingAiToolCallingProvider;
+import org.praxisplatform.config.ai.agent.runtime.OperationalAgentProposalService;
 import org.praxisplatform.config.ai.agent.runtime.OperationalAgentTurnStreamService;
 import org.praxisplatform.config.ai.agent.runtime.OperationalAssistantBlockComposer;
 import org.praxisplatform.config.ai.agent.runtime.PraxisOperationalAgentLoop;
 import org.praxisplatform.config.ai.agent.runtime.SecurityContextAgentThreadContextPropagator;
 import org.praxisplatform.config.ai.agent.spi.AgentActionAffordanceContributor;
+import org.praxisplatform.config.ai.agent.spi.AgentActionPreparationContributor;
 import org.praxisplatform.config.ai.agent.spi.AgentAuthorizationBridge;
 import org.praxisplatform.config.ai.agent.spi.AgentEntityCatalogContributor;
 import org.praxisplatform.config.ai.agent.spi.AgentExecutionContextCustomizer;
+import org.praxisplatform.config.ai.agent.spi.AgentKnowledgeSearchContributor;
 import org.praxisplatform.config.ai.agent.spi.AgentProactiveAlertContributor;
 import org.praxisplatform.config.ai.agent.spi.AgentResourceExecutionBridge;
 import org.praxisplatform.config.ai.agent.spi.AgentThreadContextPropagator;
 import org.praxisplatform.config.ai.agent.spi.AgentTopicContributor;
 import org.praxisplatform.config.ai.agent.spi.CompositeAgentThreadContextPropagator;
+import org.praxisplatform.config.ai.agent.tools.AggregateResourceStatsTool;
 import org.praxisplatform.config.ai.agent.tools.DiscoverTopicResourcesAndSchemasTool;
+import org.praxisplatform.config.ai.agent.tools.ExplainCalculationMemoryTool;
 import org.praxisplatform.config.ai.agent.tools.GetEntity360DossierTool;
 import org.praxisplatform.config.ai.agent.tools.OperationalAgentTool;
+import org.praxisplatform.config.ai.agent.tools.PrepareActionOrMutationTool;
+import org.praxisplatform.config.ai.agent.tools.PrepareBulkOperationTool;
 import org.praxisplatform.config.ai.agent.tools.QueryResourceRecordsTool;
 import org.praxisplatform.config.ai.agent.tools.SearchAndResolveEntitiesTool;
+import org.praxisplatform.config.ai.agent.tools.SearchDomainKnowledgeAndRulesTool;
+import org.praxisplatform.config.ai.agent.tools.SimulateDeterminationOrRulesTool;
 import org.praxisplatform.config.controller.OperationalAgentController;
+import org.praxisplatform.config.repository.AiAgentActionProposalRepository;
+import org.praxisplatform.config.repository.DomainRuleDefinitionRepository;
 import org.praxisplatform.config.service.AiPrincipalContextResolver;
 import org.praxisplatform.config.service.AiProviderManagementService;
 import org.praxisplatform.config.service.AiStreamAccessTokenService;
 import org.praxisplatform.config.service.AiThreadService;
 import org.praxisplatform.config.service.AiTurnEventService;
 import org.praxisplatform.config.service.AiTurnService;
+import org.praxisplatform.config.tx.ConfigTransactionManagerNames;
 import org.praxisplatform.uischema.action.ActionCatalogService;
+import org.praxisplatform.uischema.action.ActionDefinitionRegistry;
 import org.praxisplatform.uischema.capability.CapabilityService;
+import org.praxisplatform.uischema.concurrency.ResourceVersionEtagService;
+import org.praxisplatform.uischema.concurrency.ResourceVersionScopeProvider;
 import org.praxisplatform.uischema.controller.base.AbstractResourceQueryController;
+import org.praxisplatform.uischema.fact.ResourceFactCatalogProvider;
 import org.praxisplatform.uischema.surface.SurfaceCatalogService;
+import org.praxisplatform.uischema.surface.SurfaceDefinitionRegistry;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
@@ -46,6 +65,8 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.boot.autoconfigure.data.jpa.JpaRepositoriesAutoConfiguration;
+import org.springframework.boot.autoconfigure.orm.jpa.HibernateJpaAutoConfiguration;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Primary;
@@ -58,7 +79,13 @@ import org.springframework.transaction.PlatformTransactionManager;
  * ponte em processo {@code praxis-metadata-starter}, cofre efemero de PII Mod-11 e SSE idempotente.
  */
 @AutoConfiguration
-@AutoConfigureAfter(AgenticAuthoringAutoConfiguration.class)
+@AutoConfigureAfter({
+        AgenticAuthoringAutoConfiguration.class,
+        ConfigDataSourceIsolationAutoConfiguration.class,
+        HibernateJpaAutoConfiguration.class,
+        JpaRepositoriesAutoConfiguration.class,
+        ConfigTransactionManagerAliasAutoConfiguration.class
+})
 @ConditionalOnProperty(prefix = "praxis.ai.agent", name = "enabled", havingValue = "true", matchIfMissing = true)
 public class OperationalAgentAutoConfiguration {
 
@@ -78,9 +105,10 @@ public class OperationalAgentAutoConfiguration {
     static class MetadataStarterBridgeConfiguration {
 
         @Bean
-        @ConditionalOnMissingBean(AgentAuthorizationBridge.class)
-        public AgentAuthorizationBridge defaultMetadataGovernanceAgentAuthorizationBridge() {
-            return new DefaultMetadataGovernanceAgentAuthorizationBridge();
+        @ConditionalOnMissingBean(DefaultMetadataGovernanceAgentAuthorizationBridge.class)
+        public DefaultMetadataGovernanceAgentAuthorizationBridge defaultMetadataGovernanceAgentAuthorizationBridge(
+                ObjectProvider<AbstractResourceQueryController<?, ?, ?>> controllers) {
+            return new DefaultMetadataGovernanceAgentAuthorizationBridge(controllers.orderedStream().toList());
         }
 
         @Bean
@@ -94,6 +122,13 @@ public class OperationalAgentAutoConfiguration {
                 ObjectProvider<CapabilityService> capabilityService,
                 ObjectProvider<ActionCatalogService> actionCatalogService,
                 ObjectProvider<SurfaceCatalogService> surfaceCatalogService,
+                ObjectProvider<SurfaceDefinitionRegistry> surfaceDefinitionRegistry,
+                ObjectProvider<ResourceFactCatalogProvider> factCatalogProviders,
+                ObjectProvider<ActionDefinitionRegistry> actionDefinitionRegistry,
+                ObjectProvider<ResourceVersionEtagService> resourceVersionEtagService,
+                ObjectProvider<ResourceVersionScopeProvider> resourceVersionScopeProvider,
+                ObjectProvider<Validator> validatorProvider,
+                ObjectProvider<AgentActionPreparationContributor> preparationContributors,
                 AgentAuthorizationBridge authorizationBridge,
                 @Qualifier("mvcConversionService") ObjectProvider<ConversionService> mvcConversionService,
                 ObjectProvider<ConversionService> fallbackConversionService,
@@ -115,7 +150,14 @@ public class OperationalAgentAutoConfiguration {
                     conversionService,
                     objectMapperProvider.getIfAvailable(),
                     transactionManager.getIfAvailable(),
-                    actionContributors.orderedStream().toList());
+                    actionContributors.orderedStream().toList(),
+                    surfaceDefinitionRegistry.getIfAvailable(),
+                    factCatalogProviders.orderedStream().toList(),
+                    actionDefinitionRegistry.getIfAvailable(),
+                    resourceVersionEtagService.getIfAvailable(),
+                    resourceVersionScopeProvider.getIfAvailable(),
+                    validatorProvider.getIfAvailable(),
+                    preparationContributors.orderedStream().toList());
         }
     }
 
@@ -135,7 +177,7 @@ public class OperationalAgentAutoConfiguration {
     @ConditionalOnMissingBean
     public OpenAiResponsesAgentToolGateway openAiResponsesAgentToolGateway(
             ObjectProvider<ObjectMapper> objectMapperProvider,
-            @Value("${spring.ai.openai.api-key:}") String apiKey,
+            @Value("${spring.ai.openai.api-key:${OPENAI_API_KEY:}}") String apiKey,
             @Value("${spring.ai.openai.base-url:}") String baseUrl,
             @Value("${spring.ai.openai.chat.options.model:gpt-4o-mini}") String model) {
         return new OpenAiResponsesAgentToolGateway(
@@ -197,17 +239,101 @@ public class OperationalAgentAutoConfiguration {
     }
 
     @Bean
+    @ConditionalOnBean(AgentResourceExecutionBridge.class)
+    @ConditionalOnMissingBean(AggregateResourceStatsTool.class)
+    public AggregateResourceStatsTool aggregateResourceStatsTool(AgentResourceExecutionBridge bridge) {
+        return new AggregateResourceStatsTool(bridge);
+    }
+
+    @Bean
+    @ConditionalOnBean(AgentResourceExecutionBridge.class)
+    @ConditionalOnMissingBean(ExplainCalculationMemoryTool.class)
+    public ExplainCalculationMemoryTool explainCalculationMemoryTool(AgentResourceExecutionBridge bridge) {
+        return new ExplainCalculationMemoryTool(bridge);
+    }
+
+    @Bean
+    @ConditionalOnBean(DomainRuleDefinitionRepository.class)
+    @ConditionalOnMissingBean(ConfigDomainRuleKnowledgeContributor.class)
+    public ConfigDomainRuleKnowledgeContributor configDomainRuleKnowledgeContributor(
+            DomainRuleDefinitionRepository repository,
+            @Qualifier(ConfigTransactionManagerNames.CONFIG) ObjectProvider<PlatformTransactionManager> configTxManager,
+            ObjectProvider<PlatformTransactionManager> fallbackTxManager) {
+        PlatformTransactionManager txManager = configTxManager.getIfAvailable();
+        if (txManager == null) {
+            txManager = fallbackTxManager.getIfAvailable();
+        }
+        return new ConfigDomainRuleKnowledgeContributor(repository, txManager);
+    }
+
+    @Bean
+    @ConditionalOnMissingBean(SearchDomainKnowledgeAndRulesTool.class)
+    public SearchDomainKnowledgeAndRulesTool searchDomainKnowledgeAndRulesTool(
+            ObjectProvider<AgentKnowledgeSearchContributor> knowledgeContributors) {
+        return new SearchDomainKnowledgeAndRulesTool(knowledgeContributors.orderedStream().toList());
+    }
+
+    @Bean
+    @ConditionalOnBean(AgentResourceExecutionBridge.class)
+    @ConditionalOnMissingBean(SimulateDeterminationOrRulesTool.class)
+    public SimulateDeterminationOrRulesTool simulateDeterminationOrRulesTool(AgentResourceExecutionBridge bridge) {
+        return new SimulateDeterminationOrRulesTool(bridge);
+    }
+
+    @Bean
+    @ConditionalOnBean({AiAgentActionProposalRepository.class, AgentResourceExecutionBridge.class})
+    @ConditionalOnMissingBean(OperationalAgentProposalService.class)
+    public OperationalAgentProposalService operationalAgentProposalService(
+            AiAgentActionProposalRepository proposalRepository,
+            AgentResourceExecutionBridge bridge,
+            ObjectProvider<AgentExecutionContextCustomizer> contextCustomizers,
+            @Qualifier(ConfigTransactionManagerNames.CONFIG) ObjectProvider<PlatformTransactionManager> configTxManager,
+            ObjectProvider<PlatformTransactionManager> fallbackTxManager,
+            ObjectProvider<ObjectMapper> objectMapperProvider,
+            @Value("${praxis.ai.agent.proposal-ttl-seconds:900}") long proposalTtlSeconds,
+            @Value("${praxis.ai.agent.proposal-retention-seconds:86400}") long proposalRetentionSeconds) {
+        PlatformTransactionManager txManager = configTxManager.getIfAvailable();
+        if (txManager == null) {
+            txManager = fallbackTxManager.getIfAvailable();
+        }
+        return new OperationalAgentProposalService(
+                proposalRepository,
+                bridge,
+                contextCustomizers.orderedStream().toList(),
+                txManager,
+                objectMapperProvider.getIfAvailable(),
+                proposalTtlSeconds,
+                proposalRetentionSeconds);
+    }
+
+    @Bean
+    @ConditionalOnBean(OperationalAgentProposalService.class)
+    @ConditionalOnMissingBean(PrepareActionOrMutationTool.class)
+    public PrepareActionOrMutationTool prepareActionOrMutationTool(OperationalAgentProposalService proposalService) {
+        return new PrepareActionOrMutationTool(proposalService);
+    }
+
+    @Bean
+    @ConditionalOnBean(OperationalAgentProposalService.class)
+    @ConditionalOnMissingBean(PrepareBulkOperationTool.class)
+    public PrepareBulkOperationTool prepareBulkOperationTool(OperationalAgentProposalService proposalService) {
+        return new PrepareBulkOperationTool(proposalService);
+    }
+
+    @Bean
     @ConditionalOnMissingBean
     public PraxisOperationalAgentLoop praxisOperationalAgentLoop(
             AiToolCallingProvider aiToolCallingProvider,
             ObjectProvider<OperationalAgentTool> tools,
             OperationalAssistantBlockComposer blockComposer,
-            @Value("${praxis.ai.agent.max-iterations:6}") int maxIterations) {
+            @Value("${praxis.ai.agent.max-iterations:6}") int maxIterations,
+            ObjectProvider<AgentResourceExecutionBridge> bridgeProvider) {
         return new PraxisOperationalAgentLoop(
                 aiToolCallingProvider,
                 tools.orderedStream().toList(),
                 blockComposer,
-                maxIterations);
+                maxIterations,
+                bridgeProvider.getIfAvailable());
     }
 
     @Bean
@@ -242,8 +368,12 @@ public class OperationalAgentAutoConfiguration {
     public OperationalAgentController operationalAgentController(
             OperationalAgentTurnStreamService turnStreamService,
             AiPrincipalContextResolver principalContextResolver,
-            AiStreamAccessTokenService streamAccessTokenService) {
+            AiStreamAccessTokenService streamAccessTokenService,
+            ObjectProvider<OperationalAgentProposalService> proposalServiceProvider) {
         return new OperationalAgentController(
-                turnStreamService, principalContextResolver, streamAccessTokenService);
+                turnStreamService,
+                principalContextResolver,
+                streamAccessTokenService,
+                proposalServiceProvider.getIfAvailable());
     }
 }

@@ -13,7 +13,7 @@
 
     <groupId>io.github.codexrodrigues</groupId>
     <artifactId>praxis-config-starter</artifactId>
-    <version>0.1.0-rc.179</version>
+    <version>0.1.0-rc.181</version>
     <packaging>jar</packaging>
 
     <name>Praxis Config Starter</name>
@@ -51,7 +51,7 @@
         <lombok.version>1.18.30</lombok.version>
         <praxis-config-contracts.version>0.1.0-beta.7</praxis-config-contracts.version>
         <praxis-rules-engine.version>0.1.0-beta.20</praxis-rules-engine.version>
-        <praxis-metadata-starter.version>8.0.0-rc.193</praxis-metadata-starter.version>
+        <praxis-metadata-starter.version>8.0.0-rc.197</praxis-metadata-starter.version>
         <swagger-annotations.version>2.2.47</swagger-annotations.version>
         <swagger-core.version>2.2.47</swagger-core.version>
     </properties>

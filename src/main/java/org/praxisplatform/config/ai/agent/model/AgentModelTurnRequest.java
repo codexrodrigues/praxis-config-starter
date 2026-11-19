@@ -10,10 +10,19 @@ public record AgentModelTurnRequest(
         String systemInstruction,
         List<AgentConversationItem> conversation,
         List<AgentToolDeclaration> tools,
-        AiCallConfig callConfig
+        AiCallConfig callConfig,
+        boolean disableToolCalling
 ) {
     public AgentModelTurnRequest {
         conversation = conversation == null ? List.of() : List.copyOf(conversation);
         tools = tools == null ? List.of() : List.copyOf(tools);
+    }
+
+    public AgentModelTurnRequest(
+            String systemInstruction,
+            List<AgentConversationItem> conversation,
+            List<AgentToolDeclaration> tools,
+            AiCallConfig callConfig) {
+        this(systemInstruction, conversation, tools, callConfig, false);
     }
 }

@@ -5,7 +5,12 @@ import java.util.Collections;
 import java.util.List;
 import org.praxisplatform.config.ai.agent.spi.AgentEntityDossier;
 import org.praxisplatform.config.ai.agent.spi.AgentEntityMatch;
+import org.praxisplatform.config.ai.agent.spi.AgentEvaluatedCalculationMemory;
+import org.praxisplatform.config.ai.agent.spi.AgentKnowledgeDocument;
+import org.praxisplatform.config.ai.agent.spi.AgentPersistedActionProposal;
 import org.praxisplatform.config.ai.agent.spi.AgentQueryResult;
+import org.praxisplatform.config.ai.agent.spi.AgentSimulationPreview;
+import org.praxisplatform.config.ai.agent.spi.AgentStatsResult;
 
 /**
  * Armazena os artefatos autoritativos produzidos pelas ferramentas em um turno para composicao
@@ -24,6 +29,11 @@ public final class AgentTurnArtifactStore {
     private final List<AgentEntityMatch> lastSearchMatches = new ArrayList<>();
     private final List<AgentQueryResult> queryResults = new ArrayList<>();
     private final List<AgentEntityDossier> dossiers = new ArrayList<>();
+    private final List<AgentStatsResult> statsResults = new ArrayList<>();
+    private final List<AgentEvaluatedCalculationMemory> calculationMemories = new ArrayList<>();
+    private final List<AgentKnowledgeDocument> knowledgeCitations = new ArrayList<>();
+    private final List<AgentSimulationPreview> simulationPreviews = new ArrayList<>();
+    private final List<AgentPersistedActionProposal> actionProposals = new ArrayList<>();
     private final List<ToolExecutionTrace> traces = new ArrayList<>();
 
     public synchronized void recordSearchMatches(List<AgentEntityMatch> matches) {
@@ -61,6 +71,69 @@ public final class AgentTurnArtifactStore {
         dossiers.add(dossier);
     }
 
+    public synchronized void recordStatsResult(AgentStatsResult stats) {
+        if (stats != null) {
+            statsResults.add(stats);
+        }
+    }
+
+    public synchronized void recordCalculationMemory(AgentEvaluatedCalculationMemory memory) {
+        if (memory == null) {
+            return;
+        }
+        String key = memoryKey(memory);
+        for (int i = 0; i < calculationMemories.size(); i++) {
+            if (key.equalsIgnoreCase(memoryKey(calculationMemories.get(i)))) {
+                calculationMemories.set(i, memory);
+                return;
+            }
+        }
+        calculationMemories.add(memory);
+    }
+
+    public synchronized void recordKnowledgeCitations(List<AgentKnowledgeDocument> docs) {
+        if (docs == null || docs.isEmpty()) {
+            return;
+        }
+        for (AgentKnowledgeDocument doc : docs) {
+            if (doc == null || doc.docId() == null) {
+                continue;
+            }
+            boolean updated = false;
+            for (int i = 0; i < knowledgeCitations.size(); i++) {
+                if (doc.docId().equals(knowledgeCitations.get(i).docId())) {
+                    if (doc.score() >= knowledgeCitations.get(i).score()) {
+                        knowledgeCitations.set(i, doc);
+                    }
+                    updated = true;
+                    break;
+                }
+            }
+            if (!updated) {
+                knowledgeCitations.add(doc);
+            }
+        }
+    }
+
+    public synchronized void recordSimulationPreview(AgentSimulationPreview preview) {
+        if (preview != null) {
+            simulationPreviews.add(preview);
+        }
+    }
+
+    public synchronized void recordActionProposal(AgentPersistedActionProposal proposal) {
+        if (proposal == null || proposal.proposalId() == null) {
+            return;
+        }
+        for (int i = 0; i < actionProposals.size(); i++) {
+            if (proposal.proposalId().equals(actionProposals.get(i).proposalId())) {
+                actionProposals.set(i, proposal);
+                return;
+            }
+        }
+        actionProposals.add(proposal);
+    }
+
     public synchronized void recordTrace(String toolName, String description, long durationMs, int itemCount) {
         traces.add(new ToolExecutionTrace(toolName, description, durationMs, itemCount));
     }
@@ -77,7 +150,33 @@ public final class AgentTurnArtifactStore {
         return Collections.unmodifiableList(new ArrayList<>(dossiers));
     }
 
+    public synchronized List<AgentStatsResult> statsResults() {
+        return Collections.unmodifiableList(new ArrayList<>(statsResults));
+    }
+
+    public synchronized List<AgentEvaluatedCalculationMemory> calculationMemories() {
+        return Collections.unmodifiableList(new ArrayList<>(calculationMemories));
+    }
+
+    public synchronized List<AgentKnowledgeDocument> knowledgeCitations() {
+        return Collections.unmodifiableList(new ArrayList<>(knowledgeCitations));
+    }
+
+    public synchronized List<AgentSimulationPreview> simulationPreviews() {
+        return Collections.unmodifiableList(new ArrayList<>(simulationPreviews));
+    }
+
+    public synchronized List<AgentPersistedActionProposal> actionProposals() {
+        return Collections.unmodifiableList(new ArrayList<>(actionProposals));
+    }
+
     public synchronized List<ToolExecutionTrace> traces() {
         return Collections.unmodifiableList(new ArrayList<>(traces));
+    }
+
+    private static String memoryKey(AgentEvaluatedCalculationMemory memory) {
+        String ek = memory.entityKey() != null ? memory.entityKey().trim() : "";
+        String id = memory.entityId() != null ? memory.entityId().trim() : "";
+        return ek + "::" + id;
     }
 }
