@@ -160,6 +160,62 @@ class DomainCatalogScopeRepositoryPersistenceTest {
                 });
     }
 
+    @Test
+    void findsSupersededReleasesOnlyWithinSameServiceResourceTenantAndEnvironment() {
+        DomainCatalogRelease oldSameScope = release(
+                "praxis-service:human-resources.folhas-pagamento:old-hash",
+                "tenant-a",
+                "dev");
+        DomainCatalogRelease legacyNullResourceSameScope = DomainCatalogRelease.builder()
+                .id(UUID.randomUUID())
+                .releaseKey("praxis-service:human-resources.folhas-pagamento:legacy-hash")
+                .schemaVersion("praxis.domain-catalog/v0.2")
+                .serviceKey("praxis-service")
+                .resourceKey(null)
+                .sourceHash("legacy-hash")
+                .tenantId("tenant-a")
+                .environment("dev")
+                .rawPayload("{}")
+                .createdAt(Instant.now())
+                .build();
+        DomainCatalogRelease activeSameScope = release(
+                "praxis-service:human-resources.folhas-pagamento:new-hash",
+                "tenant-a",
+                "dev");
+        DomainCatalogRelease otherResource = DomainCatalogRelease.builder()
+                .id(UUID.randomUUID())
+                .releaseKey("praxis-service:operations.missoes:old-hash")
+                .schemaVersion("praxis.domain-catalog/v0.2")
+                .serviceKey("praxis-service")
+                .resourceKey("operations.missoes")
+                .sourceHash("other-hash")
+                .tenantId("tenant-a")
+                .environment("dev")
+                .rawPayload("{}")
+                .createdAt(Instant.now())
+                .build();
+        DomainCatalogRelease otherTenant = release(
+                "praxis-service:human-resources.folhas-pagamento:old-hash",
+                "tenant-b",
+                "dev");
+
+        releaseRepository.saveAllAndFlush(List.of(
+                oldSameScope,
+                legacyNullResourceSameScope,
+                activeSameScope,
+                otherResource,
+                otherTenant));
+
+        assertThat(releaseRepository.findSupersededByScopeAndResource(
+                        "praxis-service",
+                        "human-resources.folhas-pagamento",
+                        "tenant-a",
+                        "dev",
+                        activeSameScope.getReleaseKey()))
+                .extracting(DomainCatalogRelease::getId)
+                .containsExactlyInAnyOrder(oldSameScope.getId(), legacyNullResourceSameScope.getId());
+    }
+
     private DomainCatalogRelease release(String releaseKey, String tenantId, String environment) {
         return DomainCatalogRelease.builder()
                 .id(UUID.randomUUID())

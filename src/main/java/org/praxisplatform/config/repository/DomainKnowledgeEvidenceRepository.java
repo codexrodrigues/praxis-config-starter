@@ -2,12 +2,23 @@ package org.praxisplatform.config.repository;
 
 import java.util.List;
 import java.util.UUID;
+import org.praxisplatform.config.domain.DomainCatalogRelease;
 import org.praxisplatform.config.domain.DomainKnowledgeEvidence;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
 public interface DomainKnowledgeEvidenceRepository extends JpaRepository<DomainKnowledgeEvidence, UUID> {
+
+    @Modifying
+    @Query("""
+        delete from DomainKnowledgeEvidence e
+        where e.sourceRelease in :sourceReleases
+          and e.status = 'active'
+          and e.revertedByChangeSetId is null
+    """)
+    void deleteBySourceReleaseIn(@Param("sourceReleases") List<DomainCatalogRelease> sourceReleases);
 
     List<DomainKnowledgeEvidence> findByTenantIdAndEnvironmentAndSubjectTypeAndSubjectId(
             String tenantId,

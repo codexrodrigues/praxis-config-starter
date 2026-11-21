@@ -14,7 +14,8 @@ import org.praxisplatform.config.repository.projection.DomainCatalogItemSummary;
 public interface DomainCatalogItemRepository extends JpaRepository<DomainCatalogItem, UUID> {
 
     @Modifying
-    void deleteByRelease(DomainCatalogRelease release);
+    @Query("delete from DomainCatalogItem i where i.release = :release")
+    void deleteByRelease(@Param("release") DomainCatalogRelease release);
 
     List<DomainCatalogItem> findByRelease(DomainCatalogRelease release);
 

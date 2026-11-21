@@ -59,4 +59,19 @@ public interface DomainCatalogReleaseRepository extends JpaRepository<DomainCata
             @Param("tenantId") String tenantId,
             @Param("environment") String environment,
             Pageable pageable);
+
+    @Query("""
+        select r from DomainCatalogRelease r
+        where r.serviceKey = :serviceKey
+          and (r.resourceKey = :resourceKey or (r.resourceKey is null and r.releaseKey like concat(:serviceKey, ':', :resourceKey, ':%')))
+          and ((:tenantId is null and r.tenantId is null) or r.tenantId = :tenantId)
+          and ((:environment is null and r.environment is null) or r.environment = :environment)
+          and r.releaseKey <> :activeReleaseKey
+    """)
+    List<DomainCatalogRelease> findSupersededByScopeAndResource(
+            @Param("serviceKey") String serviceKey,
+            @Param("resourceKey") String resourceKey,
+            @Param("tenantId") String tenantId,
+            @Param("environment") String environment,
+            @Param("activeReleaseKey") String activeReleaseKey);
 }

@@ -433,6 +433,37 @@ class DomainKnowledgeProjectionServiceTest {
                 .satisfies(relationship -> assertThat(relationship.getRelationshipType()).isEqualTo("governed_by"));
     }
 
+    @Test
+    void deletesEvidenceLinkedToSupersededCatalogReleases() {
+        DomainKnowledgeConceptRepository conceptRepository = mock(DomainKnowledgeConceptRepository.class);
+        DomainKnowledgeAliasRepository aliasRepository = mock(DomainKnowledgeAliasRepository.class);
+        DomainKnowledgeBindingRepository bindingRepository = mock(DomainKnowledgeBindingRepository.class);
+        DomainKnowledgeRelationshipRepository relationshipRepository = mock(DomainKnowledgeRelationshipRepository.class);
+        DomainKnowledgeEvidenceRepository evidenceRepository = mock(DomainKnowledgeEvidenceRepository.class);
+        DomainKnowledgeProjectionService service = new DomainKnowledgeProjectionService(
+                conceptRepository,
+                aliasRepository,
+                bindingRepository,
+                relationshipRepository,
+                evidenceRepository,
+                objectMapper);
+
+        DomainCatalogRelease oldRelease = DomainCatalogRelease.builder()
+                .releaseKey("praxis-service:human-resources.folhas-pagamento:old-hash")
+                .schemaVersion("praxis.domain-catalog/v0.2")
+                .tenantId("tenant-a")
+                .environment("dev")
+                .build();
+
+        service.deleteEvidenceForSupersededReleases(List.of());
+        verify(evidenceRepository, never()).deleteBySourceReleaseIn(any());
+
+        service.deleteEvidenceForSupersededReleases(List.of(oldRelease));
+        var inOrder = org.mockito.Mockito.inOrder(evidenceRepository);
+        inOrder.verify(evidenceRepository).flush();
+        inOrder.verify(evidenceRepository).deleteBySourceReleaseIn(List.of(oldRelease));
+    }
+
     private DomainCatalogItem item(
             DomainCatalogRelease release,
             String itemType,

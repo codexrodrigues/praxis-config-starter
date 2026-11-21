@@ -5,11 +5,13 @@ import static org.assertj.core.api.Assertions.assertThat;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
+import jakarta.persistence.EntityManager;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.praxisplatform.config.PraxisConfigStarterApplication;
 import org.praxisplatform.config.domain.DomainCatalogRelease;
 import org.praxisplatform.config.domain.DomainKnowledgeConcept;
+import org.praxisplatform.config.domain.DomainKnowledgeEvidence;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.jdbc.AutoConfigureTestDatabase;
 import org.springframework.boot.test.autoconfigure.orm.jpa.DataJpaTest;
@@ -38,6 +40,12 @@ class DomainKnowledgeConceptRepositoryPersistenceTest {
 
     @Autowired
     private DomainCatalogReleaseRepository releaseRepository;
+
+    @Autowired
+    private DomainKnowledgeEvidenceRepository evidenceRepository;
+
+    @Autowired
+    private EntityManager entityManager;
 
     @Test
     void governedProjectKnowledgeCandidatesApplyStatusVisibilityScopeAndSourceReleaseFilters() {
@@ -122,6 +130,97 @@ class DomainKnowledgeConceptRepositoryPersistenceTest {
         assertThat(results)
                 .extracting(DomainKnowledgeConcept::getConceptKey)
                 .containsExactly("human-resources.context");
+    }
+
+    @Test
+    void bulkDeleteBySourceReleaseRemovesOnlyActiveNonRevertedEvidenceOfSupersededReleases() {
+        DomainCatalogRelease oldRelease = releaseRepository.saveAndFlush(DomainCatalogRelease.builder()
+                .id(UUID.randomUUID())
+                .releaseKey("quickstart:human-resources:old")
+                .schemaVersion("praxis.domain-catalog/v0.2")
+                .tenantId("tenant-a")
+                .environment("dev")
+                .rawPayload("{}")
+                .createdAt(Instant.now())
+                .build());
+        DomainCatalogRelease currentRelease = releaseRepository.saveAndFlush(DomainCatalogRelease.builder()
+                .id(UUID.randomUUID())
+                .releaseKey("quickstart:human-resources:current")
+                .schemaVersion("praxis.domain-catalog/v0.2")
+                .tenantId("tenant-a")
+                .environment("dev")
+                .rawPayload("{}")
+                .createdAt(Instant.now())
+                .build());
+        UUID subjectId = UUID.randomUUID();
+        UUID changeSetId = UUID.randomUUID();
+
+        DomainKnowledgeEvidence oldActive = DomainKnowledgeEvidence.builder()
+                .id(UUID.randomUUID())
+                .tenantId("tenant-a")
+                .environment("dev")
+                .evidenceKey("catalog-release:old:node")
+                .subjectType("concept")
+                .subjectId(subjectId)
+                .evidenceType("catalog_release")
+                .sourceRelease(oldRelease)
+                .status("active")
+                .payload("{}")
+                .createdAt(Instant.now())
+                .build();
+        DomainKnowledgeEvidence oldReverted = DomainKnowledgeEvidence.builder()
+                .id(UUID.randomUUID())
+                .tenantId("tenant-a")
+                .environment("dev")
+                .evidenceKey("catalog-release:old:reverted")
+                .subjectType("concept")
+                .subjectId(subjectId)
+                .evidenceType("catalog_release")
+                .sourceRelease(oldRelease)
+                .status("reverted")
+                .revertedByChangeSetId(changeSetId)
+                .payload("{}")
+                .createdAt(Instant.now())
+                .build();
+        DomainKnowledgeEvidence oldWithChangeSet = DomainKnowledgeEvidence.builder()
+                .id(UUID.randomUUID())
+                .tenantId("tenant-a")
+                .environment("dev")
+                .evidenceKey("catalog-release:old:changeset-bound")
+                .subjectType("concept")
+                .subjectId(subjectId)
+                .evidenceType("catalog_release")
+                .sourceRelease(oldRelease)
+                .status("active")
+                .revertedByChangeSetId(changeSetId)
+                .payload("{}")
+                .createdAt(Instant.now())
+                .build();
+        DomainKnowledgeEvidence currentActive = DomainKnowledgeEvidence.builder()
+                .id(UUID.randomUUID())
+                .tenantId("tenant-a")
+                .environment("dev")
+                .evidenceKey("catalog-release:current:node")
+                .subjectType("concept")
+                .subjectId(subjectId)
+                .evidenceType("catalog_release")
+                .sourceRelease(currentRelease)
+                .status("active")
+                .payload("{}")
+                .createdAt(Instant.now())
+                .build();
+
+        evidenceRepository.saveAllAndFlush(List.of(oldActive, oldReverted, oldWithChangeSet, currentActive));
+        evidenceRepository.deleteBySourceReleaseIn(List.of(oldRelease));
+        entityManager.flush();
+        entityManager.clear();
+
+        assertThat(evidenceRepository.findAll())
+                .extracting(DomainKnowledgeEvidence::getEvidenceKey)
+                .containsExactlyInAnyOrder(
+                        "catalog-release:old:reverted",
+                        "catalog-release:old:changeset-bound",
+                        "catalog-release:current:node");
     }
 
     private DomainKnowledgeConcept concept(

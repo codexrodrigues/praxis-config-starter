@@ -355,6 +355,9 @@ public class DomainCatalogIngestionService {
                 }
                 reconcileRagPublicationAfterPersistence(release, existingItems);
             }
+            if (existingItemCount > 0L) {
+                pruneSupersededReleases(release);
+            }
             log.info(
                     "Skipped domain catalog release {} because sourceHash {} is already ingested",
                     release.getReleaseKey(),
@@ -393,6 +396,9 @@ public class DomainCatalogIngestionService {
         if (domainKnowledgeProjectionService != null) {
             domainKnowledgeProjectionService.project(release, items);
         }
+        if (!items.isEmpty()) {
+            pruneSupersededReleases(release);
+        }
         if (domainCatalogRagPublicationEnabled) {
             if (ragPublicationStateService != null) {
                 releaseRepository.flush();
@@ -405,6 +411,58 @@ public class DomainCatalogIngestionService {
 
         log.info("Ingested domain catalog release {} with {} item(s)", release.getReleaseKey(), items.size());
         return new DomainCatalogIngestionResponse(release.getId(), release.getReleaseKey(), items.size());
+    }
+
+    private void pruneSupersededReleases(DomainCatalogRelease activeRelease) {
+        if (activeRelease == null) {
+            return;
+        }
+        String serviceKey = normalize(activeRelease.getServiceKey());
+        String resourceKey = effectiveResourceKey(activeRelease);
+        String releaseKey = normalize(activeRelease.getReleaseKey());
+        if (!StringUtils.hasText(serviceKey)
+                || !StringUtils.hasText(resourceKey)
+                || !StringUtils.hasText(releaseKey)) {
+            return;
+        }
+        List<DomainCatalogRelease> superseded = releaseRepository.findSupersededByScopeAndResource(
+                serviceKey,
+                resourceKey,
+                normalize(activeRelease.getTenantId()),
+                normalize(activeRelease.getEnvironment()),
+                releaseKey);
+        if (superseded == null || superseded.isEmpty()) {
+            return;
+        }
+        if (domainKnowledgeProjectionService != null) {
+            domainKnowledgeProjectionService.deleteEvidenceForSupersededReleases(superseded);
+        }
+        for (DomainCatalogRelease oldRelease : superseded) {
+            itemRepository.deleteByRelease(oldRelease);
+        }
+        releaseRepository.deleteAll(superseded);
+        log.info(
+                "Pruned {} superseded domain catalog release(s) for serviceKey={}, resourceKey={}, tenant={}, environment={} after activating {}",
+                superseded.size(),
+                serviceKey,
+                resourceKey,
+                activeRelease.getTenantId(),
+                activeRelease.getEnvironment(),
+                releaseKey);
+    }
+
+    private String effectiveResourceKey(DomainCatalogRelease release) {
+        if (release == null) {
+            return null;
+        }
+        String explicit = normalize(release.getResourceKey());
+        if (StringUtils.hasText(explicit)) {
+            return explicit;
+        }
+        if (hasStructuredResourceReleaseKey(release.getReleaseKey())) {
+            return normalize(resourceKeyFromReleaseKey(release.getReleaseKey()));
+        }
+        return null;
     }
 
     private void publishReleaseChanged(DomainCatalogRelease release) {

@@ -2479,4 +2479,52 @@ class DomainCatalogIngestionServiceTest {
                 .satisfies(edge -> assertThat(edge.itemKey())
                         .isEqualTo("workforce.radar-ferias-prescricao.materializes.workforce.vinculos"));
     }
+
+    @Test
+    void prunesSupersededReleasesItemsAndEvidenceWhenNewReleaseIsIngestedForSameResource() throws Exception {
+        DomainCatalogReleaseRepository releaseRepository = mock(DomainCatalogReleaseRepository.class);
+        DomainCatalogItemRepository itemRepository = mock(DomainCatalogItemRepository.class);
+        RagVectorStoreService ragVectorStoreService = mock(RagVectorStoreService.class);
+        DomainKnowledgeProjectionService projectionService = mock(DomainKnowledgeProjectionService.class);
+        DomainCatalogIngestionService service = new DomainCatalogIngestionService(
+                releaseRepository,
+                itemRepository,
+                objectMapper,
+                ragVectorStoreService,
+                validationService(),
+                projectionService,
+                false,
+                false,
+                100,
+                event -> { });
+
+        DomainCatalogRelease oldRelease = DomainCatalogRelease.builder()
+                .id(UUID.fromString("a190c524-b67a-4cc0-b754-d652d7424e14"))
+                .releaseKey("praxis-api-quickstart:human-resources.folhas-pagamento:old-hash")
+                .schemaVersion("praxis.domain-catalog/v0.2")
+                .serviceKey("praxis-api-quickstart")
+                .resourceKey("human-resources.folhas-pagamento")
+                .tenantId("tenant-a")
+                .environment("dev")
+                .build();
+
+        when(releaseRepository.findByReleaseKeyAndScope("praxis-api-quickstart:test", "tenant-a", "dev"))
+                .thenReturn(Optional.empty());
+        when(releaseRepository.save(any(DomainCatalogRelease.class)))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+        when(itemRepository.saveAll(any())).thenAnswer(invocation -> invocation.getArgument(0));
+        when(releaseRepository.findSupersededByScopeAndResource(
+                "praxis-api-quickstart",
+                "human-resources.folhas-pagamento",
+                "tenant-a",
+                "dev",
+                "praxis-api-quickstart:test"))
+                .thenReturn(List.of(oldRelease));
+
+        service.ingest(sampleCatalog(), "tenant-a", "dev");
+
+        verify(projectionService).deleteEvidenceForSupersededReleases(List.of(oldRelease));
+        verify(itemRepository).deleteByRelease(oldRelease);
+        verify(releaseRepository).deleteAll(List.of(oldRelease));
+    }
 }

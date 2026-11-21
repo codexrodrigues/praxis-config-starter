@@ -44,3 +44,24 @@ CREATE TABLE domain_knowledge_concept (
   updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE domain_knowledge_evidence (
+  id UUID PRIMARY KEY,
+  tenant_id VARCHAR(128),
+  environment VARCHAR(128),
+  evidence_key VARCHAR(512) NOT NULL,
+  subject_type VARCHAR(64) NOT NULL,
+  subject_id UUID NOT NULL,
+  evidence_type VARCHAR(64) NOT NULL,
+  source_release_id UUID REFERENCES domain_catalog_release(id) ON DELETE SET NULL,
+  source_uri VARCHAR(1024),
+  source_pointer VARCHAR(1024),
+  status VARCHAR(32) NOT NULL DEFAULT 'active',
+  superseded_by_evidence_id UUID,
+  reverted_by_change_set_id UUID,
+  reverted_at TIMESTAMP WITH TIME ZONE,
+  revert_reason TEXT,
+  confidence DOUBLE PRECISION,
+  payload jsonb NOT NULL DEFAULT '{}',
+  created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+

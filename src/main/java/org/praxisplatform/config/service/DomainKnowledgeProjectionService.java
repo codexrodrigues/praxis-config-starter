@@ -66,6 +66,15 @@ public class DomainKnowledgeProjectionService {
         projectEvidence(release, items, conceptsByKey);
     }
 
+    @Transactional(transactionManager = ConfigTransactionManagerNames.CONFIG)
+    public void deleteEvidenceForSupersededReleases(List<DomainCatalogRelease> supersededReleases) {
+        if (supersededReleases == null || supersededReleases.isEmpty()) {
+            return;
+        }
+        evidenceRepository.flush();
+        evidenceRepository.deleteBySourceReleaseIn(supersededReleases);
+    }
+
     private Map<String, DomainKnowledgeConcept> projectConcepts(DomainCatalogRelease release, List<DomainCatalogItem> items) {
         Map<String, DomainKnowledgeConcept> existingConceptsByKey = existingConceptsByKey(release, items);
         Map<String, DomainKnowledgeConcept> conceptsByKey = new LinkedHashMap<>();
