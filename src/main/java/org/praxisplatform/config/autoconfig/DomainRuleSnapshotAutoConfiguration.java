@@ -45,7 +45,7 @@ import java.time.Clock;
 import java.time.Duration;
 
 /** Exposes the snapshot control plane when the host has enabled Config Starter persistence. */
-@AutoConfiguration
+@AutoConfiguration(after = {ConfigDataSourceIsolationAutoConfiguration.class, ConfigJdbcTemplateAutoConfiguration.class})
 @ConditionalOnBean({
   DomainRuleDefinitionRepository.class,
   DomainRuleDefinitionApprovalRepository.class,

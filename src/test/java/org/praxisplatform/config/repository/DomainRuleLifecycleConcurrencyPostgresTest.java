@@ -839,7 +839,9 @@ class DomainRuleLifecycleConcurrencyPostgresTest {
                     "V58__govern_policy_test_run_idempotency_and_baseline_lane.sql",
                     "V62__add_governed_color_palette_materialization.sql",
                     "V63__preserve_domain_rule_application_history.sql",
-                    "V78__add_domain_rule_workspace_draft_documentation.sql")) {
+                    "V78__allow_authorization_policy_definitions.sql",
+                    "V79__create_authz_policy_release_ledger.sql",
+                    "V80__add_domain_rule_workspace_draft_documentation.sql")) {
                 Files.copy(Path.of("src/main/resources/db/migration", name), migrations.resolve(name));
             }
             Flyway.configure().dataSource(postgres.getPostgresDatabase())

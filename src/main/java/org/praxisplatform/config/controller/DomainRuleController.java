@@ -1,5 +1,7 @@
 package org.praxisplatform.config.controller;
 
+import static org.praxisplatform.config.domain.DomainRuleDefinition.AUTHORIZATION_POLICY_RULE_TYPE;
+
 import jakarta.servlet.http.HttpServletRequest;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
@@ -310,7 +312,8 @@ public class DomainRuleController {
             DomainRuleDefinitionResponse definition, boolean canCreateVersion, boolean canPublish) {
         var actions = new java.util.ArrayList<String>();
         if (canCreateVersion) actions.add("CREATE_NEW_VERSION");
-        if (canPublish && ("approved".equals(definition.status())
+        if (canPublish && !AUTHORIZATION_POLICY_RULE_TYPE.equals(definition.ruleType())
+                && ("approved".equals(definition.status())
                 || "active".equals(definition.status()))) actions.add("PUBLISH");
         return List.copyOf(actions);
     }

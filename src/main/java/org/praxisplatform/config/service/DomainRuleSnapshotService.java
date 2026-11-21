@@ -1,5 +1,7 @@
 package org.praxisplatform.config.service;
 
+import static org.praxisplatform.config.domain.DomainRuleDefinition.AUTHORIZATION_POLICY_RULE_TYPE;
+
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
@@ -534,6 +536,9 @@ public class DomainRuleSnapshotService {
       if (refreshSources) entityRefresh.definition(source);
       if (!tenant.equals(source.getTenantId()) || !environment.equals(source.getEnvironment())) {
         throw badRequest("Every source definition must belong to the snapshot tenant and environment");
+      }
+      if (AUTHORIZATION_POLICY_RULE_TYPE.equals(source.getRuleType())) {
+        throw badRequest("Authorization policies cannot be sources for a BUSINESS RuleSet snapshot");
       }
       if (!PUBLISHABLE_STATUSES.contains(source.getStatus())) {
         throw badRequest("Every source definition must have an approved or active status");

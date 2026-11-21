@@ -40,6 +40,8 @@ import org.hibernate.annotations.ColumnTransformer;
 @AllArgsConstructor
 public class DomainRuleDefinition {
 
+  public static final String AUTHORIZATION_POLICY_RULE_TYPE = "authorization_policy";
+
   @Id
   private UUID id;
 

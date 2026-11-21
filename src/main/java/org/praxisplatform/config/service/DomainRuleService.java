@@ -1,10 +1,14 @@
 package org.praxisplatform.config.service;
 
+import static org.praxisplatform.config.domain.DomainRuleDefinition.AUTHORIZATION_POLICY_RULE_TYPE;
+
 import com.fasterxml.jackson.core.JsonPointer;
+import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
@@ -22,6 +26,7 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.regex.Pattern;
 import lombok.RequiredArgsConstructor;
+import org.praxisplatform.authz.contracts.policy.AuthorizationPolicyDefinition;
 import org.praxisplatform.config.domain.DomainCatalogRelease;
 import org.praxisplatform.config.domain.DomainKnowledgeChangeSet;
 import org.praxisplatform.config.domain.DomainRuleDefinition;
@@ -71,6 +76,11 @@ public class DomainRuleService {
             "draft", "pending_review", "applied", "failed", "superseded", "reverted");
     private static final List<String> INITIAL_MATERIALIZATION_STATUSES = List.of("draft", "pending_review");
     private static final List<String> COVERAGE_STATUSES = List.of("approved", "active");
+    private static final String OPA_TARGET_LAYER = "policy_engine";
+    private static final String OPA_ARTIFACT_TYPE = "opa-policy";
+    private static final String OPA_PUBLICATION_REQUIRED = "requires_opa_publication";
+    private static final String OPA_PUBLICATION_MESSAGE =
+            "Authorization policy activation and materialization require governed OPA publication";
     private static final String BACKEND_DETERMINATION_TARGET_LAYER = "backend_determination";
     private static final String REACTIVE_DETERMINATION_ARTIFACT_TYPE = "resource-reactive-determination";
     private static final String REACTIVE_DETERMINATION_TARGET_POINTER = "/determination";
@@ -124,24 +134,35 @@ public class DomainRuleService {
         requireText(request.ruleType(), "ruleType");
         requireText(request.resourceKey(), "resourceKey");
 
-        ObjectNode definition = request.definition() != null && request.definition().isObject()
-                ? request.definition().deepCopy()
-                : objectMapper.createObjectNode();
-        if (!StringUtils.hasText(definition.path("summary").asText(null))) {
-            definition.put("summary", request.prompt().trim());
-        }
-        definition.put("sourcePrompt", request.prompt().trim());
-        if (StringUtils.hasText(request.assistantMessage())) {
-            definition.put("assistantMessage", request.assistantMessage().trim());
+        String ruleType = request.ruleType().trim();
+        JsonNode definition = request.definition();
+        String ruleKey = normalize(request.ruleKey());
+        if (AUTHORIZATION_POLICY_RULE_TYPE.equals(ruleType)) {
+            if (ruleKey == null && definition != null) {
+                ruleKey = definition.path("policyId").asText(null);
+            }
+        } else {
+            if (ruleKey == null) {
+                ruleKey = deriveRuleKey(request.resourceKey(), ruleType);
+            }
+            ObjectNode enriched = definition != null && definition.isObject()
+                    ? definition.deepCopy()
+                    : objectMapper.createObjectNode();
+            if (!StringUtils.hasText(enriched.path("summary").asText(null))) {
+                enriched.put("summary", request.prompt().trim());
+            }
+            enriched.put("sourcePrompt", request.prompt().trim());
+            if (StringUtils.hasText(request.assistantMessage())) {
+                enriched.put("assistantMessage", request.assistantMessage().trim());
+            }
+            definition = enriched;
         }
 
         DomainRuleDefinitionResponse persisted = createDefinition(
                 new DomainRuleDefinitionRequest(
-                        StringUtils.hasText(request.ruleKey())
-                                ? request.ruleKey().trim()
-                                : deriveRuleKey(request.resourceKey(), request.ruleType()),
+                        ruleKey,
                         null,
-                        request.ruleType().trim(),
+                        ruleType,
                         "draft",
                         normalize(request.contextKey()),
                         request.resourceKey().trim(),
@@ -250,6 +271,7 @@ public class DomainRuleService {
         JsonNode requestedGovernance = request.governance();
         JsonNode requestedDefinition = validateAndNormalizeDocumentationUrls(request.definition());
         JsonNode requestedParameters = request.parameters();
+        validateAuthorizationPolicyDefinition(definition.getRuleType(), requestedDefinition);
         validateFactCatalog(requestedDefinition);
         requireDefinitionCreationGovernance(
                 request.ruleType().trim(),
@@ -264,8 +286,20 @@ public class DomainRuleService {
         definition.setServiceKey(normalize(request.serviceKey()));
         definition.setSemanticOwner(normalize(request.semanticOwner()));
         definition.setSteward(normalize(request.steward()));
-        definition.setSourceRelease(resolveRelease(request.sourceReleaseId()));
-        definition.setSourceChangeSet(resolveChangeSet(request.sourceChangeSetId()));
+        DomainCatalogRelease sourceRelease = resolveRelease(request.sourceReleaseId());
+        DomainKnowledgeChangeSet sourceChangeSet = resolveChangeSet(request.sourceChangeSetId());
+        if (AUTHORIZATION_POLICY_RULE_TYPE.equals(definition.getRuleType())) {
+            if (sourceRelease != null) {
+                requireScope(sourceRelease.getTenantId(), principal.tenantId(), "sourceRelease tenantId");
+                requireScope(sourceRelease.getEnvironment(), principal.environment(), "sourceRelease environment");
+            }
+            if (sourceChangeSet != null) {
+                requireScope(sourceChangeSet.getTenantId(), principal.tenantId(), "sourceChangeSet tenantId");
+                requireScope(sourceChangeSet.getEnvironment(), principal.environment(), "sourceChangeSet environment");
+            }
+        }
+        definition.setSourceRelease(sourceRelease);
+        definition.setSourceChangeSet(sourceChangeSet);
         definition.setDefinition(writeOrDefault(requestedDefinition, "{}"));
         definition.setParameters(writeOrDefault(requestedParameters, "{}"));
         definition.setCondition(writeNullable(DomainRuleParameters.condition(
@@ -405,6 +439,9 @@ public class DomainRuleService {
         lifecycleRefresh.definition(definition);
         requireScope(definition.getTenantId(), principal.tenantId(), "tenantId");
         requireScope(definition.getEnvironment(), principal.environment(), "environment");
+        if (AUTHORIZATION_POLICY_RULE_TYPE.equals(definition.getRuleType()) && "active".equals(status)) {
+            throw new ConfigurationIngestionException(OPA_PUBLICATION_MESSAGE);
+        }
         requireAllowedDefinitionTransition(definition.getStatus(), status);
         if (isApprovalSatisfiedDefinitionStatus(status)) {
             requireAuthenticatedAuthorEvidence(definition);
@@ -515,6 +552,7 @@ public class DomainRuleService {
         if (!StringUtils.hasText(resourceKey)) {
             throw new ConfigurationIngestionException("resourceKey is required for simulation");
         }
+        validateAuthorizationPolicyDefinition(ruleType, definition);
         Instant simulationRequestedAt = Instant.now();
         if (persistedDefinition != null) {
             recordSimulationRequestedEvent(persistedDefinition, simulationRequestedAt);
@@ -764,6 +802,7 @@ public class DomainRuleService {
                 .orElseThrow(() -> new ConfigurationIngestionException("Rule definition not found: " + request.ruleDefinitionId()));
         requireScope(definition.getTenantId(), tenantId, "tenantId");
         requireScope(definition.getEnvironment(), environment, "environment");
+        requireGenericMaterializationTarget(definition, request.targetArtifactType());
         validateParameterDefinition(definition);
         requireSnapshotMaterializationForParameters(definition);
         requireReactiveDeterminationTargetContract(
@@ -1096,10 +1135,13 @@ public class DomainRuleService {
             JsonNode definition,
             JsonNode parameters) {
         ArrayNode targets = objectMapper.createArrayNode();
+        appendExplicitMaterializationTargets(targets, definition);
+        if (AUTHORIZATION_POLICY_RULE_TYPE.equals(ruleType)) {
+            return targets;
+        }
         String recommendedOperation = definition != null ? normalize(definition.path("recommendedOperation").asText(null)) : null;
         JsonNode params = parameters == null || parameters.isNull() ? null : parameters;
 
-        appendExplicitMaterializationTargets(targets, definition);
         validateReactiveDeterminationTargets(ruleType, params, targets);
 
         if (!containsMaterializationTarget(targets, "option_source", "resource-option-source")
@@ -2207,6 +2249,7 @@ public class DomainRuleService {
         if (isBackendValidationRuleType(ruleType)
                 || isWorkflowActionRuleType(ruleType)
                 || isApprovalPolicyRuleType(ruleType)
+                || AUTHORIZATION_POLICY_RULE_TYPE.equals(ruleType)
                 || COLOR_PALETTE_RULE_TYPE.equals(ruleType)
                 || "visual_guidance".equals(ruleType)
                 || "form_rule".equals(ruleType)) {
@@ -2222,6 +2265,44 @@ public class DomainRuleService {
                 && parameters.isObject()
                 && (StringUtils.hasText(parameters.path("optionSourceKey").asText(null))
                 || StringUtils.hasText(parameters.path("lookupSource").asText(null)));
+    }
+
+    private void validateAuthorizationPolicyDefinition(String ruleType, JsonNode definition) {
+        JsonNode body = definition == null ? objectMapper.missingNode() : definition;
+        if (!AUTHORIZATION_POLICY_RULE_TYPE.equals(ruleType)) {
+            if (AuthorizationPolicyDefinition.SCHEMA_VERSION_V1.equals(body.path("schemaVersion").asText())) {
+                throw new ConfigurationIngestionException("Authorization policy payload requires ruleType=authorization_policy");
+            }
+            for (JsonNode target : body.path("materializationTargets")) {
+                if (OPA_ARTIFACT_TYPE.equals(target.path("targetArtifactType").asText().trim())) {
+                    throw new ConfigurationIngestionException("OPA policy targets require ruleType=authorization_policy");
+                }
+            }
+            return;
+        }
+        if (!body.isObject()) {
+            throw new ConfigurationIngestionException("Authorization policy definition must be a JSON object");
+        }
+        AuthorizationPolicyDefinition policy;
+        try {
+            policy = objectMapper.readerFor(AuthorizationPolicyDefinition.class)
+                    .with(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, DeserializationFeature.FAIL_ON_NUMBERS_FOR_ENUMS)
+                    .readValue(body);
+        } catch (IOException ex) {
+            throw new ConfigurationIngestionException(
+                    "Invalid authorization policy definition for " + AuthorizationPolicyDefinition.SCHEMA_VERSION_V1);
+        }
+        if (policy.materializationTargets().stream().anyMatch(target ->
+                !OPA_TARGET_LAYER.equals(target.targetLayer()) || !OPA_ARTIFACT_TYPE.equals(target.targetArtifactType()))) {
+            throw new ConfigurationIngestionException("Authorization policy targets must use policy_engine/opa-policy");
+        }
+    }
+
+    private void requireGenericMaterializationTarget(DomainRuleDefinition definition, String targetArtifactType) {
+        if (AUTHORIZATION_POLICY_RULE_TYPE.equals(definition.getRuleType())
+                || OPA_ARTIFACT_TYPE.equals(normalize(targetArtifactType))) {
+            throw new ConfigurationIngestionException(OPA_PUBLICATION_MESSAGE);
+        }
     }
 
     private ArrayNode buildWarnings(
@@ -2254,15 +2335,20 @@ public class DomainRuleService {
             ArrayNode warnings,
             boolean persistedDefinition) {
         ObjectNode explainability = objectMapper.createObjectNode();
+        boolean authorizationPolicy = AUTHORIZATION_POLICY_RULE_TYPE.equals(ruleType);
         explainability.put(
                 "summary",
                 buildExplainabilitySummary(ruleType, resourceKey, existingCoverage, predictedMaterializations, requiredApprovals));
         explainability.put(
                 "recommendedAction",
-                buildRecommendedAction(existingCoverage, requiredApprovals, persistedDefinition));
+                authorizationPolicy && persistedDefinition && requiredApprovals.isEmpty()
+                        ? "review_opa_publication"
+                        : buildRecommendedAction(existingCoverage, requiredApprovals, persistedDefinition));
         explainability.put(
                 "publicationReadiness",
-                buildPublicationReadiness(existingCoverage, requiredApprovals, persistedDefinition));
+                authorizationPolicy && persistedDefinition && requiredApprovals.isEmpty()
+                        ? OPA_PUBLICATION_REQUIRED
+                        : buildPublicationReadiness(existingCoverage, requiredApprovals, persistedDefinition));
         explainability.set("decisionDiagnostics", buildDecisionDiagnostics(
                 ruleKey,
                 ruleType,
@@ -2299,7 +2385,11 @@ public class DomainRuleService {
             step.put("title", "Collect the required approvals before publication or target-specific materialization.");
             step.set("approvers", requiredApprovals.deepCopy());
         }
-        if (persistedDefinition) {
+        if (persistedDefinition && authorizationPolicy) {
+            ObjectNode step = nextSteps.addObject();
+            step.put("kind", "review_opa_publication");
+            step.put("title", OPA_PUBLICATION_MESSAGE);
+        } else if (persistedDefinition) {
             ObjectNode step = nextSteps.addObject();
             step.put("kind", "materialize_or_activate");
             step.put("title", "Advance the persisted shared rule through status review and target-specific materialization.");
@@ -2332,7 +2422,8 @@ public class DomainRuleService {
             ArrayNode warnings,
             boolean persistedDefinition) {
         ObjectNode diagnostics = objectMapper.createObjectNode();
-        diagnostics.put("decisionKind", "semantic_domain_rule");
+        diagnostics.put("decisionKind",
+                AUTHORIZATION_POLICY_RULE_TYPE.equals(ruleType) ? "AUTHORIZATION" : "semantic_domain_rule");
         diagnostics.put("authoringMode", "governed");
         diagnostics.put("decisionSource", persistedDefinition ? "persisted_definition" : "ad_hoc_request");
         diagnostics.put("ruleKey", StringUtils.hasText(ruleKey) ? ruleKey : resourceKey + ".rule.draft");
@@ -2570,6 +2661,7 @@ public class DomainRuleService {
                         throw new ConfigurationIngestionException(
                                 "Rule materialization does not belong to definition " + definition.getId());
                     }
+                    requireGenericMaterializationTarget(definition, materialization.getTargetArtifactType());
                     if (!isPublishableMaterializationStatus(materialization.getStatus())) {
                         addMaterializationOutcome(
                                 materializationOutcomes,
@@ -3432,6 +3524,7 @@ public class DomainRuleService {
         requireScope(materialization.getRuleDefinition().getEnvironment(), environment, "environment");
         requireAllowedMaterializationTransition(materialization.getStatus(), status);
         if ("applied".equals(status)) {
+            requireGenericMaterializationTarget(materialization.getRuleDefinition(), materialization.getTargetArtifactType());
             requireSnapshotMaterializationForParameters(materialization.getRuleDefinition());
             requireOperationalIntegrity(materialization);
         }
