@@ -8,6 +8,7 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 import org.praxisplatform.config.domain.DomainRuleHostStatus;
 import org.praxisplatform.config.domain.DomainRuleSnapshot;
 import org.praxisplatform.config.domain.DomainRuleSnapshotHead;
@@ -34,6 +35,8 @@ public class DomainRuleHostStatusService {
   private final ObjectMapper objectMapper;
   private final Clock clock;
   private final Duration staleAfter;
+  private final ConcurrentHashMap<HostStatusKey, PersistedHostStatus> lastPersistedByHost =
+      new ConcurrentHashMap<>();
 
   public DomainRuleHostStatusService(
       DomainRuleHostStatusRepository statusRepository,
@@ -89,12 +92,46 @@ public class DomainRuleHostStatusService {
       throw new ConfigurationIngestionException("activationRevision must be positive");
     }
     String failureCode = optionalText(request.failureCode(), "failureCode", 64);
+    var hostKey = new HostStatusKey(
+        principal.tenantId(), principal.environment(), ruleSetKey, operationKey, principal.actorRef());
+    var candidate = new PersistedHostStatus(
+        snapshotKey, contentHash, revision, request.ready(), contractVersion,
+        engineContractVersion, dialectVersion, corpusSha256, catalogDigest,
+        failureCode, request.observedAtUtc());
+    if (shouldSkipUnchangedHeartbeat(lastPersistedByHost.get(hostKey), candidate)) {
+      return new DomainRuleHostStatusIngestionResponse(false, request.observedAtUtc());
+    }
     int changed = statusRepository.upsertIfNewer(
         UUID.randomUUID(), principal.tenantId(), principal.environment(), ruleSetKey, operationKey,
         principal.actorRef(), snapshotKey, contentHash, revision, request.ready(), contractVersion,
         engineContractVersion, dialectVersion, corpusSha256, catalogDigest,
         failureCode, request.observedAtUtc(), receivedAt);
+    if (changed == 1) {
+      lastPersistedByHost.compute(hostKey, (ignored, current) ->
+          current == null || !candidate.observedAtUtc().isBefore(current.observedAtUtc())
+              ? candidate
+              : current);
+    }
     return new DomainRuleHostStatusIngestionResponse(changed == 1, request.observedAtUtc());
+  }
+
+  private boolean shouldSkipUnchangedHeartbeat(
+      PersistedHostStatus previous, PersistedHostStatus candidate) {
+    if (previous == null || !previous.sameState(candidate)) {
+      return false;
+    }
+    if (candidate.observedAtUtc().isBefore(previous.observedAtUtc())) {
+      return false;
+    }
+    if (!candidate.ready() && isUnprovisionedHeadFailure(candidate.failureCode())) {
+      return true;
+    }
+    return Duration.between(previous.observedAtUtc(), candidate.observedAtUtc())
+        .compareTo(staleAfter.dividedBy(2)) < 0;
+  }
+
+  private static boolean isUnprovisionedHeadFailure(String failureCode) {
+    return "HEAD_NOT_FOUND".equals(failureCode) || "HEAD_NOT_LOADED".equals(failureCode);
   }
 
   @Transactional(transactionManager = ConfigTransactionManagerNames.CONFIG, readOnly = true)
@@ -217,4 +254,38 @@ public class DomainRuleHostStatusService {
       String hostContractVersion,
       RuleRuntimeCompatibility compatibility,
       String implementationCatalogDigest) {}
+
+  private record HostStatusKey(
+      String tenantId,
+      String environment,
+      String ruleSetKey,
+      String operationKey,
+      String actorRef) {}
+
+  private record PersistedHostStatus(
+      String snapshotKey,
+      String contentHash,
+      Long revision,
+      boolean ready,
+      String contractVersion,
+      String engineContractVersion,
+      String dialectVersion,
+      String corpusSha256,
+      String catalogDigest,
+      String failureCode,
+      Instant observedAtUtc) {
+
+    boolean sameState(PersistedHostStatus other) {
+      return ready == other.ready
+          && Objects.equals(snapshotKey, other.snapshotKey)
+          && Objects.equals(contentHash, other.contentHash)
+          && Objects.equals(revision, other.revision)
+          && Objects.equals(contractVersion, other.contractVersion)
+          && Objects.equals(engineContractVersion, other.engineContractVersion)
+          && Objects.equals(dialectVersion, other.dialectVersion)
+          && Objects.equals(corpusSha256, other.corpusSha256)
+          && Objects.equals(catalogDigest, other.catalogDigest)
+          && Objects.equals(failureCode, other.failureCode);
+    }
+  }
 }

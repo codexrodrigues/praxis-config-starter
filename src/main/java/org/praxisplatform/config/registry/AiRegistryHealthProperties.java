@@ -24,4 +24,10 @@ public class AiRegistryHealthProperties {
      * Optional override for minimum template count required.
      */
     private Long minTemplates;
+
+    /**
+     * Cache TTL in milliseconds for readiness status checks (default: 60000 ms).
+     * Set to 0 to disable caching.
+     */
+    private long cacheTtlMs = 60_000L;
 }

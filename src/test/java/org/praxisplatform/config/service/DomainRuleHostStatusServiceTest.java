@@ -3,8 +3,11 @@ package org.praxisplatform.config.service;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.time.Clock;
@@ -82,6 +85,68 @@ class DomainRuleHostStatusServiceTest {
         new DomainRuleHostStatusRequest("benefit.eligibility", "evaluate", null, null, null, true, "quickstart/1.0", null, null, null, null, null, NOW), principal))
         .isInstanceOf(ConfigurationIngestionException.class)
         .hasMessageContaining("ready host requires");
+  }
+
+  @Test
+  void deduplicatesRepeatedUnprovisionedHeadHeartbeatsUntilStateChanges() {
+    when(statusRepository.upsertIfNewer(
+            any(), any(), any(), any(), any(), any(), any(), any(), any(), anyBoolean(),
+            any(), any(), any(), any(), any(), any(), any(), any()))
+        .thenReturn(1);
+
+    var firstNotFound = unreadyRequest("HEAD_NOT_FOUND", NOW.minusSeconds(120));
+    var secondNotFound = unreadyRequest("HEAD_NOT_FOUND", NOW.minusSeconds(60));
+    var thirdNotFoundLater = unreadyRequest("HEAD_NOT_FOUND", NOW.plusSeconds(180));
+    var changedToNotLoaded = unreadyRequest("HEAD_NOT_LOADED", NOW.plusSeconds(210));
+    var repeatedNotLoaded = unreadyRequest("HEAD_NOT_LOADED", NOW.plusSeconds(240));
+    var changedToReady = readyRequest(NOW.plusSeconds(270));
+
+    assertThat(service.ingest(firstNotFound, principal).updated()).isTrue();
+    assertThat(service.ingest(secondNotFound, principal).updated()).isFalse();
+    assertThat(service.ingest(thirdNotFoundLater, principal).updated()).isFalse();
+    assertThat(service.ingest(changedToNotLoaded, principal).updated()).isTrue();
+    assertThat(service.ingest(repeatedNotLoaded, principal).updated()).isFalse();
+    assertThat(service.ingest(changedToReady, principal).updated()).isTrue();
+
+    verify(statusRepository, times(3)).upsertIfNewer(
+        any(), any(), any(), any(), any(), any(), any(), any(), any(), anyBoolean(),
+        any(), any(), any(), any(), any(), any(), any(), any());
+  }
+
+  @Test
+  void deduplicatesUnchangedReadyHeartbeatsWithinHalfStaleWindowAndRefreshesAfterward() {
+    when(statusRepository.upsertIfNewer(
+            any(), any(), any(), any(), any(), any(), any(), any(), any(), anyBoolean(),
+            any(), any(), any(), any(), any(), any(), any(), any()))
+        .thenReturn(1);
+
+    var first = readyRequest(NOW.minusSeconds(90));
+    var withinWindow = readyRequest(NOW.minusSeconds(60));
+    var afterHalfStaleWindow = readyRequest(NOW.minusSeconds(30));
+
+    assertThat(service.ingest(first, principal).updated()).isTrue();
+    assertThat(service.ingest(withinWindow, principal).updated()).isFalse();
+    assertThat(service.ingest(afterHalfStaleWindow, principal).updated()).isTrue();
+
+    verify(statusRepository, times(2)).upsertIfNewer(
+        any(), any(), any(), any(), any(), any(), any(), any(), any(), anyBoolean(),
+        any(), any(), any(), any(), any(), any(), any(), any());
+  }
+
+  private DomainRuleHostStatusRequest unreadyRequest(String failureCode, Instant observedAt) {
+    return new DomainRuleHostStatusRequest(
+        "benefit.eligibility", "evaluate", null, null, null, false,
+        "quickstart/1.0", COMPATIBILITY.engineContractVersion(),
+        COMPATIBILITY.jsonLogicDialectVersion(), COMPATIBILITY.jsonLogicCorpusSha256(),
+        "B".repeat(64), failureCode, observedAt);
+  }
+
+  private DomainRuleHostStatusRequest readyRequest(Instant observedAt) {
+    return new DomainRuleHostStatusRequest(
+        "benefit.eligibility", "evaluate", "snap-2", HASH, 7L, true,
+        "quickstart/1.0", COMPATIBILITY.engineContractVersion(),
+        COMPATIBILITY.jsonLogicDialectVersion(), COMPATIBILITY.jsonLogicCorpusSha256(),
+        "B".repeat(64), null, observedAt);
   }
 
   @Test

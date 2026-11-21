@@ -19,9 +19,11 @@ import org.praxisplatform.config.dto.AiRegistryTemplateRevision;
 import org.praxisplatform.config.dto.AiRegistryTemplateSearchResult;
 import org.praxisplatform.config.exception.ConfigurationIngestionException;
 import org.praxisplatform.config.projection.AiRegistryTemplateSearchProjection;
+import org.praxisplatform.config.registry.AiRegistryStatusService;
 import org.praxisplatform.config.repository.AiRegistryRepository;
 import org.praxisplatform.config.service.EmbeddingService.EmbeddingCallConfig;
 import org.praxisplatform.config.tx.ConfigTransactionManagerNames;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -48,6 +50,9 @@ public class AiRegistryTemplateService {
   private final ObjectMapper objectMapper;
   private final EmbeddingService embeddingService;
   private final CanonicalJsonHashService hashService;
+
+  @Autowired(required = false)
+  private AiRegistryStatusService statusService;
 
   @Transactional(transactionManager = ConfigTransactionManagerNames.CONFIG, readOnly = true)
   public Optional<AiRegistry> getTemplate(String componentId) {
@@ -152,6 +157,7 @@ public class AiRegistryTemplateService {
   @Transactional(transactionManager = ConfigTransactionManagerNames.CONFIG)
   public void deleteTemplate(AiRegistry config) {
     repository.delete(config);
+    invalidateStatusCache();
   }
 
   public JsonNode parsePayload(AiRegistry config) {
@@ -218,9 +224,22 @@ public class AiRegistryTemplateService {
               samePayload ? dbConfig.getSource() : config.getSource(),
               samePayload ? dbConfig.getSourceRef() : config.getSourceRef(),
               config.getStatus());
-      return changed ? repository.save(dbConfig) : dbConfig;
+      if (changed) {
+        AiRegistry saved = repository.save(dbConfig);
+        invalidateStatusCache();
+        return saved;
+      }
+      return dbConfig;
     }
-    return repository.save(config);
+    AiRegistry saved = repository.save(config);
+    invalidateStatusCache();
+    return saved;
+  }
+
+  private void invalidateStatusCache() {
+    if (statusService != null) {
+      statusService.invalidateCache();
+    }
   }
 
   private Optional<AiRegistry> findTemplate(String componentId) {

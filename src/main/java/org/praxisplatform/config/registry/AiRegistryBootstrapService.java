@@ -135,6 +135,7 @@ public class AiRegistryBootstrapService {
                     authoringManifestCount,
                     chunkedComponentCount,
                     chunkCount);
+            statusService.invalidateCache();
             bootstrapState.setSucceeded(true);
             log.info("AI registry bootstrap completed from {} (components={}, snapshotHash={}).",
                     resolvedSnapshot.location,
