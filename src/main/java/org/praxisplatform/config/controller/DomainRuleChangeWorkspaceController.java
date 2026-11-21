@@ -1,7 +1,9 @@
 package org.praxisplatform.config.controller;
 
 import jakarta.servlet.http.HttpServletRequest;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import lombok.RequiredArgsConstructor;
 import org.praxisplatform.config.dto.DomainRuleChangeWorkspaceCreateRequest;
@@ -24,6 +26,7 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 import org.springframework.http.CacheControl;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -231,6 +234,19 @@ public class DomainRuleChangeWorkspaceController {
     } catch (IllegalArgumentException exception) {
       throw new ResponseStatusException(HttpStatus.BAD_REQUEST, exception.getMessage());
     }
+  }
+
+  @ExceptionHandler(IllegalArgumentException.class)
+  public ResponseEntity<Map<String, Object>> handleInvalidRequest(
+      IllegalArgumentException exception) {
+    Map<String, Object> body = new LinkedHashMap<>();
+    body.put("status", HttpStatus.BAD_REQUEST.value());
+    body.put("error", "Bad Request");
+    body.put("code", "INVALID_WORKSPACE_REQUEST");
+    body.put(
+        "message",
+        exception.getMessage() != null ? exception.getMessage() : "Invalid workspace request");
+    return ResponseEntity.badRequest().body(body);
   }
 
   private <T> ResponseEntity<T> withEtag(HttpStatus status, T body, String etag) {

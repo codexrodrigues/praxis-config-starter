@@ -3,6 +3,8 @@ package org.praxisplatform.config.service;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.time.Instant;
 import java.util.List;
 import java.util.Locale;
@@ -64,6 +66,11 @@ public class DomainRuleChangeWorkspaceService {
       throw badRequest("baseDefinitionId is required");
     }
     DomainRuleDefinition base = scopedDefinition(request.baseDefinitionId(), principal);
+    JsonNode baseDefNode = tree(base.getDefinition());
+    JsonNode baseDocumentation =
+        baseDefNode != null && baseDefNode.path("documentation").isObject()
+            ? sanitizeDocumentationUrls(baseDefNode.path("documentation"))
+            : null;
     Instant now = Instant.now();
     DomainRuleChangeWorkspace workspace = DomainRuleChangeWorkspace.builder()
         .id(UUID.randomUUID())
@@ -77,6 +84,7 @@ public class DomainRuleChangeWorkspaceService {
         .status("OPEN")
         .draftCondition(base.getCondition())
         .draftParameters(base.getParameters())
+        .draftDocumentation(json(baseDocumentation))
         .etag(UUID.randomUUID())
         .revision(1L)
         .createdBy(requireActor(principal))
@@ -161,6 +169,13 @@ public class DomainRuleChangeWorkspaceService {
     workspace.setDraftCondition(json(DomainRuleParameters.draftCondition(objectMapper,
         tree(base.getDefinition()), tree(base.getParameters()), request.parameters(), request.condition())));
     workspace.setDraftParameters(json(request.parameters()));
+    if (request.documentation() != null) {
+      if (request.documentation().isNull()) {
+        workspace.setDraftDocumentation(null);
+      } else {
+        workspace.setDraftDocumentation(json(normalizeDocumentation(request.documentation())));
+      }
+    }
     workspace.setRationale(optionalText(request.rationale(), 4000));
     rotate(workspace, principal);
     return response(workspaceRepository.save(workspace));
@@ -398,12 +413,22 @@ public class DomainRuleChangeWorkspaceService {
         .filter(java.util.Objects::nonNull).max(Integer::compareTo).orElse(0) + 1;
     DomainRuleGovernancePrincipal author = new DomainRuleGovernancePrincipal(
         principal.tenantId(), workspace.getCreatedBy(), principal.environment());
+    JsonNode baseDefNode = tree(base.getDefinition());
+    ObjectNode effectiveDefinition = baseDefNode != null && baseDefNode.isObject()
+        ? ((ObjectNode) baseDefNode).deepCopy()
+        : objectMapper.createObjectNode();
+    JsonNode draftDoc = tree(workspace.getDraftDocumentation());
+    if (draftDoc != null && draftDoc.isObject() && !draftDoc.isEmpty()) {
+      effectiveDefinition.set("documentation", draftDoc.deepCopy());
+    } else {
+      effectiveDefinition.remove("documentation");
+    }
     var proposed = domainRuleService.createDefinition(new DomainRuleDefinitionRequest(
         base.getRuleKey(), nextVersion, base.getRuleType(), "proposed", base.getContextKey(),
         base.getResourceKey(), base.getServiceKey(), base.getSemanticOwner(), base.getSteward(),
         base.getSourceRelease() == null ? null : base.getSourceRelease().getId(),
         base.getSourceChangeSet() == null ? null : base.getSourceChangeSet().getId(),
-        tree(base.getDefinition()), tree(workspace.getDraftParameters()), tree(workspace.getDraftCondition()),
+        effectiveDefinition, tree(workspace.getDraftParameters()), tree(workspace.getDraftCondition()),
         tree(base.getGovernance()), null), author);
     var validation = objectMapper.createObjectNode();
     validation.put("review", "approved");
@@ -529,7 +554,8 @@ public class DomainRuleChangeWorkspaceService {
         source.getBaseDefinitionHash(), source.getPromotedDefinitionId(), source.getSubmittedTestRunId(),
         source.getTitle(), source.getStatus(), tree(source.getDraftCondition()),
         tree(source.getDraftParameters()), source.getRationale(), source.getRevision(), source.getEtag().toString(),
-        source.getCreatedBy(), source.getUpdatedBy(), source.getCreatedAt(), source.getUpdatedAt());
+        source.getCreatedBy(), source.getUpdatedBy(), source.getCreatedAt(), source.getUpdatedAt(),
+        tree(source.getDraftDocumentation()));
   }
 
   private DomainRuleTestScenarioResponse scenarioResponse(DomainRuleTestScenario source) {
@@ -598,6 +624,117 @@ public class DomainRuleChangeWorkspaceService {
     String normalized = value.trim();
     if (normalized.length() > max) throw badRequest("rationale exceeds " + max + " characters");
     return normalized;
+  }
+
+  private JsonNode normalizeDocumentation(JsonNode documentation) {
+    if (documentation == null || !documentation.isObject()) {
+      throw badRequest("documentation must be a JSON object");
+    }
+    ObjectNode normalized = objectMapper.createObjectNode();
+    putOptionalDocText(documentation, normalized, "title", 255);
+    putOptionalDocText(documentation, normalized, "summary", 4000);
+    putOptionalDocText(documentation, normalized, "whenApplies", 4000);
+    putOptionalDocText(documentation, normalized, "rationale", 4000);
+    putOptionalDocText(documentation, normalized, "customizationGuidance", 4000);
+    JsonNode legalBasisNode = documentation.get("legalBasis");
+    if (legalBasisNode != null && !legalBasisNode.isNull()) {
+      if (!legalBasisNode.isArray()) {
+        throw badRequest("documentation.legalBasis must be a JSON array");
+      }
+      if (legalBasisNode.size() > 20) {
+        throw badRequest("documentation.legalBasis exceeds 20 entries");
+      }
+      ArrayNode normalizedBasis = objectMapper.createArrayNode();
+      for (JsonNode item : legalBasisNode) {
+        if (item == null || !item.isObject()) {
+          throw badRequest("documentation.legalBasis entries must be JSON objects");
+        }
+        ObjectNode basisObj = objectMapper.createObjectNode();
+        putOptionalDocText(item, basisObj, "code", 255, "documentation.legalBasis.");
+        putOptionalDocText(item, basisObj, "title", 255, "documentation.legalBasis.");
+        putOptionalDocText(item, basisObj, "article", 255, "documentation.legalBasis.");
+        putOptionalDocText(item, basisObj, "jurisdiction", 255, "documentation.legalBasis.");
+        putOptionalDocText(item, basisObj, "summary", 4000, "documentation.legalBasis.");
+        putOptionalLegalBasisUrl(item, basisObj, "documentation.legalBasis.url");
+        if (!basisObj.has("code") && !basisObj.has("title")
+            && !basisObj.has("article") && !basisObj.has("summary")) {
+          throw badRequest("documentation.legalBasis entry requires at least code, title, article, or summary");
+        }
+        normalizedBasis.add(basisObj);
+      }
+      if (!normalizedBasis.isEmpty()) {
+        normalized.set("legalBasis", normalizedBasis);
+      }
+    }
+    return normalized.isEmpty() ? null : normalized;
+  }
+
+  private void putOptionalDocText(JsonNode source, ObjectNode target, String field, int max) {
+    putOptionalDocText(source, target, field, max, "documentation.");
+  }
+
+  private void putOptionalDocText(
+      JsonNode source, ObjectNode target, String field, int max, String prefix) {
+    JsonNode node = source.get(field);
+    if (node == null || node.isNull()) {
+      return;
+    }
+    if (!node.isTextual()) {
+      throw badRequest(prefix + field + " must be a string");
+    }
+    String trimmed = node.asText().trim();
+    if (trimmed.isEmpty()) {
+      return;
+    }
+    if (trimmed.length() > max) {
+      throw badRequest(prefix + field + " exceeds " + max + " characters");
+    }
+    target.put(field, trimmed);
+  }
+
+  private void putOptionalLegalBasisUrl(JsonNode source, ObjectNode target, String fieldLabel) {
+    JsonNode node = source.get("url");
+    if (node == null || node.isNull()) {
+      return;
+    }
+    if (!node.isTextual()) {
+      throw badRequest(fieldLabel + " must be a string");
+    }
+    try {
+      String validated = RuleLegalBasisUrlValidator.validateOptionalHttpUrl(node.asText(), fieldLabel);
+      if (validated != null) {
+        target.put("url", validated);
+      }
+    } catch (IllegalArgumentException exception) {
+      throw badRequest(exception.getMessage());
+    }
+  }
+
+  private JsonNode sanitizeDocumentationUrls(JsonNode documentation) {
+    if (documentation == null || !documentation.isObject()) {
+      return null;
+    }
+    ObjectNode copy = ((ObjectNode) documentation).deepCopy();
+    JsonNode legalBasisNode = copy.get("legalBasis");
+    if (legalBasisNode != null && legalBasisNode.isArray()) {
+      for (JsonNode item : legalBasisNode) {
+        if (item != null && item.isObject() && item.has("url")) {
+          ObjectNode itemObj = (ObjectNode) item;
+          JsonNode urlNode = itemObj.get("url");
+          if (urlNode == null || urlNode.isNull() || !urlNode.isTextual()) {
+            itemObj.remove("url");
+          } else {
+            String safeUrl = RuleLegalBasisUrlValidator.sanitizeOptionalHttpUrl(urlNode.asText());
+            if (safeUrl == null) {
+              itemObj.remove("url");
+            } else {
+              itemObj.put("url", safeUrl);
+            }
+          }
+        }
+      }
+    }
+    return copy;
   }
 
   private ResponseStatusException badRequest(String message) { return new ResponseStatusException(HttpStatus.BAD_REQUEST, message); }

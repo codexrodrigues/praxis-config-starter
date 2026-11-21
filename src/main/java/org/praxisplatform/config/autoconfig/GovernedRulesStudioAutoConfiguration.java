@@ -7,6 +7,7 @@ import java.util.Optional;
 import org.praxisplatform.config.contract.PublishedRuleSnapshotHeadSetReader;
 import org.praxisplatform.config.controller.GovernedRulesStudioCompositionController;
 import org.praxisplatform.config.controller.GovernedRulesStudioSandboxController;
+import org.praxisplatform.config.repository.DomainRuleDefinitionRepository;
 import org.praxisplatform.config.repository.DomainRuleSnapshotHeadRepository;
 import org.praxisplatform.config.repository.DomainRuleSnapshotRepository;
 import org.praxisplatform.config.runtime.DtoRuleFactContractFactory;
@@ -61,7 +62,10 @@ import org.springframework.util.ClassUtils;
  *       seu próprio provider.</li>
  * </ol>
  */
-@AutoConfiguration(after = DomainRuleSnapshotAutoConfiguration.class)
+@AutoConfiguration(
+        after = DomainRuleSnapshotAutoConfiguration.class,
+        afterName = "org.springframework.boot.autoconfigure.jackson.JacksonAutoConfiguration",
+        beforeName = "org.praxisplatform.uischema.configuration.OpenApiUiSchemaAutoConfiguration")
 public class GovernedRulesStudioAutoConfiguration {
 
     @Bean
@@ -354,10 +358,16 @@ public class GovernedRulesStudioAutoConfiguration {
                 governedFamilyDomainRuleSetCatalogProvider(
                         GovernedRuleFamilyRegistry familyRegistry,
                         ObjectProvider<PublishedRuleSnapshotHeadSetReader> headSetReaderProvider,
+                        ObjectProvider<DomainRuleDefinitionRepository> definitionRepositoryProvider,
+                        ObjectProvider<ObjectMapper> objectMapperProvider,
                         @Value("${praxis.config.domain-rules.default-environment:local}")
                                 String defaultEnvironment) {
             return MetadataDomainRuleSetCatalogBridgeSupport.createProvider(
-                    familyRegistry, headSetReaderProvider, defaultEnvironment);
+                    familyRegistry,
+                    headSetReaderProvider,
+                    definitionRepositoryProvider,
+                    objectMapperProvider,
+                    defaultEnvironment);
         }
     }
 }

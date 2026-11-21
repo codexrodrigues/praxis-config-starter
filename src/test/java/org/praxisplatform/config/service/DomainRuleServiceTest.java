@@ -4436,6 +4436,189 @@ class DomainRuleServiceTest {
         assertThat(service.simulate(request, "tenant-a", "dev").existingCoverage()).hasSize(1);
     }
 
+    @Test
+    void createDefinitionAndIntakeRejectUnsafeLegalBasisUrlsWithIllegalArgumentExceptionAcrossAllShapes()
+            throws Exception {
+        DomainRuleDefinitionRepository definitionRepository = mock(DomainRuleDefinitionRepository.class);
+        DomainRuleMaterializationRepository materializationRepository = mock(DomainRuleMaterializationRepository.class);
+        DomainRuleEventRepository eventRepository = mock(DomainRuleEventRepository.class);
+        DomainRuleService service = service(definitionRepository, materializationRepository, eventRepository);
+
+        when(definitionRepository.save(any(DomainRuleDefinition.class))).thenAnswer(invocation -> {
+            DomainRuleDefinition definition = invocation.getArgument(0);
+            definition.onInsert();
+            return definition;
+        });
+
+        List<String> unsafeUrls = List.of(
+                "javascript:alert(1)",
+                "data:text/html,<script>alert(1)</script>",
+                "vbscript:msgbox(1)",
+                "file:///etc/passwd",
+                "//evil.example/path",
+                "https://user:pass@example.com/doc",
+                "https:example.com",
+                "https:///path",
+                "https://example.org/\n");
+
+        for (String unsafeUrl : unsafeUrls) {
+            JsonNode docShape = objectMapper.readTree("""
+                    {
+                      "documentation": {
+                        "legalBasis": [
+                          {"code": "STAT-1", "url": %s}
+                        ]
+                      }
+                    }
+                    """.formatted(objectMapper.writeValueAsString(unsafeUrl)));
+            JsonNode directSlotShape = objectMapper.readTree("""
+                    {
+                      "slotDocumentation": {
+                        "legalBasis": [
+                          {"code": "STAT-2", "url": %s}
+                        ]
+                      }
+                    }
+                    """.formatted(objectMapper.writeValueAsString(unsafeUrl)));
+            JsonNode mapSlotShape = objectMapper.readTree("""
+                    {
+                      "slotDocumentation": {
+                        "workforce.leaves.max-days": {
+                          "legalBasis": [
+                            {"code": "STAT-3", "url": %s}
+                          ]
+                        }
+                      }
+                    }
+                    """.formatted(objectMapper.writeValueAsString(unsafeUrl)));
+            JsonNode topLevelShape = objectMapper.readTree("""
+                    {
+                      "legalBasis": [
+                        {"code": "STAT-4", "url": %s}
+                      ]
+                    }
+                    """.formatted(objectMapper.writeValueAsString(unsafeUrl)));
+
+            for (JsonNode badDef : List.of(docShape, directSlotShape, mapSlotShape, topLevelShape)) {
+                assertThatThrownBy(() -> service.createDefinition(
+                        new DomainRuleDefinitionRequest(
+                                "workforce.leaves.rule",
+                                null,
+                                "visual_guidance",
+                                "draft",
+                                "workforce",
+                                "workforce.leaves",
+                                "praxis-api-quickstart",
+                                null,
+                                null,
+                                null,
+                                null,
+                                badDef,
+                                objectMapper.createObjectNode(),
+                                objectMapper.createObjectNode(),
+                                objectMapper.createObjectNode(),
+                                null),
+                        principal("author-a")))
+                        .isInstanceOf(IllegalArgumentException.class)
+                        .isNotInstanceOf(ConfigurationIngestionException.class);
+            }
+
+            assertThatThrownBy(() -> service.intake(
+                    new DomainRuleIntakeRequest(
+                            "Validar limite de afastamento.",
+                            null,
+                            "workforce.leaves.rule",
+                            "visual_guidance",
+                            "workforce",
+                            "workforce.leaves",
+                            "praxis-api-quickstart",
+                            docShape,
+                            null,
+                            null,
+                            null),
+                    principal("author-a")))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .isNotInstanceOf(ConfigurationIngestionException.class);
+        }
+
+        JsonNode nonTextUrlDef = objectMapper.readTree("""
+                {
+                  "documentation": {
+                    "legalBasis": [{"code": "STAT-1", "url": 123}]
+                  }
+                }
+                """);
+        assertThatThrownBy(() -> service.createDefinition(
+                new DomainRuleDefinitionRequest(
+                        "workforce.leaves.rule",
+                        null,
+                        "visual_guidance",
+                        "draft",
+                        "workforce",
+                        "workforce.leaves",
+                        "praxis-api-quickstart",
+                        null,
+                        null,
+                        null,
+                        null,
+                        nonTextUrlDef,
+                        objectMapper.createObjectNode(),
+                        objectMapper.createObjectNode(),
+                        objectMapper.createObjectNode(),
+                        null),
+                principal("author-a")))
+                .isInstanceOf(IllegalArgumentException.class);
+
+        JsonNode validDef = objectMapper.readTree("""
+                {
+                  "documentation": {
+                    "legalBasis": [
+                      {"code": "STAT-1", "url": "  https://example.org/statutes/123  "},
+                      {"code": "STAT-2", "url": "   "}
+                    ]
+                  },
+                  "slotDocumentation": {
+                    "workforce.leaves.max-days": {
+                      "legalBasis": [
+                        {"code": "STAT-3", "url": "http://example.org/slot-doc"}
+                      ]
+                    }
+                  },
+                  "legalBasis": [
+                    {"code": "STAT-4", "url": "https://[::1]:8443/top-doc"}
+                  ]
+                }
+                """);
+        var saved = service.createDefinition(
+                new DomainRuleDefinitionRequest(
+                        "workforce.leaves.rule",
+                        null,
+                        "visual_guidance",
+                        "draft",
+                        "workforce",
+                        "workforce.leaves",
+                        "praxis-api-quickstart",
+                        null,
+                        null,
+                        null,
+                        null,
+                        validDef,
+                        objectMapper.createObjectNode(),
+                        objectMapper.createObjectNode(),
+                        objectMapper.readTree("{\"requiredApprovals\":[\"workforce-owner\"]}"),
+                        null),
+                principal("author-a"));
+        assertThat(saved.definition().path("documentation").path("legalBasis").get(0).path("url").asText())
+                .isEqualTo("https://example.org/statutes/123");
+        assertThat(saved.definition().path("documentation").path("legalBasis").get(1).has("url"))
+                .isFalse();
+        assertThat(saved.definition().path("slotDocumentation").path("workforce.leaves.max-days")
+                .path("legalBasis").get(0).path("url").asText())
+                .isEqualTo("http://example.org/slot-doc");
+        assertThat(saved.definition().path("legalBasis").get(0).path("url").asText())
+                .isEqualTo("https://[::1]:8443/top-doc");
+    }
+
     private org.praxisplatform.config.dto.DomainRuleMaterializationResponse materializationFor(
             org.praxisplatform.config.dto.DomainRulePublicationResponse response,
             String targetLayer) {

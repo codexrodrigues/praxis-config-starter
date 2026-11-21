@@ -6,6 +6,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -27,12 +28,16 @@ import java.util.Optional;
 import java.util.UUID;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.praxisplatform.config.autoconfig.GovernedRulesStudioAutoConfiguration;
 import org.praxisplatform.config.contract.DomainRuleTestRunRecordRequest;
 import org.praxisplatform.config.contract.DomainRuleTestRunResponse;
 import org.praxisplatform.config.contract.DomainRuleTestRunResultResponse;
 import org.praxisplatform.config.controller.GovernedRulesStudioSandboxController;
+import org.praxisplatform.config.domain.DomainRuleChangeWorkspace;
 import org.praxisplatform.config.domain.DomainRuleSnapshotHead;
+import org.praxisplatform.config.domain.DomainRuleTestRun;
+import org.praxisplatform.config.domain.DomainRuleTestScenario;
 import org.praxisplatform.config.dto.DomainRuleCandidateProbeResponse;
 import org.praxisplatform.config.dto.DomainRuleChangeWorkspaceResponse;
 import org.praxisplatform.config.dto.DomainRuleCompositionManifestResponse;
@@ -45,10 +50,15 @@ import org.praxisplatform.config.dto.DomainRuleRolloutPolicyResponse;
 import org.praxisplatform.config.dto.DomainRuleRolloutReadinessResponse;
 import org.praxisplatform.config.dto.DomainRuleRolloutResponse;
 import org.praxisplatform.config.dto.DomainRuleSnapshotActivationResponse;
+import org.praxisplatform.config.dto.DomainRuleSnapshotHeadStatusResponse;
 import org.praxisplatform.config.dto.DomainRuleSnapshotStoredResponse;
 import org.praxisplatform.config.dto.DomainRuleTestScenarioResponse;
+import org.praxisplatform.config.repository.DomainRuleChangeWorkspaceRepository;
 import org.praxisplatform.config.repository.DomainRuleSnapshotHeadRepository;
 import org.praxisplatform.config.repository.DomainRuleSnapshotRepository;
+import org.praxisplatform.config.repository.DomainRuleTestRunRepository;
+import org.praxisplatform.config.repository.DomainRuleTestRunResultRepository;
+import org.praxisplatform.config.repository.DomainRuleTestScenarioRepository;
 import org.praxisplatform.config.runtime.GovernedHostRuleBundleRuntime.OperationSpec;
 import org.praxisplatform.config.runtime.GovernedMultiTenantSnapshotBootstrapper.BootstrapReport;
 import org.praxisplatform.config.service.AiPrincipalContextResolver;
@@ -335,8 +345,6 @@ class GovernedRulesStudioWave13PromotionTest {
                 .thenReturn(List.of(allowScenario, denyScenario));
         when(ruleService.definition(eq(baseDefId), any())).thenReturn(baseDef);
         when(snapshotService.findActive(any(), any(), any(), any())).thenReturn(Optional.empty());
-        when(snapshotService.findHeadStatus(any(), any(), any(), any()))
-                .thenReturn(Optional.empty());
         when(testRunService.findByIdempotencyKey(eq(workspaceId), any(), any()))
                 .thenReturn(Optional.empty());
         when(testRunService.record(eq(workspaceId), any(), any()))
@@ -516,6 +524,538 @@ class GovernedRulesStudioWave13PromotionTest {
                                 .content(mismatchBody))
                 .andExpect(status().isUnprocessableEntity())
                 .andExpect(jsonPath("$.errorCode").value("OPERATIONAL_PROOF_MISMATCH"));
+    }
+
+    @Test
+    void sandboxAndOperationalTestResolveActiveSnapshotSha256InsteadOfHeadEtag()
+            throws Exception {
+        RealTestRunSandboxHarness harness = createRealTestRunSandboxHarness();
+        String activeSnapshotKey = "snap-active-v3";
+        String headEtagUuid = UUID.randomUUID().toString();
+        long activationRevision = 3L;
+        PublishedRuleSnapshot activeSnapshot =
+                new PublishedRuleSnapshot(
+                        PublishedRuleSnapshot.SNAPSHOT_CONTRACT_VERSION,
+                        activeSnapshotKey,
+                        "tenant-a",
+                        "local",
+                        "hr-service",
+                        3,
+                        NOW.toString(),
+                        null,
+                        "host/1.0",
+                        "2026-01-01T00:00:00Z",
+                        null,
+                        List.of(
+                                new RuleSnapshotSource(
+                                        "src-1",
+                                        "workforce.leave-requests",
+                                        1,
+                                        "B".repeat(64))),
+                        List.of(
+                                new RuleSnapshotApproval(
+                                        "app-1",
+                                        "RULE_COMPOSITION_APPROVER",
+                                        "approver-1",
+                                        NOW.toString(),
+                                        "B".repeat(64))),
+                        sampleFamily().productProfiles().getFirst().ruleSet());
+        String activeSnapshotContentHash =
+                PraxisCanonicalJson.sha256(JSON.valueToTree(activeSnapshot));
+
+        when(harness.snapshotService()
+                        .findActive("tenant-a", "local", "workforce.leave-requests", "CREATE"))
+                .thenReturn(
+                        Optional.of(
+                                new DomainRuleSnapshotActivationResponse(
+                                        activeSnapshot,
+                                        activeSnapshotContentHash,
+                                        headEtagUuid,
+                                        activationRevision,
+                                        "ACTIVE")));
+
+        var sandboxResponse =
+                harness.sandboxService()
+                        .run(
+                                new GovernedRulesStudioSandboxService.SandboxRunRequest(
+                                        harness.workspaceId(),
+                                        List.of(harness.scenarioAllowId()),
+                                        "UTC",
+                                        "idem-real-active-sandbox",
+                                        NOW),
+                                harness.principal());
+
+        assertThat(sandboxResponse.activeSnapshotKey()).isEqualTo(activeSnapshotKey);
+        assertThat(sandboxResponse.activeSnapshotContentHash())
+                .isEqualTo(activeSnapshotContentHash)
+                .matches("[A-Fa-f0-9]{64}")
+                .isNotEqualTo(headEtagUuid);
+        assertThat(sandboxResponse.activeActivationRevision()).isEqualTo(activationRevision);
+
+        var opResult =
+                harness.sandboxService()
+                        .runOperationalTest(
+                                new GovernedRulesStudioSandboxService.OperationalTestRunRequest(
+                                        harness.workspaceId(),
+                                        List.of(
+                                                new GovernedRulesStudioSandboxService
+                                                        .OperationalScenarioSelection(
+                                                        harness.scenarioAllowId(), "CREATE")),
+                                        "UTC",
+                                        NOW),
+                                harness.workspaceEtag(),
+                                "idem-real-active-op",
+                                "corr-real-active-op",
+                                harness.principal());
+
+        assertThat(opResult.run().activeSnapshotKey()).isEqualTo(activeSnapshotKey);
+        assertThat(opResult.run().activeSnapshotContentHash())
+                .isEqualTo(activeSnapshotContentHash)
+                .matches("[A-Fa-f0-9]{64}")
+                .isNotEqualTo(headEtagUuid);
+        assertThat(opResult.run().activeActivationRevision()).isEqualTo(activationRevision);
+
+        ArgumentCaptor<DomainRuleTestRun> savedRuns =
+                ArgumentCaptor.forClass(DomainRuleTestRun.class);
+        verify(harness.runsRepo(), times(2)).save(savedRuns.capture());
+        assertThat(savedRuns.getAllValues())
+                .allSatisfy(
+                        persisted -> {
+                            assertThat(persisted.getActiveSnapshotKey())
+                                    .isEqualTo(activeSnapshotKey);
+                            assertThat(persisted.getActiveSnapshotContentHash())
+                                    .isEqualTo(activeSnapshotContentHash)
+                                    .matches("[A-Fa-f0-9]{64}")
+                                    .isNotEqualTo(headEtagUuid);
+                            assertThat(persisted.getActiveActivationRevision())
+                                    .isEqualTo(activationRevision);
+                        });
+        verify(harness.snapshotService(), never()).findHeadStatus(any(), any(), any(), any());
+    }
+
+    @Test
+    void sandboxAndOperationalTestFallBackToProductPlanDigestWhenNoActiveHeadExists()
+            throws Exception {
+        RealTestRunSandboxHarness harness = createRealTestRunSandboxHarness();
+        when(harness.snapshotService()
+                        .findActive("tenant-a", "local", "workforce.leave-requests", "CREATE"))
+                .thenReturn(Optional.empty());
+
+        var sandboxResponse =
+                harness.sandboxService()
+                        .run(
+                                new GovernedRulesStudioSandboxService.SandboxRunRequest(
+                                        harness.workspaceId(),
+                                        List.of(harness.scenarioAllowId()),
+                                        "UTC",
+                                        "idem-real-empty-sandbox",
+                                        NOW),
+                                harness.principal());
+
+        String expectedPlanDigest = sandboxResponse.results().getFirst().activePlanDigest();
+        assertThat(sandboxResponse.activeSnapshotKey())
+                .isEqualTo("product:workforce.leave-requests:v1");
+        assertThat(sandboxResponse.activeSnapshotContentHash())
+                .matches("[A-Fa-f0-9]{64}")
+                .isEqualTo(expectedPlanDigest);
+        assertThat(sandboxResponse.activeActivationRevision()).isEqualTo(1L);
+
+        var opResult =
+                harness.sandboxService()
+                        .runOperationalTest(
+                                new GovernedRulesStudioSandboxService.OperationalTestRunRequest(
+                                        harness.workspaceId(),
+                                        List.of(
+                                                new GovernedRulesStudioSandboxService
+                                                        .OperationalScenarioSelection(
+                                                        harness.scenarioAllowId(), "CREATE")),
+                                        "UTC",
+                                        NOW),
+                                harness.workspaceEtag(),
+                                "idem-real-empty-op",
+                                "corr-real-empty-op",
+                                harness.principal());
+
+        assertThat(opResult.run().activeSnapshotKey())
+                .isEqualTo("product:workforce.leave-requests:v1");
+        assertThat(opResult.run().activeSnapshotContentHash())
+                .matches("[A-Fa-f0-9]{64}")
+                .isEqualTo(expectedPlanDigest);
+        assertThat(opResult.run().activeActivationRevision()).isEqualTo(1L);
+
+        ArgumentCaptor<DomainRuleTestRun> savedRuns =
+                ArgumentCaptor.forClass(DomainRuleTestRun.class);
+        verify(harness.runsRepo(), times(2)).save(savedRuns.capture());
+        assertThat(savedRuns.getAllValues())
+                .allSatisfy(
+                        persisted -> {
+                            assertThat(persisted.getActiveSnapshotKey())
+                                    .isEqualTo("product:workforce.leave-requests:v1");
+                            assertThat(persisted.getActiveSnapshotContentHash())
+                                    .isEqualTo(expectedPlanDigest);
+                            assertThat(persisted.getActiveActivationRevision()).isEqualTo(1L);
+                        });
+    }
+
+    @Test
+    void sandboxAndOperationalTestFallBackToProductPlanDigestWhenActiveHeadIsNonReadyOrHashMalformed()
+            throws Exception {
+        RealTestRunSandboxHarness harness = createRealTestRunSandboxHarness();
+        String withdrawnHeadEtag = UUID.randomUUID().toString();
+        when(harness.snapshotService()
+                        .findHeadStatus("tenant-a", "local", "workforce.leave-requests", "CREATE"))
+                .thenReturn(
+                        Optional.of(
+                                new DomainRuleSnapshotHeadStatusResponse(
+                                        "workforce.leave-requests",
+                                        "CREATE",
+                                        "snap-withdrawn-v2",
+                                        1,
+                                        2,
+                                        5L,
+                                        withdrawnHeadEtag,
+                                        false,
+                                        "WITHDRAWN")));
+
+        // Case A: withdrawn/non-ready head -> findActive returns Optional.empty()
+        when(harness.snapshotService()
+                        .findActive("tenant-a", "local", "workforce.leave-requests", "CREATE"))
+                .thenReturn(Optional.empty());
+
+        var withdrawnSandbox =
+                harness.sandboxService()
+                        .run(
+                                new GovernedRulesStudioSandboxService.SandboxRunRequest(
+                                        harness.workspaceId(),
+                                        List.of(harness.scenarioAllowId()),
+                                        "UTC",
+                                        "idem-withdrawn-sandbox",
+                                        NOW),
+                                harness.principal());
+        String expectedPlanDigest = withdrawnSandbox.results().getFirst().activePlanDigest();
+        assertThat(withdrawnSandbox.activeSnapshotKey())
+                .isEqualTo("product:workforce.leave-requests:v1");
+        assertThat(withdrawnSandbox.activeSnapshotContentHash())
+                .matches("[A-Fa-f0-9]{64}")
+                .isEqualTo(expectedPlanDigest)
+                .isNotEqualTo(withdrawnHeadEtag);
+        assertThat(withdrawnSandbox.activeActivationRevision()).isEqualTo(1L);
+
+        var withdrawnOp =
+                harness.sandboxService()
+                        .runOperationalTest(
+                                new GovernedRulesStudioSandboxService.OperationalTestRunRequest(
+                                        harness.workspaceId(),
+                                        List.of(
+                                                new GovernedRulesStudioSandboxService
+                                                        .OperationalScenarioSelection(
+                                                        harness.scenarioAllowId(), "CREATE")),
+                                        "UTC",
+                                        NOW),
+                                harness.workspaceEtag(),
+                                "idem-withdrawn-op",
+                                "corr-withdrawn-op",
+                                harness.principal());
+        assertThat(withdrawnOp.run().activeSnapshotContentHash())
+                .matches("[A-Fa-f0-9]{64}")
+                .isEqualTo(expectedPlanDigest)
+                .isNotEqualTo(withdrawnHeadEtag);
+
+        // Case B: invalid/corrupt active snapshot -> findActive throws IllegalStateException
+        when(harness.snapshotService()
+                        .findActive("tenant-a", "local", "workforce.leave-requests", "CREATE"))
+                .thenThrow(new IllegalStateException("corrupt active snapshot"));
+
+        var invalidSandbox =
+                harness.sandboxService()
+                        .run(
+                                new GovernedRulesStudioSandboxService.SandboxRunRequest(
+                                        harness.workspaceId(),
+                                        List.of(harness.scenarioAllowId()),
+                                        "UTC",
+                                        "idem-invalid-sandbox",
+                                        NOW),
+                                harness.principal());
+        assertThat(invalidSandbox.activeSnapshotKey())
+                .isEqualTo("product:workforce.leave-requests:v1");
+        assertThat(invalidSandbox.activeSnapshotContentHash())
+                .matches("[A-Fa-f0-9]{64}")
+                .isEqualTo(expectedPlanDigest);
+        assertThat(invalidSandbox.activeActivationRevision()).isEqualTo(1L);
+
+        var invalidOp =
+                harness.sandboxService()
+                        .runOperationalTest(
+                                new GovernedRulesStudioSandboxService.OperationalTestRunRequest(
+                                        harness.workspaceId(),
+                                        List.of(
+                                                new GovernedRulesStudioSandboxService
+                                                        .OperationalScenarioSelection(
+                                                        harness.scenarioAllowId(), "CREATE")),
+                                        "UTC",
+                                        NOW),
+                                harness.workspaceEtag(),
+                                "idem-invalid-op",
+                                "corr-invalid-op",
+                                harness.principal());
+        assertThat(invalidOp.run().activeSnapshotContentHash())
+                .matches("[A-Fa-f0-9]{64}")
+                .isEqualTo(expectedPlanDigest);
+
+        // Case C: malformed/blank snapshotContentHash in activation response -> falls back to
+        // planDigest (never passes UUID/malformed string to DomainRuleTestRunService)
+        PublishedRuleSnapshot partialSnapshot =
+                new PublishedRuleSnapshot(
+                        PublishedRuleSnapshot.SNAPSHOT_CONTRACT_VERSION,
+                        "snap-partial-v4",
+                        "tenant-a",
+                        "local",
+                        "hr-service",
+                        4,
+                        NOW.toString(),
+                        null,
+                        "host/1.0",
+                        "2026-01-01T00:00:00Z",
+                        null,
+                        List.of(
+                                new RuleSnapshotSource(
+                                        "src-1",
+                                        "workforce.leave-requests",
+                                        1,
+                                        "B".repeat(64))),
+                        List.of(
+                                new RuleSnapshotApproval(
+                                        "app-1",
+                                        "RULE_COMPOSITION_APPROVER",
+                                        "approver-1",
+                                        NOW.toString(),
+                                        "B".repeat(64))),
+                        sampleFamily().productProfiles().getFirst().ruleSet());
+        String malformedUuidHash = UUID.randomUUID().toString();
+        org.mockito.Mockito.doReturn(
+                        Optional.of(
+                                new DomainRuleSnapshotActivationResponse(
+                                        partialSnapshot,
+                                        malformedUuidHash,
+                                        withdrawnHeadEtag,
+                                        4L,
+                                        "ACTIVE")),
+                        Optional.of(
+                                new DomainRuleSnapshotActivationResponse(
+                                        partialSnapshot,
+                                        "   ",
+                                        withdrawnHeadEtag,
+                                        4L,
+                                        "ACTIVE")))
+                .when(harness.snapshotService())
+                .findActive("tenant-a", "local", "workforce.leave-requests", "CREATE");
+
+        var malformedSandbox =
+                harness.sandboxService()
+                        .run(
+                                new GovernedRulesStudioSandboxService.SandboxRunRequest(
+                                        harness.workspaceId(),
+                                        List.of(harness.scenarioAllowId()),
+                                        "UTC",
+                                        "idem-malformed-sandbox",
+                                        NOW),
+                                harness.principal());
+        assertThat(malformedSandbox.activeSnapshotKey()).isEqualTo("snap-partial-v4");
+        assertThat(malformedSandbox.activeSnapshotContentHash())
+                .matches("[A-Fa-f0-9]{64}")
+                .isEqualTo(expectedPlanDigest)
+                .isNotEqualTo(malformedUuidHash);
+        assertThat(malformedSandbox.activeActivationRevision()).isEqualTo(4L);
+
+        var blankOp =
+                harness.sandboxService()
+                        .runOperationalTest(
+                                new GovernedRulesStudioSandboxService.OperationalTestRunRequest(
+                                        harness.workspaceId(),
+                                        List.of(
+                                                new GovernedRulesStudioSandboxService
+                                                        .OperationalScenarioSelection(
+                                                        harness.scenarioAllowId(), "CREATE")),
+                                        "UTC",
+                                        NOW),
+                                harness.workspaceEtag(),
+                                "idem-blank-op",
+                                "corr-blank-op",
+                                harness.principal());
+        assertThat(blankOp.run().activeSnapshotKey()).isEqualTo("snap-partial-v4");
+        assertThat(blankOp.run().activeSnapshotContentHash())
+                .matches("[A-Fa-f0-9]{64}")
+                .isEqualTo(expectedPlanDigest);
+        assertThat(blankOp.run().activeActivationRevision()).isEqualTo(4L);
+    }
+
+    private record RealTestRunSandboxHarness(
+            GovernedRulesStudioSandboxService sandboxService,
+            DomainRuleSnapshotService snapshotService,
+            DomainRuleTestRunRepository runsRepo,
+            DomainRuleGovernancePrincipal principal,
+            UUID workspaceId,
+            UUID scenarioAllowId,
+            String workspaceEtag) {}
+
+    private static RealTestRunSandboxHarness createRealTestRunSandboxHarness() throws Exception {
+        GovernedRuleFamilyRegistry registry = new GovernedRuleFamilyRegistry(List.of(sampleFamily()));
+        DomainRuleService ruleService = mock(DomainRuleService.class);
+        DomainRuleChangeWorkspaceService workspaceService =
+                mock(DomainRuleChangeWorkspaceService.class);
+        DomainRuleSnapshotService snapshotService = mock(DomainRuleSnapshotService.class);
+
+        DomainRuleTestRunRepository runsRepo = mock(DomainRuleTestRunRepository.class);
+        DomainRuleTestRunResultRepository resultsRepo =
+                mock(DomainRuleTestRunResultRepository.class);
+        DomainRuleChangeWorkspaceRepository workspacesRepo =
+                mock(DomainRuleChangeWorkspaceRepository.class);
+        DomainRuleTestScenarioRepository scenariosRepo =
+                mock(DomainRuleTestScenarioRepository.class);
+        DomainRuleTestRunService realTestRunService =
+                new DomainRuleTestRunService(
+                        runsRepo, resultsRepo, workspacesRepo, scenariosRepo, JSON);
+
+        UUID workspaceId = UUID.randomUUID();
+        UUID baseDefId = UUID.randomUUID();
+        UUID scenarioAllowId = UUID.randomUUID();
+        String workspaceEtag = "\"ws-rev-1\"";
+        String baseDefHash = "A".repeat(64);
+
+        ObjectNode defNode = JSON.createObjectNode();
+        defNode.put("ruleSetKey", "workforce.leave-requests");
+        defNode.put("slotKey", "slot.max-days");
+        ObjectNode wsParams = JSON.createObjectNode();
+        wsParams.putObject("parameterValues").put("maxDays", 5);
+
+        DomainRuleDefinitionResponse baseDef =
+                new DomainRuleDefinitionResponse(
+                        baseDefId,
+                        "tenant-a",
+                        "local",
+                        "leave.max-days",
+                        1,
+                        "selection_eligibility",
+                        "active",
+                        "workforce",
+                        "workforce.leave-requests",
+                        "hr-service",
+                        "owner",
+                        "steward",
+                        null,
+                        null,
+                        defNode,
+                        JSON.createObjectNode(),
+                        null,
+                        null,
+                        null,
+                        "USER",
+                        "alice",
+                        null,
+                        NOW,
+                        NOW,
+                        null,
+                        NOW);
+        DomainRuleChangeWorkspaceResponse workspace =
+                new DomainRuleChangeWorkspaceResponse(
+                        workspaceId,
+                        "leave.max-days",
+                        baseDefId,
+                        1,
+                        baseDefHash,
+                        null,
+                        null,
+                        "Extend threshold to 5 days",
+                        "OPEN",
+                        null,
+                        wsParams,
+                        null,
+                        1L,
+                        workspaceEtag,
+                        "alice",
+                        "alice",
+                        NOW,
+                        NOW);
+
+        ObjectNode allowFacts = JSON.createObjectNode();
+        allowFacts
+                .putObject("draft")
+                .put("requestedDays", 4)
+                .put("applicantTaxId", "12345678901")
+                .put("clearanceAttached", true);
+        allowFacts.putObject("context").put("tenantId", "tenant-a");
+
+        DomainRuleTestScenarioResponse allowScenario =
+                new DomainRuleTestScenarioResponse(
+                        scenarioAllowId,
+                        workspaceId,
+                        "WITHIN_NEW_LIMIT",
+                        "4 days allowed",
+                        allowFacts,
+                        "ALLOW",
+                        null,
+                        List.of(),
+                        List.of(),
+                        "ACTIVE",
+                        1L,
+                        "s-1",
+                        "alice",
+                        "alice",
+                        NOW,
+                        NOW);
+
+        DomainRuleChangeWorkspace wsEntity =
+                DomainRuleChangeWorkspace.builder()
+                        .id(workspaceId)
+                        .tenantId("tenant-a")
+                        .environment("local")
+                        .status("OPEN")
+                        .revision(1L)
+                        .baseDefinitionHash(baseDefHash)
+                        .build();
+        DomainRuleTestScenario scenarioEntity =
+                DomainRuleTestScenario.builder()
+                        .id(scenarioAllowId)
+                        .workspaceId(workspaceId)
+                        .scenarioKey("WITHIN_NEW_LIMIT")
+                        .expectedDecision("ALLOW")
+                        .expectedOutput(null)
+                        .expectedReasonCodes("[]")
+                        .expectedEffectIntents("[]")
+                        .build();
+
+        when(workspaceService.get(eq(workspaceId), any())).thenReturn(workspace);
+        when(workspaceService.scenarios(eq(workspaceId), any()))
+                .thenReturn(List.of(allowScenario));
+        when(ruleService.definition(eq(baseDefId), any())).thenReturn(baseDef);
+        when(workspacesRepo.findById(workspaceId)).thenReturn(Optional.of(wsEntity));
+        when(workspacesRepo.findByIdForUpdate(workspaceId)).thenReturn(Optional.of(wsEntity));
+        when(runsRepo.findByTenantIdAndEnvironmentAndWorkspaceIdAndIdempotencyKey(
+                        eq("tenant-a"), eq("local"), eq(workspaceId), any()))
+                .thenReturn(Optional.empty());
+        when(runsRepo.save(any())).thenAnswer(inv -> inv.getArgument(0));
+        when(resultsRepo.saveAll(any())).thenAnswer(inv -> inv.getArgument(0));
+        when(scenariosRepo.findById(scenarioAllowId)).thenReturn(Optional.of(scenarioEntity));
+
+        GovernedRulesStudioSandboxService sandboxService =
+                new GovernedRulesStudioSandboxService(
+                        registry,
+                        ruleService,
+                        workspaceService,
+                        realTestRunService,
+                        snapshotService,
+                        JSON,
+                        Clock.fixed(NOW, ZoneId.of("UTC")));
+        DomainRuleGovernancePrincipal principal =
+                new DomainRuleGovernancePrincipal("tenant-a", "alice", "local");
+        return new RealTestRunSandboxHarness(
+                sandboxService,
+                snapshotService,
+                runsRepo,
+                principal,
+                workspaceId,
+                scenarioAllowId,
+                workspaceEtag);
     }
 
     @Test

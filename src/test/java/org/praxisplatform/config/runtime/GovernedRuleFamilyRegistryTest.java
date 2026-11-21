@@ -496,6 +496,110 @@ class GovernedRuleFamilyRegistryTest {
                 .hasMessageContaining("organizationId");
     }
 
+    @Test
+    void storesAndPreservesDidacticDocumentationAcrossWithMetadataAndFluentHelpers()
+            throws Exception {
+        GovernedRuleFamilyDescriptor<CarreiraOp> base =
+                buildFamily(
+                        CarreiraOp.class,
+                        CarreiraOp.CREATE,
+                        "workforce.carreiras",
+                        CarreiraOp.CREATE.key,
+                        "WF-09001");
+
+        var basis =
+                GovernedRuleFamilyDescriptor.GovernedRuleLegalBasisSpec.of(
+                        "LC 840/2011 Art. 14",
+                        "Estatuto Funcional",
+                        "Art. 14",
+                        "Distrital",
+                        "Exige identificação do código da carreira.",
+                        null);
+        var familyDoc =
+                GovernedRuleFamilyDescriptor.GovernedRuleDocumentationSpec.of(
+                        "Governança de Carreiras",
+                        "Valida os pré-requisitos na criação da carreira.",
+                        "Ao criar uma carreira.",
+                        "Evita cadastros sem identificador oficial.",
+                        List.of(basis),
+                        "Slot fixo de integridade.");
+        var slotDoc =
+                GovernedRuleFamilyDescriptor.GovernedRuleDocumentationSpec.of(
+                        "Código obrigatório",
+                        "Verifica se o código da carreira foi preenchido.",
+                        "Em toda inclusão.",
+                        "Permite rastreabilidade normativa.",
+                        List.of(basis),
+                        "Regra protegida.");
+        var ruleDoc =
+                GovernedRuleFamilyDescriptor.GovernedRuleDocumentationSpec.of(
+                        "Regra WF-09001",
+                        "Bloqueia criação sem código.",
+                        "Na operação CREATE.",
+                        "Protege chave de negócio.",
+                        List.of(basis),
+                        "Não substituível.");
+
+        GovernedRuleFamilyDescriptor<CarreiraOp> enriched =
+                base.withRuleSetDocumentation(familyDoc)
+                        .withSlotDocumentation(Map.of("workforce.carreiras.create", slotDoc))
+                        .withRuleDocumentation(Map.of("WF-09001", ruleDoc))
+                        .withMetadata(
+                                "workforce.carreiras",
+                                "Regras de Carreira",
+                                "Descrição funcional.",
+                                Map.of());
+
+        assertThat(enriched.ruleSetDocumentation()).contains(familyDoc);
+        assertThat(enriched.slotDocumentation()).containsEntry("workforce.carreiras.create", slotDoc);
+        assertThat(enriched.ruleDocumentation()).containsEntry("WF-09001", ruleDoc);
+        assertThat(enriched.title()).contains("Regras de Carreira");
+
+        assertThatThrownBy(
+                        () ->
+                                new GovernedRuleFamilyDescriptor.GovernedRuleLegalBasisSpec(
+                                        " ", null, " ", null, "  ", null))
+                .isInstanceOf(IllegalArgumentException.class);
+
+        var withValidUrl =
+                GovernedRuleFamilyDescriptor.GovernedRuleLegalBasisSpec.of(
+                        "STAT-01",
+                        "Estatuto",
+                        "Art. 14",
+                        "Federal",
+                        "Regra base",
+                        "  https://example.org/statutes/123  ");
+        assertThat(withValidUrl.url()).isEqualTo("https://example.org/statutes/123");
+
+        var withBlankUrl =
+                GovernedRuleFamilyDescriptor.GovernedRuleLegalBasisSpec.of(
+                        "STAT-01", "Estatuto", "Art. 14", "Federal", "Regra base", "   ");
+        assertThat(withBlankUrl.url()).isNull();
+
+        for (String unsafeUrl :
+                List.of(
+                        "javascript:alert(1)",
+                        "data:text/html,<script>alert(1)</script>",
+                        "vbscript:msgbox(1)",
+                        "file:///etc/passwd",
+                        "//evil.example/path",
+                        "https://user:pass@example.com/doc",
+                        "https:example.com",
+                        "https:///path",
+                        "https://example.org/\n")) {
+            assertThatThrownBy(
+                            () ->
+                                    GovernedRuleFamilyDescriptor.GovernedRuleLegalBasisSpec.of(
+                                            "STAT-01",
+                                            "Estatuto",
+                                            "Art. 14",
+                                            "Federal",
+                                            "Regra base",
+                                            unsafeUrl))
+                    .isInstanceOf(IllegalArgumentException.class);
+        }
+    }
+
     private static <O extends Enum<O>> GovernedRuleFamilyDescriptor<O> buildFamily(
             Class<O> opClass, O op, String ruleSetKey, String opKey, String errorCode)
             throws Exception {

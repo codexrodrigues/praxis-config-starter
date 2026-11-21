@@ -285,6 +285,8 @@ public final class GovernedRulesStudioDefinitionSeeder implements ApplicationRun
                 definition.set(
                         "factCatalog",
                         buildFactCatalog(family, ruleSet, factSchemaNode, catalogFactPaths));
+                resolveSeedDocumentation(family, slot, primaryBinding, ruleKey, falseReason)
+                        .ifPresent(doc -> definition.set("documentation", objectMapper.valueToTree(doc)));
                 if (template != null) {
                     definition.set("parameterTemplate", objectMapper.valueToTree(template));
                 }
@@ -549,6 +551,31 @@ public final class GovernedRulesStudioDefinitionSeeder implements ApplicationRun
             }
         }
         return errorCatalog.flatMap(catalog -> catalog.find(reasonCode));
+    }
+
+    private static Optional<GovernedRuleFamilyDescriptor.GovernedRuleDocumentationSpec>
+            resolveSeedDocumentation(
+                    GovernedRuleFamilyDescriptor<?> family,
+                    DecisionSlot slot,
+                    DecisionBinding primaryBinding,
+                    String ruleKey,
+                    String falseReason) {
+        if (family == null) {
+            return Optional.empty();
+        }
+        Map<String, GovernedRuleFamilyDescriptor.GovernedRuleDocumentationSpec> ruleDocs =
+                family.ruleDocumentation();
+        GovernedRuleFamilyDescriptor.GovernedRuleDocumentationSpec found = ruleDocs.get(ruleKey);
+        if (found == null && primaryBinding != null && primaryBinding.bindingKey() != null) {
+            found = ruleDocs.get(primaryBinding.bindingKey());
+        }
+        if (found == null && falseReason != null) {
+            found = ruleDocs.get(falseReason);
+        }
+        if (found == null) {
+            found = family.slotDocumentation().get(slot.slotKey());
+        }
+        return found != null && !found.isEmpty() ? Optional.of(found) : Optional.empty();
     }
 
     private static List<String> normalizeTenantIds(List<String> raw) {

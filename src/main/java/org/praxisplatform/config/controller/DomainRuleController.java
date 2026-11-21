@@ -4,7 +4,9 @@ import jakarta.servlet.http.HttpServletRequest;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import lombok.RequiredArgsConstructor;
 import org.praxisplatform.config.dto.DomainRuleDefinitionRequest;
@@ -29,7 +31,9 @@ import org.praxisplatform.config.service.DomainRuleService;
 import org.praxisplatform.config.service.DomainRuleGovernancePrincipal;
 import org.praxisplatform.config.service.DomainRuleGovernancePrincipalResolver;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -309,6 +313,19 @@ public class DomainRuleController {
         if (canPublish && ("approved".equals(definition.status())
                 || "active".equals(definition.status()))) actions.add("PUBLISH");
         return List.copyOf(actions);
+    }
+
+    @ExceptionHandler(IllegalArgumentException.class)
+    public ResponseEntity<Map<String, Object>> handleInvalidContract(
+            IllegalArgumentException exception) {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("status", HttpStatus.BAD_REQUEST.value());
+        body.put("error", "Bad Request");
+        body.put("code", "INVALID_DOMAIN_RULE");
+        body.put(
+                "message",
+                exception.getMessage() != null ? exception.getMessage() : "Invalid domain rule request");
+        return ResponseEntity.badRequest().body(body);
     }
 
     private String requiredMaterializationRole(DomainRuleStatusTransitionRequest request) {

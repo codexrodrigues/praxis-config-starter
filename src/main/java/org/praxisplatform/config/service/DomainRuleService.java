@@ -248,7 +248,7 @@ public class DomainRuleService {
                 "status",
                 DEFINITION_STATUSES);
         JsonNode requestedGovernance = request.governance();
-        JsonNode requestedDefinition = request.definition();
+        JsonNode requestedDefinition = validateAndNormalizeDocumentationUrls(request.definition());
         JsonNode requestedParameters = request.parameters();
         validateFactCatalog(requestedDefinition);
         requireDefinitionCreationGovernance(
@@ -4176,6 +4176,66 @@ public class DomainRuleService {
                 DomainRuleParameters.read(objectMapper, definition.getDefinition())) != null) {
             throw new ConfigurationIngestionException(
                     "Parameterized Engine definitions require governed RuleSet snapshot publication; generic materializations cannot preserve their execution contract");
+        }
+    }
+
+    private JsonNode validateAndNormalizeDocumentationUrls(JsonNode definition) {
+        if (definition == null || definition.isNull() || !definition.isObject()) {
+            return definition;
+        }
+        boolean hasDocFields = definition.has("documentation")
+                || definition.has("slotDocumentation")
+                || definition.has("legalBasis");
+        if (!hasDocFields) {
+            return definition;
+        }
+        ObjectNode copy = ((ObjectNode) definition).deepCopy();
+        JsonNode docNode = copy.get("documentation");
+        if (docNode != null && !docNode.isNull() && docNode.isObject()) {
+            validateLegalBasisOnDocObject((ObjectNode) docNode, "definition.documentation.legalBasis");
+        }
+        JsonNode slotDocNode = copy.get("slotDocumentation");
+        if (slotDocNode != null && !slotDocNode.isNull() && slotDocNode.isObject()) {
+            ObjectNode slotDocObj = (ObjectNode) slotDocNode;
+            // Support direct documentation object shape (MetadataDomainRuleSetCatalogBridgeSupport)
+            validateLegalBasisOnDocObject(slotDocObj, "definition.slotDocumentation.legalBasis");
+            // Support map-of-slots shape (slotKey -> documentation object)
+            slotDocObj.fields().forEachRemaining(entry -> {
+                JsonNode slotEntryValue = entry.getValue();
+                if (slotEntryValue != null && slotEntryValue.isObject()) {
+                    validateLegalBasisOnDocObject(
+                            (ObjectNode) slotEntryValue,
+                            "definition.slotDocumentation." + entry.getKey() + ".legalBasis");
+                }
+            });
+        }
+        validateLegalBasisOnDocObject(copy, "definition.legalBasis");
+        return copy;
+    }
+
+    private void validateLegalBasisOnDocObject(ObjectNode docObject, String fieldPrefix) {
+        JsonNode legalBasisNode = docObject.get("legalBasis");
+        if (legalBasisNode == null || legalBasisNode.isNull()) {
+            return;
+        }
+        if (!legalBasisNode.isArray()) {
+            throw new IllegalArgumentException(fieldPrefix + " must be a JSON array");
+        }
+        for (JsonNode item : legalBasisNode) {
+            if (item != null && item.isObject() && item.has("url") && !item.get("url").isNull()) {
+                JsonNode urlNode = item.get("url");
+                if (!urlNode.isTextual()) {
+                    throw new IllegalArgumentException(fieldPrefix + ".url must be a string");
+                }
+                String validated = RuleLegalBasisUrlValidator.validateOptionalHttpUrl(
+                        urlNode.asText(), fieldPrefix + ".url");
+                ObjectNode itemObj = (ObjectNode) item;
+                if (validated == null) {
+                    itemObj.remove("url");
+                } else {
+                    itemObj.put("url", validated);
+                }
+            }
         }
     }
 

@@ -1,5 +1,6 @@
 package org.praxisplatform.config.runtime;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -8,6 +9,7 @@ import java.util.Optional;
 import org.praxisplatform.config.runtime.GovernedHostRuleBundleRuntime.OperationSpec;
 import org.praxisplatform.config.runtime.GovernedHostRuleBundleRuntime.TenantEnvironmentScope;
 import org.praxisplatform.config.service.DomainRuleProductProfile;
+import org.praxisplatform.config.service.RuleLegalBasisUrlValidator;
 import org.praxisplatform.rules.contract.PublishedRuleSnapshot;
 import org.praxisplatform.rules.contract.RuleSetDefinition;
 import org.praxisplatform.rules.contract.RuleSetRef;
@@ -52,6 +54,95 @@ public final class GovernedRuleFamilyDescriptor<O extends Enum<O>> {
         }
     }
 
+    /**
+     * Amparo normativo estruturado associado a um slot, regra ou família governada, desacoplado de
+     * dependência direta em {@code praxis-metadata-starter}.
+     */
+    public record GovernedRuleLegalBasisSpec(
+            String code,
+            String title,
+            String article,
+            String jurisdiction,
+            String summary,
+            String url) {
+        public GovernedRuleLegalBasisSpec {
+            code = normalizeNullable(code);
+            title = normalizeNullable(title);
+            article = normalizeNullable(article);
+            jurisdiction = normalizeNullable(jurisdiction);
+            summary = normalizeNullable(summary);
+            url = RuleLegalBasisUrlValidator.validateOptionalHttpUrl(url, "url");
+            if (code == null && title == null && article == null && summary == null) {
+                throw new IllegalArgumentException(
+                        "GovernedRuleLegalBasisSpec requires at least one identifying field");
+            }
+        }
+
+        public static GovernedRuleLegalBasisSpec of(String code, String title, String summary) {
+            return new GovernedRuleLegalBasisSpec(code, title, null, null, summary, null);
+        }
+
+        public static GovernedRuleLegalBasisSpec of(
+                String code, String title, String article, String jurisdiction, String summary) {
+            return new GovernedRuleLegalBasisSpec(code, title, article, jurisdiction, summary, null);
+        }
+
+        public static GovernedRuleLegalBasisSpec of(
+                String code,
+                String title,
+                String article,
+                String jurisdiction,
+                String summary,
+                String url) {
+            return new GovernedRuleLegalBasisSpec(code, title, article, jurisdiction, summary, url);
+        }
+    }
+
+    /**
+     * Documentação didática humana ("de humano para humano") de uma família, slot ou regra governada,
+     * desacoplada de dependência direta em {@code praxis-metadata-starter}.
+     */
+    public record GovernedRuleDocumentationSpec(
+            String title,
+            String summary,
+            String whenApplies,
+            String rationale,
+            List<GovernedRuleLegalBasisSpec> legalBasis,
+            String customizationGuidance) {
+        public GovernedRuleDocumentationSpec {
+            title = normalizeNullable(title);
+            summary = normalizeNullable(summary);
+            whenApplies = normalizeNullable(whenApplies);
+            rationale = normalizeNullable(rationale);
+            legalBasis =
+                    legalBasis == null || legalBasis.isEmpty()
+                            ? List.of()
+                            : legalBasis.stream().filter(Objects::nonNull).toList();
+            customizationGuidance = normalizeNullable(customizationGuidance);
+        }
+
+        @JsonIgnore
+        public boolean isEmpty() {
+            return title == null
+                    && summary == null
+                    && whenApplies == null
+                    && rationale == null
+                    && legalBasis.isEmpty()
+                    && customizationGuidance == null;
+        }
+
+        public static GovernedRuleDocumentationSpec of(
+                String title,
+                String summary,
+                String whenApplies,
+                String rationale,
+                List<GovernedRuleLegalBasisSpec> legalBasis,
+                String customizationGuidance) {
+            return new GovernedRuleDocumentationSpec(
+                    title, summary, whenApplies, rationale, legalBasis, customizationGuidance);
+        }
+    }
+
     private final GovernedHostRuleBundleRuntime<O> runtime;
     private final RuleFactCatalogDocument factCatalogDocument;
     private final Map<String, Class<?>> rootDtoBindings;
@@ -59,22 +150,25 @@ public final class GovernedRuleFamilyDescriptor<O extends Enum<O>> {
     private final String title;
     private final String description;
     private final Map<String, GovernedConceptRootSpec> conceptRootSpecs;
+    private final GovernedRuleDocumentationSpec ruleSetDocumentation;
+    private final Map<String, GovernedRuleDocumentationSpec> slotDocumentation;
+    private final Map<String, GovernedRuleDocumentationSpec> ruleDocumentation;
     private final List<DomainRuleProductProfile> productProfiles;
 
     public GovernedRuleFamilyDescriptor(GovernedHostRuleBundleRuntime<O> runtime) {
-        this(runtime, null, Map.of(), null, null, null, Map.of());
+        this(runtime, null, Map.of(), null, null, null, Map.of(), null, Map.of(), Map.of());
     }
 
     public GovernedRuleFamilyDescriptor(
             GovernedHostRuleBundleRuntime<O> runtime, RuleFactCatalogDocument factCatalogDocument) {
-        this(runtime, factCatalogDocument, Map.of(), null, null, null, Map.of());
+        this(runtime, factCatalogDocument, Map.of(), null, null, null, Map.of(), null, Map.of(), Map.of());
     }
 
     public GovernedRuleFamilyDescriptor(
             GovernedHostRuleBundleRuntime<O> runtime,
             RuleFactCatalogDocument factCatalogDocument,
             Map<String, Class<?>> rootDtoBindings) {
-        this(runtime, factCatalogDocument, rootDtoBindings, null, null, null, Map.of());
+        this(runtime, factCatalogDocument, rootDtoBindings, null, null, null, Map.of(), null, Map.of(), Map.of());
     }
 
     public GovernedRuleFamilyDescriptor(
@@ -85,6 +179,30 @@ public final class GovernedRuleFamilyDescriptor<O extends Enum<O>> {
             String title,
             String description,
             Map<String, GovernedConceptRootSpec> conceptRootSpecs) {
+        this(
+                runtime,
+                factCatalogDocument,
+                rootDtoBindings,
+                resourceKey,
+                title,
+                description,
+                conceptRootSpecs,
+                null,
+                Map.of(),
+                Map.of());
+    }
+
+    public GovernedRuleFamilyDescriptor(
+            GovernedHostRuleBundleRuntime<O> runtime,
+            RuleFactCatalogDocument factCatalogDocument,
+            Map<String, Class<?>> rootDtoBindings,
+            String resourceKey,
+            String title,
+            String description,
+            Map<String, GovernedConceptRootSpec> conceptRootSpecs,
+            GovernedRuleDocumentationSpec ruleSetDocumentation,
+            Map<String, GovernedRuleDocumentationSpec> slotDocumentation,
+            Map<String, GovernedRuleDocumentationSpec> ruleDocumentation) {
         this.runtime = Objects.requireNonNull(runtime, "runtime");
         this.factCatalogDocument = factCatalogDocument;
         this.rootDtoBindings =
@@ -98,6 +216,12 @@ public final class GovernedRuleFamilyDescriptor<O extends Enum<O>> {
                 conceptRootSpecs == null
                         ? Map.of()
                         : Map.copyOf(new LinkedHashMap<>(conceptRootSpecs));
+        this.ruleSetDocumentation =
+                ruleSetDocumentation != null && !ruleSetDocumentation.isEmpty()
+                        ? ruleSetDocumentation
+                        : null;
+        this.slotDocumentation = immutableDocumentationMap(slotDocumentation);
+        this.ruleDocumentation = immutableDocumentationMap(ruleDocumentation);
         PraxisRulePlanCompiler planCompiler =
                 new PraxisRulePlanCompiler(runtime.executorRegistry());
         this.productProfiles =
@@ -116,7 +240,7 @@ public final class GovernedRuleFamilyDescriptor<O extends Enum<O>> {
 
     /**
      * Retorna uma nova instância enriquecida com metadados semânticos de catálogo e vínculos de
-     * raízes ontológicas ({@code conceptRootSpecs}).
+     * raízes ontológicas ({@code conceptRootSpecs}), preservando a documentação didática atual.
      */
     public GovernedRuleFamilyDescriptor<O> withMetadata(
             String resourceKey,
@@ -130,7 +254,70 @@ public final class GovernedRuleFamilyDescriptor<O extends Enum<O>> {
                 resourceKey,
                 title,
                 description,
-                conceptRootSpecs);
+                conceptRootSpecs,
+                this.ruleSetDocumentation,
+                this.slotDocumentation,
+                this.ruleDocumentation);
+    }
+
+    /**
+     * Retorna uma nova instância enriquecida com metadados semânticos, vínculos de raízes e
+     * documentação didática de família, slots e regras.
+     */
+    public GovernedRuleFamilyDescriptor<O> withMetadata(
+            String resourceKey,
+            String title,
+            String description,
+            Map<String, GovernedConceptRootSpec> conceptRootSpecs,
+            GovernedRuleDocumentationSpec ruleSetDocumentation,
+            Map<String, GovernedRuleDocumentationSpec> slotDocumentation,
+            Map<String, GovernedRuleDocumentationSpec> ruleDocumentation) {
+        return new GovernedRuleFamilyDescriptor<>(
+                this.runtime,
+                this.factCatalogDocument,
+                this.rootDtoBindings,
+                resourceKey,
+                title,
+                description,
+                conceptRootSpecs,
+                ruleSetDocumentation,
+                slotDocumentation,
+                ruleDocumentation);
+    }
+
+    public GovernedRuleFamilyDescriptor<O> withDocumentation(
+            GovernedRuleDocumentationSpec ruleSetDocumentation,
+            Map<String, GovernedRuleDocumentationSpec> slotDocumentation,
+            Map<String, GovernedRuleDocumentationSpec> ruleDocumentation) {
+        return new GovernedRuleFamilyDescriptor<>(
+                this.runtime,
+                this.factCatalogDocument,
+                this.rootDtoBindings,
+                this.resourceKey,
+                this.title,
+                this.description,
+                this.conceptRootSpecs,
+                ruleSetDocumentation,
+                slotDocumentation,
+                ruleDocumentation);
+    }
+
+    public GovernedRuleFamilyDescriptor<O> withRuleSetDocumentation(
+            GovernedRuleDocumentationSpec ruleSetDocumentation) {
+        return withDocumentation(
+                ruleSetDocumentation, this.slotDocumentation, this.ruleDocumentation);
+    }
+
+    public GovernedRuleFamilyDescriptor<O> withSlotDocumentation(
+            Map<String, GovernedRuleDocumentationSpec> slotDocumentation) {
+        return withDocumentation(
+                this.ruleSetDocumentation, slotDocumentation, this.ruleDocumentation);
+    }
+
+    public GovernedRuleFamilyDescriptor<O> withRuleDocumentation(
+            Map<String, GovernedRuleDocumentationSpec> ruleDocumentation) {
+        return withDocumentation(
+                this.ruleSetDocumentation, this.slotDocumentation, ruleDocumentation);
     }
 
     public String familyKey() {
@@ -219,6 +406,18 @@ public final class GovernedRuleFamilyDescriptor<O extends Enum<O>> {
 
     public Map<String, GovernedConceptRootSpec> conceptRootSpecs() {
         return conceptRootSpecs;
+    }
+
+    public Optional<GovernedRuleDocumentationSpec> ruleSetDocumentation() {
+        return Optional.ofNullable(ruleSetDocumentation);
+    }
+
+    public Map<String, GovernedRuleDocumentationSpec> slotDocumentation() {
+        return slotDocumentation;
+    }
+
+    public Map<String, GovernedRuleDocumentationSpec> ruleDocumentation() {
+        return ruleDocumentation;
     }
 
     public List<DomainRuleProductProfile> productProfiles() {
@@ -342,6 +541,21 @@ public final class GovernedRuleFamilyDescriptor<O extends Enum<O>> {
             return ruleSetKey.substring(0, idx + 1 + boundedContext.length());
         }
         return ref.domainKey() + "." + boundedContext;
+    }
+
+    private static Map<String, GovernedRuleDocumentationSpec> immutableDocumentationMap(
+            Map<String, GovernedRuleDocumentationSpec> input) {
+        if (input == null || input.isEmpty()) {
+            return Map.of();
+        }
+        Map<String, GovernedRuleDocumentationSpec> copy = new LinkedHashMap<>();
+        input.forEach(
+                (key, value) -> {
+                    if (key != null && !key.isBlank() && value != null && !value.isEmpty()) {
+                        copy.put(key.trim(), value);
+                    }
+                });
+        return copy.isEmpty() ? Map.of() : java.util.Collections.unmodifiableMap(copy);
     }
 
     private static String normalizeNullable(String value) {

@@ -680,6 +680,66 @@ class DomainRuleControllerTest {
                 .hasMessageContaining("RULE_DEFINITION_READER");
     }
 
+    @Test
+    void createDefinitionAndIntakeReturnHttp400WithoutGlobalExceptionHandlerOnInvalidLegalBasisUrl()
+            throws Exception {
+        DomainRuleService service = mock(DomainRuleService.class);
+        when(service.createDefinition(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.eq(PRINCIPAL)))
+                .thenThrow(new IllegalArgumentException("definition.documentation.legalBasis.url must use http or https scheme"));
+        when(service.intake(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.eq(PRINCIPAL)))
+                .thenThrow(new IllegalArgumentException("definition.documentation.legalBasis.url must use http or https scheme"));
+        DomainRuleController controller = controller(service);
+        org.springframework.test.web.servlet.MockMvc mvc =
+                org.springframework.test.web.servlet.setup.MockMvcBuilders.standaloneSetup(controller).build();
+
+        String defBody = """
+                {
+                  "ruleKey": "workforce.leaves.rule",
+                  "ruleType": "visual_guidance",
+                  "definition": {
+                    "documentation": {
+                      "legalBasis": [{"code": "STAT-1", "url": "javascript:alert(1)"}]
+                    }
+                  }
+                }
+                """;
+        mvc.perform(
+                org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post(
+                        "/api/praxis/config/domain-rules/definitions")
+                        .header("X-Tenant-ID", "tenant-a")
+                        .header("X-Env", "dev")
+                        .contentType(org.springframework.http.MediaType.APPLICATION_JSON)
+                        .content(defBody))
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.status().isBadRequest())
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath("$.code")
+                        .value("INVALID_DOMAIN_RULE"))
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath("$.message")
+                        .value("definition.documentation.legalBasis.url must use http or https scheme"));
+
+        String intakeBody = """
+                {
+                  "prompt": "Validar limite",
+                  "ruleType": "visual_guidance",
+                  "resourceKey": "workforce.leaves",
+                  "definition": {
+                    "documentation": {
+                      "legalBasis": [{"code": "STAT-1", "url": "javascript:alert(1)"}]
+                    }
+                  }
+                }
+                """;
+        mvc.perform(
+                org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post(
+                        "/api/praxis/config/domain-rules/intake")
+                        .header("X-Tenant-ID", "tenant-a")
+                        .header("X-Env", "dev")
+                        .contentType(org.springframework.http.MediaType.APPLICATION_JSON)
+                        .content(intakeBody))
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.status().isBadRequest())
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath("$.code")
+                        .value("INVALID_DOMAIN_RULE"));
+    }
+
     private DomainRuleController controller(DomainRuleService service) {
         DomainRuleGovernancePrincipalResolver resolver = mock(DomainRuleGovernancePrincipalResolver.class);
         when(resolver.resolve(

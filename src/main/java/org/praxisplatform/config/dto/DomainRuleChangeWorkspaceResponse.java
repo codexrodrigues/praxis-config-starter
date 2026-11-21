@@ -22,4 +22,46 @@ public record DomainRuleChangeWorkspaceResponse(
     String createdBy,
     String updatedBy,
     Instant createdAt,
-    Instant updatedAt) {}
+    Instant updatedAt,
+    JsonNode documentation) {
+  public DomainRuleChangeWorkspaceResponse(
+      UUID id,
+      String ruleKey,
+      UUID baseDefinitionId,
+      Integer baseDefinitionVersion,
+      String baseDefinitionHash,
+      UUID promotedDefinitionId,
+      UUID submittedTestRunId,
+      String title,
+      String status,
+      JsonNode condition,
+      JsonNode parameters,
+      String rationale,
+      Long revision,
+      String etag,
+      String createdBy,
+      String updatedBy,
+      Instant createdAt,
+      Instant updatedAt) {
+    this(
+        id,
+        ruleKey,
+        baseDefinitionId,
+        baseDefinitionVersion,
+        baseDefinitionHash,
+        promotedDefinitionId,
+        submittedTestRunId,
+        title,
+        status,
+        condition,
+        parameters,
+        rationale,
+        revision,
+        etag,
+        createdBy,
+        updatedBy,
+        createdAt,
+        updatedAt,
+        null);
+  }
+}

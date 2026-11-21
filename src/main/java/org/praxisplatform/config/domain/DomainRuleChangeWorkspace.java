@@ -36,6 +36,8 @@ public class DomainRuleChangeWorkspace {
   @ColumnTransformer(write = "?::jsonb") private String draftCondition;
   @Column(name = "draft_parameters", nullable = false, columnDefinition = "jsonb")
   @ColumnTransformer(write = "?::jsonb") private String draftParameters;
+  @Column(name = "draft_documentation", columnDefinition = "jsonb")
+  @ColumnTransformer(write = "?::jsonb") private String draftDocumentation;
   @Column(columnDefinition = "text") private String rationale;
   @Column(nullable = false) private UUID etag;
   @Column(nullable = false) private Long revision;

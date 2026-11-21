@@ -20,6 +20,7 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import org.praxisplatform.config.contract.DomainRuleOperationalTestEvidence;
 import org.praxisplatform.config.contract.DomainRuleTestBaselineEvidence;
@@ -30,7 +31,7 @@ import org.praxisplatform.config.contract.DomainRuleTestRunResultRequest;
 import org.praxisplatform.config.contract.DomainRuleTestRunResultResponse;
 import org.praxisplatform.config.dto.DomainRuleChangeWorkspaceResponse;
 import org.praxisplatform.config.dto.DomainRuleDefinitionResponse;
-import org.praxisplatform.config.dto.DomainRuleSnapshotHeadStatusResponse;
+import org.praxisplatform.config.dto.DomainRuleSnapshotActivationResponse;
 import org.praxisplatform.config.dto.DomainRuleTestScenarioResponse;
 import org.praxisplatform.config.http.HttpEntityTagCondition;
 import org.praxisplatform.config.service.DomainRuleChangeWorkspaceService;
@@ -43,6 +44,7 @@ import org.praxisplatform.rules.contract.DecisionBinding;
 import org.praxisplatform.rules.contract.DecisionSlot;
 import org.praxisplatform.rules.contract.DecisionSource;
 import org.praxisplatform.rules.contract.OverridePolicy;
+import org.praxisplatform.rules.contract.PublishedRuleSnapshot;
 import org.praxisplatform.rules.contract.RuleDecision;
 import org.praxisplatform.rules.contract.RuleEvaluationResult;
 import org.praxisplatform.rules.contract.RuleExecutorRef;
@@ -77,6 +79,7 @@ public class GovernedRulesStudioSandboxService {
   private static final Set<String> SUPPORTED_OPERATION_MODES = Set.of("CREATE", "UPDATE");
   private static final Set<String> SUPPORTED_OPERATIONAL_DECISIONS = Set.of("ALLOW", "DENY");
   private static final int MAX_OPERATIONAL_SCENARIOS = 20;
+  private static final Pattern SHA256_HEX_PATTERN = Pattern.compile("[A-Fa-f0-9]{64}");
 
   private final GovernedRuleFamilyRegistry familyRegistry;
   private final DomainRuleService domainRuleService;
@@ -267,7 +270,13 @@ public class GovernedRulesStudioSandboxService {
     PraxisRulePlanCompiler compiler = new PraxisRulePlanCompiler(executorRegistry);
     PraxisRuleSetEngine engine = new PraxisRuleSetEngine(executorRegistry);
 
-    RuleSetDefinition activeDefinition = resolveActiveDefinition(context, principal);
+    Optional<DomainRuleSnapshotActivationResponse> activeSnapshotOpt =
+        resolveActiveSnapshot(context, principal);
+    RuleSetDefinition activeDefinition =
+        activeSnapshotOpt
+            .map(DomainRuleSnapshotActivationResponse::snapshot)
+            .map(PublishedRuleSnapshot::ruleSet)
+            .orElseGet(context::productRuleSet);
     RuleDecisionPlan activePlan = compileWithGraphError(compiler, activeDefinition);
     RuleSetDefinition candidateDefinition =
         buildCandidateDefinition(activeDefinition, workspace, baseDefinition);
@@ -290,7 +299,7 @@ public class GovernedRulesStudioSandboxService {
                         zoneId))
             .toList();
 
-    ActiveHeadInfo headInfo = resolveActiveHeadInfo(context, activePlan, principal);
+    ActiveHeadInfo headInfo = resolveActiveHeadInfo(context, activeSnapshotOpt, activePlan);
     String expectationDigest = scenarioExpectationDigest(selected);
     Map<UUID, DomainRuleTestScenarioResponse> scenariosById =
         selected.stream().collect(Collectors.toMap(DomainRuleTestScenarioResponse::id, s -> s));
@@ -381,7 +390,13 @@ public class GovernedRulesStudioSandboxService {
     PraxisRulePlanCompiler compiler = new PraxisRulePlanCompiler(executorRegistry);
     PraxisRuleSetEngine engine = new PraxisRuleSetEngine(executorRegistry);
 
-    RuleSetDefinition activeDefinition = resolveActiveDefinition(context, principal);
+    Optional<DomainRuleSnapshotActivationResponse> activeSnapshotOpt =
+        resolveActiveSnapshot(context, principal);
+    RuleSetDefinition activeDefinition =
+        activeSnapshotOpt
+            .map(DomainRuleSnapshotActivationResponse::snapshot)
+            .map(PublishedRuleSnapshot::ruleSet)
+            .orElseGet(context::productRuleSet);
     RuleDecisionPlan activePlan = compileWithGraphError(compiler, activeDefinition);
     RuleSetDefinition candidateDefinition =
         buildCandidateDefinition(activeDefinition, workspace, baseDefinition);
@@ -424,7 +439,7 @@ public class GovernedRulesStudioSandboxService {
       }
     }
 
-    ActiveHeadInfo headInfo = resolveActiveHeadInfo(context, activePlan, principal);
+    ActiveHeadInfo headInfo = resolveActiveHeadInfo(context, activeSnapshotOpt, activePlan);
     String expectationDigest = scenarioExpectationDigest(selected);
     Map<UUID, DomainRuleTestScenarioResponse> scenariosById =
         selected.stream().collect(Collectors.toMap(DomainRuleTestScenarioResponse::id, s -> s));
@@ -527,7 +542,7 @@ public class GovernedRulesStudioSandboxService {
         family, firstSpec.productRuleSet(), firstSpec.operationKey());
   }
 
-  private RuleSetDefinition resolveActiveDefinition(
+  private Optional<DomainRuleSnapshotActivationResponse> resolveActiveSnapshot(
       ResolvedRuleSetContext context, DomainRuleGovernancePrincipal principal) {
     try {
       var activeOpt =
@@ -536,16 +551,15 @@ public class GovernedRulesStudioSandboxService {
               principal.environment(),
               context.ruleSetKey(),
               context.operationKey());
-      if (activeOpt != null
-          && activeOpt.isPresent()
-          && activeOpt.get().snapshot() != null
-          && activeOpt.get().snapshot().ruleSet() != null) {
-        return activeOpt.get().snapshot().ruleSet();
+      if (activeOpt == null) {
+        return Optional.empty();
       }
+      return activeOpt.filter(
+          active -> active.snapshot() != null && active.snapshot().ruleSet() != null);
     } catch (RuntimeException ignored) {
       // Fallback gracefully to the product baseline RuleSet when no active snapshot exists yet
+      return Optional.empty();
     }
-    return context.productRuleSet();
   }
 
   private RuleSetDefinition buildCandidateDefinition(
@@ -897,40 +911,29 @@ public class GovernedRulesStudioSandboxService {
 
   private ActiveHeadInfo resolveActiveHeadInfo(
       ResolvedRuleSetContext context,
-      RuleDecisionPlan activePlan,
-      DomainRuleGovernancePrincipal principal) {
-    Optional<DomainRuleSnapshotHeadStatusResponse> headOpt = Optional.empty();
-    try {
-      var found =
-          snapshotService.findHeadStatus(
-              principal.tenantId(),
-              principal.environment(),
-              context.ruleSetKey(),
-              activePlan.definition().ref().operationKey());
-      if (found != null) {
-        headOpt = found;
-      }
-    } catch (RuntimeException ignored) {
-      // Fallback to baseline metadata when no head exists yet
-    }
+      Optional<DomainRuleSnapshotActivationResponse> activeSnapshotOpt,
+      RuleDecisionPlan activePlan) {
     String activeSnapshotKey =
-        headOpt
-            .map(DomainRuleSnapshotHeadStatusResponse::activeSnapshotKey)
+        activeSnapshotOpt
+            .map(DomainRuleSnapshotActivationResponse::snapshot)
+            .map(PublishedRuleSnapshot::snapshotKey)
             .filter(StringUtils::hasText)
+            .map(String::trim)
             .orElse(
                 "product:"
                     + context.ruleSetKey()
                     + ":v"
                     + activePlan.definition().ref().version());
     String activeSnapshotHash =
-        headOpt
-            .map(DomainRuleSnapshotHeadStatusResponse::headEtag)
-            .map(etag -> etag.replace("\"", "").trim())
+        activeSnapshotOpt
+            .map(DomainRuleSnapshotActivationResponse::snapshotContentHash)
             .filter(StringUtils::hasText)
+            .map(String::trim)
+            .filter(hash -> SHA256_HEX_PATTERN.matcher(hash).matches())
             .orElse(activePlan.planDigest());
     long activeRevision =
-        headOpt
-            .map(DomainRuleSnapshotHeadStatusResponse::activationRevision)
+        activeSnapshotOpt
+            .map(DomainRuleSnapshotActivationResponse::activationRevision)
             .filter(r -> r > 0)
             .orElse(1L);
     return new ActiveHeadInfo(activeSnapshotKey, activeSnapshotHash, activeRevision);

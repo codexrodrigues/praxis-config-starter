@@ -481,6 +481,401 @@ class DomainRuleChangeWorkspaceServiceTest {
         org.mockito.ArgumentMatchers.eq(new DomainRuleGovernancePrincipal("tenant-a", "reviewer-a", "dev")));
   }
 
+  @Test
+  void inheritsUpdatesPreservesValidatesAndPromotesDidacticDocumentationWithoutPollutingParameters()
+      throws Exception {
+    UUID id = UUID.randomUUID();
+    DomainRuleDefinition base = definition("tenant-a", "dev");
+    var defNode = DomainRuleParametersTest.definition(objectMapper);
+    defNode.put("ruleSetKey", "corp.leaves");
+    defNode.put("slotKey", "leaves.max-days");
+    defNode.set(
+        "documentation",
+        objectMapper.readTree(
+            """
+            {
+              "title": "Limite padrão de dias",
+              "summary": "Verifica se os dias solicitados respeitam o teto.",
+              "legalBasis": [{"code": "POL-01", "title": "Política Interna"}]
+            }
+            """));
+    base.setDefinition(defNode.toString());
+    base.setParameters("{\"parameterValues\":{\"limit\":100}}");
+    when(definitions.findById(base.getId())).thenReturn(Optional.of(base));
+    when(fingerprint.sha256(base)).thenReturn("C".repeat(64));
+
+    var created =
+        service.create(
+            new DomainRuleChangeWorkspaceCreateRequest(base.getId(), "Ajustar limite e texto"),
+            PRINCIPAL);
+    assertThat(created.documentation().path("title").asText()).isEqualTo("Limite padrão de dias");
+
+    DomainRuleChangeWorkspace workspace = workspace(id, "tenant-a", "dev");
+    workspace.setBaseDefinitionId(base.getId());
+    workspace.setBaseDefinitionHash("C".repeat(64));
+    workspace.setDraftDocumentation(created.documentation().toString());
+    when(workspaces.findByIdForUpdate(id)).thenReturn(Optional.of(workspace));
+
+    var updatedDocs =
+        objectMapper.readTree(
+            """
+            {
+              "title": "Limite anual de afastamento do órgão",
+              "summary": "Verifica se a duração solicitada não ultrapassa 45 dias.",
+              "whenApplies": "Em toda solicitação de afastamento.",
+              "rationale": "Atende à portaria interna de gestão de pessoas.",
+              "legalBasis": [
+                {
+                  "code": "PORTARIA-45/2026",
+                  "title": "Portaria Interna de Pessoal",
+                  "article": "Art. 3º",
+                  "jurisdiction": "Institucional",
+                  "summary": "Fixa limite máximo de 45 dias."
+                }
+              ],
+              "customizationGuidance": "Parametrizável no Policy Studio."
+            }
+            """);
+
+    var afterDocUpdate =
+        service.updateDraft(
+            id,
+            new DomainRuleChangeWorkspaceUpdateRequest(
+                null,
+                objectMapper.readTree("{\"parameterValues\":{\"limit\":45}}"),
+                "Ajuste normativo",
+                updatedDocs),
+            "\"" + workspace.getEtag() + "\"",
+            PRINCIPAL);
+    assertThat(afterDocUpdate.condition().at("/<=/1").intValue()).isEqualTo(45);
+    assertThat(afterDocUpdate.documentation().path("title").asText())
+        .isEqualTo("Limite anual de afastamento do órgão");
+    assertThat(afterDocUpdate.documentation().path("legalBasis").get(0).path("code").asText())
+        .isEqualTo("PORTARIA-45/2026");
+
+    // 3-arg request (documentation == null) preserves existing draftDocumentation
+    var afterThreeArgUpdate =
+        service.updateDraft(
+            id,
+            new DomainRuleChangeWorkspaceUpdateRequest(
+                null,
+                objectMapper.readTree("{\"parameterValues\":{\"limit\":30}}"),
+                "Novo ajuste"),
+            "\"" + afterDocUpdate.etag() + "\"",
+            PRINCIPAL);
+    assertThat(afterThreeArgUpdate.documentation().path("title").asText())
+        .isEqualTo("Limite anual de afastamento do órgão");
+
+    // Malformed documentation is rejected cleanly with 400
+    assertThatThrownBy(
+            () ->
+                service.updateDraft(
+                    id,
+                    new DomainRuleChangeWorkspaceUpdateRequest(
+                        null,
+                        objectMapper.readTree("{\"parameterValues\":{\"limit\":30}}"),
+                        "Inválido",
+                        objectMapper.readTree("{\"legalBasis\":\"not-an-array\"}")),
+                    "\"" + afterThreeArgUpdate.etag() + "\"",
+                    PRINCIPAL))
+        .isInstanceOf(ResponseStatusException.class)
+        .hasMessageContaining("400");
+
+    // Promote writes draftDocumentation into proposed.definition.documentation
+    workspace.setStatus("APPROVED");
+    long approvedRevision = workspace.getRevision();
+    when(reviews.findByTenantIdAndEnvironmentAndWorkspaceIdOrderByReviewedAtDesc("tenant-a", "dev", id))
+        .thenReturn(
+            List.of(
+                org.praxisplatform.config.domain.DomainRuleWorkspaceReview.builder()
+                    .workspaceRevision(approvedRevision - 1)
+                    .baseDefinitionHash("C".repeat(64))
+                    .decision("APPROVE")
+                    .reviewerRef("reviewer-a")
+                    .build()));
+    when(definitions.findAllByTenantIdAndEnvironmentAndRuleKeyOrderByVersionDesc(
+            "tenant-a", "dev", base.getRuleKey()))
+        .thenReturn(List.of(base));
+    UUID promotedDefId = UUID.randomUUID();
+    when(domainRules.createDefinition(any(), any()))
+        .thenReturn(
+            new DomainRuleDefinitionResponse(
+                promotedDefId,
+                "tenant-a",
+                "dev",
+                base.getRuleKey(),
+                4,
+                base.getRuleType(),
+                "proposed",
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                objectMapper.createObjectNode(),
+                objectMapper.createObjectNode(),
+                null,
+                objectMapper.createObjectNode(),
+                null,
+                "authenticated",
+                "author-a",
+                null,
+                null,
+                null,
+                null,
+                null));
+
+    service.promote(id, "\"" + workspace.getEtag() + "\"", PRINCIPAL);
+
+    ArgumentCaptor<org.praxisplatform.config.dto.DomainRuleDefinitionRequest> reqCaptor =
+        ArgumentCaptor.forClass(org.praxisplatform.config.dto.DomainRuleDefinitionRequest.class);
+    verify(domainRules).createDefinition(reqCaptor.capture(), any());
+    assertThat(reqCaptor.getValue().definition().path("documentation").path("title").asText())
+        .isEqualTo("Limite anual de afastamento do órgão");
+    assertThat(
+            reqCaptor
+                .getValue()
+                .definition()
+                .path("documentation")
+                .path("legalBasis")
+                .get(0)
+                .path("code")
+                .asText())
+        .isEqualTo("PORTARIA-45/2026");
+  }
+
+  @Test
+  void clearsInheritedDocumentationWithNullNodeAndRemovesItOnPromote() throws Exception {
+    UUID id = UUID.randomUUID();
+    DomainRuleDefinition base = definition("tenant-a", "dev");
+    var defNode = DomainRuleParametersTest.definition(objectMapper);
+    defNode.put("ruleSetKey", "corp.leaves");
+    defNode.put("slotKey", "leaves.max-days");
+    defNode.set(
+        "documentation",
+        objectMapper.readTree(
+            """
+            {
+              "title": "Documentação herdada",
+              "summary": "Texto herdado da definição base."
+            }
+            """));
+    base.setDefinition(defNode.toString());
+    base.setParameters("{\"parameterValues\":{\"limit\":100}}");
+    when(definitions.findById(base.getId())).thenReturn(Optional.of(base));
+    when(fingerprint.sha256(base)).thenReturn("D".repeat(64));
+
+    var created =
+        service.create(
+            new DomainRuleChangeWorkspaceCreateRequest(base.getId(), "Limpar documentação"),
+            PRINCIPAL);
+    assertThat(created.documentation().path("title").asText()).isEqualTo("Documentação herdada");
+
+    DomainRuleChangeWorkspace workspace = workspace(id, "tenant-a", "dev");
+    workspace.setBaseDefinitionId(base.getId());
+    workspace.setBaseDefinitionHash("D".repeat(64));
+    workspace.setDraftDocumentation(created.documentation().toString());
+    when(workspaces.findByIdForUpdate(id)).thenReturn(Optional.of(workspace));
+
+    var cleared =
+        service.updateDraft(
+            id,
+            new DomainRuleChangeWorkspaceUpdateRequest(
+                null,
+                objectMapper.readTree("{\"parameterValues\":{\"limit\":80}}"),
+                "Remover documentação",
+                com.fasterxml.jackson.databind.node.NullNode.getInstance()),
+            "\"" + workspace.getEtag() + "\"",
+            PRINCIPAL);
+    assertThat(cleared.documentation()).isNull();
+    assertThat(workspace.getDraftDocumentation()).isNull();
+
+    workspace.setStatus("APPROVED");
+    long approvedRevision = workspace.getRevision();
+    when(reviews.findByTenantIdAndEnvironmentAndWorkspaceIdOrderByReviewedAtDesc("tenant-a", "dev", id))
+        .thenReturn(
+            List.of(
+                org.praxisplatform.config.domain.DomainRuleWorkspaceReview.builder()
+                    .workspaceRevision(approvedRevision - 1)
+                    .baseDefinitionHash("D".repeat(64))
+                    .decision("APPROVE")
+                    .reviewerRef("reviewer-a")
+                    .build()));
+    when(definitions.findAllByTenantIdAndEnvironmentAndRuleKeyOrderByVersionDesc(
+            "tenant-a", "dev", base.getRuleKey()))
+        .thenReturn(List.of(base));
+    UUID promotedDefId = UUID.randomUUID();
+    when(domainRules.createDefinition(any(), any()))
+        .thenReturn(
+            new DomainRuleDefinitionResponse(
+                promotedDefId,
+                "tenant-a",
+                "dev",
+                base.getRuleKey(),
+                4,
+                base.getRuleType(),
+                "proposed",
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                objectMapper.createObjectNode(),
+                objectMapper.createObjectNode(),
+                null,
+                objectMapper.createObjectNode(),
+                null,
+                "authenticated",
+                "author-a",
+                null,
+                null,
+                null,
+                null,
+                null));
+
+    service.promote(id, "\"" + workspace.getEtag() + "\"", PRINCIPAL);
+
+    ArgumentCaptor<org.praxisplatform.config.dto.DomainRuleDefinitionRequest> reqCaptor =
+        ArgumentCaptor.forClass(org.praxisplatform.config.dto.DomainRuleDefinitionRequest.class);
+    verify(domainRules).createDefinition(reqCaptor.capture(), any());
+    assertThat(reqCaptor.getValue().definition().has("documentation")).isFalse();
+    assertThat(reqCaptor.getValue().definition().path("ruleSetKey").asText()).isEqualTo("corp.leaves");
+    assertThat(reqCaptor.getValue().definition().path("slotKey").asText()).isEqualTo("leaves.max-days");
+  }
+
+  @Test
+  void validatesLegalBasisUrlsFailClosedAndSanitizesLegacyBaseDocumentationOnCreate()
+      throws Exception {
+    UUID id = UUID.randomUUID();
+    DomainRuleDefinition base = definition("tenant-a", "dev");
+    var defNode = DomainRuleParametersTest.definition(objectMapper);
+    defNode.put("ruleSetKey", "workforce.leaves");
+    defNode.put("slotKey", "leaves.max-days");
+    defNode.set(
+        "documentation",
+        objectMapper.readTree(
+            """
+            {
+              "title": "Legado",
+              "legalBasis": [
+                {"code": "LEG-1", "title": "Unsafe", "url": "javascript:alert(1)"},
+                {"code": "LEG-2", "title": "Safe", "url": "  https://example.org/statutes/123  "}
+              ]
+            }
+            """));
+    base.setDefinition(defNode.toString());
+    base.setParameters("{\"parameterValues\":{\"limit\":100}}");
+    when(definitions.findById(base.getId())).thenReturn(Optional.of(base));
+    when(fingerprint.sha256(base)).thenReturn("D".repeat(64));
+
+    var created =
+        service.create(
+            new DomainRuleChangeWorkspaceCreateRequest(base.getId(), "Sanear amparo"),
+            PRINCIPAL);
+    assertThat(created.documentation().path("legalBasis").get(0).has("url")).isFalse();
+    assertThat(created.documentation().path("legalBasis").get(1).path("url").asText())
+        .isEqualTo("https://example.org/statutes/123");
+
+    DomainRuleChangeWorkspace workspace = workspace(id, "tenant-a", "dev");
+    workspace.setBaseDefinitionId(base.getId());
+    workspace.setBaseDefinitionHash("D".repeat(64));
+    when(workspaces.findByIdForUpdate(id)).thenReturn(Optional.of(workspace));
+
+    List<String> unsafeUrls =
+        List.of(
+            "javascript:alert(1)",
+            "data:text/html,<script>alert(1)</script>",
+            "vbscript:msgbox(1)",
+            "file:///etc/passwd",
+            "//evil.example/path",
+            "https://user:pass@example.com/doc",
+            "https://user@example.com/doc",
+            "https://@example.com/doc",
+            "https:example.com",
+            "https:///path",
+            "https://example.org/a b",
+            "https://example.org/a\nb",
+            "https://example.org/a\u0085b",
+            "https://example.org/a\u2028b",
+            "https://example.org/a\u00A0b",
+            "https://example.org/" + "x".repeat(1025));
+
+    for (String unsafeUrl : unsafeUrls) {
+      var badDoc = objectMapper.createObjectNode();
+      var basisArr = badDoc.putArray("legalBasis");
+      basisArr.addObject().put("code", "STAT-1").put("url", unsafeUrl);
+      assertThatThrownBy(
+              () ->
+                  service.updateDraft(
+                      id,
+                      new DomainRuleChangeWorkspaceUpdateRequest(
+                          null,
+                          objectMapper.readTree("{\"parameterValues\":{\"limit\":30}}"),
+                          "Invalido",
+                          badDoc),
+                      "\"" + workspace.getEtag() + "\"",
+                      PRINCIPAL))
+          .isInstanceOf(ResponseStatusException.class)
+          .hasMessageContaining("400");
+    }
+
+    var nonTextUrlDoc =
+        objectMapper.readTree(
+            """
+            {
+              "legalBasis": [
+                {"code": "STAT-1", "url": 123}
+              ]
+            }
+            """);
+    assertThatThrownBy(
+            () ->
+                service.updateDraft(
+                    id,
+                    new DomainRuleChangeWorkspaceUpdateRequest(
+                        null,
+                        objectMapper.readTree("{\"parameterValues\":{\"limit\":30}}"),
+                        "Tipo invalido",
+                        nonTextUrlDoc),
+                    "\"" + workspace.getEtag() + "\"",
+                    PRINCIPAL))
+        .isInstanceOf(ResponseStatusException.class)
+        .hasMessageContaining("400");
+
+    var validDoc =
+        objectMapper.readTree(
+            """
+            {
+              "legalBasis": [
+                {"code": "STAT-1", "url": "  HTTPS://example.org/statutes/123?p=1#a  "},
+                {"code": "STAT-2", "url": "http://[::1]:8080/law"},
+                {"code": "STAT-3", "url": "   "},
+                {"code": "STAT-4", "url": null}
+              ]
+            }
+            """);
+    var updated =
+        service.updateDraft(
+            id,
+            new DomainRuleChangeWorkspaceUpdateRequest(
+                null,
+                objectMapper.readTree("{\"parameterValues\":{\"limit\":30}}"),
+                "URLs validas",
+                validDoc),
+            "\"" + workspace.getEtag() + "\"",
+            PRINCIPAL);
+    assertThat(updated.documentation().path("legalBasis").get(0).path("url").asText())
+        .isEqualTo("HTTPS://example.org/statutes/123?p=1#a");
+    assertThat(updated.documentation().path("legalBasis").get(1).path("url").asText())
+        .isEqualTo("http://[::1]:8080/law");
+    assertThat(updated.documentation().path("legalBasis").get(2).has("url")).isFalse();
+    assertThat(updated.documentation().path("legalBasis").get(3).has("url")).isFalse();
+  }
+
   private DomainRuleDefinition definition(String tenant, String environment) {
     return DomainRuleDefinition.builder()
         .id(UUID.randomUUID()).tenantId(tenant).environment(environment)
