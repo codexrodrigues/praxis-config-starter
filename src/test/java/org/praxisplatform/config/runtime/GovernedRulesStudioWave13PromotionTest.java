@@ -132,6 +132,16 @@ class GovernedRulesStudioWave13PromotionTest {
         }
     }
 
+    enum MultiOp {
+        DELETE("DELETE"),
+        CREATE("CREATE");
+        final String key;
+
+        MultiOp(String key) {
+            this.key = key;
+        }
+    }
+
     static class LeaveRequestDraftDto {
         @Schema(description = "Requested duration in calendar days")
         @UISchema(label = "Requested Days")
@@ -887,6 +897,281 @@ class GovernedRulesStudioWave13PromotionTest {
                 .matches("[A-Fa-f0-9]{64}")
                 .isEqualTo(expectedPlanDigest);
         assertThat(blankOp.run().activeActivationRevision()).isEqualTo(4L);
+    }
+
+    @Test
+    void sandboxSelectsOperationContainingTargetSlotWhenOperationHintIsLegacyAliasInMultiOpFamily()
+            throws Exception {
+        GovernedRuleFamilyDescriptor<LeaveOp> baseSample = sampleFamily();
+        RuleSetDefinition createDef = baseSample.operationSpecs().get(LeaveOp.CREATE).productRuleSet();
+        RuleFactContract createContract = baseSample.operationSpecs().get(LeaveOp.CREATE).factContract();
+        RuleSetRef deleteRef =
+                new RuleSetRef("workforce", "hr", "workforce.leave-requests", "DELETE", 1);
+        RuleSetDefinition deleteDef =
+                new RuleSetDefinition(
+                        deleteRef,
+                        List.of("draft", "context"),
+                        List.of(createDef.slots().getFirst()),
+                        List.of(createDef.bindings().getFirst()),
+                        createDef.compatibility(),
+                        createDef.failPolicy(),
+                        createDef.errorDescriptors());
+        GovernedHostRuleBundleRuntime<MultiOp> runtime =
+                new GovernedHostRuleBundleRuntime<>(
+                        MultiOp.class,
+                        "hr-service",
+                        "workforce.leave-requests",
+                        "host/1.0",
+                        "provider/1.0",
+                        List.of(
+                                new OperationSpec<>(MultiOp.DELETE, "DELETE", deleteDef, createContract),
+                                new OperationSpec<>(MultiOp.CREATE, "CREATE", createDef, createContract)),
+                        requested -> Optional.empty(),
+                        Clock.fixed(NOW, ZoneId.of("UTC")),
+                        ZoneId.of("UTC"),
+                        RuleBindingExecutorRegistry.empty(),
+                        RuleErrorCatalog.of(
+                                Map.of(
+                                        "WF-00000",
+                                        new RuleErrorDescriptor(
+                                                "WF-00000",
+                                                "draft.clearanceAttached",
+                                                "Missing medical clearance",
+                                                "leave.guard",
+                                                "ELIGIBILITY"),
+                                        "WF-00001",
+                                        new RuleErrorDescriptor(
+                                                "WF-00001",
+                                                "draft.requestedDays",
+                                                "Leave limit exceeded",
+                                                "leave.max-days",
+                                                "LIMIT"))));
+        GovernedRuleFamilyDescriptor<MultiOp> multiOpFamily =
+                new GovernedRuleFamilyDescriptor<>(
+                        runtime,
+                        null,
+                        Map.of("draft", LeaveRequestDraftDto.class),
+                        "workforce.leave-requests",
+                        "Workforce Leave Requests",
+                        "Workforce leave eligibility",
+                        Map.of());
+
+        GovernedRuleFamilyRegistry registry = new GovernedRuleFamilyRegistry(List.of(multiOpFamily));
+        DomainRuleService ruleService = mock(DomainRuleService.class);
+        DomainRuleChangeWorkspaceService workspaceService =
+                mock(DomainRuleChangeWorkspaceService.class);
+        DomainRuleTestRunService testRunService = mock(DomainRuleTestRunService.class);
+        DomainRuleSnapshotService snapshotService = mock(DomainRuleSnapshotService.class);
+
+        UUID workspaceId = UUID.randomUUID();
+        UUID baseDefId = UUID.randomUUID();
+        UUID scenarioAllowId = UUID.randomUUID();
+        UUID scenarioDenyId = UUID.randomUUID();
+
+        ObjectNode defNode = JSON.createObjectNode();
+        defNode.put("ruleSetKey", "workforce.leave-requests");
+        defNode.put("slotKey", "slot.max-days");
+        ObjectNode defParams = JSON.createObjectNode();
+        defParams.putArray("operationKeys").add("validate");
+        ObjectNode wsParams = JSON.createObjectNode();
+        wsParams.putObject("parameterValues").put("maxDays", 5);
+
+        DomainRuleDefinitionResponse baseDef =
+                new DomainRuleDefinitionResponse(
+                        baseDefId,
+                        "tenant-a",
+                        "local",
+                        "leave.max-days",
+                        1,
+                        "selection_eligibility",
+                        "active",
+                        "workforce",
+                        "workforce.leave-requests",
+                        "hr-service",
+                        "owner",
+                        "steward",
+                        null,
+                        null,
+                        defNode,
+                        defParams,
+                        null,
+                        null,
+                        null,
+                        "USER",
+                        "alice",
+                        null,
+                        NOW,
+                        NOW,
+                        null,
+                        NOW);
+        DomainRuleChangeWorkspaceResponse workspace =
+                new DomainRuleChangeWorkspaceResponse(
+                        workspaceId,
+                        "leave.max-days",
+                        baseDefId,
+                        1,
+                        "HASH-MULTI-1",
+                        null,
+                        null,
+                        "Legacy validate alias on multi-op family",
+                        "OPEN",
+                        null,
+                        wsParams,
+                        null,
+                        1L,
+                        "\"ws-multi-1\"",
+                        "alice",
+                        "alice",
+                        NOW,
+                        NOW);
+
+        ObjectNode allowFacts = JSON.createObjectNode();
+        allowFacts
+                .putObject("draft")
+                .put("requestedDays", 4)
+                .put("applicantTaxId", "12345678901")
+                .put("clearanceAttached", true);
+        allowFacts.putObject("context").put("tenantId", "tenant-a");
+        ObjectNode denyFacts = JSON.createObjectNode();
+        denyFacts
+                .putObject("draft")
+                .put("requestedDays", 7)
+                .put("applicantTaxId", "12345678901")
+                .put("clearanceAttached", true);
+        denyFacts.putObject("context").put("tenantId", "tenant-a");
+
+        DomainRuleTestScenarioResponse allowScenario =
+                new DomainRuleTestScenarioResponse(
+                        scenarioAllowId,
+                        workspaceId,
+                        "WITHIN_LIMIT",
+                        "4 days allowed",
+                        allowFacts,
+                        "ALLOW",
+                        null,
+                        List.of(),
+                        List.of(),
+                        "ACTIVE",
+                        1L,
+                        "s-allow",
+                        "alice",
+                        "alice",
+                        NOW,
+                        NOW);
+        DomainRuleTestScenarioResponse denyScenario =
+                new DomainRuleTestScenarioResponse(
+                        scenarioDenyId,
+                        workspaceId,
+                        "ABOVE_LIMIT",
+                        "7 days denied",
+                        denyFacts,
+                        "DENY",
+                        null,
+                        List.of("WF-00001"),
+                        List.of(),
+                        "ACTIVE",
+                        1L,
+                        "s-deny",
+                        "alice",
+                        "alice",
+                        NOW,
+                        NOW);
+
+        when(workspaceService.get(eq(workspaceId), any())).thenReturn(workspace);
+        when(workspaceService.scenarios(eq(workspaceId), any()))
+                .thenReturn(List.of(allowScenario, denyScenario));
+        when(ruleService.definition(eq(baseDefId), any())).thenReturn(baseDef);
+        when(snapshotService.findActive(any(), any(), any(), any())).thenReturn(Optional.empty());
+        when(testRunService.findByIdempotencyKey(eq(workspaceId), any(), any()))
+                .thenReturn(Optional.empty());
+        when(testRunService.record(eq(workspaceId), any(), any()))
+                .thenAnswer(
+                        inv -> {
+                            DomainRuleTestRunRecordRequest req = inv.getArgument(1);
+                            List<DomainRuleTestRunResultResponse> runResults =
+                                    req.results().stream()
+                                            .map(
+                                                    r ->
+                                                            new DomainRuleTestRunResultResponse(
+                                                                    r.scenarioId(),
+                                                                    r.scenarioKey(),
+                                                                    r.baselineResult().decision(),
+                                                                    r.candidateDecision(),
+                                                                    r.activeDecision(),
+                                                                    "MISMATCH",
+                                                                    true,
+                                                                    false,
+                                                                    r.baselineResult().output(),
+                                                                    r.candidateOutput(),
+                                                                    r.activeOutput(),
+                                                                    true,
+                                                                    true,
+                                                                    r.baselineResult().reasonCodes(),
+                                                                    r.candidateReasonCodes(),
+                                                                    r.activeReasonCodes(),
+                                                                    true,
+                                                                    true,
+                                                                    r.baselineResult().effectIntents(),
+                                                                    r.candidateEffectIntents(),
+                                                                    r.activeEffectIntents(),
+                                                                    true,
+                                                                    true,
+                                                                    r.candidatePlanDigest(),
+                                                                    r.activePlanDigest(),
+                                                                    r.factsDigest(),
+                                                                    r.baselineResult(),
+                                                                    "MATCH",
+                                                                    true,
+                                                                    true,
+                                                                    true,
+                                                                    true,
+                                                                    r.operationalEvidence()))
+                                            .toList();
+                            return new DomainRuleTestRunResponse(
+                                    UUID.randomUUID(),
+                                    workspaceId,
+                                    req.idempotencyKey(),
+                                    "req-hash",
+                                    req.workspaceRevision(),
+                                    req.baseDefinitionHash(),
+                                    req.evaluatedAtUtc(),
+                                    req.userTimeZone(),
+                                    req.activeSnapshotKey(),
+                                    req.activeSnapshotContentHash(),
+                                    req.activeActivationRevision(),
+                                    req.baselineEvidence(),
+                                    runResults,
+                                    "alice",
+                                    NOW);
+                        });
+
+        GovernedRulesStudioSandboxService sandboxService =
+                new GovernedRulesStudioSandboxService(
+                        registry,
+                        ruleService,
+                        workspaceService,
+                        testRunService,
+                        snapshotService,
+                        JSON,
+                        Clock.fixed(NOW, ZoneId.of("UTC")));
+        DomainRuleGovernancePrincipal principal =
+                new DomainRuleGovernancePrincipal("tenant-a", "alice", "local");
+
+        var response =
+                sandboxService.run(
+                        new GovernedRulesStudioSandboxService.SandboxRunRequest(
+                                workspaceId,
+                                List.of(scenarioAllowId, scenarioDenyId),
+                                "UTC",
+                                "idem-multi-op-alias",
+                                NOW),
+                        principal);
+
+        assertThat(response.results()).hasSize(2);
+        assertThat(response.results().get(0).candidateDecision()).isEqualTo("ALLOW");
+        assertThat(response.results().get(0).activeDecision()).isEqualTo("DENY");
+        assertThat(response.results().get(1).candidateDecision()).isEqualTo("DENY");
+        verify(snapshotService).findActive("tenant-a", "local", "workforce.leave-requests", "CREATE");
     }
 
     private record RealTestRunSandboxHarness(

@@ -1832,6 +1832,78 @@ class DomainRuleServiceTest {
     }
 
     @Test
+    void allowsDistinctAuthenticatedReviewerForGenericHumanReviewGateWhileEnforcingExplicitOwners()
+            throws Exception {
+        DomainRuleDefinitionRepository definitionRepository = mock(DomainRuleDefinitionRepository.class);
+        DomainRuleMaterializationRepository materializationRepository = mock(DomainRuleMaterializationRepository.class);
+        DomainRuleService service = service(definitionRepository, materializationRepository);
+
+        UUID genericId = UUID.randomUUID();
+        DomainRuleDefinition genericDefinition = DomainRuleDefinition.builder()
+                .id(genericId)
+                .tenantId("tenant-a")
+                .environment("dev")
+                .ruleKey("hr.designations.filter.access-policy")
+                .version(1)
+                .ruleType("authorization_policy")
+                .status("proposed")
+                .definition("{}")
+                .parameters("{}")
+                .governance("{\"ruleAuthoring\":\"review_required\",\"requiredApprovals\":[\"human-review\"]}")
+                .createdByType("authenticated")
+                .createdBy("rule-author")
+                .build();
+        when(definitionRepository.findById(genericId)).thenReturn(Optional.of(genericDefinition));
+        when(definitionRepository.save(any(DomainRuleDefinition.class)))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+
+        assertThatThrownBy(() -> service.transitionDefinitionStatus(
+                genericId,
+                new DomainRuleDefinitionStatusTransitionRequest(
+                        "approved",
+                        objectMapper.readTree("{\"review\":\"approved\"}")),
+                principal("rule-author")))
+                .isInstanceOf(ConfigurationIngestionException.class)
+                .hasMessageContaining("must be different from its author");
+
+        var approved = service.transitionDefinitionStatus(
+                genericId,
+                new DomainRuleDefinitionStatusTransitionRequest(
+                        "approved",
+                        objectMapper.readTree("{\"review\":\"approved\"}")),
+                principal("reviewer-1"));
+
+        assertThat(approved.status()).isEqualTo("approved");
+        assertThat(approved.approvedBy()).isEqualTo("reviewer-1");
+
+        UUID explicitId = UUID.randomUUID();
+        DomainRuleDefinition explicitOwnerDefinition = DomainRuleDefinition.builder()
+                .id(explicitId)
+                .tenantId("tenant-a")
+                .environment("dev")
+                .ruleKey("procurement.suppliers.rule.selection-eligibility")
+                .version(1)
+                .ruleType("selection_eligibility")
+                .status("proposed")
+                .definition("{}")
+                .parameters("{\"optionSourceKey\":\"supplier\"}")
+                .governance("{\"requiredApprovals\":[\"procurement-owner\"]}")
+                .createdByType("authenticated")
+                .createdBy("rule-author")
+                .build();
+        when(definitionRepository.findById(explicitId)).thenReturn(Optional.of(explicitOwnerDefinition));
+
+        assertThatThrownBy(() -> service.transitionDefinitionStatus(
+                explicitId,
+                new DomainRuleDefinitionStatusTransitionRequest(
+                        "approved",
+                        objectMapper.readTree("{\"review\":\"approved\"}")),
+                principal("reviewer-1")))
+                .isInstanceOf(ConfigurationIngestionException.class)
+                .hasMessageContaining("actor is not authorized by governance");
+    }
+
+    @Test
     void blocksDefinitionTransitionFromRetiredBackToActive() throws Exception {
         DomainRuleDefinitionRepository definitionRepository = mock(DomainRuleDefinitionRepository.class);
         DomainRuleMaterializationRepository materializationRepository = mock(DomainRuleMaterializationRepository.class);

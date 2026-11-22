@@ -2180,7 +2180,10 @@ public class DomainRuleService {
         JsonNode governance = read(definition.getGovernance());
         List<String> authorizedApprovers = authorizedApprovers(
                 governance, requireRequiredApprovals(governance));
-        if (!authorizedApprovers.contains(normalizedActor)) {
+        boolean genericHumanReviewGate =
+                !hasExplicitAuthorizedApprovers(governance)
+                        && authorizedApprovers.equals(List.of("human-review"));
+        if (!genericHumanReviewGate && !authorizedApprovers.contains(normalizedActor)) {
             throw new ConfigurationIngestionException(
                     "Governed domain rule " + action + " actor is not authorized by governance");
         }
@@ -2243,6 +2246,19 @@ public class DomainRuleService {
             }
         }
         return List.copyOf(values);
+    }
+
+    private boolean hasExplicitAuthorizedApprovers(JsonNode governance) {
+        if (governance == null || !governance.isObject()) {
+            return false;
+        }
+        JsonNode explicit = governance.get("authorizedApprovers");
+        if (explicit == null || !explicit.isArray()) {
+            return false;
+        }
+        return collectTextArray(explicit).stream()
+                .map(this::normalize)
+                .anyMatch(StringUtils::hasText);
     }
 
     private boolean isGovernedDecision(String ruleType, JsonNode definition, JsonNode parameters) {
