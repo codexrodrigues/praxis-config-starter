@@ -827,7 +827,7 @@ class AgenticAuthoringDomainCatalogCandidateEnhancerTest {
                                 "reasonCode": "WF-03162",
                                 "targetField": "dtfim",
                                 "message": "Data de término da dependência não pode anteceder data de início.",
-                                "origin": "PCK_DEPENDENTES.MAIN_PRE"
+                                "origin": "pkg_legacy_rules.dependentes_main_pre"
                               }
                             ]
                           }

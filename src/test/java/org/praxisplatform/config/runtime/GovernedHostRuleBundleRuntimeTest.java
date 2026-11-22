@@ -225,7 +225,7 @@ class GovernedHostRuleBundleRuntimeTest {
                 "WF-09101",
                 "nome",
                 "Nome obrigatório.",
-                "PCK_SETOR",
+                "pkg_legacy_rules.setor",
                 "IF :NEW.NOME IS NULL",
                 "{\"!=\":[{\"var\":\"draft.nome\"},null]}");
         RuleSetDefinition productRuleSet = OntologyRuleSetBuilder.requireReferencedFactPaths(
