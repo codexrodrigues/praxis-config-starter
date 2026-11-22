@@ -10,6 +10,7 @@ import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneId;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -470,6 +471,12 @@ public class GovernedRulesStudioSandboxService {
       DomainRuleChangeWorkspaceResponse workspace, DomainRuleDefinitionResponse baseDefinition) {
     List<String> candidates = new ArrayList<>();
     String operationHint = null;
+    String explicitSlotKey =
+        baseDefinition != null
+                && baseDefinition.definition() != null
+                && baseDefinition.definition().hasNonNull("slotKey")
+            ? baseDefinition.definition().path("slotKey").asText()
+            : null;
     if (baseDefinition != null) {
       if (baseDefinition.definition() != null
           && baseDefinition.definition().hasNonNull("ruleSetKey")) {
@@ -499,19 +506,15 @@ public class GovernedRulesStudioSandboxService {
       Optional<GovernedRuleFamilyDescriptor<?>> byFamily =
           familyRegistry.findByFamilyKey(candidateKey.trim());
       if (byFamily.isPresent()) {
-        return selectOperation(byFamily.get(), operationHint);
+        return selectOperation(
+            byFamily.get(), operationHint, explicitSlotKey, workspace.ruleKey());
       }
     }
 
     for (GovernedRuleFamilyDescriptor<?> family : familyRegistry.families()) {
-      for (GovernedHostRuleBundleRuntime.OperationSpec<?> spec :
-          family.operationSpecs().values()) {
+      for (GovernedHostRuleBundleRuntime.OperationSpec<?> spec : orderedOperationSpecs(family)) {
         RuleSetDefinition def = spec.productRuleSet();
-        boolean matches =
-            def.slots().stream().anyMatch(s -> s.slotKey().equals(workspace.ruleKey()))
-                || def.bindings().stream()
-                    .anyMatch(b -> b.bindingKey().equals(workspace.ruleKey()));
-        if (matches) {
+        if (ruleSetContainsTarget(def, explicitSlotKey, workspace.ruleKey())) {
           return new ResolvedRuleSetContext(family, def, spec.operationKey());
         }
       }
@@ -522,16 +525,30 @@ public class GovernedRulesStudioSandboxService {
   }
 
   private static ResolvedRuleSetContext selectOperation(
-      GovernedRuleFamilyDescriptor<?> family, String operationHint) {
+      GovernedRuleFamilyDescriptor<?> family,
+      String operationHint,
+      String explicitSlotKey,
+      String ruleKey) {
+    List<GovernedHostRuleBundleRuntime.OperationSpec<?>> orderedSpecs =
+        orderedOperationSpecs(family);
     if (StringUtils.hasText(operationHint)) {
       var specOpt = family.findOperationSpec(operationHint.trim());
-      if (specOpt.isPresent()) {
+      if (specOpt.isPresent()
+          && (ruleSetContainsTarget(specOpt.get().productRuleSet(), explicitSlotKey, ruleKey)
+              || orderedSpecs.stream()
+                  .noneMatch(
+                      s -> ruleSetContainsTarget(s.productRuleSet(), explicitSlotKey, ruleKey)))) {
         return new ResolvedRuleSetContext(
             family, specOpt.get().productRuleSet(), specOpt.get().operationKey());
       }
     }
+    for (GovernedHostRuleBundleRuntime.OperationSpec<?> spec : orderedSpecs) {
+      if (ruleSetContainsTarget(spec.productRuleSet(), explicitSlotKey, ruleKey)) {
+        return new ResolvedRuleSetContext(family, spec.productRuleSet(), spec.operationKey());
+      }
+    }
     var firstSpec =
-        family.operationSpecs().values().stream()
+        orderedSpecs.stream()
             .findFirst()
             .orElseThrow(
                 () ->
@@ -540,6 +557,60 @@ public class GovernedRulesStudioSandboxService {
                         "Governed family declares no operations: " + family.familyKey()));
     return new ResolvedRuleSetContext(
         family, firstSpec.productRuleSet(), firstSpec.operationKey());
+  }
+
+  private static <O extends Enum<O>>
+      List<GovernedHostRuleBundleRuntime.OperationSpec<?>> orderedOperationSpecs(
+          GovernedRuleFamilyDescriptor<O> family) {
+    return family.operationSpecs().values().stream()
+        .<GovernedHostRuleBundleRuntime.OperationSpec<?>>map(spec -> spec)
+        .sorted(
+            Comparator.comparingInt(
+                    (GovernedHostRuleBundleRuntime.OperationSpec<?> spec) ->
+                        operationPriority(spec.operationKey()))
+                .thenComparing(GovernedHostRuleBundleRuntime.OperationSpec::operationKey))
+        .toList();
+  }
+
+  private static int operationPriority(String operationKey) {
+    if (operationKey == null) {
+      return 5;
+    }
+    String normalized = operationKey.trim().toLowerCase(Locale.ROOT);
+    if (normalized.endsWith(":create")
+        || normalized.equals("create")
+        || normalized.equals("validate")
+        || normalized.equals("evaluate")
+        || normalized.endsWith(":validate")
+        || normalized.endsWith(":evaluate")) {
+      return 0;
+    }
+    if (normalized.endsWith(":update") || normalized.equals("update")) {
+      return 1;
+    }
+    if (!normalized.contains(":preview-")
+        && !normalized.endsWith(":delete")
+        && !normalized.equals("delete")) {
+      return 2;
+    }
+    if (normalized.endsWith(":delete") || normalized.equals("delete")) {
+      return 3;
+    }
+    return 4;
+  }
+
+  private static boolean ruleSetContainsTarget(
+      RuleSetDefinition def, String explicitSlotKey, String ruleKey) {
+    if (def == null) {
+      return false;
+    }
+    return def.slots().stream()
+            .anyMatch(
+                s ->
+                    (StringUtils.hasText(explicitSlotKey) && s.slotKey().equals(explicitSlotKey))
+                        || (StringUtils.hasText(ruleKey) && s.slotKey().equals(ruleKey)))
+        || (StringUtils.hasText(ruleKey)
+            && def.bindings().stream().anyMatch(b -> b.bindingKey().equals(ruleKey)));
   }
 
   private Optional<DomainRuleSnapshotActivationResponse> resolveActiveSnapshot(
