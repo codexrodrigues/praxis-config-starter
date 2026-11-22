@@ -32,8 +32,17 @@ public class ConfigDataSourceProperties {
     /** Tamanho máximo do pool Hikari dedicado ao Config Store. */
     private int maximumPoolSize = 8;
 
-    /** Quantidade mínima de conexões ociosas mantidas no pool do Config Store. */
-    private int minimumIdle = 2;
+    /** Quantidade mínima de conexões ociosas mantidas no pool do Config Store (0 favorece scale-to-zero). */
+    private int minimumIdle = 0;
+
+    /** Tempo máximo de ociosidade antes de encerrar conexões excedentes no pool, em milissegundos. */
+    private long idleTimeoutMs = 120_000L;
+
+    /** Tempo máximo de vida de uma conexão no pool, em milissegundos. */
+    private long maxLifetimeMs = 600_000L;
+
+    /** Intervalo de keepalive periódico de conexões ociosas, em milissegundos (0 desabilita). */
+    private long keepaliveTimeMs = 0L;
 
     /** Tempo limite de aquisição de conexão no pool, em milissegundos. */
     private long connectionTimeoutMs = 10_000L;
@@ -121,6 +130,30 @@ public class ConfigDataSourceProperties {
 
     public void setMinimumIdle(int minimumIdle) {
         this.minimumIdle = minimumIdle;
+    }
+
+    public long getIdleTimeoutMs() {
+        return idleTimeoutMs;
+    }
+
+    public void setIdleTimeoutMs(long idleTimeoutMs) {
+        this.idleTimeoutMs = idleTimeoutMs;
+    }
+
+    public long getMaxLifetimeMs() {
+        return maxLifetimeMs;
+    }
+
+    public void setMaxLifetimeMs(long maxLifetimeMs) {
+        this.maxLifetimeMs = maxLifetimeMs;
+    }
+
+    public long getKeepaliveTimeMs() {
+        return keepaliveTimeMs;
+    }
+
+    public void setKeepaliveTimeMs(long keepaliveTimeMs) {
+        this.keepaliveTimeMs = keepaliveTimeMs;
     }
 
     public long getConnectionTimeoutMs() {

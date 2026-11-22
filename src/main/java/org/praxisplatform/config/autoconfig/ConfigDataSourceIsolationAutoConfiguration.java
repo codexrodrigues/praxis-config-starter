@@ -112,6 +112,15 @@ public class ConfigDataSourceIsolationAutoConfiguration {
         }
         hikari.setMaximumPoolSize(Math.max(1, properties.getMaximumPoolSize()));
         hikari.setMinimumIdle(Math.max(0, Math.min(properties.getMinimumIdle(), hikari.getMaximumPoolSize())));
+        if (properties.getIdleTimeoutMs() > 0L) {
+            hikari.setIdleTimeout(Math.max(10_000L, properties.getIdleTimeoutMs()));
+        }
+        if (properties.getMaxLifetimeMs() > 0L) {
+            hikari.setMaxLifetime(Math.max(30_000L, properties.getMaxLifetimeMs()));
+        }
+        if (properties.getKeepaliveTimeMs() >= 0L) {
+            hikari.setKeepaliveTime(properties.getKeepaliveTimeMs());
+        }
         hikari.setConnectionTimeout(Math.max(250L, properties.getConnectionTimeoutMs()));
         hikari.setValidationTimeout(Math.max(250L, properties.getValidationTimeoutMs()));
         return new HikariDataSource(hikari);

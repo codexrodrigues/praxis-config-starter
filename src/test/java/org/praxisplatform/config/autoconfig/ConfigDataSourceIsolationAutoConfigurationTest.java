@@ -2,6 +2,7 @@ package org.praxisplatform.config.autoconfig;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.zaxxer.hikari.HikariDataSource;
 import jakarta.persistence.EntityManagerFactory;
 import javax.sql.DataSource;
 import org.junit.jupiter.api.Tag;
@@ -83,6 +84,11 @@ class ConfigDataSourceIsolationAutoConfigurationTest {
                                     context.getBean("configDataSource", DataSource.class);
                             assertThat(isolated).isNotSameAs(primary);
                             assertThat(context.getBean(DataSource.class)).isSameAs(primary);
+                            HikariDataSource hikari = (HikariDataSource) isolated;
+                            assertThat(hikari.getMinimumIdle()).isZero();
+                            assertThat(hikari.getIdleTimeout()).isEqualTo(120_000L);
+                            assertThat(hikari.getMaxLifetime()).isEqualTo(600_000L);
+                            assertThat(hikari.getKeepaliveTime()).isZero();
 
                             PlatformTransactionManager primaryTx =
                                     context.getBean("transactionManager", PlatformTransactionManager.class);
@@ -162,6 +168,35 @@ class ConfigDataSourceIsolationAutoConfigurationTest {
                                                     ConfigTransactionManagerNames.CONFIG,
                                                     PlatformTransactionManager.class))
                                     .isSameAs(CustomConfigOverrides.CUSTOM_TX_MANAGER);
+                        });
+    }
+
+    @Test
+    void respectsConfiguredPoolIdleAndLifetimeOverrides() {
+        runner.withUserConfiguration(PrimaryInfrastructureConfiguration.class)
+                .withPropertyValues(
+                        "spring.datasource.url=jdbc:h2:mem:primary_pool_custom;DB_CLOSE_DELAY=-1",
+                        "config.datasource.url=jdbc:h2:mem:isolated_pool_custom;DB_CLOSE_DELAY=-1",
+                        "config.datasource.username=sa",
+                        "config.datasource.password=",
+                        "config.datasource.driver-class-name=org.h2.Driver",
+                        "config.datasource.ddl-auto=none",
+                        "config.datasource.minimum-idle=1",
+                        "config.datasource.maximum-pool-size=4",
+                        "config.datasource.idle-timeout-ms=45000",
+                        "config.datasource.max-lifetime-ms=300000",
+                        "config.datasource.keepalive-time-ms=30000",
+                        "praxis.config.datasource.isolation.enable-jpa-repositories=false")
+                .run(
+                        context -> {
+                            assertThat(context).hasNotFailed();
+                            HikariDataSource isolated =
+                                    context.getBean("configDataSource", HikariDataSource.class);
+                            assertThat(isolated.getMaximumPoolSize()).isEqualTo(4);
+                            assertThat(isolated.getMinimumIdle()).isEqualTo(1);
+                            assertThat(isolated.getIdleTimeout()).isEqualTo(45_000L);
+                            assertThat(isolated.getMaxLifetime()).isEqualTo(300_000L);
+                            assertThat(isolated.getKeepaliveTime()).isEqualTo(30_000L);
                         });
     }
 
