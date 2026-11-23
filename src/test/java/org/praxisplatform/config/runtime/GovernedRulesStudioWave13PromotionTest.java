@@ -1604,6 +1604,246 @@ class GovernedRulesStudioWave13PromotionTest {
                         });
     }
 
+    @Test
+    void resolveActiveSnapshotPrefersHigherActivationRevisionOnHintedRollback() throws Exception {
+        GovernedRuleFamilyDescriptor<LeaveOp> family = sampleFamily();
+        GovernedRuleFamilyRegistry registry = new GovernedRuleFamilyRegistry(List.of(family));
+        DomainRuleService ruleService = mock(DomainRuleService.class);
+        DomainRuleChangeWorkspaceService workspaceService =
+                mock(DomainRuleChangeWorkspaceService.class);
+        DomainRuleTestRunService testRunService = mock(DomainRuleTestRunService.class);
+        DomainRuleSnapshotService snapshotService = mock(DomainRuleSnapshotService.class);
+
+        UUID workspaceId = UUID.randomUUID();
+        UUID baseDefId = UUID.randomUUID();
+        UUID scenarioAllowId = UUID.randomUUID();
+
+        ObjectNode defNode = JSON.createObjectNode();
+        defNode.put("ruleSetKey", "workforce.leave-requests");
+        defNode.put("slotKey", "slot.max-days");
+        ObjectNode baseParams = JSON.createObjectNode();
+        baseParams.putArray("operationKeys").add("validate");
+        ObjectNode wsParams = JSON.createObjectNode();
+        wsParams.putObject("parameterValues").put("maxDays", 5);
+
+        DomainRuleDefinitionResponse baseDef =
+                new DomainRuleDefinitionResponse(
+                        baseDefId,
+                        "tenant-a",
+                        "local",
+                        "leave.max-days",
+                        1,
+                        "selection_eligibility",
+                        "active",
+                        "workforce",
+                        "workforce.leave-requests",
+                        "hr-service",
+                        "owner",
+                        "steward",
+                        null,
+                        null,
+                        defNode,
+                        baseParams,
+                        null,
+                        null,
+                        null,
+                        "USER",
+                        "alice",
+                        null,
+                        NOW,
+                        NOW,
+                        null,
+                        NOW);
+        DomainRuleChangeWorkspaceResponse workspace =
+                new DomainRuleChangeWorkspaceResponse(
+                        workspaceId,
+                        "leave.max-days",
+                        baseDefId,
+                        1,
+                        "HASH-1",
+                        null,
+                        null,
+                        "Rollback comparison",
+                        "OPEN",
+                        null,
+                        wsParams,
+                        null,
+                        1L,
+                        "\"ws-rev-1\"",
+                        "alice",
+                        "alice",
+                        NOW,
+                        NOW);
+
+        ObjectNode allowFacts = JSON.createObjectNode();
+        allowFacts
+                .putObject("draft")
+                .put("requestedDays", 4)
+                .put("applicantTaxId", "12345678901")
+                .put("clearanceAttached", true);
+        allowFacts.putObject("context").put("tenantId", "tenant-a");
+
+        DomainRuleTestScenarioResponse allowScenario =
+                new DomainRuleTestScenarioResponse(
+                        scenarioAllowId,
+                        workspaceId,
+                        "WITHIN_LIMIT",
+                        "4 days",
+                        allowFacts,
+                        "ALLOW",
+                        null,
+                        List.of(),
+                        List.of(),
+                        "ACTIVE",
+                        1L,
+                        "s-1",
+                        "alice",
+                        "alice",
+                        NOW,
+                        NOW);
+
+        RuleSetDefinition v1CreateDef = family.operationSpecs().get(LeaveOp.CREATE).productRuleSet();
+        RuleSetDefinition v2CreateDef =
+                new RuleSetDefinition(
+                        new RuleSetRef(
+                                "workforce", "hr", "workforce.leave-requests", "CREATE", 2),
+                        v1CreateDef.availableRoots(),
+                        v1CreateDef.slots(),
+                        v1CreateDef.bindings(),
+                        v1CreateDef.compatibility(),
+                        v1CreateDef.failPolicy(),
+                        v1CreateDef.errorDescriptors());
+        RuleSetDefinition v1ValidateRollbackDef =
+                new RuleSetDefinition(
+                        new RuleSetRef(
+                                "workforce", "hr", "workforce.leave-requests", "validate", 1),
+                        v1CreateDef.availableRoots(),
+                        v1CreateDef.slots(),
+                        v1CreateDef.bindings(),
+                        v1CreateDef.compatibility(),
+                        v1CreateDef.failPolicy(),
+                        v1CreateDef.errorDescriptors());
+
+        PublishedRuleSnapshot createV2Snapshot =
+                new PublishedRuleSnapshot(
+                        PublishedRuleSnapshot.SNAPSHOT_CONTRACT_VERSION,
+                        "snap-create-v2",
+                        "tenant-a",
+                        "local",
+                        "hr-service",
+                        2,
+                        NOW.toString(),
+                        null,
+                        "host/1.0",
+                        NOW.minusSeconds(60).toString(),
+                        null,
+                        List.of(
+                                new RuleSnapshotSource(
+                                        "def-c2", "workforce.leave-requests", 2, "A".repeat(64))),
+                        List.of(
+                                new RuleSnapshotApproval(
+                                        "ap-c2",
+                                        "APPROVER",
+                                        "alice",
+                                        NOW.toString(),
+                                        "B".repeat(64))),
+                        v2CreateDef);
+        PublishedRuleSnapshot validateRollbackSnapshot =
+                new PublishedRuleSnapshot(
+                        PublishedRuleSnapshot.SNAPSHOT_CONTRACT_VERSION,
+                        "snap-validate-v1-rb",
+                        "tenant-a",
+                        "local",
+                        "hr-service",
+                        3,
+                        NOW.toString(),
+                        "snap-validate-v2",
+                        "host/1.0",
+                        NOW.minusSeconds(60).toString(),
+                        null,
+                        List.of(
+                                new RuleSnapshotSource(
+                                        "def-v1", "workforce.leave-requests", 1, "C".repeat(64))),
+                        List.of(
+                                new RuleSnapshotApproval(
+                                        "ap-v1",
+                                        "APPROVER",
+                                        "alice",
+                                        NOW.toString(),
+                                        "D".repeat(64))),
+                        v1ValidateRollbackDef);
+
+        when(workspaceService.get(eq(workspaceId), any())).thenReturn(workspace);
+        when(workspaceService.scenarios(eq(workspaceId), any())).thenReturn(List.of(allowScenario));
+        when(ruleService.definition(eq(baseDefId), any())).thenReturn(baseDef);
+        when(snapshotService.findActive("tenant-a", "local", "workforce.leave-requests", "CREATE"))
+                .thenReturn(
+                        Optional.of(
+                                new DomainRuleSnapshotActivationResponse(
+                                        createV2Snapshot, "HASH-C2", "\"etag-c2\"", 1L, "ACTIVE")));
+        when(snapshotService.findActive("tenant-a", "local", "workforce.leave-requests", "validate"))
+                .thenReturn(
+                        Optional.of(
+                                new DomainRuleSnapshotActivationResponse(
+                                        validateRollbackSnapshot,
+                                        "HASH-V1-RB",
+                                        "\"etag-v1-rb\"",
+                                        3L,
+                                        "ROLLED_BACK")));
+        when(testRunService.findByIdempotencyKey(eq(workspaceId), any(), any()))
+                .thenReturn(Optional.empty());
+        when(testRunService.record(eq(workspaceId), any(), any()))
+                .thenAnswer(
+                        inv -> {
+                            DomainRuleTestRunRecordRequest req = inv.getArgument(1);
+                            return new DomainRuleTestRunResponse(
+                                    UUID.randomUUID(),
+                                    workspaceId,
+                                    req.idempotencyKey(),
+                                    "REQ-HASH",
+                                    req.workspaceRevision(),
+                                    req.baseDefinitionHash(),
+                                    req.evaluatedAtUtc(),
+                                    req.userTimeZone(),
+                                    req.activeSnapshotKey(),
+                                    req.activeSnapshotContentHash(),
+                                    req.activeActivationRevision(),
+                                    req.baselineEvidence(),
+                                    List.of(),
+                                    "alice",
+                                    NOW);
+                        });
+
+        GovernedRulesStudioSandboxService sandboxService =
+                new GovernedRulesStudioSandboxService(
+                        registry,
+                        ruleService,
+                        workspaceService,
+                        testRunService,
+                        snapshotService,
+                        JSON,
+                        Clock.fixed(NOW, ZoneId.of("UTC")));
+        DomainRuleGovernancePrincipal principal =
+                new DomainRuleGovernancePrincipal("tenant-a", "alice", "local");
+
+        GovernedRulesStudioSandboxService.SandboxRunResponse response =
+                sandboxService.run(
+                        new GovernedRulesStudioSandboxService.SandboxRunRequest(
+                                workspaceId,
+                                List.of(scenarioAllowId),
+                                "UTC",
+                                "idem-rb-1",
+                                NOW),
+                        principal);
+
+        assertThat(response).isNotNull();
+        ArgumentCaptor<DomainRuleTestRunRecordRequest> reqCaptor =
+                ArgumentCaptor.forClass(DomainRuleTestRunRecordRequest.class);
+        verify(testRunService).record(eq(workspaceId), reqCaptor.capture(), eq(principal));
+        assertThat(reqCaptor.getValue().activeSnapshotKey()).isEqualTo("snap-validate-v1-rb");
+        assertThat(reqCaptor.getValue().activeActivationRevision()).isEqualTo(3L);
+    }
+
     private static GovernedRuleFamilyDescriptor<LeaveOp> sampleFamily() throws Exception {
         RuleSetRef ref =
                 new RuleSetRef("workforce", "hr", "workforce.leave-requests", "CREATE", 1);

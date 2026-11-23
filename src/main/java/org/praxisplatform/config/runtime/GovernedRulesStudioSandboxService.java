@@ -515,7 +515,7 @@ public class GovernedRulesStudioSandboxService {
       for (GovernedHostRuleBundleRuntime.OperationSpec<?> spec : orderedOperationSpecs(family)) {
         RuleSetDefinition def = spec.productRuleSet();
         if (ruleSetContainsTarget(def, explicitSlotKey, workspace.ruleKey())) {
-          return new ResolvedRuleSetContext(family, def, spec.operationKey());
+          return new ResolvedRuleSetContext(family, def, spec.operationKey(), operationHint);
         }
       }
     }
@@ -539,12 +539,13 @@ public class GovernedRulesStudioSandboxService {
                   .noneMatch(
                       s -> ruleSetContainsTarget(s.productRuleSet(), explicitSlotKey, ruleKey)))) {
         return new ResolvedRuleSetContext(
-            family, specOpt.get().productRuleSet(), specOpt.get().operationKey());
+            family, specOpt.get().productRuleSet(), specOpt.get().operationKey(), operationHint);
       }
     }
     for (GovernedHostRuleBundleRuntime.OperationSpec<?> spec : orderedSpecs) {
       if (ruleSetContainsTarget(spec.productRuleSet(), explicitSlotKey, ruleKey)) {
-        return new ResolvedRuleSetContext(family, spec.productRuleSet(), spec.operationKey());
+        return new ResolvedRuleSetContext(
+            family, spec.productRuleSet(), spec.operationKey(), operationHint);
       }
     }
     var firstSpec =
@@ -556,7 +557,7 @@ public class GovernedRulesStudioSandboxService {
                         HttpStatus.BAD_REQUEST,
                         "Governed family declares no operations: " + family.familyKey()));
     return new ResolvedRuleSetContext(
-        family, firstSpec.productRuleSet(), firstSpec.operationKey());
+        family, firstSpec.productRuleSet(), firstSpec.operationKey(), operationHint);
   }
 
   private static <O extends Enum<O>>
@@ -615,13 +616,43 @@ public class GovernedRulesStudioSandboxService {
 
   private Optional<DomainRuleSnapshotActivationResponse> resolveActiveSnapshot(
       ResolvedRuleSetContext context, DomainRuleGovernancePrincipal principal) {
+    Optional<DomainRuleSnapshotActivationResponse> primary =
+        findActiveSafe(
+            principal.tenantId(),
+            principal.environment(),
+            context.ruleSetKey(),
+            context.operationKey());
+    String hint = context.operationHint();
+    if (!StringUtils.hasText(hint) || hint.trim().equals(context.operationKey())) {
+      return primary;
+    }
+    Optional<DomainRuleSnapshotActivationResponse> hinted =
+        findActiveSafe(
+            principal.tenantId(),
+            principal.environment(),
+            context.ruleSetKey(),
+            hint.trim());
+    if (primary.isEmpty()) {
+      return hinted;
+    }
+    if (hinted.isEmpty()) {
+      return primary;
+    }
+    if (hinted.get().activationRevision() != primary.get().activationRevision()) {
+      return hinted.get().activationRevision() > primary.get().activationRevision()
+          ? hinted
+          : primary;
+    }
+    int primaryVersion = primary.get().snapshot().ruleSet().ref().version();
+    int hintedVersion = hinted.get().snapshot().ruleSet().ref().version();
+    return hintedVersion > primaryVersion ? hinted : primary;
+  }
+
+  private Optional<DomainRuleSnapshotActivationResponse> findActiveSafe(
+      String tenantId, String environment, String ruleSetKey, String operationKey) {
     try {
       var activeOpt =
-          snapshotService.findActive(
-              principal.tenantId(),
-              principal.environment(),
-              context.ruleSetKey(),
-              context.operationKey());
+          snapshotService.findActive(tenantId, environment, ruleSetKey, operationKey);
       if (activeOpt == null) {
         return Optional.empty();
       }
@@ -1499,7 +1530,8 @@ public class GovernedRulesStudioSandboxService {
   private record ResolvedRuleSetContext(
       GovernedRuleFamilyDescriptor<?> family,
       RuleSetDefinition productRuleSet,
-      String operationKey) {
+      String operationKey,
+      String operationHint) {
     String ruleSetKey() {
       return productRuleSet.ref().ruleSetKey();
     }
