@@ -7,12 +7,13 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 
 /**
- * Override por chamada para provider, modelo, limites e contexto de recuperacao.
- * Quando informado, {@code timeoutSeconds} representa o orçamento total da operação no roteador;
- * candidatos de fallback consomem apenas o tempo restante e não renovam esse orçamento.
+ * Override por chamada para provider, modelo, limites, perfil de raciocinio, chaves de cache
+ * e contexto de recuperacao. Quando informado, {@code timeoutSeconds} representa o orcamento
+ * total da operacao no roteador; candidatos de fallback consomem apenas o tempo restante e nao
+ * renovam esse orcamento.
  *
- * <p>{@code invocationTrace} e um coletor operacional efemero. Ele nao faz parte de payload HTTP,
- * persistencia ou configuracao do usuario.</p>
+ * <p>{@code invocationTrace} e os controles avancados de pensamento/cache sao metadados efemeros
+ * de execucao interna; nao fazem parte de payload HTTP persistido em configuracao de usuario.</p>
  */
 @Data
 @NoArgsConstructor
@@ -34,6 +35,46 @@ public class AiCallConfig {
     private AiExecutionProfile executionProfile;
     @JsonIgnore
     private AiProviderInvocationTrace invocationTrace;
+    @JsonIgnore
+    private AiThinkingProfile thinkingProfile;
+    @JsonIgnore
+    private Integer thinkingBudgetTokens;
+    @JsonIgnore
+    private String promptCacheKey;
+    @JsonIgnore
+    private String cachedContentName;
+
+    public AiCallConfig(
+            String provider,
+            String model,
+            Map<String, String> providerModelOverrides,
+            Double temperature,
+            Integer maxTokens,
+            Integer timeoutSeconds,
+            String apiKey,
+            String tenantId,
+            String environment,
+            String ragReleaseId,
+            AiExecutionProfile executionProfile,
+            AiProviderInvocationTrace invocationTrace) {
+        this(
+                provider,
+                model,
+                providerModelOverrides,
+                temperature,
+                maxTokens,
+                timeoutSeconds,
+                apiKey,
+                tenantId,
+                environment,
+                ragReleaseId,
+                executionProfile,
+                invocationTrace,
+                null,
+                null,
+                null,
+                null);
+    }
 
     public static AiCallConfigBuilder builder() {
         return new AiCallConfigBuilder();
@@ -56,7 +97,11 @@ public class AiCallConfig {
                 .environment(environment)
                 .ragReleaseId(ragReleaseId)
                 .executionProfile(executionProfile)
-                .invocationTrace(invocationTrace);
+                .invocationTrace(invocationTrace)
+                .thinkingProfile(thinkingProfile)
+                .thinkingBudgetTokens(thinkingBudgetTokens)
+                .promptCacheKey(promptCacheKey)
+                .cachedContentName(cachedContentName);
     }
 
     /**
@@ -76,6 +121,10 @@ public class AiCallConfig {
         private String ragReleaseId;
         private AiExecutionProfile executionProfile;
         private AiProviderInvocationTrace invocationTrace;
+        private AiThinkingProfile thinkingProfile;
+        private Integer thinkingBudgetTokens;
+        private String promptCacheKey;
+        private String cachedContentName;
 
         private AiCallConfigBuilder() {
         }
@@ -140,6 +189,26 @@ public class AiCallConfig {
             return this;
         }
 
+        public AiCallConfigBuilder thinkingProfile(AiThinkingProfile thinkingProfile) {
+            this.thinkingProfile = thinkingProfile;
+            return this;
+        }
+
+        public AiCallConfigBuilder thinkingBudgetTokens(Integer thinkingBudgetTokens) {
+            this.thinkingBudgetTokens = thinkingBudgetTokens;
+            return this;
+        }
+
+        public AiCallConfigBuilder promptCacheKey(String promptCacheKey) {
+            this.promptCacheKey = promptCacheKey;
+            return this;
+        }
+
+        public AiCallConfigBuilder cachedContentName(String cachedContentName) {
+            this.cachedContentName = cachedContentName;
+            return this;
+        }
+
         public AiCallConfig build() {
             return new AiCallConfig(
                     provider,
@@ -153,7 +222,11 @@ public class AiCallConfig {
                     environment,
                     ragReleaseId,
                     executionProfile,
-                    invocationTrace);
+                    invocationTrace,
+                    thinkingProfile,
+                    thinkingBudgetTokens,
+                    promptCacheKey,
+                    cachedContentName);
         }
     }
 }

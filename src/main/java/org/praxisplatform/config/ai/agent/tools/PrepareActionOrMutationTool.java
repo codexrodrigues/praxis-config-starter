@@ -35,6 +35,11 @@ public class PrepareActionOrMutationTool implements OperationalAgentTool {
     }
 
     @Override
+    public AgentToolSafetyClass safetyClass() {
+        return AgentToolSafetyClass.PROPOSAL_MUTATION;
+    }
+
+    @Override
     public AgentToolDeclaration declaration() {
         Map<String, Object> properties = new LinkedHashMap<>();
         properties.put("entityKey", Map.of(

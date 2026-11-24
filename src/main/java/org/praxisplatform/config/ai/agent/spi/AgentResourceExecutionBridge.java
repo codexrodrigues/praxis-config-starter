@@ -42,6 +42,24 @@ public interface AgentResourceExecutionBridge {
         throw new UnsupportedOperationException("Agregacao analitica nao suportada por esta bridge");
     }
 
+    default AgentStatsResult executeVerifiedAnalyticalRecipe(
+            AgentExecutionContext context,
+            AgentVerifiedRecipeExecutionRequest request) {
+        throw new UnsupportedOperationException("Execucao de receita analitica verificada nao suportada por esta bridge");
+    }
+
+    default AgentStatisticalAnalysisResult runStatisticalInference(
+            AgentExecutionContext context,
+            AgentStatisticalInferenceRequest request) {
+        throw new UnsupportedOperationException("Inferencia estatistica nao suportada por esta bridge");
+    }
+
+    default AgentStatisticalAnalysisResult scanResourceAnomalies(
+            AgentExecutionContext context,
+            AgentAnomalyScanRequest request) {
+        throw new UnsupportedOperationException("Varredura de anomalias nao suportada por esta bridge");
+    }
+
     default List<AgentEvaluatedCalculationMemory> evaluateCalculationMemory(
             AgentExecutionContext context,
             String entityKeyOrResourcePath,

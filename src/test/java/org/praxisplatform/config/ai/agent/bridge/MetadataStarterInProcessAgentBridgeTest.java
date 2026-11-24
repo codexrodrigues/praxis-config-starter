@@ -11,6 +11,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.validation.Validation;
 import jakarta.validation.Validator;
 import jakarta.validation.constraints.NotBlank;
+import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.Collection;
@@ -53,9 +54,11 @@ import org.praxisplatform.config.ai.agent.spi.CompactAgentSchemaDigest;
 import org.praxisplatform.config.ai.agent.spi.CompactAgentSchemaDigest.BulkCapabilityDigest;
 import org.praxisplatform.config.ai.agent.spi.AgentProactiveAlertContributor;
 import org.praxisplatform.config.ai.agent.spi.AgentKnowledgeDocument;
+import org.praxisplatform.config.ai.agent.spi.AgentAnalyticalProvenance;
 import org.praxisplatform.config.ai.agent.spi.AgentSimulationPreview;
 import org.praxisplatform.config.ai.agent.spi.AgentStatsAggregationRequest;
 import org.praxisplatform.config.ai.agent.spi.AgentStatsResult;
+import org.praxisplatform.config.ai.agent.spi.AgentVerifiedRecipeExecutionRequest;
 import org.praxisplatform.config.ai.agent.tools.AggregateResourceStatsTool;
 import org.praxisplatform.config.ai.agent.tools.DiscoverTopicResourcesAndSchemasTool;
 import org.praxisplatform.config.ai.agent.tools.ExplainCalculationMemoryTool;
@@ -135,10 +138,15 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 import org.praxisplatform.uischema.FieldControlType;
 import org.praxisplatform.uischema.annotation.AiUsagePolicy;
 import org.praxisplatform.uischema.annotation.AiVisibilityMode;
+import org.praxisplatform.uischema.annotation.AnalyticalRecipeGovernanceTier;
+import org.praxisplatform.uischema.annotation.AnalyticalRecipeParameter;
+import org.praxisplatform.uischema.annotation.AnalyticsOperation;
 import org.praxisplatform.uischema.annotation.ApiResource;
 import org.praxisplatform.uischema.annotation.DomainClassification;
 import org.praxisplatform.uischema.annotation.DomainGovernance;
 import org.praxisplatform.uischema.annotation.ResourceIdentity;
+import org.praxisplatform.uischema.annotation.VerifiedAnalyticalRecipe;
+import org.praxisplatform.uischema.annotation.FilterCriterion;
 import org.praxisplatform.uischema.concurrency.ResourceRepresentationResult;
 import org.praxisplatform.uischema.controller.base.AbstractResourceQueryController;
 import org.praxisplatform.uischema.dto.CursorPage;
@@ -156,6 +164,8 @@ import org.praxisplatform.uischema.stats.StatsFieldDescriptor;
 import org.praxisplatform.uischema.stats.StatsFieldRegistry;
 import org.praxisplatform.uischema.stats.StatsMetric;
 import org.praxisplatform.uischema.stats.StatsSupportMode;
+import org.praxisplatform.uischema.stats.dto.ComparisonBucket;
+import org.praxisplatform.uischema.stats.dto.ComparisonMetricValue;
 import org.praxisplatform.uischema.stats.dto.ComparisonStatsRequest;
 import org.praxisplatform.uischema.stats.dto.ComparisonStatsResponse;
 import org.praxisplatform.uischema.stats.dto.DistributionBucket;
@@ -2288,5 +2298,370 @@ class MetadataStarterInProcessAgentBridgeTest {
         PraxisOperationalAgentLoop loop = new PraxisOperationalAgentLoop(
                 capturingProvider, List.of(), new OperationalAssistantBlockComposer(om), 4, bridge);
         loop.execute(writerCtx, "Explique este registro.", null, List.of(), null, null);
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void verifiedRecipesArePublishedExecutedFailClosedAndEnforcePolicyInBridge() {
+        ObjectMapper om = new ObjectMapper().findAndRegisterModules();
+        java.util.concurrent.atomic.AtomicReference<GroupByStatsRequest<VerifiedRecipeBridgeFilter>> captured =
+                new java.util.concurrent.atomic.AtomicReference<>();
+
+        BaseResourceQueryService<VerifiedRecipeBridgeDto, Long, VerifiedRecipeBridgeFilter> service =
+                mock(BaseResourceQueryService.class);
+        StatsFieldRegistry statsRegistry = StatsFieldRegistry.builder()
+                .add(StatsFieldDescriptor.groupByBucket("departmentCode", "departmentCode", Set.of(StatsMetric.COUNT)))
+                .build();
+        when(service.getStatsFieldRegistry()).thenReturn(statsRegistry);
+        when(service.getGroupByStatsSupportMode()).thenReturn(StatsSupportMode.AUTO);
+        when(service.groupByStats(any())).thenAnswer(inv -> {
+            GroupByStatsRequest<VerifiedRecipeBridgeFilter> req = inv.getArgument(0);
+            captured.set(req);
+            return new GroupByStatsResponse(
+                    req.field(),
+                    req.primaryMetric(),
+                    List.of(new GroupByBucket("ENG", "Engineering", 10L, 10L)));
+        });
+
+        VerifiedRecipeBridgeController controller = new VerifiedRecipeBridgeController(service);
+        MetadataStarterInProcessAgentBridge bridge = new MetadataStarterInProcessAgentBridge(
+                List.of(controller),
+                List.of(),
+                List.of(),
+                List.of(),
+                null,
+                null,
+                null,
+                new DefaultMetadataGovernanceAgentAuthorizationBridge(List.of(controller)),
+                new DefaultConversionService(),
+                om,
+                null);
+
+        AgentExecutionContext ctx = new AgentExecutionContext(
+                UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID(),
+                "tenant-a", "user-1", "prod", "ana", Set.of("ROLE_USER"),
+                null, null, null, Map.of());
+
+        CompactAgentSchemaDigest digest = bridge.describeEntitySchema(ctx, "workforce.verified-assignments")
+                .orElseThrow();
+        assertThat(digest.verifiedRecipes()).hasSize(1);
+        var recipeSummary = digest.verifiedRecipes().get(0);
+        assertThat(recipeSummary.recipeId()).isEqualTo("active-headcount-by-dept");
+        assertThat(recipeSummary.governanceTier()).isEqualTo("CERTIFIED");
+        assertThat(recipeSummary.lockedFilters()).containsEntry("status", "ACTIVE");
+        assertThat(recipeSummary.provenanceDigest()).isNotBlank();
+
+        AgentStatsResult verifiedResult = bridge.executeVerifiedAnalyticalRecipe(
+                ctx,
+                new AgentVerifiedRecipeExecutionRequest(
+                        "workforce.verified-assignments",
+                        "active-headcount-by-dept",
+                        Map.of("departmentCode", "ENG", "limit", 5),
+                        null,
+                        null,
+                        null));
+
+        assertThat(verifiedResult.analyticalProvenance()).isNotNull();
+        assertThat(verifiedResult.analyticalProvenance().mode()).isEqualTo(AgentAnalyticalProvenance.MODE_VERIFIED_RECIPE);
+        assertThat(verifiedResult.analyticalProvenance().recipeId()).isEqualTo("active-headcount-by-dept");
+        assertThat(verifiedResult.analyticalProvenance().provenanceDigest()).isEqualTo(recipeSummary.provenanceDigest());
+        assertThat(verifiedResult.analyticalProvenance().lockedFilters()).containsEntry("status", "ACTIVE");
+        assertThat(captured.get().filter().getStatus()).isEqualTo("ACTIVE");
+        assertThat(captured.get().filter().getDepartmentCode()).isEqualTo("ENG");
+        assertThat(captured.get().limit()).isEqualTo(5);
+
+        // Fail-closed: attempting to inject an undeclared/locked parameter fails with IllegalArgumentException
+        assertThatThrownBy(() -> bridge.executeVerifiedAnalyticalRecipe(
+                ctx,
+                new AgentVerifiedRecipeExecutionRequest(
+                        "workforce.verified-assignments",
+                        "active-headcount-by-dept",
+                        Map.of("status", "TERMINATED"),
+                        null,
+                        null,
+                        null)))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("Unsupported adjustable parameter");
+
+        // Exploratory fallback is stamped EXPLORATORY_UNVERIFIED when allowed
+        AgentStatsResult exploratory = bridge.aggregateStats(
+                ctx,
+                new AgentStatsAggregationRequest(
+                        "workforce.verified-assignments",
+                        "GROUP_BY",
+                        "departmentCode",
+                        "COUNT",
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        Map.of("departmentCode", "ENG"),
+                        10));
+        assertThat(exploratory.analyticalProvenance()).isNotNull();
+        assertThat(exploratory.analyticalProvenance().mode())
+                .isEqualTo(AgentAnalyticalProvenance.MODE_EXPLORATORY_UNVERIFIED);
+
+        // Fail-closed exploratory guard when requireVerifiedRecipesForAi = true
+        bridge.configureVerifiedRecipes(null, true);
+        assertThatThrownBy(() -> bridge.aggregateStats(
+                ctx,
+                new AgentStatsAggregationRequest(
+                        "workforce.verified-assignments",
+                        "GROUP_BY",
+                        "departmentCode",
+                        "COUNT",
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        Map.of(),
+                        10)))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("execute_verified_analytical_recipe");
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void comparisonRecipesPreserveDeltasStrictPolicyBlocksWithoutRecipesAndGovernanceBlocksRestrictedFields() {
+        ObjectMapper om = new ObjectMapper().findAndRegisterModules();
+
+        BaseResourceQueryService<ComparisonRecipeBridgeDto, Long, ComparisonRecipeBridgeFilter> compService =
+                mock(BaseResourceQueryService.class);
+        StatsFieldRegistry compRegistry = StatsFieldRegistry.builder()
+                .add(StatsFieldDescriptor.groupByBucket("departmentCode", "departmentCode", Set.of(StatsMetric.COUNT, StatsMetric.SUM)))
+                .add(StatsFieldDescriptor.timeSeriesField("payDate", "payDate"))
+                .add(new StatsFieldDescriptor("grossAmount", "grossAmount", Set.of(StatsMetric.SUM, StatsMetric.COUNT)))
+                .add(StatsFieldDescriptor.timeSeriesField("restrictedMetric", "restrictedMetric"))
+                .build();
+        when(compService.getStatsFieldRegistry()).thenReturn(compRegistry);
+        when(compService.getComparisonStatsSupportMode()).thenReturn(StatsSupportMode.AUTO);
+        when(compService.comparisonStats(any())).thenAnswer(inv -> {
+            ComparisonStatsRequest<ComparisonRecipeBridgeFilter> req = inv.getArgument(0);
+            return new ComparisonStatsResponse(
+                    req.field(),
+                    req.periodField(),
+                    req.metrics(),
+                    null,
+                    null,
+                    List.of(new ComparisonBucket(
+                            "ENG",
+                            "Engenharia",
+                            Map.of("grossAmount", new ComparisonMetricValue(
+                                    new BigDecimal("15234.50"),
+                                    new BigDecimal("12000.00"),
+                                    new BigDecimal("3234.50"),
+                                    26.95d,
+                                    false)))));
+        });
+
+        BaseResourceQueryService<VerifiedRecipeBridgeDto, Long, VerifiedRecipeBridgeFilter> plainService =
+                mock(BaseResourceQueryService.class);
+        when(plainService.getStatsFieldRegistry()).thenReturn(StatsFieldRegistry.builder()
+                .add(StatsFieldDescriptor.groupByBucket("departmentCode", "departmentCode", Set.of(StatsMetric.COUNT)))
+                .build());
+
+        ComparisonRecipeBridgeController compController = new ComparisonRecipeBridgeController(compService);
+        PlainNoRecipeController plainController = new PlainNoRecipeController(plainService);
+        MetadataStarterInProcessAgentBridge bridge = new MetadataStarterInProcessAgentBridge(
+                List.of(compController, plainController),
+                List.of(),
+                List.of(),
+                List.of(),
+                null,
+                null,
+                null,
+                new DefaultMetadataGovernanceAgentAuthorizationBridge(List.of(compController, plainController)),
+                new DefaultConversionService(),
+                om,
+                null);
+
+        AgentExecutionContext ctx = new AgentExecutionContext(
+                UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID(),
+                "tenant-a", "user-1", "prod", "ana", Set.of("ROLE_USER"),
+                null, null, null, Map.of());
+
+        // 1) COMPARISON recipe preserves previousValue/delta/deltaPercent and does NOT fabricate count from SUM value
+        AgentStatsResult compResult = bridge.executeVerifiedAnalyticalRecipe(
+                ctx,
+                new AgentVerifiedRecipeExecutionRequest(
+                        "payroll.comparison-slips",
+                        "payroll-dept-comparison",
+                        Map.of(),
+                        null,
+                        null,
+                        null));
+        assertThat(compResult.buckets()).hasSize(1);
+        AgentStatsResult.AgentStatsBucket bucket = compResult.buckets().get(0);
+        assertThat(bucket.value()).isEqualByComparingTo("15234.50");
+        assertThat(bucket.previousValue()).isEqualByComparingTo("12000.00");
+        assertThat(bucket.delta()).isEqualByComparingTo("3234.50");
+        assertThat(bucket.deltaPercent()).isEqualTo(26.95d);
+        assertThat(compResult.totalElements()).isEqualTo(1L);
+
+        // 2) Governance check blocks recipe when periodField or lockedCriteria targets a field with AiVisibilityMode.DENY
+        assertThatThrownBy(() -> bridge.executeVerifiedAnalyticalRecipe(
+                ctx,
+                new AgentVerifiedRecipeExecutionRequest(
+                        "payroll.comparison-slips",
+                        "restricted-locked-recipe",
+                        Map.of(),
+                        null,
+                        null,
+                        null)))
+                .isInstanceOf(SecurityException.class)
+                .hasMessageContaining("restrictedMetric");
+
+        // 3) STRICT_VERIFIED_ONLY blocks exploratory aggregation even on a resource WITHOUT verified recipes
+        bridge.configureVerifiedRecipes(null, MetadataStarterInProcessAgentBridge.VerifiedRecipePolicy.STRICT_VERIFIED_ONLY);
+        assertThatThrownBy(() -> bridge.aggregateStats(
+                ctx,
+                new AgentStatsAggregationRequest(
+                        "workforce.plain-no-recipes",
+                        "GROUP_BY",
+                        "departmentCode",
+                        "COUNT",
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        Map.of(),
+                        10)))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("STRICT_VERIFIED_ONLY");
+    }
+
+    @ApiResource(value = "/api/workforce/verified-assignments", resourceKey = "workforce.verified-assignments")
+    @ResourceIdentity(keyField = "id", titleField = "departmentCode")
+    @VerifiedAnalyticalRecipe(
+            id = "active-headcount-by-dept",
+            title = "Headcount Ativo por Departamento",
+            operation = AnalyticsOperation.GROUP_BY,
+            field = "departmentCode",
+            metric = StatsMetric.COUNT,
+            limit = 10,
+            lockedCriteria = { @FilterCriterion(field = "status", values = "ACTIVE") },
+            adjustableParams = {
+                    @AnalyticalRecipeParameter(name = "departmentCode", dataType = "string"),
+                    @AnalyticalRecipeParameter(name = "limit", dataType = "integer", minValue = "1", maxValue = "25")
+            },
+            governanceTier = AnalyticalRecipeGovernanceTier.CERTIFIED
+    )
+    static class VerifiedRecipeBridgeController
+            extends AbstractResourceQueryController<VerifiedRecipeBridgeDto, Long, VerifiedRecipeBridgeFilter> {
+        private final BaseResourceQueryService<VerifiedRecipeBridgeDto, Long, VerifiedRecipeBridgeFilter> service;
+
+        VerifiedRecipeBridgeController(
+                BaseResourceQueryService<VerifiedRecipeBridgeDto, Long, VerifiedRecipeBridgeFilter> service) {
+            this.service = service;
+        }
+
+        @Override
+        protected BaseResourceQueryService<VerifiedRecipeBridgeDto, Long, VerifiedRecipeBridgeFilter> getService() {
+            return service;
+        }
+
+        @Override
+        protected Long getResponseId(VerifiedRecipeBridgeDto dto) {
+            return dto.getId();
+        }
+    }
+
+    static class VerifiedRecipeBridgeDto {
+        private Long id;
+        private String departmentCode;
+        public Long getId() { return id; }
+        public void setId(Long id) { this.id = id; }
+        public String getDepartmentCode() { return departmentCode; }
+        public void setDepartmentCode(String departmentCode) { this.departmentCode = departmentCode; }
+    }
+
+    static class VerifiedRecipeBridgeFilter implements GenericFilterDTO {
+        @Filterable
+        private String status;
+        @Filterable
+        private String departmentCode;
+        public String getStatus() { return status; }
+        public void setStatus(String status) { this.status = status; }
+        public String getDepartmentCode() { return departmentCode; }
+        public void setDepartmentCode(String departmentCode) { this.departmentCode = departmentCode; }
+    }
+
+    @ApiResource(value = "/api/payroll/comparison-slips", resourceKey = "payroll.comparison-slips")
+    @ResourceIdentity(keyField = "id", titleField = "departmentCode")
+    @VerifiedAnalyticalRecipe(
+            id = "payroll-dept-comparison",
+            title = "Comparativo Salarial por Departamento",
+            operation = AnalyticsOperation.COMPARISON,
+            field = "departmentCode",
+            periodField = "payDate",
+            metric = StatsMetric.SUM,
+            metricField = "grossAmount",
+            governanceTier = AnalyticalRecipeGovernanceTier.CERTIFIED
+    )
+    @VerifiedAnalyticalRecipe(
+            id = "restricted-locked-recipe",
+            title = "Receita Restrita",
+            operation = AnalyticsOperation.GROUP_BY,
+            field = "departmentCode",
+            metric = StatsMetric.COUNT,
+            lockedCriteria = { @FilterCriterion(field = "restrictedMetric", values = "X") },
+            governanceTier = AnalyticalRecipeGovernanceTier.OPERATIONAL
+    )
+    static class ComparisonRecipeBridgeController
+            extends AbstractResourceQueryController<ComparisonRecipeBridgeDto, Long, ComparisonRecipeBridgeFilter> {
+        private final BaseResourceQueryService<ComparisonRecipeBridgeDto, Long, ComparisonRecipeBridgeFilter> service;
+        ComparisonRecipeBridgeController(
+                BaseResourceQueryService<ComparisonRecipeBridgeDto, Long, ComparisonRecipeBridgeFilter> service) {
+            this.service = service;
+        }
+        @Override protected BaseResourceQueryService<ComparisonRecipeBridgeDto, Long, ComparisonRecipeBridgeFilter> getService() { return service; }
+        @Override protected Long getResponseId(ComparisonRecipeBridgeDto dto) { return dto.getId(); }
+    }
+
+    static class ComparisonRecipeBridgeDto {
+        private Long id;
+        private String departmentCode;
+        private java.time.LocalDate payDate;
+        private BigDecimal grossAmount;
+        @DomainGovernance(classification = DomainClassification.RESTRICTED,
+                aiUsage = @AiUsagePolicy(visibility = AiVisibilityMode.DENY))
+        private String restrictedMetric;
+        public Long getId() { return id; }
+        public void setId(Long id) { this.id = id; }
+        public String getDepartmentCode() { return departmentCode; }
+        public void setDepartmentCode(String departmentCode) { this.departmentCode = departmentCode; }
+        public java.time.LocalDate getPayDate() { return payDate; }
+        public void setPayDate(java.time.LocalDate payDate) { this.payDate = payDate; }
+        public BigDecimal getGrossAmount() { return grossAmount; }
+        public void setGrossAmount(BigDecimal grossAmount) { this.grossAmount = grossAmount; }
+        public String getRestrictedMetric() { return restrictedMetric; }
+        public void setRestrictedMetric(String restrictedMetric) { this.restrictedMetric = restrictedMetric; }
+    }
+
+    static class ComparisonRecipeBridgeFilter implements GenericFilterDTO {
+        @Filterable
+        private String departmentCode;
+        @Filterable
+        private String restrictedMetric;
+        public String getDepartmentCode() { return departmentCode; }
+        public void setDepartmentCode(String departmentCode) { this.departmentCode = departmentCode; }
+        public String getRestrictedMetric() { return restrictedMetric; }
+        public void setRestrictedMetric(String restrictedMetric) { this.restrictedMetric = restrictedMetric; }
+    }
+
+    @ApiResource(value = "/api/workforce/plain-no-recipes", resourceKey = "workforce.plain-no-recipes")
+    @ResourceIdentity(keyField = "id", titleField = "departmentCode")
+    static class PlainNoRecipeController
+            extends AbstractResourceQueryController<VerifiedRecipeBridgeDto, Long, VerifiedRecipeBridgeFilter> {
+        private final BaseResourceQueryService<VerifiedRecipeBridgeDto, Long, VerifiedRecipeBridgeFilter> service;
+        PlainNoRecipeController(
+                BaseResourceQueryService<VerifiedRecipeBridgeDto, Long, VerifiedRecipeBridgeFilter> service) {
+            this.service = service;
+        }
+        @Override protected BaseResourceQueryService<VerifiedRecipeBridgeDto, Long, VerifiedRecipeBridgeFilter> getService() { return service; }
+        @Override protected Long getResponseId(VerifiedRecipeBridgeDto dto) { return dto.getId(); }
     }
 }

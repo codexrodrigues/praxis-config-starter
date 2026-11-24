@@ -40,6 +40,9 @@ import org.praxisplatform.config.ai.agent.spi.AgentActionExecutionOutcome;
 import org.praxisplatform.config.ai.agent.spi.AgentActionInputField;
 import org.praxisplatform.config.ai.agent.spi.AgentActionPreparationContributor;
 import org.praxisplatform.config.ai.agent.spi.AgentActionPreparationContributor.ActionGuardAssessment;
+import org.praxisplatform.config.ai.agent.spi.AgentAnalyticalProvenance;
+import org.praxisplatform.config.ai.agent.spi.AgentAnalyticalRecipeSummary;
+import org.praxisplatform.config.ai.agent.spi.AgentAnomalyScanRequest;
 import org.praxisplatform.config.ai.agent.spi.AgentAuthorizationBridge;
 import org.praxisplatform.config.ai.agent.spi.AgentDeterminationRequest;
 import org.praxisplatform.config.ai.agent.spi.AgentEntityCatalogContributor;
@@ -47,6 +50,7 @@ import org.praxisplatform.config.ai.agent.spi.AgentEntityDescriptor;
 import org.praxisplatform.config.ai.agent.spi.AgentEntityDossier;
 import org.praxisplatform.config.ai.agent.spi.AgentEntityMatch;
 import org.praxisplatform.config.ai.agent.spi.AgentEntitySearchRequest;
+import org.praxisplatform.config.ai.agent.spi.AgentEpistemicEnvelope;
 import org.praxisplatform.config.ai.agent.spi.AgentEvaluatedCalculationMemory;
 import org.praxisplatform.config.ai.agent.spi.AgentExecuteActionRequest;
 import org.praxisplatform.config.ai.agent.spi.AgentExecutionContext;
@@ -61,12 +65,15 @@ import org.praxisplatform.config.ai.agent.spi.AgentQueryResult;
 import org.praxisplatform.config.ai.agent.spi.AgentRelatedDataset;
 import org.praxisplatform.config.ai.agent.spi.AgentResourceExecutionBridge;
 import org.praxisplatform.config.ai.agent.spi.AgentSimulationPreview;
+import org.praxisplatform.config.ai.agent.spi.AgentStatisticalAnalysisResult;
+import org.praxisplatform.config.ai.agent.spi.AgentStatisticalInferenceRequest;
 import org.praxisplatform.config.ai.agent.spi.AgentStatsAggregationRequest;
 import org.praxisplatform.config.ai.agent.spi.AgentStatsResult;
 import org.praxisplatform.config.ai.agent.spi.AgentStatsResult.AgentStatsBucket;
 import org.praxisplatform.config.ai.agent.spi.AgentSurfaceSummary;
 import org.praxisplatform.config.ai.agent.spi.AgentTopicContributor;
 import org.praxisplatform.config.ai.agent.spi.AgentTopicDescriptor;
+import org.praxisplatform.config.ai.agent.spi.AgentVerifiedRecipeExecutionRequest;
 import org.praxisplatform.config.ai.agent.spi.CompactAgentSchemaDigest;
 import org.praxisplatform.config.ai.agent.spi.CompactAgentSchemaDigest.BulkCapabilityDigest;
 import org.praxisplatform.config.ai.agent.spi.CompactAgentSchemaDigest.DeterminationSummary;
@@ -83,6 +90,7 @@ import org.praxisplatform.uischema.action.ActionCatalogResponse;
 import org.praxisplatform.uischema.action.ActionCatalogService;
 import org.praxisplatform.uischema.action.ActionDefinitionRegistry;
 import org.praxisplatform.uischema.action.ActionScope;
+import org.praxisplatform.uischema.analytics.VerifiedAnalyticalRecipeResolver;
 import org.praxisplatform.uischema.annotation.AiVisibilityMode;
 import org.praxisplatform.uischema.annotation.ApiResource;
 import org.praxisplatform.uischema.annotation.DomainClassification;
@@ -284,6 +292,18 @@ public class MetadataStarterInProcessAgentBridge implements AgentResourceExecuti
     private final TransactionTemplate readOnlyTxTemplate;
     private final TransactionTemplate isolatedReadOnlyTxTemplate;
     private final TransactionTemplate rollbackOnlyReadTemplate;
+    /**
+     * Politica que governa quando agregacoes exploratorias ({@code aggregate_resource_stats}) sao
+     * permitidas face a {@code @VerifiedAnalyticalRecipe}.
+     */
+    public enum VerifiedRecipePolicy {
+        ALLOW_EXPLORATORY,
+        PREFER_VERIFIED_WHEN_AVAILABLE,
+        STRICT_VERIFIED_ONLY
+    }
+
+    private volatile VerifiedAnalyticalRecipeResolver verifiedAnalyticalRecipeResolver;
+    private volatile VerifiedRecipePolicy verifiedRecipePolicy = VerifiedRecipePolicy.ALLOW_EXPLORATORY;
 
     private volatile List<RegisteredResource> cachedCatalog;
 
@@ -478,6 +498,32 @@ public class MetadataStarterInProcessAgentBridge implements AgentResourceExecuti
         }
     }
 
+    /**
+     * Configura opcionalmente o resolver de {@code @VerifiedAnalyticalRecipe} e a politica booleana legada
+     * ({@code true} equivale a {@link VerifiedRecipePolicy#PREFER_VERIFIED_WHEN_AVAILABLE}).
+     * Preserva todos os construtores publicos existentes.
+     */
+    public void configureVerifiedRecipes(
+            VerifiedAnalyticalRecipeResolver verifiedAnalyticalRecipeResolver,
+            boolean requireVerifiedRecipesForAi) {
+        configureVerifiedRecipes(
+                verifiedAnalyticalRecipeResolver,
+                requireVerifiedRecipesForAi
+                        ? VerifiedRecipePolicy.PREFER_VERIFIED_WHEN_AVAILABLE
+                        : VerifiedRecipePolicy.ALLOW_EXPLORATORY);
+    }
+
+    /**
+     * Configura o resolver de {@code @VerifiedAnalyticalRecipe} e a politica explicita de governanca
+     * analitica ({@link VerifiedRecipePolicy}).
+     */
+    public void configureVerifiedRecipes(
+            VerifiedAnalyticalRecipeResolver verifiedAnalyticalRecipeResolver,
+            VerifiedRecipePolicy policy) {
+        this.verifiedAnalyticalRecipeResolver = verifiedAnalyticalRecipeResolver;
+        this.verifiedRecipePolicy = policy != null ? policy : VerifiedRecipePolicy.ALLOW_EXPLORATORY;
+    }
+
     @Override
     public List<AgentTopicDescriptor> listTopics(AgentExecutionContext context) {
         List<AgentTopicDescriptor> contributed = new ArrayList<>();
@@ -611,6 +657,65 @@ public class MetadataStarterInProcessAgentBridge implements AgentResourceExecuti
             throw new SecurityException("Access denied to resource: " + res.descriptor().resourcePath());
         }
         return executeReadOnly(() -> aggregateStatsInternal(context, res, request));
+    }
+
+    @Override
+    public AgentStatsResult executeVerifiedAnalyticalRecipe(
+            AgentExecutionContext context,
+            AgentVerifiedRecipeExecutionRequest request) {
+        if (request == null || !StringUtils.hasText(request.entityKeyOrResourcePath())) {
+            throw new IllegalArgumentException("entityKeyOrResourcePath is required");
+        }
+        if (!StringUtils.hasText(request.recipeId())) {
+            throw new IllegalArgumentException("recipeId is required");
+        }
+        RegisteredResource res = findResource(context, request.entityKeyOrResourcePath())
+                .orElseThrow(() -> new IllegalArgumentException(
+                        "Unknown entity/resource: " + request.entityKeyOrResourcePath()));
+        if (!authorizationBridge.canReadResource(context, res.descriptor().resourcePath())) {
+            throw new SecurityException("Access denied to resource: " + res.descriptor().resourcePath());
+        }
+        return executeReadOnly(() -> executeVerifiedAnalyticalRecipeInternal(context, res, request));
+    }
+
+    @Override
+    public AgentStatisticalAnalysisResult runStatisticalInference(
+            AgentExecutionContext context,
+            AgentStatisticalInferenceRequest request) {
+        if (request == null || !StringUtils.hasText(request.entityKeyOrResourcePath())) {
+            throw new IllegalArgumentException("entityKeyOrResourcePath is required");
+        }
+        RegisteredResource res = findResource(context, request.entityKeyOrResourcePath())
+                .orElseThrow(() -> new IllegalArgumentException(
+                        "Unknown entity/resource: " + request.entityKeyOrResourcePath()));
+        if (!authorizationBridge.canReadResource(context, res.descriptor().resourcePath())) {
+            throw new SecurityException("Access denied to resource: " + res.descriptor().resourcePath());
+        }
+        if (!isIntelligenceContractsPresent()) {
+            return unavailableStatisticalResult(res, "inference",
+                    "Contratos de inteligencia estatistica ausentes no classpath.");
+        }
+        return runStatisticalInferenceInternal(context, res, request);
+    }
+
+    @Override
+    public AgentStatisticalAnalysisResult scanResourceAnomalies(
+            AgentExecutionContext context,
+            AgentAnomalyScanRequest request) {
+        if (request == null || !StringUtils.hasText(request.entityKeyOrResourcePath())) {
+            throw new IllegalArgumentException("entityKeyOrResourcePath is required");
+        }
+        RegisteredResource res = findResource(context, request.entityKeyOrResourcePath())
+                .orElseThrow(() -> new IllegalArgumentException(
+                        "Unknown entity/resource: " + request.entityKeyOrResourcePath()));
+        if (!authorizationBridge.canReadResource(context, res.descriptor().resourcePath())) {
+            throw new SecurityException("Access denied to resource: " + res.descriptor().resourcePath());
+        }
+        if (!isIntelligenceContractsPresent()) {
+            return unavailableStatisticalResult(res, "anomaly-scan",
+                    "Contratos de inteligencia estatistica ausentes no classpath.");
+        }
+        return scanResourceAnomaliesInternal(context, res, request);
     }
 
     @Override
@@ -3764,6 +3869,8 @@ public class MetadataStarterInProcessAgentBridge implements AgentResourceExecuti
                 ? List.of()
                 : res.determinations().stream().map(DeterminationEndpoint::toSummary).toList();
         BulkCapabilityDigest bulkCapability = res.bulkSupport() != null ? res.bulkSupport().digest() : null;
+        List<AgentAnalyticalRecipeSummary> verifiedRecipes = MetadataStarterVerifiedRecipeSupport.extractRecipes(
+                res.controller(), verifiedAnalyticalRecipeResolver, objectMapper);
         return new CompactAgentSchemaDigest(
                 d.entityKey(),
                 d.resourceKey(),
@@ -3784,7 +3891,8 @@ public class MetadataStarterInProcessAgentBridge implements AgentResourceExecuti
                 !calculationTrailIds.isEmpty(),
                 calculationTrailIds,
                 determinations,
-                bulkCapability);
+                bulkCapability,
+                verifiedRecipes);
     }
 
     @SuppressWarnings({"rawtypes", "unchecked"})
@@ -3792,6 +3900,26 @@ public class MetadataStarterInProcessAgentBridge implements AgentResourceExecuti
             AgentExecutionContext context,
             RegisteredResource res,
             AgentStatsAggregationRequest request) {
+        if (verifiedRecipePolicy != VerifiedRecipePolicy.ALLOW_EXPLORATORY) {
+            List<AgentAnalyticalRecipeSummary> recipes = MetadataStarterVerifiedRecipeSupport.extractRecipes(
+                    res.controller(), verifiedAnalyticalRecipeResolver, objectMapper);
+            if (verifiedRecipePolicy == VerifiedRecipePolicy.STRICT_VERIFIED_ONLY) {
+                throw new IllegalStateException(recipes.isEmpty()
+                        ? "Exploratory aggregation blocked by STRICT_VERIFIED_ONLY policy and resource '"
+                                + res.descriptor().entityKey() + "' has no verified analytical recipes."
+                        : "Exploratory aggregation blocked by STRICT_VERIFIED_ONLY policy for resource '"
+                                + res.descriptor().entityKey()
+                                + "'. Use execute_verified_analytical_recipe with one of: "
+                                + recipes.stream().map(AgentAnalyticalRecipeSummary::recipeId).toList());
+            }
+            if (!recipes.isEmpty()) {
+                throw new IllegalStateException(
+                        "Exploratory aggregation blocked when verified recipes exist for resource '"
+                                + res.descriptor().entityKey()
+                                + "'. Use execute_verified_analytical_recipe with one of: "
+                                + recipes.stream().map(AgentAnalyticalRecipeSummary::recipeId).toList());
+            }
+        }
         BaseResourceQueryService service = res.service();
         StatsFieldRegistry registry = tryMetadataLookup("statsRegistry:" + res.descriptor().entityKey(),
                 service::getStatsFieldRegistry);
@@ -3811,7 +3939,8 @@ public class MetadataStarterInProcessAgentBridge implements AgentResourceExecuti
                     request.granularity(),
                     0L,
                     List.of(),
-                    "Este recurso não declarou dimensões estatísticas habilitadas.");
+                    "Este recurso não declarou dimensões estatísticas habilitadas.",
+                    AgentAnalyticalProvenance.exploratoryUnverified(request.filters()));
         }
 
         Set<String> blockedFields = findBlockedStatsFields(context, res, registry);
@@ -3972,7 +4101,170 @@ public class MetadataStarterInProcessAgentBridge implements AgentResourceExecuti
                 granularityUsed,
                 totalElements,
                 buckets,
-                emptyReason);
+                emptyReason,
+                AgentAnalyticalProvenance.exploratoryUnverified(request.filters()));
+    }
+
+    @SuppressWarnings({"rawtypes", "unchecked"})
+    private AgentStatsResult executeVerifiedAnalyticalRecipeInternal(
+            AgentExecutionContext context,
+            RegisteredResource res,
+            AgentVerifiedRecipeExecutionRequest request) {
+        BaseResourceQueryService service = res.service();
+        StatsFieldRegistry registry = tryMetadataLookup("statsRegistry:" + res.descriptor().entityKey(),
+                service::getStatsFieldRegistry);
+        Set<String> blockedFields = findBlockedStatsFields(context, res, registry != null ? registry : StatsFieldRegistry.empty());
+        MetadataStarterVerifiedRecipeSupport.RecipeExecutionOutcome outcome =
+                MetadataStarterVerifiedRecipeSupport.executeRecipe(
+                        res.controller(),
+                        service,
+                        res.filterDtoType(),
+                        registry != null ? registry : StatsFieldRegistry.empty(),
+                        blockedFields,
+                        verifiedAnalyticalRecipeResolver,
+                        objectMapper,
+                        request);
+
+        String targetField = StringUtils.hasText(outcome.recipe().field())
+                ? outcome.recipe().field()
+                : (!outcome.recipe().dimensions().isEmpty() ? outcome.recipe().dimensions().get(0).field() : "");
+        List<AgentStatsBucket> buckets = new ArrayList<>(outcome.rawBuckets().size());
+        for (MetadataStarterVerifiedRecipeSupport.RawRecipeBucket raw : outcome.rawBuckets()) {
+            String label = resolveBucketLabel(res, targetField, raw.key(), raw.serverLabel());
+            buckets.add(new AgentStatsBucket(
+                    raw.key(),
+                    label,
+                    toBigDecimal(raw.value(), raw.count()),
+                    raw.count(),
+                    raw.rangeFrom(),
+                    raw.rangeTo(),
+                    raw.previousValue(),
+                    raw.delta(),
+                    raw.deltaPercent()));
+        }
+        boolean nonCountComparison = "COMPARISON".equals(outcome.operationKind())
+                && outcome.metricOp() != StatsMetric.COUNT
+                && outcome.metricOp() != StatsMetric.DISTINCT_COUNT;
+        long totalElements = nonCountComparison
+                ? buckets.size()
+                : buckets.stream().mapToLong(AgentStatsBucket::count).sum();
+        String fieldLabel = resolveFieldLabel(res, targetField);
+        String chartKind = inferChartKind(request.chartKind(), outcome.operationKind(), outcome.metricOp(), buckets.size());
+        String title = firstNonBlank(request.title(), firstNonBlank(outcome.recipe().title(), res.descriptor().title() + " — " + fieldLabel));
+        String subtitle = formatStatsSubtitlePtBr(res, outcome.metricOp(), outcome.metricField(), fieldLabel);
+        String emptyReason = buckets.isEmpty() ? "Nenhum registro encontrado para os filtros informados." : null;
+
+        return new AgentStatsResult(
+                res.descriptor().entityKey(),
+                res.descriptor().resourceKey(),
+                res.descriptor().resourcePath(),
+                title,
+                subtitle,
+                outcome.operationKind(),
+                chartKind,
+                targetField,
+                fieldLabel,
+                outcome.metricOp().name(),
+                outcome.metricField(),
+                outcome.granularityUsed(),
+                totalElements,
+                buckets,
+                emptyReason,
+                outcome.provenance());
+    }
+
+    private AgentStatisticalAnalysisResult runStatisticalInferenceInternal(
+            AgentExecutionContext context,
+            RegisteredResource res,
+            AgentStatisticalInferenceRequest request) {
+        StatsFieldRegistry registry = tryMetadataLookup("statsRegistry:" + res.descriptor().entityKey(),
+                () -> res.service().getStatsFieldRegistry());
+        Set<String> blockedFields = findBlockedStatsFields(
+                context, res, registry != null ? registry : StatsFieldRegistry.empty());
+        enforceNoBlockedFilterKeys(request.filters(), findBlockedFilterFields(res, blockedFields));
+        GenericFilterDTO filterDto = populateFilterDto(res, request.filters());
+        return MetadataStarterStatisticalIntelligenceSupport.runInference(
+                res.service(),
+                filterDto,
+                res.descriptor().entityKey(),
+                res.descriptor().resourceKey(),
+                res.descriptor().resourcePath(),
+                res.descriptor().title(),
+                blockedFields,
+                request);
+    }
+
+    private AgentStatisticalAnalysisResult scanResourceAnomaliesInternal(
+            AgentExecutionContext context,
+            RegisteredResource res,
+            AgentAnomalyScanRequest request) {
+        StatsFieldRegistry registry = tryMetadataLookup("statsRegistry:" + res.descriptor().entityKey(),
+                () -> res.service().getStatsFieldRegistry());
+        Set<String> blockedFields = findBlockedStatsFields(
+                context, res, registry != null ? registry : StatsFieldRegistry.empty());
+        enforceNoBlockedFilterKeys(request.filters(), findBlockedFilterFields(res, blockedFields));
+        GenericFilterDTO filterDto = populateFilterDto(res, request.filters());
+        return MetadataStarterStatisticalIntelligenceSupport.scanAnomalies(
+                res.service(),
+                filterDto,
+                res.descriptor().entityKey(),
+                res.descriptor().resourceKey(),
+                res.descriptor().resourcePath(),
+                res.descriptor().title(),
+                blockedFields,
+                request);
+    }
+
+    private static boolean isIntelligenceContractsPresent() {
+        return ClassUtils.isPresent(
+                "org.praxisplatform.intelligence.contracts.epistemic.EpistemicEnvelope",
+                MetadataStarterInProcessAgentBridge.class.getClassLoader());
+    }
+
+    private static AgentStatisticalAnalysisResult unavailableStatisticalResult(
+            RegisteredResource res,
+            String analysisKind,
+            String note) {
+        String rawTitle = firstNonBlank(res.descriptor().title(), res.descriptor().entityKey())
+                + ("anomaly-scan".equals(analysisKind) ? " — Varredura Estatística" : " — Inferência Estatística");
+        String maskedTitle = OperationalAssistantBlockComposer.maskPiiText(rawTitle);
+        String maskedNote = OperationalAssistantBlockComposer.maskPiiText(note);
+        AgentEpistemicEnvelope envelope = AgentEpistemicEnvelope.unavailable(
+                AgentEpistemicEnvelope.KIND_CALIBRATED_PROBABILITY,
+                res.descriptor().resourceKey(),
+                null,
+                maskedNote);
+        Map<String, Object> envMap = new LinkedHashMap<>();
+        envMap.put("epistemicKind", envelope.epistemicKind());
+        envMap.put("availabilityState", envelope.availabilityState());
+        envMap.put("statisticallySignificant", envelope.statisticallySignificant());
+        envMap.put("sampleSize", envelope.sampleSize());
+        envMap.put("suppressedCellCount", envelope.suppressedCellCount());
+        envMap.put("datasetKey", OperationalAssistantBlockComposer.maskPiiText(envelope.datasetKey()));
+        if (StringUtils.hasText(envelope.methodologyNote())) {
+            envMap.put("methodologyNote", envelope.methodologyNote());
+        }
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("entityKey", res.descriptor().entityKey());
+        payload.put("resourceKey", res.descriptor().resourceKey());
+        payload.put("resourcePath", res.descriptor().resourcePath());
+        payload.put("title", maskedTitle);
+        payload.put("analysisKind", analysisKind);
+        payload.put("epistemicEnvelope", envMap);
+        payload.put("availabilityState", AgentEpistemicEnvelope.AVAILABILITY_ENGINE_UNAVAILABLE);
+        payload.put("errorCode", "INTELLIGENCE_ENGINE_UNAVAILABLE");
+        payload.put("failClosedNote", maskedNote);
+        payload.put("findings", List.of());
+        payload.put("groups", List.of());
+        return new AgentStatisticalAnalysisResult(
+                res.descriptor().entityKey(),
+                res.descriptor().resourceKey(),
+                res.descriptor().resourcePath(),
+                maskedTitle,
+                analysisKind,
+                envelope,
+                payload,
+                payload);
     }
 
     @SuppressWarnings({"rawtypes", "unchecked"})
@@ -4085,6 +4377,8 @@ public class MetadataStarterInProcessAgentBridge implements AgentResourceExecuti
         StatsSupportMode gMode = safeStatsMode(() -> res.service().getGroupByStatsSupportMode());
         StatsSupportMode tsMode = safeStatsMode(() -> res.service().getTimeSeriesStatsSupportMode());
         StatsSupportMode distMode = safeStatsMode(() -> res.service().getDistributionStatsSupportMode());
+        StatsSupportMode infMode = safeStatsMode(() -> res.service().getInferenceStatsSupportMode());
+        StatsSupportMode anomMode = safeStatsMode(() -> res.service().getAnomalyStatsSupportMode());
         org.praxisplatform.uischema.stats.StatsCapability cap =
                 org.praxisplatform.uischema.stats.StatsCapability.from(registry, gMode, tsMode, distMode);
         if (cap.fields().isEmpty()) {
@@ -4106,7 +4400,75 @@ public class MetadataStarterInProcessAgentBridge implements AgentResourceExecuti
         if (fields.isEmpty()) {
             return null;
         }
-        return new StatsCapabilityDigest(gMode.name(), tsMode.name(), distMode.name(), fields);
+        return new StatsCapabilityDigest(
+                gMode.name(), tsMode.name(), distMode.name(), infMode.name(), anomMode.name(), fields);
+    }
+
+    private static Set<String> findBlockedFilterFields(RegisteredResource res, Set<String> blockedFields) {
+        if (blockedFields == null || blockedFields.isEmpty()) {
+            return Set.of();
+        }
+        Set<String> blockedFilterKeys = new LinkedHashSet<>(blockedFields);
+        Class<?> current = res.filterDtoType();
+        while (current != null && !Object.class.equals(current)) {
+            for (Field field : current.getDeclaredFields()) {
+                String lowerName = field.getName().trim().toLowerCase(Locale.ROOT);
+                if (blockedFields.contains(lowerName)) {
+                    blockedFilterKeys.add(lowerName);
+                    continue;
+                }
+                Filterable filterable = AnnotatedElementUtils.findMergedAnnotation(field, Filterable.class);
+                if (filterable != null) {
+                    if (matchesAnyBlockedRelation(filterable.relation(), blockedFields)) {
+                        blockedFilterKeys.add(lowerName);
+                        continue;
+                    }
+                    for (String rel : filterable.relations()) {
+                        if (matchesAnyBlockedRelation(rel, blockedFields)) {
+                            blockedFilterKeys.add(lowerName);
+                            break;
+                        }
+                    }
+                }
+            }
+            current = current.getSuperclass();
+        }
+        return Set.copyOf(blockedFilterKeys);
+    }
+
+    private static boolean matchesAnyBlockedRelation(String relation, Set<String> blockedFields) {
+        if (!StringUtils.hasText(relation)) {
+            return false;
+        }
+        String normalized = relation.trim().toLowerCase(Locale.ROOT);
+        if (blockedFields.contains(normalized)) {
+            return true;
+        }
+        int dotIdx = normalized.indexOf('.');
+        if (dotIdx > 0 && blockedFields.contains(normalized.substring(0, dotIdx))) {
+            return true;
+        }
+        int lastDotIdx = normalized.lastIndexOf('.');
+        return lastDotIdx >= 0
+                && lastDotIdx + 1 < normalized.length()
+                && blockedFields.contains(normalized.substring(lastDotIdx + 1));
+    }
+
+    private static void enforceNoBlockedFilterKeys(
+            Map<String, Object> filters,
+            Set<String> blockedFilterKeys) {
+        if (filters == null || filters.isEmpty() || blockedFilterKeys == null || blockedFilterKeys.isEmpty()) {
+            return;
+        }
+        for (Map.Entry<String, Object> entry : filters.entrySet()) {
+            if (entry.getKey() == null) {
+                continue;
+            }
+            String trimmed = entry.getKey().trim();
+            if (!trimmed.isEmpty() && blockedFilterKeys.contains(trimmed.toLowerCase(Locale.ROOT))) {
+                throw new SecurityException("Filter field restricted by governance policy: " + trimmed);
+            }
+        }
     }
 
     private Set<String> findBlockedStatsFields(

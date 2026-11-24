@@ -11,9 +11,22 @@ import org.praxisplatform.config.ai.agent.spi.AgentExecutionContext;
  */
 public interface OperationalAgentTool {
 
+    /**
+     * Safety classification for runtime security gating of tool execution.
+     */
+    enum AgentToolSafetyClass {
+        READ_ONLY,
+        SIMULATION,
+        PROPOSAL_MUTATION
+    }
+
     String name();
 
     AgentToolDeclaration declaration();
+
+    default AgentToolSafetyClass safetyClass() {
+        return AgentToolSafetyClass.READ_ONLY;
+    }
 
     /**
      * Executa a ferramenta retornando o payload seguro ({@code modelSafe}) que sera devolvido ao

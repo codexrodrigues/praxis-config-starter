@@ -1,6 +1,7 @@
 package org.praxisplatform.config.ai.agent.runtime;
 
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -15,9 +16,19 @@ import org.praxisplatform.config.ai.agent.model.AgentToolCall;
 import org.praxisplatform.config.ai.agent.model.AgentToolDeclaration;
 import org.praxisplatform.config.ai.agent.model.AgentToolResult;
 import org.praxisplatform.config.ai.agent.model.AiToolCallingProvider;
+import org.praxisplatform.config.ai.agent.security.AgentSecurityFinding;
+import org.praxisplatform.config.ai.agent.security.AgentSecurityGuard;
+import org.praxisplatform.config.ai.agent.security.AgentSecurityMode;
+import org.praxisplatform.config.ai.agent.security.AgentSecurityVerdict;
+import org.praxisplatform.config.ai.agent.security.DefaultDeterministicAgentSecurityGuard;
+import org.praxisplatform.config.ai.agent.security.TurnSecurityState;
+import org.praxisplatform.config.ai.agent.spi.AgentEpistemicEnvelope;
 import org.praxisplatform.config.ai.agent.spi.AgentExecutionContext;
+import org.praxisplatform.config.ai.agent.spi.AgentExtensionArtifact;
 import org.praxisplatform.config.ai.agent.spi.AgentResourceExecutionBridge;
 import org.praxisplatform.config.ai.agent.spi.AgentTopicDescriptor;
+import org.praxisplatform.config.ai.agent.telemetry.AgentTurnTelemetryRecorder;
+import org.praxisplatform.config.ai.agent.telemetry.AgentTurnTelemetrySummary;
 import org.praxisplatform.config.ai.agent.tools.OperationalAgentTool;
 import org.praxisplatform.config.service.AiCallConfig;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
@@ -62,8 +73,20 @@ public class PraxisOperationalAgentLoop {
             List<Map<String, Object>> quickReplies,
             List<AgentTurnArtifactStore.ToolExecutionTrace> traces,
             AgentTokenUsage usage,
-            int roundsExecuted
+            int roundsExecuted,
+            AgentTurnTelemetrySummary telemetrySummary
     ) {
+        public AgentTurnOutcome(
+                String provider,
+                String model,
+                String assistantMessage,
+                com.fasterxml.jackson.databind.JsonNode assistantContent,
+                List<Map<String, Object>> quickReplies,
+                List<AgentTurnArtifactStore.ToolExecutionTrace> traces,
+                AgentTokenUsage usage,
+                int roundsExecuted) {
+            this(provider, model, assistantMessage, assistantContent, quickReplies, traces, usage, roundsExecuted, null);
+        }
     }
 
     private final AiToolCallingProvider toolCallingProvider;
@@ -71,6 +94,10 @@ public class PraxisOperationalAgentLoop {
     private final OperationalAssistantBlockComposer blockComposer;
     private final int maxIterations;
     private final AgentResourceExecutionBridge bridge;
+    private final AgentSystemInstructionComposer instructionComposer;
+    private final AgentSecurityGuard securityGuard;
+    private final AgentSecurityMode securityMode;
+    private final AgentTurnTelemetryRecorder telemetryRecorder;
 
     public PraxisOperationalAgentLoop(
             AiToolCallingProvider toolCallingProvider,
@@ -93,10 +120,42 @@ public class PraxisOperationalAgentLoop {
             OperationalAssistantBlockComposer blockComposer,
             int maxIterations,
             AgentResourceExecutionBridge bridge) {
+        this(
+                toolCallingProvider,
+                tools,
+                blockComposer,
+                maxIterations,
+                bridge,
+                null,
+                null,
+                null,
+                null);
+    }
+
+    public PraxisOperationalAgentLoop(
+            AiToolCallingProvider toolCallingProvider,
+            List<OperationalAgentTool> tools,
+            OperationalAssistantBlockComposer blockComposer,
+            int maxIterations,
+            AgentResourceExecutionBridge bridge,
+            AgentSystemInstructionComposer instructionComposer,
+            AgentSecurityGuard securityGuard,
+            AgentSecurityMode securityMode,
+            AgentTurnTelemetryRecorder telemetryRecorder) {
         this.toolCallingProvider = Objects.requireNonNull(toolCallingProvider, "toolCallingProvider is required");
         this.blockComposer = Objects.requireNonNull(blockComposer, "blockComposer is required");
         this.maxIterations = Math.max(1, maxIterations);
         this.bridge = bridge;
+        this.instructionComposer = instructionComposer != null
+                ? instructionComposer
+                : AgentSystemInstructionComposer.defaultComposer();
+        this.securityGuard = securityGuard != null
+                ? securityGuard
+                : new DefaultDeterministicAgentSecurityGuard();
+        this.securityMode = securityMode != null ? securityMode : AgentSecurityMode.ENFORCE;
+        this.telemetryRecorder = telemetryRecorder != null
+                ? telemetryRecorder
+                : AgentTurnTelemetryRecorder.NOOP;
         Map<String, OperationalAgentTool> map = new LinkedHashMap<>();
         if (tools != null) {
             for (OperationalAgentTool tool : tools) {
@@ -123,116 +182,271 @@ public class PraxisOperationalAgentLoop {
         AgentTurnArtifactStore artifacts = new AgentTurnArtifactStore();
         List<AgentToolDeclaration> declarations = toolsByName.values().stream()
                 .map(OperationalAgentTool::declaration)
+                .sorted(Comparator.comparing(AgentToolDeclaration::name))
                 .toList();
 
-        List<AgentConversationItem> conversation = buildInitialConversation(history, vault.sanitizedPrompt(), vault);
-        String systemInstruction = buildSystemInstruction(context);
+        TurnSecurityState securityState = new TurnSecurityState(securityMode);
+        AgentTurnTelemetryRecorder.TurnSpan turnSpan = telemetryRecorder.startTurn(
+                context,
+                callConfig != null ? callConfig.getProvider() : null,
+                callConfig != null ? callConfig.getModel() : null);
+
         AgentTokenUsage totalUsage = AgentTokenUsage.ZERO;
         String finalText = "";
         String lastFinishReason = null;
         String provider = callConfig != null ? callConfig.getProvider() : null;
         String model = callConfig != null ? callConfig.getModel() : null;
         int rounds = 0;
+        String finishStatus = "completed";
 
-        for (int round = 1; round <= maxIterations; round++) {
-            if (progress.isCancelled()) {
-                throw new IllegalStateException("Turn cancelled before LLM round " + round);
-            }
-            if (TransactionSynchronizationManager.isActualTransactionActive()) {
-                throw new IllegalStateException("Agent loop must never hold an active database transaction during LLM I/O.");
-            }
-            rounds = round;
-            progress.onStatus("reasoning", "Analisando solicitação operacional...");
-
-            AgentModelTurnResponse response = toolCallingProvider.generateTurn(
-                    new AgentModelTurnRequest(systemInstruction, conversation, declarations, callConfig),
-                    AgentModelStreamListener.NOOP);
-
-            if (StringUtils.hasText(response.provider())) {
-                provider = response.provider();
-            }
-            if (StringUtils.hasText(response.model())) {
-                model = response.model();
-            }
-            if (StringUtils.hasText(response.finishReason())) {
-                lastFinishReason = response.finishReason();
-            }
-            totalUsage = totalUsage.plus(response.usage());
-
-            if (!response.hasToolCalls()) {
-                finalText = StringUtils.hasText(response.text()) ? response.text().trim() : "";
-                break;
+        try {
+            int priorFindingsCount = securityState.findings().size();
+            AgentSecurityGuard.InboundCheckResult inbound = securityGuard.guardInboundUserInput(
+                    vault.sanitizedPrompt(), context, securityState);
+            recordNewFindings(turnSpan, securityState, priorFindingsCount);
+            if (inbound.verdict().isBlocked()) {
+                finishStatus = "blocked_inbound";
+                String denialText = StringUtils.hasText(inbound.verdict().reason())
+                        ? inbound.verdict().reason()
+                        : "Solicitacao bloqueada pela politica de seguranca.";
+                OperationalAssistantBlockComposer.ComposedAssistantOutput composedBlocked =
+                        blockComposer.compose(denialText, artifacts);
+                AgentTurnTelemetrySummary summary = turnSpan.complete(
+                        provider, model, 0, totalUsage, securityState.isTainted(), finishStatus);
+                return new AgentTurnOutcome(
+                        provider,
+                        model,
+                        denialText,
+                        composedBlocked.assistantContent(),
+                        composedBlocked.quickReplies(),
+                        artifacts.traces(),
+                        totalUsage,
+                        0,
+                        summary);
             }
 
-            conversation.add(AgentConversationItem.assistantToolCalls(
-                    response.text(),
-                    response.toolCalls(),
-                    response.providerOpaqueState()));
-
-            List<AgentToolResult> results = new ArrayList<>(response.toolCalls().size());
-            for (AgentToolCall call : response.toolCalls()) {
-                if (progress.isCancelled()) {
-                    throw new IllegalStateException("Turn cancelled during tool execution: " + call.name());
-                }
-                progress.onToolStarted(call.name(), round);
-                long startNanos = System.nanoTime();
-                OperationalAgentTool tool = toolsByName.get(call.name());
-                Map<String, Object> output;
-                boolean error = false;
-                if (tool == null) {
-                    output = Map.of("error", "Ferramenta operacional desconhecida: " + call.name());
-                    error = true;
-                } else {
-                    try {
-                        Map<String, Object> rawOutput = tool.execute(context, vault, artifacts, call.arguments());
-                        output = rawOutput == null
-                                ? Map.of()
-                                : vault.scrubOutboundForModel(OperationalAssistantBlockComposer.maskMod11InStructure(rawOutput));
-                    } catch (Exception ex) {
-                        log.warn("[OperationalAgentLoop] Tool '{}' failed: {}", call.name(), ex.getMessage(), ex);
-                        output = Map.of("error", "Falha ao executar ferramenta operacional.");
-                        error = true;
+            AgentExecutionContext effectiveContext = inbound.sanitizedContext();
+            AgentExecutionContext modelSafeContext = sanitizeExecutionContextForModel(effectiveContext);
+            String safePrompt = inbound.sanitizedUserMessage();
+            if (history != null) {
+                for (ConversationHistoryEntry entry : history) {
+                    if (entry != null && StringUtils.hasText(entry.text())
+                            && !DefaultDeterministicAgentSecurityGuard.isSuspicious(entry.text())) {
+                        securityState.groundFromTrustedHistoryText(entry.text());
                     }
                 }
-                long durationMs = Math.max(0L, (System.nanoTime() - startNanos) / 1_000_000L);
-                artifacts.recordTrace(call.name(), call.name(), durationMs, estimateResultCount(output));
-                progress.onToolCompleted(call.name(), round, durationMs);
-                results.add(new AgentToolResult(call.callId(), call.name(), output, error));
             }
-            conversation.add(AgentConversationItem.toolResults(results));
-            if (round == maxIterations && !progress.isCancelled()) {
-                AgentModelTurnResponse synthesis = toolCallingProvider.generateTurn(
-                        new AgentModelTurnRequest(systemInstruction, conversation, declarations, callConfig, true),
-                        AgentModelStreamListener.NOOP);
-                if (StringUtils.hasText(synthesis.provider())) {
-                    provider = synthesis.provider();
+            List<AgentConversationItem> conversation = buildInitialConversation(history, safePrompt, vault);
+            String systemInstruction = buildSystemInstruction(effectiveContext);
+
+            for (int round = 1; round <= maxIterations; round++) {
+                if (progress.isCancelled()) {
+                    finishStatus = "cancelled";
+                    throw new IllegalStateException("Turn cancelled before LLM round " + round);
                 }
-                if (StringUtils.hasText(synthesis.model())) {
-                    model = synthesis.model();
+                if (TransactionSynchronizationManager.isActualTransactionActive()) {
+                    finishStatus = "error";
+                    throw new IllegalStateException(
+                            "Agent loop must never hold an active database transaction during LLM I/O.");
                 }
-                totalUsage = totalUsage.plus(synthesis.usage());
-                finalText = StringUtils.hasText(synthesis.text())
-                        ? synthesis.text().trim()
-                        : "Consulta operacional concluída com as evidências disponíveis.";
+                rounds = round;
+                progress.onStatus("reasoning", "Analisando solicitação operacional...");
+
+                AgentModelTurnResponse response;
+                try (AgentTurnTelemetryRecorder.ModelRoundSpan roundSpan =
+                        turnSpan.startModelRound(round, provider, model)) {
+                    try {
+                        response = toolCallingProvider.generateTurn(
+                                new AgentModelTurnRequest(
+                                        systemInstruction,
+                                        conversation,
+                                        declarations,
+                                        callConfig,
+                                        false,
+                                        Map.of(),
+                                        modelSafeContext),
+                                AgentModelStreamListener.NOOP);
+                    } catch (RuntimeException ex) {
+                        roundSpan.fail(ex);
+                        throw ex;
+                    }
+                    if (StringUtils.hasText(response.provider())) {
+                        provider = response.provider();
+                    }
+                    if (StringUtils.hasText(response.model())) {
+                        model = response.model();
+                    }
+                    if (StringUtils.hasText(response.finishReason())) {
+                        lastFinishReason = response.finishReason();
+                    }
+                    totalUsage = totalUsage.plus(response.usage());
+                    roundSpan.finish(
+                            provider,
+                            model,
+                            response.usage(),
+                            response.toolCalls().size(),
+                            response.finishReason());
+                }
+
+                if (!response.hasToolCalls()) {
+                    finalText = StringUtils.hasText(response.text()) ? response.text().trim() : "";
+                    break;
+                }
+
+                conversation.add(AgentConversationItem.assistantToolCalls(
+                        response.text(),
+                        response.toolCalls(),
+                        response.providerOpaqueState()));
+
+                List<AgentToolResult> results = new ArrayList<>(response.toolCalls().size());
+                for (AgentToolCall call : response.toolCalls()) {
+                    if (progress.isCancelled()) {
+                        finishStatus = "cancelled";
+                        throw new IllegalStateException("Turn cancelled during tool execution: " + call.name());
+                    }
+                    progress.onToolStarted(call.name(), round);
+                    long startNanos = System.nanoTime();
+                    OperationalAgentTool tool = toolsByName.get(call.name());
+                    OperationalAgentTool.AgentToolSafetyClass safetyClass = tool != null
+                            ? tool.safetyClass()
+                            : OperationalAgentTool.AgentToolSafetyClass.READ_ONLY;
+                    String recipeId = call.arguments() != null && call.arguments().get("recipeId") != null
+                            ? String.valueOf(call.arguments().get("recipeId"))
+                            : null;
+
+                    Map<String, Object> output;
+                    boolean error = false;
+                    boolean blockedBySecurity = false;
+
+                    try (AgentTurnTelemetryRecorder.ToolExecutionSpan toolSpan =
+                            turnSpan.startToolExecution(call.name(), safetyClass.name(), recipeId)) {
+                        int beforeFindings = securityState.findings().size();
+                        AgentSecurityVerdict preVerdict = securityGuard.guardBeforeToolExecution(
+                                call.name(), safetyClass, call.arguments(), securityState);
+                        recordNewFindings(turnSpan, securityState, beforeFindings);
+
+                        if (preVerdict.isBlocked()) {
+                            blockedBySecurity = true;
+                            error = true;
+                            output = Map.of(
+                                    "error", StringUtils.hasText(preVerdict.reason())
+                                            ? preVerdict.reason()
+                                            : "Operacao bloqueada pela politica de seguranca.",
+                                    "blockedBySecurity", true,
+                                    "ruleId", preVerdict.ruleId());
+                        } else if (tool == null) {
+                            output = Map.of("error", "Ferramenta operacional desconhecida: " + call.name());
+                            error = true;
+                        } else {
+                            try {
+                                Map<String, Object> rawOutput = tool.execute(effectiveContext, vault, artifacts, call.arguments());
+                                Map<String, Object> scrubbed = rawOutput == null
+                                        ? Map.of()
+                                        : vault.scrubOutboundForModel(
+                                                OperationalAssistantBlockComposer.maskMod11InStructure(rawOutput));
+                                int outputFindingsStart = securityState.findings().size();
+                                AgentSecurityGuard.ToolOutputCheckResult outputCheck =
+                                        securityGuard.guardToolOutput(call.name(), safetyClass, scrubbed, securityState);
+                                recordNewFindings(turnSpan, securityState, outputFindingsStart);
+                                output = outputCheck.sanitizedPayload() != null ? outputCheck.sanitizedPayload() : scrubbed;
+                            } catch (Exception ex) {
+                                log.warn("[OperationalAgentLoop] Tool '{}' failed: {}", call.name(), ex.getMessage(), ex);
+                                toolSpan.fail(ex);
+                                output = Map.of("error", "Falha ao executar ferramenta operacional.");
+                                error = true;
+                            }
+                        }
+                        toolSpan.finish(error, blockedBySecurity);
+                    }
+                    long durationMs = Math.max(0L, (System.nanoTime() - startNanos) / 1_000_000L);
+                    artifacts.recordTrace(call.name(), call.name(), durationMs, estimateResultCount(output));
+                    progress.onToolCompleted(call.name(), round, durationMs);
+                    results.add(new AgentToolResult(call.callId(), call.name(), output, error));
+                }
+                conversation.add(AgentConversationItem.toolResults(results));
+                if (round == maxIterations && !progress.isCancelled()) {
+                    try (AgentTurnTelemetryRecorder.ModelRoundSpan synthSpan =
+                            turnSpan.startModelRound(round + 1, provider, model)) {
+                        AgentModelTurnResponse synthesis;
+                        try {
+                            synthesis = toolCallingProvider.generateTurn(
+                                    new AgentModelTurnRequest(
+                                            systemInstruction,
+                                            conversation,
+                                            declarations,
+                                            callConfig,
+                                            true,
+                                            Map.of(),
+                                            modelSafeContext),
+                                    AgentModelStreamListener.NOOP);
+                        } catch (RuntimeException ex) {
+                            synthSpan.fail(ex);
+                            throw ex;
+                        }
+                        if (StringUtils.hasText(synthesis.provider())) {
+                            provider = synthesis.provider();
+                        }
+                        if (StringUtils.hasText(synthesis.model())) {
+                            model = synthesis.model();
+                        }
+                        totalUsage = totalUsage.plus(synthesis.usage());
+                        synthSpan.finish(
+                                provider,
+                                model,
+                                synthesis.usage(),
+                                0,
+                                synthesis.finishReason());
+                        finalText = StringUtils.hasText(synthesis.text())
+                                ? synthesis.text().trim()
+                                : "Consulta operacional concluída com as evidências disponíveis.";
+                    }
+                }
             }
-        }
 
-        if (!StringUtils.hasText(finalText)) {
-            finalText = buildFallbackNarrative(artifacts, lastFinishReason);
-        }
-        finalText = OperationalAssistantBlockComposer.maskMod11TaxIds(finalText);
-        OperationalAssistantBlockComposer.ComposedAssistantOutput composed =
-                blockComposer.compose(finalText, artifacts);
+            if (!StringUtils.hasText(finalText)) {
+                finalText = buildFallbackNarrative(artifacts, lastFinishReason);
+            }
+            int outFindingsStart = securityState.findings().size();
+            AgentSecurityGuard.OutboundCheckResult outboundCheck =
+                    securityGuard.guardOutboundResponse(finalText, securityState);
+            recordNewFindings(turnSpan, securityState, outFindingsStart);
+            finalText = OperationalAssistantBlockComposer.maskMod11TaxIds(
+                    outboundCheck.sanitizedNarrative() != null ? outboundCheck.sanitizedNarrative() : finalText);
+            OperationalAssistantBlockComposer.ComposedAssistantOutput composed =
+                    blockComposer.compose(finalText, artifacts);
 
-        return new AgentTurnOutcome(
-                provider,
-                model,
-                finalText,
-                composed.assistantContent(),
-                composed.quickReplies(),
-                artifacts.traces(),
-                totalUsage,
-                rounds);
+            AgentTurnTelemetrySummary summary = turnSpan.complete(
+                    provider, model, rounds, totalUsage, securityState.isTainted(), finishStatus);
+            return new AgentTurnOutcome(
+                    provider,
+                    model,
+                    finalText,
+                    composed.assistantContent(),
+                    composed.quickReplies(),
+                    artifacts.traces(),
+                    totalUsage,
+                    rounds,
+                    summary);
+        } catch (RuntimeException ex) {
+            if ("completed".equals(finishStatus)) {
+                finishStatus = "error";
+            }
+            turnSpan.fail(ex);
+            turnSpan.complete(provider, model, rounds, totalUsage, securityState.isTainted(), finishStatus);
+            throw ex;
+        } finally {
+            turnSpan.close();
+        }
+    }
+
+    private static void recordNewFindings(
+            AgentTurnTelemetryRecorder.TurnSpan turnSpan,
+            TurnSecurityState state,
+            int fromIndex) {
+        List<AgentSecurityFinding> all = state.findings();
+        for (int i = fromIndex; i < all.size(); i++) {
+            turnSpan.recordSecurityFinding(all.get(i));
+        }
     }
 
     private static List<AgentConversationItem> buildInitialConversation(
@@ -258,67 +472,32 @@ public class PraxisOperationalAgentLoop {
     }
 
     private String buildSystemInstruction(AgentExecutionContext context) {
-        StringBuilder sb = new StringBuilder();
-        sb.append("Você é o assistente operacional da plataforma Praxis.\n");
-        sb.append("Regras obrigatórias:\n");
-        sb.append("1. Sempre comece por 'search_and_resolve_entities' quando o usuário informar um documento ([TAX_ID_n]), e-mail ([EMAIL_n]), código, matrícula, nome ou termo curto sem entidade inequívoca.\n");
-        sb.append("2. Se 'search_and_resolve_entities' retornar exatamente 1 candidato (SINGLE_MATCH) e já incluir 'autoLoadedDossier', não chame 'get_entity_360_dossier' novamente; responda diretamente consolidando os dados, alertas e ações já retornados. Chame 'get_entity_360_dossier' apenas quando 'autoLoadedDossier' não estiver presente ou quando o usuário escolher um candidato específico.\n");
-        sb.append("3. Se 'search_and_resolve_entities' retornar múltiplos candidatos (MULTIPLE_CANDIDATES), nunca escolha um deles por conta própria; apresente a síntese e peça ao usuário para escolher na lista.\n");
-        sb.append("4. Para listar coleções ou aplicar filtros específicos, use 'discover_topic_resources_and_schemas' e 'query_resource_records'. Se não houver correspondência relevante na busca polimórfica global, responda de forma objetiva sem repetir múltiplas consultas vazias.\n");
-        sb.append("5. Nunca invente fatos, números, alertas ou permissões; não gere HTML nem blocos JSON na resposta em texto pois a UI renderizará os blocos ricos automaticamente a partir das ferramentas.\n");
-        sb.append("6. Seja executivo e conciso (1 a 3 frases curtas): não repita como lista em markdown os campos detalhados de 'autoLoadedDossier', 'get_entity_360_dossier', candidatos de 'search_and_resolve_entities' ou linhas de 'query_resource_records' quando os blocos ricos da UI já os exibirem; destaque apenas a identificação principal, o status e alertas críticos.\n");
-        sb.append("7. Para análises quantitativas, gráficos, rankings ou séries temporais, inspecione 'statsCapability' via 'discover_topic_resources_and_schemas' (se necessário) e chame 'aggregate_resource_stats' usando apenas campos declarados.\n");
-        sb.append("8. Para perguntas sobre fórmulas, contracheques, descontos, tetos ou composições de valores auditáveis, use 'explain_calculation_memory' (ou o campo 'calculationTrails' do dossiê) e explique apenas os passos retornados sem inventar parcelas.\n");
-        sb.append("9. Para perguntas sobre leis, estatutos, regras declarativas ou motivos de bloqueio/validação, consulte 'search_domain_knowledge_and_rules' respeitando o tenant/ente ativo do contexto.\n");
-        sb.append("10. Para simular cenários, prévias, saldos projetados ou elegibilidade sem gravar no banco, use 'simulate_determination_or_rules' informando 'draftFields' coerentes com o digest do recurso e deixe claro que é simulação não persistida.\n");
-        sb.append("11. Nunca efetue ou declare uma mutação de banco diretamente durante o turno. Para ações ou edições individuais de 1 registro, chame 'prepare_action_or_mutation'. Para alterações em lote envolvendo múltiplos registros (UNIFORM_UPDATE ou PER_ITEM_UPDATE) ou comandos coletivos @WorkflowAction/@BulkOperation (DOMAIN_COMMAND), inspecione 'bulkCapability' no digest do recurso se necessário e chame 'prepare_bulk_operation' para avaliar sem escrita e gerar a proposta vinculada para revisão no modal dedicado.\n");
-        sb.append("12. Contexto focado (Fast Grounding): se 'Registro/escopo ativo em foco na conversa' já identificar inequivocamente o recurso ('resourcePath'/'entityKey') e/ou registro ('recordId'/'entityId') e a pergunta do usuário se referir diretamente ao item ou tela aberta (ex.: 'este registro', 'este cálculo', 'estes indicadores', 'homologar este item'), use diretamente 'get_entity_360_dossier', 'explain_calculation_memory', 'prepare_action_or_mutation' ou 'prepare_bulk_operation' sem repetir 'discover_topic_resources_and_schemas' nem 'search_and_resolve_entities'. Caso o usuário nomeie pessoa, matrícula, CPF/CNPJ, lotação ou recurso diferente do foco atual, chame 'search_and_resolve_entities' obrigatoriamente.\n");
-        if (bridge != null) {
-            try {
-                List<AgentTopicDescriptor> topics = bridge.listTopics(context);
-                if (topics != null && !topics.isEmpty()) {
-                    sb.append("Tópicos de domínio disponíveis neste host: ");
-                    for (int i = 0; i < Math.min(topics.size(), 10); i++) {
-                        AgentTopicDescriptor topic = topics.get(i);
-                        if (i > 0) {
-                            sb.append(", ");
-                        }
-                        sb.append(topic.topicKey()).append(" (").append(topic.title()).append(')');
-                    }
-                    sb.append(".\n");
-                }
-            } catch (RuntimeException ex) {
-                log.debug("[OperationalAgentLoop] Topics unavailable during instruction composition: {}", ex.getMessage());
-            }
-        }
-        if (context != null && StringUtils.hasText(context.activeTopicKey())) {
-            sb.append("Tópico em foco na tela ativa: ")
-                    .append(sanitizePromptHint(context.activeTopicKey(), 120))
-                    .append(".\n");
-        }
-        if (context != null && StringUtils.hasText(context.activeScreenResourcePath())) {
-            sb.append("Contexto consultivo da tela aberta (apenas desempate, não bloqueia buscas em outros módulos): ")
-                    .append(sanitizePromptHint(context.activeScreenResourcePath(), 240))
-                    .append(".\n");
-        }
-        if (context != null && context.activeSelectionHints() != null && !context.activeSelectionHints().isEmpty()) {
-            Object scrubbedHints = OperationalAssistantBlockComposer.maskMod11InStructure(context.activeSelectionHints());
-            sb.append("Registro/escopo ativo em foco na conversa (somente leitura/referência; sanitizado): ")
-                    .append(sanitizePromptHint(
-                            TurnScopedPiiVault.maskRawEmails(
-                                    OperationalAssistantBlockComposer.maskMod11TaxIds(String.valueOf(scrubbedHints))),
-                            768))
-                    .append(".\n");
-        }
-        return sb.toString();
+        return instructionComposer.compose(context, buildTopicDiscoverySummary(context));
     }
 
-    private static String sanitizePromptHint(String raw, int maxLen) {
-        if (!StringUtils.hasText(raw)) {
+    private String buildTopicDiscoverySummary(AgentExecutionContext context) {
+        if (bridge == null) {
             return "";
         }
-        String singleLine = raw.replaceAll("[\\p{Cntrl}]+", " ").trim();
-        return singleLine.length() > maxLen ? singleLine.substring(0, maxLen) : singleLine;
+        try {
+            List<AgentTopicDescriptor> topics = bridge.listTopics(context);
+            if (topics == null || topics.isEmpty()) {
+                return "";
+            }
+            StringBuilder sb = new StringBuilder("Tópicos de domínio disponíveis neste host: ");
+            for (int i = 0; i < Math.min(topics.size(), 10); i++) {
+                AgentTopicDescriptor topic = topics.get(i);
+                if (i > 0) {
+                    sb.append(", ");
+                }
+                sb.append(topic.topicKey()).append(" (").append(topic.title()).append(')');
+            }
+            sb.append('.');
+            return sb.toString();
+        } catch (RuntimeException ex) {
+            log.debug("[OperationalAgentLoop] Topics unavailable during instruction composition: {}", ex.getMessage());
+            return "";
+        }
     }
 
     private static int estimateResultCount(Map<String, Object> output) {
@@ -333,6 +512,12 @@ public class PraxisOperationalAgentLoop {
         }
         if (Boolean.TRUE.equals(output.get("found"))) {
             return 1;
+        }
+        if (output.get("groups") instanceof List<?> groups) {
+            return groups.size();
+        }
+        if (output.get("findings") instanceof List<?> findings) {
+            return findings.size();
         }
         return output.size();
     }
@@ -353,6 +538,20 @@ public class PraxisOperationalAgentLoop {
         if (!artifacts.statsResults().isEmpty()) {
             return "Agregação analítica consolidada no gráfico abaixo.";
         }
+        if (!artifacts.extensionArtifacts().isEmpty()) {
+            AgentExtensionArtifact latest = artifacts.extensionArtifacts().get(artifacts.extensionArtifacts().size() - 1);
+            if (latest != null && latest.epistemicEnvelope() != null
+                    && !AgentEpistemicEnvelope.AVAILABILITY_AVAILABLE.equals(
+                            latest.epistemicEnvelope().availabilityState())) {
+                String note = latest.epistemicEnvelope().methodologyNote();
+                return StringUtils.hasText(note)
+                        ? "Execução analítica indisponível ou restrita em modo fail-closed: "
+                                + OperationalAssistantBlockComposer.maskPiiText(note)
+                        : "Execução analítica indisponível ou restrita em modo fail-closed ("
+                                + latest.epistemicEnvelope().availabilityState() + ").";
+            }
+            return "Análise estatística consolidada com selo epistêmico abaixo.";
+        }
         if (!artifacts.knowledgeCitations().isEmpty()) {
             return "Referências normativas e regras aplicáveis localizadas abaixo.";
         }
@@ -370,5 +569,24 @@ public class PraxisOperationalAgentLoop {
                     + reason + ". Tente reformular a solicitação ou iniciar uma nova consulta.";
         }
         return "Não foram encontrados registros para os critérios informados.";
+    }
+
+    private static AgentExecutionContext sanitizeExecutionContextForModel(AgentExecutionContext context) {
+        if (context == null) {
+            return null;
+        }
+        return new AgentExecutionContext(
+                context.threadId(),
+                context.turnId(),
+                context.streamId(),
+                context.tenantId(),
+                OperationalAssistantBlockComposer.maskPiiText(context.userId()),
+                context.environment(),
+                OperationalAssistantBlockComposer.maskPiiText(context.principalName()),
+                context.authorities(),
+                OperationalAssistantBlockComposer.maskPiiText(context.activeScreenResourcePath()),
+                OperationalAssistantBlockComposer.maskPiiText(context.activeTopicKey()),
+                OperationalAssistantBlockComposer.maskPiiInStructure(context.activeSelectionHints()),
+                OperationalAssistantBlockComposer.maskPiiInStructure(context.propagatedClaims()));
     }
 }

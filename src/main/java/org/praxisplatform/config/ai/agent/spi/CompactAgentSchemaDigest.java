@@ -26,7 +26,8 @@ public record CompactAgentSchemaDigest(
         boolean calculationMemoryAvailable,
         List<String> calculationTrailIds,
         List<DeterminationSummary> determinations,
-        BulkCapabilityDigest bulkCapability
+        BulkCapabilityDigest bulkCapability,
+        List<AgentAnalyticalRecipeSummary> verifiedRecipes
 ) {
     public CompactAgentSchemaDigest(
             String entityKey,
@@ -62,7 +63,8 @@ public record CompactAgentSchemaDigest(
                 false,
                 List.of(),
                 List.of(),
-                null);
+                null,
+                List.of());
     }
 
     public CompactAgentSchemaDigest(
@@ -104,7 +106,8 @@ public record CompactAgentSchemaDigest(
                 calculationMemoryAvailable,
                 calculationTrailIds,
                 List.of(),
-                null);
+                null,
+                List.of());
     }
 
     public CompactAgentSchemaDigest(
@@ -147,7 +150,53 @@ public record CompactAgentSchemaDigest(
                 calculationMemoryAvailable,
                 calculationTrailIds,
                 determinations,
-                null);
+                null,
+                List.of());
+    }
+
+    public CompactAgentSchemaDigest(
+            String entityKey,
+            String resourceKey,
+            String resourcePath,
+            String title,
+            String description,
+            String idFieldName,
+            String titleField,
+            String subtitleField,
+            List<String> metadataFields,
+            List<FilterFieldDigest> filterableFields,
+            List<ResponseFieldDigest> responseFields,
+            List<AgentActionAffordance> availableActions,
+            List<AgentSurfaceSummary> availableSurfaces,
+            StatsCapabilityDigest statsCapability,
+            List<QuickFilterSummary> quickFilters,
+            List<ResourceFactSummary> resourceFacts,
+            boolean calculationMemoryAvailable,
+            List<String> calculationTrailIds,
+            List<DeterminationSummary> determinations,
+            BulkCapabilityDigest bulkCapability) {
+        this(
+                entityKey,
+                resourceKey,
+                resourcePath,
+                title,
+                description,
+                idFieldName,
+                titleField,
+                subtitleField,
+                metadataFields,
+                filterableFields,
+                responseFields,
+                availableActions,
+                availableSurfaces,
+                statsCapability,
+                quickFilters,
+                resourceFacts,
+                calculationMemoryAvailable,
+                calculationTrailIds,
+                determinations,
+                bulkCapability,
+                List.of());
     }
 
     public CompactAgentSchemaDigest {
@@ -160,6 +209,7 @@ public record CompactAgentSchemaDigest(
         resourceFacts = resourceFacts == null ? List.of() : List.copyOf(resourceFacts);
         calculationTrailIds = calculationTrailIds == null ? List.of() : List.copyOf(calculationTrailIds);
         determinations = determinations == null ? List.of() : List.copyOf(determinations);
+        verifiedRecipes = verifiedRecipes == null ? List.of() : List.copyOf(verifiedRecipes);
     }
 
     public record BulkEditableFieldDigest(
@@ -221,9 +271,22 @@ public record CompactAgentSchemaDigest(
             String groupByMode,
             String timeSeriesMode,
             String distributionMode,
+            String inferenceMode,
+            String anomalyMode,
             List<StatsFieldDigest> fields
     ) {
+        public StatsCapabilityDigest(
+                String groupByMode,
+                String timeSeriesMode,
+                String distributionMode,
+                List<StatsFieldDigest> fields
+        ) {
+            this(groupByMode, timeSeriesMode, distributionMode, "DISABLED", "DISABLED", fields);
+        }
+
         public StatsCapabilityDigest {
+            inferenceMode = (inferenceMode == null || inferenceMode.isBlank()) ? "DISABLED" : inferenceMode;
+            anomalyMode = (anomalyMode == null || anomalyMode.isBlank()) ? "DISABLED" : anomalyMode;
             fields = fields == null ? List.of() : List.copyOf(fields);
         }
     }

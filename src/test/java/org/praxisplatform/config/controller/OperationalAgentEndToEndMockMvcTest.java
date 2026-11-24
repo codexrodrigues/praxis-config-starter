@@ -1443,7 +1443,7 @@ class OperationalAgentEndToEndMockMvcTest {
 
     @Test
     void scenarioN_prepareBulkOperationEmitsSafeSseBlocksBlocksChatConfirmAndCompletesViaModal() throws Exception {
-        AgenticAuthoringTurnStreamStartResponse start = startStream("prepare bulk mixed", "turn-bulk-mixed-1");
+        AgenticAuthoringTurnStreamStartResponse start = startStream("prepare bulk mixed 501 502", "turn-bulk-mixed-1");
         List<AiTurnEventEnvelope> events = readSseEvents(start.getStreamId());
 
         AiTurnEventEnvelope resultEvent = events.stream()

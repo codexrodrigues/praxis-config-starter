@@ -39,6 +39,7 @@ import org.praxisplatform.config.dto.AiOrchestratorRequest;
 import org.praxisplatform.config.dto.AiPatchStreamCancelResponse;
 import org.praxisplatform.config.dto.AiTurnEventEnvelope;
 import org.praxisplatform.config.service.AiCallConfig;
+import org.praxisplatform.config.service.AiThinkingProfile;
 import org.praxisplatform.config.service.AiPrincipalContext;
 import org.praxisplatform.config.service.AiProviderManagementService;
 import org.praxisplatform.config.service.AiStreamAccessTokenService;
@@ -424,7 +425,14 @@ public class OperationalAgentTurnStreamService {
             resultPayload.put("traces", outcome.traces());
             resultPayload.put("inputTokens", outcome.usage().inputTokens());
             resultPayload.put("outputTokens", outcome.usage().outputTokens());
+            resultPayload.put("cacheReadInputTokens", outcome.usage().cacheReadInputTokens());
+            resultPayload.put("cacheWriteInputTokens", outcome.usage().cacheWriteInputTokens());
+            resultPayload.put("thinkingTokens", outcome.usage().thinkingTokens());
+            resultPayload.put("cacheHit", outcome.usage().cacheHit());
             resultPayload.put("totalTokens", outcome.usage().totalTokens());
+            if (outcome.telemetrySummary() != null) {
+                resultPayload.put("telemetryMeta", outcome.telemetrySummary().toSafeEventMeta());
+            }
 
             appendAndEmit(principalContext, streamId, threadId, turnId, "result", resultPayload);
             turnService.completeTurn(threadId, turnId);
@@ -712,12 +720,20 @@ public class OperationalAgentTurnStreamService {
     private AiCallConfig resolveCallConfig(
             OperationalAgentTurnStreamRequest request,
             AiPrincipalContext principalContext) {
+        String tenantKey = StringUtils.hasText(principalContext.tenantId())
+                ? principalContext.tenantId().trim()
+                : "default";
+        String envKey = StringUtils.hasText(principalContext.environment())
+                ? principalContext.environment().trim()
+                : "default";
         AiCallConfig requested = AiCallConfig.builder()
                 .provider(request.provider())
                 .model(request.model())
                 .apiKey(corporateMode ? null : request.apiKey())
                 .tenantId(principalContext.tenantId())
                 .environment(principalContext.environment())
+                .thinkingProfile(AiThinkingProfile.OPERATIONAL_AUDIT)
+                .promptCacheKey("praxis-op-agent:" + tenantKey + ":" + envKey)
                 .build();
         if (providerManagementService == null) {
             return requested;

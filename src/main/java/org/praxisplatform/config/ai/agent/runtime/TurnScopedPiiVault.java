@@ -21,7 +21,7 @@ import org.springframework.util.StringUtils;
 public final class TurnScopedPiiVault {
 
     private static final Pattern RAW_EMAIL_PATTERN = Pattern.compile(
-            "(?<![A-Za-z0-9._%+-])([A-Za-z0-9._%+-]{1,64})@([A-Za-z0-9.-]+\\.[A-Za-z]{2,})(?![A-Za-z0-9.-])");
+            "(?<![A-Za-z0-9._%+-])([A-Za-z0-9._%+-]{1,64})@((?:[A-Za-z0-9-]+\\.)+[A-Za-z]{2,})(?![A-Za-z0-9_-]|\\.[A-Za-z0-9])");
 
     private final String sanitizedPrompt;
     private final Map<String, String> tokenToDigits;

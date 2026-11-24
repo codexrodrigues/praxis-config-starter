@@ -1,20 +1,34 @@
 package org.praxisplatform.config.autoconfig;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import io.micrometer.observation.ObservationRegistry;
 import jakarta.validation.Validator;
 import java.util.List;
 import org.praxisplatform.config.ai.agent.bridge.ConfigDomainRuleKnowledgeContributor;
 import org.praxisplatform.config.ai.agent.bridge.DefaultMetadataGovernanceAgentAuthorizationBridge;
 import org.praxisplatform.config.ai.agent.bridge.MetadataStarterInProcessAgentBridge;
 import org.praxisplatform.config.ai.agent.model.AiToolCallingProvider;
+import org.praxisplatform.config.ai.agent.provider.AiProviderEligibilityPolicy;
 import org.praxisplatform.config.ai.agent.provider.GoogleGenAiAgentToolGateway;
 import org.praxisplatform.config.ai.agent.provider.OpenAiResponsesAgentToolGateway;
+import org.praxisplatform.config.ai.agent.provider.ProfileSovereigntyAiProviderEligibilityPolicy;
 import org.praxisplatform.config.ai.agent.provider.RoutingAiToolCallingProvider;
+import org.praxisplatform.config.ai.agent.runtime.AgentSystemInstructionComposer;
+import org.praxisplatform.config.ai.agent.runtime.AnalyticalRecipeAndEpistemicInstructionContributor;
+import org.praxisplatform.config.ai.agent.runtime.CoreOperationalRulesInstructionContributor;
+import org.praxisplatform.config.ai.agent.runtime.HostContextSystemInstructionContributor;
 import org.praxisplatform.config.ai.agent.runtime.OperationalAgentProposalService;
 import org.praxisplatform.config.ai.agent.runtime.OperationalAgentTurnStreamService;
 import org.praxisplatform.config.ai.agent.runtime.OperationalAssistantBlockComposer;
 import org.praxisplatform.config.ai.agent.runtime.PraxisOperationalAgentLoop;
+import org.praxisplatform.config.ai.agent.runtime.ResourceDiscoverySummaryInstructionContributor;
+import org.praxisplatform.config.ai.agent.runtime.SecurityBoundaryInstructionContributor;
 import org.praxisplatform.config.ai.agent.runtime.SecurityContextAgentThreadContextPropagator;
+import org.praxisplatform.config.ai.agent.runtime.StatisticalIntelligenceBlockContributor;
+import org.praxisplatform.config.ai.agent.security.AgentSecurityGuard;
+import org.praxisplatform.config.ai.agent.security.AgentSecurityMode;
+import org.praxisplatform.config.ai.agent.security.CompositeAgentSecurityGuard;
+import org.praxisplatform.config.ai.agent.security.DefaultDeterministicAgentSecurityGuard;
 import org.praxisplatform.config.ai.agent.spi.AgentActionAffordanceContributor;
 import org.praxisplatform.config.ai.agent.spi.AgentActionPreparationContributor;
 import org.praxisplatform.config.ai.agent.spi.AgentAuthorizationBridge;
@@ -23,17 +37,24 @@ import org.praxisplatform.config.ai.agent.spi.AgentExecutionContextCustomizer;
 import org.praxisplatform.config.ai.agent.spi.AgentKnowledgeSearchContributor;
 import org.praxisplatform.config.ai.agent.spi.AgentProactiveAlertContributor;
 import org.praxisplatform.config.ai.agent.spi.AgentResourceExecutionBridge;
+import org.praxisplatform.config.ai.agent.spi.AgentSystemInstructionContributor;
 import org.praxisplatform.config.ai.agent.spi.AgentThreadContextPropagator;
 import org.praxisplatform.config.ai.agent.spi.AgentTopicContributor;
 import org.praxisplatform.config.ai.agent.spi.CompositeAgentThreadContextPropagator;
+import org.praxisplatform.config.ai.agent.spi.OperationalAssistantBlockContributor;
+import org.praxisplatform.config.ai.agent.telemetry.AgentTurnTelemetryRecorder;
+import org.praxisplatform.config.ai.agent.telemetry.MicrometerGenAiAgentTelemetryRecorder;
 import org.praxisplatform.config.ai.agent.tools.AggregateResourceStatsTool;
 import org.praxisplatform.config.ai.agent.tools.DiscoverTopicResourcesAndSchemasTool;
+import org.praxisplatform.config.ai.agent.tools.ExecuteVerifiedAnalyticalRecipeTool;
 import org.praxisplatform.config.ai.agent.tools.ExplainCalculationMemoryTool;
 import org.praxisplatform.config.ai.agent.tools.GetEntity360DossierTool;
 import org.praxisplatform.config.ai.agent.tools.OperationalAgentTool;
 import org.praxisplatform.config.ai.agent.tools.PrepareActionOrMutationTool;
 import org.praxisplatform.config.ai.agent.tools.PrepareBulkOperationTool;
 import org.praxisplatform.config.ai.agent.tools.QueryResourceRecordsTool;
+import org.praxisplatform.config.ai.agent.tools.RunResourceStatisticalInferenceTool;
+import org.praxisplatform.config.ai.agent.tools.ScanResourceAnomaliesTool;
 import org.praxisplatform.config.ai.agent.tools.SearchAndResolveEntitiesTool;
 import org.praxisplatform.config.ai.agent.tools.SearchDomainKnowledgeAndRulesTool;
 import org.praxisplatform.config.ai.agent.tools.SimulateDeterminationOrRulesTool;
@@ -42,6 +63,7 @@ import org.praxisplatform.config.repository.AiAgentActionProposalRepository;
 import org.praxisplatform.config.repository.DomainRuleDefinitionRepository;
 import org.praxisplatform.config.service.AiPrincipalContextResolver;
 import org.praxisplatform.config.service.AiProviderManagementService;
+import org.praxisplatform.config.service.AiProviderRateLimitStore;
 import org.praxisplatform.config.service.AiStreamAccessTokenService;
 import org.praxisplatform.config.service.AiThreadService;
 import org.praxisplatform.config.service.AiTurnEventService;
@@ -49,6 +71,7 @@ import org.praxisplatform.config.service.AiTurnService;
 import org.praxisplatform.config.tx.ConfigTransactionManagerNames;
 import org.praxisplatform.uischema.action.ActionCatalogService;
 import org.praxisplatform.uischema.action.ActionDefinitionRegistry;
+import org.praxisplatform.uischema.analytics.VerifiedAnalyticalRecipeResolver;
 import org.praxisplatform.uischema.capability.CapabilityService;
 import org.praxisplatform.uischema.concurrency.ResourceVersionEtagService;
 import org.praxisplatform.uischema.concurrency.ResourceVersionScopeProvider;
@@ -61,6 +84,7 @@ import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.boot.autoconfigure.AutoConfigureAfter;
+import org.springframework.boot.autoconfigure.condition.AnyNestedCondition;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
@@ -68,6 +92,7 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.autoconfigure.data.jpa.JpaRepositoriesAutoConfiguration;
 import org.springframework.boot.autoconfigure.orm.jpa.HibernateJpaAutoConfiguration;
 import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Conditional;
 import org.springframework.context.annotation.Import;
 import org.springframework.context.annotation.Primary;
 import org.springframework.core.convert.ConversionService;
@@ -78,7 +103,9 @@ import org.springframework.transaction.PlatformTransactionManager;
  * Auto-configuracao do assistente operacional com tool calling explicito via SDKs oficiais,
  * ponte em processo {@code praxis-metadata-starter}, cofre efemero de PII Mod-11 e SSE idempotente.
  */
-@AutoConfiguration
+@AutoConfiguration(afterName = {
+        "org.praxisplatform.intelligence.starter.autoconfigure.PraxisIntelligenceAutoConfiguration"
+})
 @AutoConfigureAfter({
         AgenticAuthoringAutoConfiguration.class,
         ConfigDataSourceIsolationAutoConfiguration.class,
@@ -89,7 +116,8 @@ import org.springframework.transaction.PlatformTransactionManager;
 @ConditionalOnProperty(prefix = "praxis.ai.agent", name = "enabled", havingValue = "true", matchIfMissing = true)
 @Import({
         OperationalAgentAutoConfiguration.SecurityPropagationConfiguration.class,
-        OperationalAgentAutoConfiguration.MetadataStarterBridgeConfiguration.class
+        OperationalAgentAutoConfiguration.MetadataStarterBridgeConfiguration.class,
+        OperationalAgentAutoConfiguration.StatisticalIntelligenceToolsConfiguration.class
 })
 public class OperationalAgentAutoConfiguration {
 
@@ -135,12 +163,15 @@ public class OperationalAgentAutoConfiguration {
                 @Qualifier("mvcConversionService") ObjectProvider<ConversionService> mvcConversionService,
                 ObjectProvider<ConversionService> fallbackConversionService,
                 ObjectProvider<ObjectMapper> objectMapperProvider,
-                ObjectProvider<PlatformTransactionManager> transactionManager) {
+                ObjectProvider<PlatformTransactionManager> transactionManager,
+                ObjectProvider<VerifiedAnalyticalRecipeResolver> verifiedAnalyticalRecipeResolverProvider,
+                @Value("${praxis.ai.agent.analytics.require-verified-recipes:false}") boolean requireVerifiedRecipesForAi,
+                @Value("${praxis.ai.agent.analytics.policy:}") String analyticsPolicy) {
             ConversionService conversionService = mvcConversionService.getIfAvailable();
             if (conversionService == null) {
                 conversionService = fallbackConversionService.getIfAvailable();
             }
-            return new MetadataStarterInProcessAgentBridge(
+            MetadataStarterInProcessAgentBridge bridge = new MetadataStarterInProcessAgentBridge(
                     controllers.orderedStream().toList(),
                     entityContributors.orderedStream().toList(),
                     topicContributors.orderedStream().toList(),
@@ -160,6 +191,22 @@ public class OperationalAgentAutoConfiguration {
                     resourceVersionScopeProvider.getIfAvailable(),
                     validatorProvider.getIfAvailable(),
                     preparationContributors.orderedStream().toList());
+            MetadataStarterInProcessAgentBridge.VerifiedRecipePolicy resolvedPolicy =
+                    resolveAnalyticsPolicy(analyticsPolicy, requireVerifiedRecipesForAi);
+            bridge.configureVerifiedRecipes(verifiedAnalyticalRecipeResolverProvider.getIfAvailable(), resolvedPolicy);
+            return bridge;
+        }
+
+        private static MetadataStarterInProcessAgentBridge.VerifiedRecipePolicy resolveAnalyticsPolicy(
+                String rawPolicy,
+                boolean requireVerifiedRecipesForAi) {
+            if (rawPolicy != null && !rawPolicy.isBlank()) {
+                return MetadataStarterInProcessAgentBridge.VerifiedRecipePolicy.valueOf(
+                        rawPolicy.trim().toUpperCase(java.util.Locale.ROOT));
+            }
+            return requireVerifiedRecipesForAi
+                    ? MetadataStarterInProcessAgentBridge.VerifiedRecipePolicy.PREFER_VERIFIED_WHEN_AVAILABLE
+                    : MetadataStarterInProcessAgentBridge.VerifiedRecipePolicy.ALLOW_EXPLORATORY;
         }
     }
 
@@ -194,8 +241,14 @@ public class OperationalAgentAutoConfiguration {
     @ConditionalOnMissingBean(name = "aiToolCallingProvider")
     public AiToolCallingProvider aiToolCallingProvider(
             ObjectProvider<AiProviderManagementService> providerManagementService,
-            List<AiToolCallingProvider> gateways) {
-        return new RoutingAiToolCallingProvider(providerManagementService.getIfAvailable(), gateways);
+            List<AiToolCallingProvider> gateways,
+            ObjectProvider<AiProviderRateLimitStore> rateLimitStoreProvider,
+            ObjectProvider<AiProviderEligibilityPolicy> eligibilityPolicies) {
+        return new RoutingAiToolCallingProvider(
+                providerManagementService.getIfAvailable(),
+                gateways,
+                rateLimitStoreProvider.getIfAvailable(),
+                eligibilityPolicies.orderedStream().toList());
     }
 
     @Bean
@@ -207,9 +260,76 @@ public class OperationalAgentAutoConfiguration {
 
     @Bean
     @ConditionalOnMissingBean
+    public ProfileSovereigntyAiProviderEligibilityPolicy profileSovereigntyAiProviderEligibilityPolicy(
+            @Value("${praxis.ai.agent.sovereignty.restricted-profiles:}") List<String> restrictedProfiles,
+            @Value("${praxis.ai.agent.sovereignty.restricted-resource-prefixes:}") List<String> restrictedResourcePrefixes,
+            @Value("${praxis.ai.agent.sovereignty.restricted-topics:}") List<String> restrictedTopics,
+            @Value("${praxis.ai.agent.sovereignty.restricted-path-segments:}") List<String> restrictedPathSegments,
+            @Value("${praxis.ai.agent.sovereignty.sovereign-providers:}") List<String> sovereignProviders,
+            @Value("${praxis.ai.agent.sovereignty.strict-fail-closed:true}") boolean strictFailClosed) {
+        return new ProfileSovereigntyAiProviderEligibilityPolicy(
+                restrictedProfiles,
+                restrictedResourcePrefixes,
+                restrictedTopics,
+                restrictedPathSegments,
+                sovereignProviders,
+                strictFailClosed);
+    }
+
+    @Bean
+    @ConditionalOnMissingBean
+    public StatisticalIntelligenceBlockContributor statisticalIntelligenceBlockContributor() {
+        return new StatisticalIntelligenceBlockContributor();
+    }
+
+    @Bean
+    @ConditionalOnMissingBean
     public OperationalAssistantBlockComposer operationalAssistantBlockComposer(
-            ObjectProvider<ObjectMapper> objectMapperProvider) {
-        return new OperationalAssistantBlockComposer(objectMapperProvider.getIfAvailable());
+            ObjectProvider<ObjectMapper> objectMapperProvider,
+            ObjectProvider<OperationalAssistantBlockContributor> blockContributors) {
+        return new OperationalAssistantBlockComposer(
+                objectMapperProvider.getIfAvailable(),
+                blockContributors.orderedStream().toList());
+    }
+
+    static final class StatisticalToolsEnabledCondition extends AnyNestedCondition {
+
+        StatisticalToolsEnabledCondition() {
+            super(ConfigurationPhase.REGISTER_BEAN);
+        }
+
+        @ConditionalOnBean(type = "org.praxisplatform.intelligence.contracts.spi.ResourceIntelligenceExecutor")
+        static class OnExecutorBean {
+        }
+
+        @ConditionalOnProperty(
+                prefix = "praxis.ai.agent.statistical-tools",
+                name = "expose-when-unavailable",
+                havingValue = "true")
+        static class OnExposeWhenUnavailableProperty {
+        }
+    }
+
+    @ConditionalOnClass(name = "org.praxisplatform.intelligence.contracts.spi.ResourceIntelligenceExecutor")
+    static class StatisticalIntelligenceToolsConfiguration {
+
+        @Bean
+        @Conditional(StatisticalToolsEnabledCondition.class)
+        @ConditionalOnBean(AgentResourceExecutionBridge.class)
+        @ConditionalOnMissingBean(RunResourceStatisticalInferenceTool.class)
+        public RunResourceStatisticalInferenceTool runResourceStatisticalInferenceTool(
+                AgentResourceExecutionBridge bridge) {
+            return new RunResourceStatisticalInferenceTool(bridge);
+        }
+
+        @Bean
+        @Conditional(StatisticalToolsEnabledCondition.class)
+        @ConditionalOnBean(AgentResourceExecutionBridge.class)
+        @ConditionalOnMissingBean(ScanResourceAnomaliesTool.class)
+        public ScanResourceAnomaliesTool scanResourceAnomaliesTool(
+                AgentResourceExecutionBridge bridge) {
+            return new ScanResourceAnomaliesTool(bridge);
+        }
     }
 
     @Bean
@@ -245,6 +365,69 @@ public class OperationalAgentAutoConfiguration {
     @ConditionalOnMissingBean(AggregateResourceStatsTool.class)
     public AggregateResourceStatsTool aggregateResourceStatsTool(AgentResourceExecutionBridge bridge) {
         return new AggregateResourceStatsTool(bridge);
+    }
+
+    @Bean
+    @ConditionalOnBean(AgentResourceExecutionBridge.class)
+    @ConditionalOnMissingBean(ExecuteVerifiedAnalyticalRecipeTool.class)
+    public ExecuteVerifiedAnalyticalRecipeTool executeVerifiedAnalyticalRecipeTool(AgentResourceExecutionBridge bridge) {
+        return new ExecuteVerifiedAnalyticalRecipeTool(bridge);
+    }
+
+    @Bean
+    @ConditionalOnMissingBean(CoreOperationalRulesInstructionContributor.class)
+    public CoreOperationalRulesInstructionContributor coreOperationalRulesInstructionContributor() {
+        return new CoreOperationalRulesInstructionContributor();
+    }
+
+    @Bean
+    @ConditionalOnMissingBean(SecurityBoundaryInstructionContributor.class)
+    public SecurityBoundaryInstructionContributor securityBoundaryInstructionContributor() {
+        return new SecurityBoundaryInstructionContributor();
+    }
+
+    @Bean
+    @ConditionalOnMissingBean(AnalyticalRecipeAndEpistemicInstructionContributor.class)
+    public AnalyticalRecipeAndEpistemicInstructionContributor analyticalRecipeAndEpistemicInstructionContributor() {
+        return new AnalyticalRecipeAndEpistemicInstructionContributor();
+    }
+
+    @Bean
+    @ConditionalOnMissingBean(ResourceDiscoverySummaryInstructionContributor.class)
+    public ResourceDiscoverySummaryInstructionContributor resourceDiscoverySummaryInstructionContributor() {
+        return new ResourceDiscoverySummaryInstructionContributor();
+    }
+
+    @Bean
+    @ConditionalOnMissingBean(HostContextSystemInstructionContributor.class)
+    public HostContextSystemInstructionContributor hostContextSystemInstructionContributor() {
+        return new HostContextSystemInstructionContributor();
+    }
+
+    @Bean
+    @ConditionalOnMissingBean(AgentSystemInstructionComposer.class)
+    public AgentSystemInstructionComposer agentSystemInstructionComposer(
+            ObjectProvider<AgentSystemInstructionContributor> contributors) {
+        List<AgentSystemInstructionContributor> resolved = contributors.orderedStream().toList();
+        return resolved.isEmpty()
+                ? AgentSystemInstructionComposer.defaultComposer()
+                : new AgentSystemInstructionComposer(resolved);
+    }
+
+    @Bean
+    @ConditionalOnMissingBean(DefaultDeterministicAgentSecurityGuard.class)
+    public DefaultDeterministicAgentSecurityGuard defaultDeterministicAgentSecurityGuard() {
+        return new DefaultDeterministicAgentSecurityGuard();
+    }
+
+    @Bean
+    @ConditionalOnMissingBean(AgentTurnTelemetryRecorder.class)
+    public AgentTurnTelemetryRecorder agentTurnTelemetryRecorder(
+            ObjectProvider<ObservationRegistry> observationRegistryProvider) {
+        ObservationRegistry registry = observationRegistryProvider.getIfAvailable();
+        return registry != null
+                ? new MicrometerGenAiAgentTelemetryRecorder(registry)
+                : AgentTurnTelemetryRecorder.NOOP;
     }
 
     @Bean
@@ -329,13 +512,25 @@ public class OperationalAgentAutoConfiguration {
             ObjectProvider<OperationalAgentTool> tools,
             OperationalAssistantBlockComposer blockComposer,
             @Value("${praxis.ai.agent.max-iterations:6}") int maxIterations,
-            ObjectProvider<AgentResourceExecutionBridge> bridgeProvider) {
+            ObjectProvider<AgentResourceExecutionBridge> bridgeProvider,
+            ObjectProvider<AgentSystemInstructionComposer> instructionComposerProvider,
+            ObjectProvider<AgentSecurityGuard> securityGuardsProvider,
+            @Value("${praxis.ai.agent.security.mode:ENFORCE}") AgentSecurityMode securityMode,
+            ObjectProvider<AgentTurnTelemetryRecorder> telemetryRecorderProvider) {
+        List<AgentSecurityGuard> guards = securityGuardsProvider.orderedStream().toList();
+        AgentSecurityGuard effectiveGuard = guards.isEmpty()
+                ? new DefaultDeterministicAgentSecurityGuard()
+                : (guards.size() == 1 ? guards.get(0) : new CompositeAgentSecurityGuard(guards));
         return new PraxisOperationalAgentLoop(
                 aiToolCallingProvider,
                 tools.orderedStream().toList(),
                 blockComposer,
                 maxIterations,
-                bridgeProvider.getIfAvailable());
+                bridgeProvider.getIfAvailable(),
+                instructionComposerProvider.getIfAvailable(AgentSystemInstructionComposer::defaultComposer),
+                effectiveGuard,
+                securityMode,
+                telemetryRecorderProvider.getIfAvailable(() -> AgentTurnTelemetryRecorder.NOOP));
     }
 
     @Bean

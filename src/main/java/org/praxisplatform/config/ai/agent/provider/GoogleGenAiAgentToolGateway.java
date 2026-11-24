@@ -2,6 +2,7 @@ package org.praxisplatform.config.ai.agent.provider;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.google.genai.Client;
+import com.google.genai.errors.ApiException;
 import com.google.genai.types.AutomaticFunctionCallingConfig;
 import com.google.genai.types.Candidate;
 import com.google.genai.types.Content;
@@ -15,16 +16,24 @@ import com.google.genai.types.GenerateContentResponse;
 import com.google.genai.types.GenerateContentResponseUsageMetadata;
 import com.google.genai.types.HttpOptions;
 import com.google.genai.types.Part;
+import com.google.genai.types.ThinkingConfig;
+import com.google.genai.types.ThinkingLevel;
 import com.google.genai.types.Tool;
 import com.google.genai.types.ToolConfig;
 import jakarta.annotation.PreDestroy;
+import java.net.SocketTimeoutException;
+import java.net.http.HttpTimeoutException;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import org.praxisplatform.config.ai.agent.model.AgentConversationItem;
 import org.praxisplatform.config.ai.agent.model.AgentConversationRole;
 import org.praxisplatform.config.ai.agent.model.AgentModelStreamListener;
@@ -36,6 +45,8 @@ import org.praxisplatform.config.ai.agent.model.AgentToolDeclaration;
 import org.praxisplatform.config.ai.agent.model.AgentToolResult;
 import org.praxisplatform.config.ai.agent.model.AiToolCallingProvider;
 import org.praxisplatform.config.service.AiCallConfig;
+import org.praxisplatform.config.service.AiProviderCallException;
+import org.praxisplatform.config.service.AiThinkingProfile;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.util.StringUtils;
@@ -53,11 +64,12 @@ public class GoogleGenAiAgentToolGateway implements AiToolCallingProvider {
     private static final String DEFAULT_MODEL = "gemini-flash-latest";
     private static final String SYNTHETIC_CALL_PREFIX = "gemini-auto-";
     private static final int MAX_CACHED_CLIENTS = 32;
-    private static final Map<ClientKey, Client> CLIENT_CACHE = new ConcurrentHashMap<>();
-    private static final GeminiExchange DEFAULT_EXCHANGE = (apiKey, model, contents, config) ->
-            invokeSdk(apiKey, null, null, model, contents, config);
+    private static final long MIN_RETRY_AFTER_MS = 1_000L;
+    private static final long MAX_RETRY_AFTER_MS = 600_000L;
+    private static final Pattern GEMINI_RETRY_DELAY_PATTERN = Pattern.compile(
+            "(?i)(?:retry\\s+(?:in|after)\\s+|retryDelay[\"':\\s]+)(\\d+(?:\\.\\d+)?)\\s*s");
 
-    private record ClientKey(String apiKey, String baseUrl, Integer timeoutMs) {}
+    private record ClientKey(String apiKey, String baseUrl) {}
 
     @FunctionalInterface
     public interface GeminiExchange {
@@ -73,13 +85,18 @@ public class GoogleGenAiAgentToolGateway implements AiToolCallingProvider {
     private final String defaultModel;
     private String defaultBaseUrl;
     private final GeminiExchange exchange;
+    private final Map<ClientKey, Client> clientCache = new ConcurrentHashMap<>();
 
     @Autowired
     public GoogleGenAiAgentToolGateway(
             ObjectMapper objectMapper,
             @Value("${spring.ai.google.genai.api-key:${GEMINI_API_KEY:${GOOGLE_API_KEY:}}}") String defaultApiKey,
             @Value("${spring.ai.google.genai.chat.options.model:" + DEFAULT_MODEL + "}") String defaultModel) {
-        this(objectMapper, defaultApiKey, defaultModel, DEFAULT_EXCHANGE);
+        this.objectMapper = objectMapper == null ? new ObjectMapper() : objectMapper;
+        this.defaultApiKey = trimToNull(defaultApiKey);
+        this.defaultModel = StringUtils.hasText(defaultModel) ? defaultModel.trim() : DEFAULT_MODEL;
+        this.defaultBaseUrl = null;
+        this.exchange = null;
     }
 
     public GoogleGenAiAgentToolGateway(
@@ -105,6 +122,11 @@ public class GoogleGenAiAgentToolGateway implements AiToolCallingProvider {
     }
 
     @Override
+    public boolean hasConfiguredCredentials(AiCallConfig callConfig) {
+        return StringUtils.hasText(firstNonBlank(callConfig != null ? callConfig.getApiKey() : null, defaultApiKey));
+    }
+
+    @Override
     public AgentModelTurnResponse generateTurn(
             AgentModelTurnRequest request,
             AgentModelStreamListener listener) {
@@ -117,18 +139,16 @@ public class GoogleGenAiAgentToolGateway implements AiToolCallingProvider {
         String model = firstNonBlank(callConfig != null ? callConfig.getModel() : null, defaultModel);
 
         List<Content> contents = toGeminiContents(request.conversation());
-        GenerateContentConfig config = toGeminiConfig(request, callConfig);
+        GenerateContentConfig config = toGeminiConfig(request, model, callConfig);
 
-        GenerateContentResponse response = exchange == DEFAULT_EXCHANGE
-                ? invokeSdk(
-                        apiKey,
-                        defaultBaseUrl,
-                        callConfig != null ? callConfig.getTimeoutSeconds() : null,
-                        model,
-                        contents,
-                        config)
-                : exchange.generate(apiKey, model, contents, config);
-        return fromGeminiResponse(model, response, listener);
+        try {
+            GenerateContentResponse response = exchange == null
+                    ? invokeSdk(apiKey, defaultBaseUrl, model, contents, config)
+                    : exchange.generate(apiKey, model, contents, config);
+            return fromGeminiResponse(model, response, listener);
+        } catch (RuntimeException ex) {
+            throw mapProviderException(ex);
+        }
     }
 
     List<Content> toGeminiContents(List<AgentConversationItem> conversation) {
@@ -193,9 +213,29 @@ public class GoogleGenAiAgentToolGateway implements AiToolCallingProvider {
     }
 
     GenerateContentConfig toGeminiConfig(AgentModelTurnRequest request, AiCallConfig callConfig) {
+        String model = firstNonBlank(callConfig != null ? callConfig.getModel() : null, defaultModel);
+        return toGeminiConfig(request, model, callConfig);
+    }
+
+    GenerateContentConfig toGeminiConfig(
+            AgentModelTurnRequest request,
+            String resolvedModel,
+            AiCallConfig callConfig) {
         GenerateContentConfig.Builder builder = GenerateContentConfig.builder()
                 .automaticFunctionCalling(AutomaticFunctionCallingConfig.builder().disable(true).build());
-        if (StringUtils.hasText(request.systemInstruction())) {
+        if (callConfig != null && callConfig.getTimeoutSeconds() != null && callConfig.getTimeoutSeconds() > 0) {
+            int timeoutMs = (int) Math.min(Integer.MAX_VALUE, callConfig.getTimeoutSeconds() * 1000L);
+            HttpOptions.Builder httpOptionsBuilder = HttpOptions.builder().timeout(timeoutMs);
+            if (StringUtils.hasText(defaultBaseUrl)) {
+                httpOptionsBuilder.baseUrl(defaultBaseUrl);
+            }
+            builder.httpOptions(httpOptionsBuilder.build());
+        }
+        boolean hasCachedContent = callConfig != null && StringUtils.hasText(callConfig.getCachedContentName());
+        if (hasCachedContent) {
+            // Gemini rejects systemInstruction/tools/toolConfig alongside explicit cachedContent.
+            builder.cachedContent(callConfig.getCachedContentName().trim());
+        } else if (StringUtils.hasText(request.systemInstruction())) {
             builder.systemInstruction(Content.builder()
                     .parts(List.of(Part.fromText(request.systemInstruction())))
                     .build());
@@ -206,7 +246,12 @@ public class GoogleGenAiAgentToolGateway implements AiToolCallingProvider {
         if (callConfig != null && callConfig.getMaxTokens() != null) {
             builder.maxOutputTokens(callConfig.getMaxTokens());
         }
-        if (!request.tools().isEmpty()) {
+        applyThinkingConfig(builder, resolvedModel, callConfig);
+        if (request.responseJsonSchema() != null && !request.responseJsonSchema().isEmpty()) {
+            builder.responseMimeType("application/json");
+            builder.responseJsonSchema(request.responseJsonSchema());
+        }
+        if (!hasCachedContent && !request.tools().isEmpty()) {
             List<FunctionDeclaration> declarations = new ArrayList<>();
             for (AgentToolDeclaration tool : request.tools()) {
                 FunctionDeclaration.Builder declBuilder = FunctionDeclaration.builder()
@@ -228,6 +273,51 @@ public class GoogleGenAiAgentToolGateway implements AiToolCallingProvider {
             }
         }
         return builder.build();
+    }
+
+    private static void applyThinkingConfig(
+            GenerateContentConfig.Builder builder,
+            String model,
+            AiCallConfig callConfig) {
+        if (callConfig == null || (callConfig.getThinkingProfile() == null && callConfig.getThinkingBudgetTokens() == null)) {
+            return;
+        }
+        String lower = model == null ? "" : model.trim().toLowerCase(Locale.ROOT);
+        AiThinkingProfile profile = callConfig.getThinkingProfile();
+        if (lower.contains("gemini-3")) {
+            ThinkingLevel.Known level = switch (profile != null ? profile : AiThinkingProfile.OPERATIONAL_AUDIT) {
+                case OFF -> lower.contains("pro") ? ThinkingLevel.Known.LOW : ThinkingLevel.Known.MINIMAL;
+                case FAST_LOOKUP -> ThinkingLevel.Known.LOW;
+                case OPERATIONAL_AUDIT -> ThinkingLevel.Known.MEDIUM;
+                case DEEP_ANALYSIS -> ThinkingLevel.Known.HIGH;
+            };
+            builder.thinkingConfig(ThinkingConfig.builder()
+                    .thinkingLevel(level)
+                    .build());
+            return;
+        }
+        boolean supportsBudget = lower.contains("gemini-2.5")
+                || lower.contains("flash-latest")
+                || lower.contains("pro-latest")
+                || callConfig.getThinkingBudgetTokens() != null;
+        if (!supportsBudget) {
+            return;
+        }
+        Integer explicitBudget = callConfig.getThinkingBudgetTokens();
+        int budget;
+        if (explicitBudget != null) {
+            budget = Math.max(0, explicitBudget);
+        } else {
+            budget = switch (profile) {
+                case OFF -> lower.contains("pro") ? 128 : 0;
+                case FAST_LOOKUP -> 1024;
+                case OPERATIONAL_AUDIT -> 4096;
+                case DEEP_ANALYSIS -> 12288;
+            };
+        }
+        builder.thinkingConfig(ThinkingConfig.builder()
+                .thinkingBudget(budget)
+                .build());
     }
 
     private static List<Part> extractOpaqueGeminiParts(AgentConversationItem item) {
@@ -373,37 +463,63 @@ public class GoogleGenAiAgentToolGateway implements AiToolCallingProvider {
         long input = metadata.promptTokenCount().map(Integer::longValue).orElse(0L);
         long output = metadata.candidatesTokenCount().map(Integer::longValue).orElse(0L);
         long total = metadata.totalTokenCount().map(Integer::longValue).orElse(input + output);
-        return new AgentTokenUsage(input, output, total);
+        long cacheRead = metadata.cachedContentTokenCount().map(Integer::longValue).orElse(0L);
+        long thoughts = metadata.thoughtsTokenCount().map(Integer::longValue).orElse(0L);
+        return new AgentTokenUsage(input, output, total, cacheRead, 0L, thoughts, cacheRead > 0L);
     }
 
-    private static GenerateContentResponse invokeSdk(
-            String apiKey,
-            String model,
-            List<Content> contents,
-            GenerateContentConfig config) {
-        return invokeSdk(apiKey, null, null, model, contents, config);
+    private static RuntimeException mapProviderException(RuntimeException ex) {
+        if (ex instanceof AiProviderCallException) {
+            return ex;
+        }
+        if (ex instanceof ApiException apiEx) {
+            Instant retryAfter = parseRetryAfterHint(apiEx.message());
+            return AiProviderCallException.fromHttpStatusSanitized(
+                    PROVIDER_ID, apiEx.code(), apiEx.message(), retryAfter, apiEx);
+        }
+        Throwable cursor = ex;
+        while (cursor != null) {
+            if (cursor instanceof SocketTimeoutException || cursor instanceof HttpTimeoutException) {
+                return AiProviderCallException.timeout(PROVIDER_ID, ex);
+            }
+            cursor = cursor.getCause();
+        }
+        return ex;
     }
 
-    private static GenerateContentResponse invokeSdk(
+    static Instant parseRetryAfterHint(String message) {
+        if (!StringUtils.hasText(message)) {
+            return null;
+        }
+        Matcher matcher = GEMINI_RETRY_DELAY_PATTERN.matcher(message);
+        if (!matcher.find()) {
+            return null;
+        }
+        try {
+            double seconds = Double.parseDouble(matcher.group(1));
+            long ms = Math.round(seconds * 1000.0d);
+            long clampedMs = Math.max(MIN_RETRY_AFTER_MS, Math.min(MAX_RETRY_AFTER_MS, ms));
+            return Instant.now().plusMillis(clampedMs);
+        } catch (NumberFormatException ignored) {
+            return null;
+        }
+    }
+
+    private GenerateContentResponse invokeSdk(
             String apiKey,
             String baseUrl,
-            Integer timeoutSeconds,
             String model,
             List<Content> contents,
             GenerateContentConfig config) {
-        Integer timeoutMs = timeoutSeconds != null && timeoutSeconds > 0
-                ? (int) Math.min(Integer.MAX_VALUE, timeoutSeconds * 1000L)
-                : null;
         ClientKey key = new ClientKey(
                 apiKey,
-                StringUtils.hasText(baseUrl) ? baseUrl.trim() : "",
-                timeoutMs);
-        Client cached = CLIENT_CACHE.get(key);
+                StringUtils.hasText(baseUrl) ? baseUrl.trim() : "");
+        Client cached = clientCache.get(key);
         if (cached != null) {
             return cached.models.generateContent(model, contents, config);
         }
-        if (CLIENT_CACHE.size() < MAX_CACHED_CLIENTS) {
-            Client client = CLIENT_CACHE.computeIfAbsent(key, GoogleGenAiAgentToolGateway::buildClient);
+        if (clientCache.size() < MAX_CACHED_CLIENTS) {
+            Client client = clientCache.computeIfAbsent(key, GoogleGenAiAgentToolGateway::buildClient);
             return client.models.generateContent(model, contents, config);
         }
         try (Client client = buildClient(key)) {
@@ -413,23 +529,16 @@ public class GoogleGenAiAgentToolGateway implements AiToolCallingProvider {
 
     private static Client buildClient(ClientKey key) {
         Client.Builder builder = Client.builder().apiKey(key.apiKey());
-        if (StringUtils.hasText(key.baseUrl()) || key.timeoutMs() != null) {
-            HttpOptions.Builder httpBuilder = HttpOptions.builder();
-            if (StringUtils.hasText(key.baseUrl())) {
-                httpBuilder.baseUrl(key.baseUrl());
-            }
-            if (key.timeoutMs() != null) {
-                httpBuilder.timeout(key.timeoutMs());
-            }
-            builder.httpOptions(httpBuilder.build());
+        if (StringUtils.hasText(key.baseUrl())) {
+            builder.httpOptions(HttpOptions.builder().baseUrl(key.baseUrl()).build());
         }
         return builder.build();
     }
 
     @PreDestroy
     void closeCachedClients() {
-        List<Client> snapshot = new ArrayList<>(CLIENT_CACHE.values());
-        CLIENT_CACHE.clear();
+        List<Client> snapshot = new ArrayList<>(clientCache.values());
+        clientCache.clear();
         for (Client client : snapshot) {
             try {
                 client.close();

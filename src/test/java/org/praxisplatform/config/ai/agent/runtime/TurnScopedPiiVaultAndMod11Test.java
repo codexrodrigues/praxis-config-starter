@@ -89,5 +89,11 @@ class TurnScopedPiiVaultAndMod11Test {
                 .contains("c***@servidor.gov.br")
                 .doesNotContain("carlos.silva@servidor.gov.br");
         assertThat(scrubbed.get("alreadyMasked")).isEqualTo("m***@servidor.gov.br");
+
+        String trailingPeriod = TurnScopedPiiVault.maskRawEmails(
+                "Relatorio emitido por ops.auditor@workforce.org. Fim.");
+        assertThat(trailingPeriod)
+                .isEqualTo("Relatorio emitido por o***@workforce.org. Fim.")
+                .doesNotContain("ops.auditor@workforce.org");
     }
 }

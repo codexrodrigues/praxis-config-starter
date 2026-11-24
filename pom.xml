@@ -53,6 +53,7 @@
         <praxis-authz-contracts.version>0.1.0-beta.2</praxis-authz-contracts.version>
         <praxis-rules-engine.version>0.1.0-beta.20</praxis-rules-engine.version>
         <praxis-metadata-starter.version>8.0.0-rc.198</praxis-metadata-starter.version>
+        <praxis-intelligence-contracts.version>0.1.0-beta.1</praxis-intelligence-contracts.version>
         <swagger-annotations.version>2.2.47</swagger-annotations.version>
         <swagger-core.version>2.2.47</swagger-core.version>
     </properties>
@@ -220,6 +221,12 @@
             <version>${praxis-metadata-starter.version}</version>
             <optional>true</optional>
         </dependency>
+        <dependency>
+            <groupId>io.github.codexrodrigues</groupId>
+            <artifactId>praxis-intelligence-contracts</artifactId>
+            <version>${praxis-intelligence-contracts.version}</version>
+            <optional>true</optional>
+        </dependency>
     </dependencies>
 
     <build>
@@ -265,6 +272,7 @@
                 <artifactId>maven-surefire-plugin</artifactId>
                 <configuration>
                     <argLine>-Djdk.attach.allowAttachSelf=true -XX:+EnableDynamicAgentLoading</argLine>
+                    <excludedGroups>ai-trajectory-live</excludedGroups>
                     <systemPropertyVariables>
                         <spring.flyway.enabled>false</spring.flyway.enabled>
                     </systemPropertyVariables>

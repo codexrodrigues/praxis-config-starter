@@ -67,6 +67,7 @@ public class AiSensitiveDataRedactor {
             "outputtokens",
             "cachereadinputtokens",
             "cachewriteinputtokens",
+            "thinkingtokens",
             "totaltokens");
     private static final Set<String> QUICK_REPLY_CONTEXT_HINT_FIELDS = Set.of(
             "artifactkind",

@@ -234,7 +234,10 @@ public class AiProviderManagementService {
         if (selectedProvider == null) {
             throw new IllegalStateException("Provider not available: " + provider);
         }
-        AiCallConfig config = AiCallConfig.builder()
+        AiCallConfig.AiCallConfigBuilder configBuilder = requestConfig != null
+                ? requestConfig.toBuilder()
+                : AiCallConfig.builder();
+        AiCallConfig config = configBuilder
                 .provider(provider)
                 .apiKey(resolveApiKey(requestConfig != null ? requestConfig.getApiKey() : null, stored))
                 .model(resolveCallModel(provider, requestConfig, stored))
@@ -271,7 +274,10 @@ public class AiProviderManagementService {
         if (selectedProvider == null) {
             throw new IllegalStateException("Provider not available: " + provider);
         }
-        AiCallConfig config = AiCallConfig.builder()
+        AiCallConfig.AiCallConfigBuilder configBuilder = requestConfig != null
+                ? requestConfig.toBuilder()
+                : AiCallConfig.builder();
+        AiCallConfig config = configBuilder
                 .provider(provider)
                 .apiKey(resolveApiKey(requestConfig != null ? requestConfig.getApiKey() : null, stored))
                 .model(resolveCallModel(provider, requestConfig, stored))
@@ -311,7 +317,10 @@ public class AiProviderManagementService {
         if (model == null) {
             model = resolvePreferredModel(provider, stored);
         }
-        return AiCallConfig.builder()
+        AiCallConfig.AiCallConfigBuilder builder = requestConfig != null
+                ? requestConfig.toBuilder()
+                : AiCallConfig.builder();
+        return builder
                 .provider(provider)
                 .apiKey(resolveApiKey(requestConfig != null ? requestConfig.getApiKey() : null, stored))
                 .model(model)

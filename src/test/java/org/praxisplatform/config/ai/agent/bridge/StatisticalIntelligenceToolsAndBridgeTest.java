@@ -1,0 +1,735 @@
+package org.praxisplatform.config.ai.agent.bridge;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verifyNoInteractions;
+
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import java.math.BigDecimal;
+import java.time.Instant;
+import java.time.LocalDate;
+import java.util.Collection;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.OptionalLong;
+import java.util.Set;
+import java.util.UUID;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.Function;
+import org.junit.jupiter.api.Tag;
+import org.junit.jupiter.api.Test;
+import org.praxisplatform.config.ai.agent.model.AgentModelTurnResponse;
+import org.praxisplatform.config.ai.agent.model.AgentTokenUsage;
+import org.praxisplatform.config.ai.agent.model.AgentToolCall;
+import org.praxisplatform.config.ai.agent.model.AiToolCallingProvider;
+import org.praxisplatform.config.ai.agent.provider.ProfileSovereigntyAiProviderEligibilityPolicy;
+import org.praxisplatform.config.ai.agent.runtime.AgentTurnArtifactStore;
+import org.praxisplatform.config.ai.agent.runtime.OperationalAssistantBlockComposer;
+import org.praxisplatform.config.ai.agent.runtime.PraxisOperationalAgentLoop;
+import org.praxisplatform.config.ai.agent.runtime.StatisticalIntelligenceBlockContributor;
+import org.praxisplatform.config.ai.agent.runtime.TurnScopedPiiVault;
+import org.praxisplatform.config.ai.agent.spi.AgentEpistemicEnvelope;
+import org.praxisplatform.config.ai.agent.spi.AgentEntityDescriptor;
+import org.praxisplatform.config.ai.agent.spi.AgentExecutionContext;
+import org.praxisplatform.config.ai.agent.spi.AgentResourceExecutionBridge;
+import org.praxisplatform.config.ai.agent.tools.RunResourceStatisticalInferenceTool;
+import org.praxisplatform.config.ai.agent.tools.ScanResourceAnomaliesTool;
+import org.praxisplatform.config.autoconfig.OperationalAgentAutoConfiguration;
+import org.praxisplatform.config.service.AiCallConfig;
+import org.praxisplatform.config.service.AiProviderManagementService;
+import org.praxisplatform.config.service.AiSensitiveDataRedactor;
+import org.praxisplatform.intelligence.contracts.IntelligenceContractVersion;
+import org.praxisplatform.intelligence.contracts.anomaly.AnomalyDecompositionStep;
+import org.praxisplatform.intelligence.contracts.anomaly.AnomalyFinding;
+import org.praxisplatform.intelligence.contracts.anomaly.AnomalyMethod;
+import org.praxisplatform.intelligence.contracts.anomaly.AnomalyScanResponse;
+import org.praxisplatform.intelligence.contracts.anomaly.AnomalyScanSummary;
+import org.praxisplatform.intelligence.contracts.anomaly.AnomalyScope;
+import org.praxisplatform.intelligence.contracts.anomaly.AnomalySeverity;
+import org.praxisplatform.intelligence.contracts.anomaly.DecompositionStepRole;
+import org.praxisplatform.intelligence.contracts.error.IntelligenceErrorCode;
+import org.praxisplatform.intelligence.contracts.error.IntelligenceExecutionException;
+import org.praxisplatform.intelligence.contracts.epistemic.EpistemicKind;
+import org.praxisplatform.intelligence.contracts.inference.InferenceGroupResult;
+import org.praxisplatform.intelligence.contracts.inference.InferenceResponse;
+import org.praxisplatform.intelligence.contracts.inference.InferenceTestKind;
+import org.praxisplatform.intelligence.contracts.modelcard.ModelCardDescriptor;
+import org.praxisplatform.intelligence.contracts.provenance.AnalyticalProvenance;
+import org.praxisplatform.intelligence.contracts.provenance.SuppressionStatus;
+import org.praxisplatform.intelligence.contracts.spi.ResourceIntelligenceExecutor;
+import org.praxisplatform.uischema.annotation.AiUsagePolicy;
+import org.praxisplatform.uischema.annotation.AiVisibilityMode;
+import org.praxisplatform.uischema.annotation.ApiResource;
+import org.praxisplatform.uischema.annotation.DomainClassification;
+import org.praxisplatform.uischema.annotation.DomainGovernance;
+import org.praxisplatform.uischema.annotation.ResourceIdentity;
+import org.praxisplatform.uischema.concurrency.ResourceRepresentationResult;
+import org.praxisplatform.uischema.controller.base.AbstractResourceQueryController;
+import org.praxisplatform.uischema.dto.CursorPage;
+import org.praxisplatform.uischema.dto.OptionDTO;
+import org.praxisplatform.uischema.extension.annotation.UISchema;
+import org.praxisplatform.uischema.filter.annotation.Filterable;
+import org.praxisplatform.uischema.filter.dto.GenericFilterDTO;
+import org.praxisplatform.uischema.options.OptionSourceDescriptor;
+import org.praxisplatform.uischema.options.OptionSourceFilterRequest;
+import org.praxisplatform.uischema.options.OptionSourceRegistry;
+import org.praxisplatform.uischema.service.base.BaseResourceQueryService;
+import org.praxisplatform.uischema.stats.StatsFieldDescriptor;
+import org.praxisplatform.uischema.stats.StatsFieldRegistry;
+import org.praxisplatform.uischema.stats.StatsMetric;
+import org.praxisplatform.uischema.stats.StatsSupportMode;
+import org.praxisplatform.uischema.stats.dto.AnomalyScanStatsRequest;
+import org.praxisplatform.uischema.stats.dto.ComparisonStatsRequest;
+import org.praxisplatform.uischema.stats.dto.ComparisonStatsResponse;
+import org.praxisplatform.uischema.stats.dto.DistributionStatsRequest;
+import org.praxisplatform.uischema.stats.dto.DistributionStatsResponse;
+import org.praxisplatform.uischema.stats.dto.GroupByStatsRequest;
+import org.praxisplatform.uischema.stats.dto.GroupByStatsResponse;
+import org.praxisplatform.uischema.stats.dto.InferenceStatsRequest;
+import org.praxisplatform.uischema.stats.dto.TimeSeriesStatsRequest;
+import org.praxisplatform.uischema.stats.dto.TimeSeriesStatsResponse;
+import org.springframework.boot.autoconfigure.AutoConfigurations;
+import org.springframework.boot.test.context.FilteredClassLoader;
+import org.springframework.boot.test.context.runner.ApplicationContextRunner;
+import org.springframework.core.convert.support.DefaultConversionService;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
+
+@Tag("unit")
+class StatisticalIntelligenceToolsAndBridgeTest {
+
+    private static final String SHA_SNAPSHOT = "b".repeat(64);
+    private static final String SHA_LOCK = "a".repeat(64);
+    private static final String SHA_ASSUMPTIONS = "c".repeat(64);
+
+    public static class PayrollSlipDto {
+        private Long id;
+        @UISchema(label = "Coorte")
+        private String cohortKey;
+        @UISchema(label = "Valor esperado")
+        private BigDecimal expectedValue;
+        @UISchema(label = "Valor observado")
+        private BigDecimal observedValue;
+        @DomainGovernance(
+                classification = DomainClassification.RESTRICTED,
+                aiUsage = @AiUsagePolicy(visibility = AiVisibilityMode.DENY))
+        private BigDecimal confidentialBonus;
+
+        public Long getId() {
+            return id;
+        }
+
+        public String getCohortKey() {
+            return cohortKey;
+        }
+
+        public BigDecimal getExpectedValue() {
+            return expectedValue;
+        }
+
+        public BigDecimal getObservedValue() {
+            return observedValue;
+        }
+
+        public BigDecimal getConfidentialBonus() {
+            return confidentialBonus;
+        }
+    }
+
+    public static class PayrollSlipFilterDto implements GenericFilterDTO {
+        private String cohortKey;
+        @Filterable(operation = Filterable.FilterOperation.EQUAL, relation = "confidentialBonus")
+        private BigDecimal minConfidentialBonus;
+        private BigDecimal confidentialBonus;
+
+        public String getCohortKey() {
+            return cohortKey;
+        }
+
+        public void setCohortKey(String cohortKey) {
+            this.cohortKey = cohortKey;
+        }
+
+        public BigDecimal getMinConfidentialBonus() {
+            return minConfidentialBonus;
+        }
+
+        public void setMinConfidentialBonus(BigDecimal minConfidentialBonus) {
+            this.minConfidentialBonus = minConfidentialBonus;
+        }
+
+        public BigDecimal getConfidentialBonus() {
+            return confidentialBonus;
+        }
+
+        public void setConfidentialBonus(BigDecimal confidentialBonus) {
+            this.confidentialBonus = confidentialBonus;
+        }
+    }
+
+    public static class StubPayrollService implements BaseResourceQueryService<PayrollSlipDto, Long, PayrollSlipFilterDto> {
+        Function<InferenceStatsRequest<PayrollSlipFilterDto>, InferenceResponse> inferenceHandler;
+        Function<AnomalyScanStatsRequest<PayrollSlipFilterDto>, AnomalyScanResponse> anomalyHandler;
+
+        @Override public String getIdFieldName() { return "id"; }
+        @Override public Sort getDefaultSort() { return Sort.by("id"); }
+        @Override public Optional<String> getDatasetVersion() { return Optional.empty(); }
+        @Override public StatsSupportMode getGroupByStatsSupportMode() { return StatsSupportMode.AUTO; }
+        @Override public StatsSupportMode getTimeSeriesStatsSupportMode() { return StatsSupportMode.DISABLED; }
+        @Override public StatsSupportMode getDistributionStatsSupportMode() { return StatsSupportMode.DISABLED; }
+        @Override public StatsSupportMode getInferenceStatsSupportMode() { return StatsSupportMode.AUTO; }
+        @Override public StatsSupportMode getAnomalyStatsSupportMode() { return StatsSupportMode.AUTO; }
+
+        @Override
+        public StatsFieldRegistry getStatsFieldRegistry() {
+            return StatsFieldRegistry.builder()
+                    .groupByBucket("cohortKey", "cohortKey", Set.of(StatsMetric.COUNT))
+                    .numericHistogramMeasureField("expectedValue", "expectedValue")
+                    .numericHistogramMeasureField("observedValue", "observedValue")
+                    .numericHistogramMeasureField("confidentialBonus", "confidentialBonus")
+                    .build();
+        }
+
+        @Override public OptionSourceRegistry getOptionSourceRegistry() { return null; }
+        @Override public boolean hasOptionSource(String sourceKey) { return false; }
+        @Override public OptionSourceDescriptor resolveOptionSource(String sourceKey) { return null; }
+        @Override public ResourceRepresentationResult<PayrollSlipDto> findById(Long id) { return null; }
+        @Override public List<PayrollSlipDto> findAll() { return List.of(); }
+        @Override public List<PayrollSlipDto> findAllById(Collection<Long> ids) { return List.of(); }
+        @Override public Page<PayrollSlipDto> filter(PayrollSlipFilterDto filter, Pageable pageable, Collection<Long> includeIds) { return Page.empty(); }
+        @Override public CursorPage<PayrollSlipDto> filterByCursor(PayrollSlipFilterDto filter, Sort sort, String after, String before, int size) { return null; }
+        @Override public OptionalLong locate(PayrollSlipFilterDto filter, Sort sort, Long id) { return OptionalLong.empty(); }
+        @Override public Page<OptionDTO<Long>> filterOptions(PayrollSlipFilterDto filter, Pageable pageable) { return Page.empty(); }
+        @Override public List<OptionDTO<Long>> byIdsOptions(Collection<Long> ids) { return List.of(); }
+        @Override public Page<OptionDTO<Object>> filterOptionSourceOptions(String sourceKey, OptionSourceFilterRequest<PayrollSlipFilterDto> request, Pageable pageable) { return Page.empty(); }
+        @Override public List<OptionDTO<Object>> byIdsOptionSourceOptions(String sourceKey, Collection<Object> ids) { return List.of(); }
+        @Override public GroupByStatsResponse groupByStats(GroupByStatsRequest<PayrollSlipFilterDto> request) { return null; }
+        @Override public TimeSeriesStatsResponse timeSeriesStats(TimeSeriesStatsRequest<PayrollSlipFilterDto> request) { return null; }
+        @Override public DistributionStatsResponse distributionStats(DistributionStatsRequest<PayrollSlipFilterDto> request) { return null; }
+        @Override public ComparisonStatsResponse comparisonStats(ComparisonStatsRequest<PayrollSlipFilterDto> request) { return null; }
+
+        @Override
+        public InferenceResponse inferenceStats(InferenceStatsRequest<PayrollSlipFilterDto> request) {
+            return inferenceHandler.apply(request);
+        }
+
+        @Override
+        public AnomalyScanResponse anomalyScanStats(AnomalyScanStatsRequest<PayrollSlipFilterDto> request) {
+            return anomalyHandler.apply(request);
+        }
+    }
+
+    @ApiResource(
+            value = "/api/workforce/payroll-slips",
+            resourceKey = "workforce.payroll-slips",
+            title = "Payroll Slips",
+            description = "Payroll slips analytics resource",
+            identity = @ResourceIdentity(keyField = "id", titleField = "cohortKey"))
+    public static class StubPayrollController extends AbstractResourceQueryController<PayrollSlipDto, Long, PayrollSlipFilterDto> {
+        private final StubPayrollService service;
+
+        StubPayrollController(StubPayrollService service) {
+            this.service = service;
+        }
+
+        @Override
+        protected BaseResourceQueryService<PayrollSlipDto, Long, PayrollSlipFilterDto> getService() {
+            return service;
+        }
+
+        @Override
+        protected Long getResponseId(PayrollSlipDto dto) {
+            return dto.getId();
+        }
+    }
+
+    @Test
+    void enforcesNonSignificanceSuppressionMaskingAndFailClosedEngineUnavailable() {
+        StubPayrollService service = new StubPayrollService();
+        MetadataStarterInProcessAgentBridge bridge = new MetadataStarterInProcessAgentBridge(
+                List.of(new StubPayrollController(service)),
+                List.of(ctx -> List.of(new AgentEntityDescriptor(
+                        "workforce.payroll-slips", "workforce.payroll-slips", "/api/workforce/payroll-slips",
+                        "Payroll Slips", "Workforce payroll slips", "payments",
+                        "id", "cohortKey", "cohortKey", List.of("cohortKey"),
+                        null, "cohortKey", null, "/payroll/{id}", "payroll", 100))),
+                List.of(),
+                List.of(),
+                null,
+                null,
+                null,
+                new DefaultMetadataGovernanceAgentAuthorizationBridge(),
+                new DefaultConversionService(),
+                new ObjectMapper().findAndRegisterModules(),
+                null);
+
+        AgentExecutionContext ctx = new AgentExecutionContext(
+                UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID(),
+                "tenant-a", "auditor", "prod", "auditor",
+                Set.of("ROLE_READ"), null, null, Map.of(), Map.of());
+
+        AnalyticalProvenance provenance = new AnalyticalProvenance(
+                IntelligenceContractVersion.V1, "praxis-intelligence-python", "0.1.0", "3.12",
+                SHA_LOCK, "WF-CARD-01", "1.0.0", 42L, LocalDate.of(2026, 11, 1),
+                SHA_SNAPSHOT, SHA_ASSUMPTIONS, EpistemicKind.CALIBRATED_PROBABILITY,
+                320L, 1, "corr-1", "job-1", Instant.parse("2026-11-24T00:00:00Z"));
+        ModelCardDescriptor card = new ModelCardDescriptor(
+                "WF-CARD-01", "1.0.0", "Workforce Payroll Statistical Audit", "workforce.payroll",
+                "ROBUST_MAD_FDR", EpistemicKind.CALIBRATED_PROBABILITY,
+                "Detect calibrated payroll deviations.", List.of("No auto withhold"),
+                15, List.of("Independent cohorts"), "Human review required");
+
+        // 1. Inference: non-significant exact group + k-anonymity suppressed group
+        service.inferenceHandler = req -> new InferenceResponse(
+                IntelligenceContractVersion.V1,
+                provenance,
+                card,
+                List.of(
+                        new InferenceGroupResult(
+                                "cohort_admin",
+                                InferenceTestKind.WILCOXON_SIGNED_RANK,
+                                0.31d, 0.72d, 0.85d, 0.04d, "rank_biserial", -0.05d, 0.12d,
+                                120L, 120L, new BigDecimal("50.00"),
+                                false, false, SuppressionStatus.EXACT_RELEASE, "No shift"),
+                        new InferenceGroupResult(
+                                "cohort_tiny",
+                                InferenceTestKind.MANN_WHITNEY_U,
+                                0.0d, 1.0d, 1.0d, 0.0d, "rank_biserial", null, null,
+                                3L, 3L, new BigDecimal("777.77"),
+                                false, false, SuppressionStatus.SUPPRESSED_PRIMARY_K_ANONYMITY, "Hidden counts")));
+
+        RunResourceStatisticalInferenceTool inferenceTool = new RunResourceStatisticalInferenceTool(bridge);
+        AgentTurnArtifactStore artifacts = new AgentTurnArtifactStore();
+        TurnScopedPiiVault vault = TurnScopedPiiVault.tokenize("Execute inference");
+
+        Map<String, Object> inferenceOut = inferenceTool.execute(
+                ctx,
+                vault,
+                artifacts,
+                Map.of(
+                        "entityKey", "workforce.payroll-slips",
+                        "tests", List.of("WILCOXON_SIGNED_RANK"),
+                        "groupByField", "cohortKey",
+                        "expectedField", "expectedValue",
+                        "observedField", "observedValue"));
+
+        @SuppressWarnings("unchecked")
+        Map<String, Object> envMap = (Map<String, Object>) inferenceOut.get("epistemicEnvelope");
+        assertThat(envMap.get("statisticallySignificant")).isEqualTo(Boolean.FALSE);
+        assertThat(envMap.get("suppressedCellCount")).isEqualTo(1);
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> groups = (List<Map<String, Object>>) inferenceOut.get("groups");
+        assertThat(groups).hasSize(2);
+        assertThat(groups.get(0).get("nonAnomalyNote").toString()).contains("nao classificar como anomalia");
+        Map<String, Object> suppressedGroup = groups.get(1);
+        assertThat(suppressedGroup).containsEntry("suppressed", Boolean.TRUE);
+        assertThat(suppressedGroup).doesNotContainKeys("sampleSizeA", "sampleSizeB", "aggregateImpact", "statistic");
+        assertThat(artifacts.extensionArtifacts()).hasSize(1);
+
+        // 2. Anomaly scan with one exact finding and one k-anonymity suppressed finding
+        AnomalyFinding exactFinding = new AnomalyFinding(
+                "f-exact", AnomalyMethod.ROBUST_MAD_ZSCORE, AnomalyScope.COHORT_GROUP,
+                null, "cohort_tech", "observedValue",
+                new BigDecimal("10450.00"), new BigDecimal("10000.00"), new BigDecimal("450.00"),
+                new BigDecimal("10.00"), new BigDecimal("5.00"), 1.2d, 0.40d, 0.55d, 0.05d,
+                AnomalySeverity.INFO, new BigDecimal("450.00"), 45, SuppressionStatus.EXACT_RELEASE,
+                List.of(new AnomalyDecompositionStep(
+                        "residual", "Residual delta", new BigDecimal("450.00"), "BRL", DecompositionStepRole.RESULT)));
+        AnomalyFinding suppressedFinding = new AnomalyFinding(
+                "f-sup", AnomalyMethod.ROBUST_MAD_ZSCORE, AnomalyScope.INDIVIDUAL_ENTITY,
+                "opaque-1234", "cohort_micro", "observedValue",
+                new BigDecimal("9999.00"), new BigDecimal("1000.00"), new BigDecimal("8999.00"),
+                new BigDecimal("0.00"), new BigDecimal("1.00"), 8.0d, 0.0001d, 0.001d, 0.90d,
+                AnomalySeverity.CRITICAL, new BigDecimal("8999.00"), 2, SuppressionStatus.SUPPRESSED_PRIMARY_K_ANONYMITY,
+                List.of());
+
+        service.anomalyHandler = req -> new AnomalyScanResponse(
+                IntelligenceContractVersion.V1,
+                provenance,
+                card,
+                List.of(exactFinding, suppressedFinding),
+                new AnomalyScanSummary(320L, 4, 2, 1, 0, 1, new BigDecimal("450.00"), false));
+
+        ScanResourceAnomaliesTool anomalyTool = new ScanResourceAnomaliesTool(bridge);
+        Map<String, Object> anomalyOut = anomalyTool.execute(
+                ctx,
+                vault,
+                artifacts,
+                Map.of(
+                        "entityKey", "workforce.payroll-slips",
+                        "methods", List.of("ROBUST_MAD_ZSCORE"),
+                        "columnMapping", Map.of(
+                                "cohortColumn", "cohortKey",
+                                "expectedColumn", "expectedValue",
+                                "observedColumn", "observedValue",
+                                "residualColumn", "observedValue")));
+
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> findingsOut = (List<Map<String, Object>>) anomalyOut.get("findings");
+        assertThat(findingsOut).hasSize(2);
+        assertThat(findingsOut.get(0)).containsKey("nonAnomalyNote");
+        assertThat(findingsOut.get(1))
+                .containsEntry("suppressed", Boolean.TRUE)
+                .doesNotContainKeys("observedValue", "expectedValue", "residualValue", "financialImpact", "affectedCount", "opaqueEntityKey");
+        assertThat(artifacts.extensionArtifacts()).hasSize(2);
+
+        // 3. Engine unavailable (503) returns fail-closed without throwing and records epistemic badge artifact
+        service.anomalyHandler = req -> {
+            throw new IntelligenceExecutionException(
+                    IntelligenceErrorCode.INTELLIGENCE_ENGINE_UNAVAILABLE,
+                    "Python intelligence service offline");
+        };
+        Map<String, Object> unavailableOut = anomalyTool.execute(
+                ctx,
+                vault,
+                artifacts,
+                Map.of("entityKey", "workforce.payroll-slips", "methods", List.of("ROBUST_MAD_ZSCORE")));
+        assertThat(unavailableOut).containsEntry("availabilityState", AgentEpistemicEnvelope.AVAILABILITY_ENGINE_UNAVAILABLE);
+        assertThat(unavailableOut).containsEntry("errorCode", "INTELLIGENCE_ENGINE_UNAVAILABLE");
+        assertThat(artifacts.extensionArtifacts()).hasSize(3);
+        assertThat(artifacts.extensionArtifacts().get(2).epistemicEnvelope().availabilityState())
+                .isEqualTo(AgentEpistemicEnvelope.AVAILABILITY_ENGINE_UNAVAILABLE);
+        assertThat(artifacts.extensionArtifacts().get(2).epistemicEnvelope().statisticallySignificant()).isFalse();
+    }
+
+    @Test
+    void autoConfigurationBootsCleanlyWithoutOptionalIntelligenceExecutorAndRegistersSovereigntyPolicy() {
+        // 1. Without ResourceIntelligenceExecutor bean (even with classes on classpath), tools are hidden by default
+        new ApplicationContextRunner()
+                .withConfiguration(AutoConfigurations.of(OperationalAgentAutoConfiguration.class))
+                .withBean(AiToolCallingProvider.class, () -> mock(AiToolCallingProvider.class))
+                .withBean(AiProviderManagementService.class, () -> mock(AiProviderManagementService.class))
+                .withBean(AgentResourceExecutionBridge.class, () -> mock(AgentResourceExecutionBridge.class))
+                .run(context -> {
+                    assertThat(context).hasNotFailed();
+                    assertThat(context).hasSingleBean(OperationalAssistantBlockComposer.class);
+                    assertThat(context).hasSingleBean(StatisticalIntelligenceBlockContributor.class);
+                    assertThat(context).hasSingleBean(ProfileSovereigntyAiProviderEligibilityPolicy.class);
+                    assertThat(context).hasSingleBean(PraxisOperationalAgentLoop.class);
+                    assertThat(context).doesNotHaveBean(RunResourceStatisticalInferenceTool.class);
+                    assertThat(context).doesNotHaveBean(ScanResourceAnomaliesTool.class);
+                });
+
+        // 2. With opt-in property expose-when-unavailable=true, tools register in fail-closed mode
+        new ApplicationContextRunner()
+                .withConfiguration(AutoConfigurations.of(OperationalAgentAutoConfiguration.class))
+                .withPropertyValues("praxis.ai.agent.statistical-tools.expose-when-unavailable=true")
+                .withBean(AiToolCallingProvider.class, () -> mock(AiToolCallingProvider.class))
+                .withBean(AiProviderManagementService.class, () -> mock(AiProviderManagementService.class))
+                .withBean(AgentResourceExecutionBridge.class, () -> mock(AgentResourceExecutionBridge.class))
+                .run(context -> {
+                    assertThat(context).hasNotFailed();
+                    assertThat(context).hasSingleBean(RunResourceStatisticalInferenceTool.class);
+                    assertThat(context).hasSingleBean(ScanResourceAnomaliesTool.class);
+                });
+
+        // 3. With ResourceIntelligenceExecutor bean active, tools register automatically
+        new ApplicationContextRunner()
+                .withConfiguration(AutoConfigurations.of(OperationalAgentAutoConfiguration.class))
+                .withBean(AiToolCallingProvider.class, () -> mock(AiToolCallingProvider.class))
+                .withBean(AiProviderManagementService.class, () -> mock(AiProviderManagementService.class))
+                .withBean(AgentResourceExecutionBridge.class, () -> mock(AgentResourceExecutionBridge.class))
+                .withBean(ResourceIntelligenceExecutor.class, () -> mock(ResourceIntelligenceExecutor.class))
+                .run(context -> {
+                    assertThat(context).hasNotFailed();
+                    assertThat(context).hasSingleBean(RunResourceStatisticalInferenceTool.class);
+                    assertThat(context).hasSingleBean(ScanResourceAnomaliesTool.class);
+                });
+
+        // 4. With intelligence classes absent via FilteredClassLoader, auto-config still boots cleanly
+        new ApplicationContextRunner()
+                .withConfiguration(AutoConfigurations.of(OperationalAgentAutoConfiguration.class))
+                .withClassLoader(new FilteredClassLoader(
+                        "org.praxisplatform.intelligence.contracts",
+                        "org.praxisplatform.uischema"))
+                .withBean(AiToolCallingProvider.class, () -> mock(AiToolCallingProvider.class))
+                .withBean(AiProviderManagementService.class, () -> mock(AiProviderManagementService.class))
+                .withBean(AgentResourceExecutionBridge.class, () -> mock(AgentResourceExecutionBridge.class))
+                .run(context -> {
+                    assertThat(context).hasNotFailed();
+                    assertThat(context).doesNotHaveBean(RunResourceStatisticalInferenceTool.class);
+                    assertThat(context).doesNotHaveBean(ScanResourceAnomaliesTool.class);
+                });
+    }
+
+    @Test
+    void enforcesBlockedColumnsFiltersCanonicalDefaultsAndReleasesJdbcTransaction() {
+        StubPayrollService service = new StubPayrollService();
+        PlatformTransactionManager txManager = mock(PlatformTransactionManager.class);
+        MetadataStarterInProcessAgentBridge bridge = new MetadataStarterInProcessAgentBridge(
+                List.of(new StubPayrollController(service)),
+                List.of(ctx -> List.of(new AgentEntityDescriptor(
+                        "workforce.payroll-slips", "workforce.payroll-slips", "/api/workforce/payroll-slips",
+                        "Payroll Slips", "Workforce payroll slips", "payments",
+                        "id", "cohortKey", "cohortKey", List.of("cohortKey"),
+                        null, "cohortKey", null, "/payroll/{id}", "payroll", 100))),
+                List.of(),
+                List.of(),
+                null,
+                null,
+                null,
+                new DefaultMetadataGovernanceAgentAuthorizationBridge(),
+                new DefaultConversionService(),
+                new ObjectMapper().findAndRegisterModules(),
+                txManager);
+
+        AgentExecutionContext ctx = new AgentExecutionContext(
+                UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID(),
+                "tenant-a", "auditor", "prod", "auditor",
+                Set.of("ROLE_READ"), null, null, Map.of(), Map.of());
+
+        var digest = bridge.describeEntitySchema(ctx, "workforce.payroll-slips").orElseThrow();
+        assertThat(digest.statsCapability().inferenceMode()).isEqualTo("AUTO");
+        assertThat(digest.statsCapability().anomalyMode()).isEqualTo("AUTO");
+        org.mockito.Mockito.reset(txManager);
+
+        AtomicBoolean txActiveDuringCall = new AtomicBoolean(true);
+        AnalyticalProvenance provenance = new AnalyticalProvenance(
+                IntelligenceContractVersion.V1, "praxis-intelligence-python", "0.1.0", "3.12",
+                SHA_LOCK, "WF-CARD-01", "1.0.0", 42L, LocalDate.of(2026, 11, 1),
+                SHA_SNAPSHOT, SHA_ASSUMPTIONS, EpistemicKind.CALIBRATED_PROBABILITY,
+                100L, 0, "corr-tx", "job-tx", Instant.parse("2026-11-24T00:00:00Z"));
+        ModelCardDescriptor card = new ModelCardDescriptor(
+                "WF-CARD-01", "1.0.0", "Workforce Card", "workforce.payroll",
+                "ROBUST_MAD_FDR", EpistemicKind.CALIBRATED_PROBABILITY,
+                "Audit payroll", List.of(), 15, List.of(), "Review required");
+        service.inferenceHandler = req -> {
+            txActiveDuringCall.set(TransactionSynchronizationManager.isActualTransactionActive());
+            return new InferenceResponse(IntelligenceContractVersion.V1, provenance, card, List.of());
+        };
+        service.anomalyHandler = req -> {
+            txActiveDuringCall.set(TransactionSynchronizationManager.isActualTransactionActive());
+            return new AnomalyScanResponse(
+                    IntelligenceContractVersion.V1, provenance, card, List.of(),
+                    new AnomalyScanSummary(100L, 2, 0, 0, 0, 0, BigDecimal.ZERO, false));
+        };
+
+        bridge.runStatisticalInference(ctx, new org.praxisplatform.config.ai.agent.spi.AgentStatisticalInferenceRequest(
+                "workforce.payroll-slips", List.of("WILCOXON_SIGNED_RANK"),
+                "cohortKey", "expectedValue", "observedValue", null, null, 0.05d, null, null, null, null, Map.of()));
+        assertThat(txActiveDuringCall.get()).isFalse();
+
+        txActiveDuringCall.set(true);
+        bridge.scanResourceAnomalies(ctx, new org.praxisplatform.config.ai.agent.spi.AgentAnomalyScanRequest(
+                "workforce.payroll-slips", List.of("ROBUST_MAD_ZSCORE"),
+                Map.of(), 0.05d, null, null, null, null, false, null, null, null, null, null, Map.of()));
+        assertThat(txActiveDuringCall.get()).isFalse();
+        verifyNoInteractions(txManager);
+
+        // Governance denials on AiVisibilityMode.DENY field in columns and filters (direct & @Filterable relation)
+        assertThatThrownBy(() -> bridge.runStatisticalInference(
+                ctx,
+                new org.praxisplatform.config.ai.agent.spi.AgentStatisticalInferenceRequest(
+                        "workforce.payroll-slips", List.of("WELCH_T"),
+                        "cohortKey", "expectedValue", "confidentialBonus", null, null, 0.05d, null, null, null, null, Map.of())))
+                .isInstanceOf(SecurityException.class)
+                .hasMessageContaining("confidentialBonus");
+
+        assertThatThrownBy(() -> bridge.runStatisticalInference(
+                ctx,
+                new org.praxisplatform.config.ai.agent.spi.AgentStatisticalInferenceRequest(
+                        "workforce.payroll-slips", List.of("WELCH_T"),
+                        "cohortKey", "expectedValue", "observedValue", null, null, 0.05d, null, null, null, null,
+                        Map.of("confidentialBonus", 100))))
+                .isInstanceOf(SecurityException.class)
+                .hasMessageContaining("confidentialBonus");
+
+        assertThatThrownBy(() -> bridge.runStatisticalInference(
+                ctx,
+                new org.praxisplatform.config.ai.agent.spi.AgentStatisticalInferenceRequest(
+                        "workforce.payroll-slips", List.of("WELCH_T"),
+                        "cohortKey", "expectedValue", "observedValue", null, null, 0.05d, null, null, null, null,
+                        Map.of("minConfidentialBonus", 100))))
+                .isInstanceOf(SecurityException.class)
+                .hasMessageContaining("minConfidentialBonus");
+
+        assertThatThrownBy(() -> bridge.scanResourceAnomalies(
+                ctx,
+                new org.praxisplatform.config.ai.agent.spi.AgentAnomalyScanRequest(
+                        "workforce.payroll-slips", List.of("ROBUST_MAD_ZSCORE"),
+                        Map.of("residualColumn", "confidentialBonus"), 0.05d,
+                        null, null, null, null, false, null, null, null, null, null, Map.of())))
+                .isInstanceOf(SecurityException.class)
+                .hasMessageContaining("confidentialBonus");
+
+        // Canonical default column name must also be rejected when DTO field with that canonical name is DENY
+        StubLockedObservedController lockedObsCtrl = new StubLockedObservedController();
+        MetadataStarterInProcessAgentBridge lockedBridge = new MetadataStarterInProcessAgentBridge(
+                List.of(lockedObsCtrl),
+                List.of(),
+                List.of(),
+                List.of(),
+                null, null, null,
+                new DefaultMetadataGovernanceAgentAuthorizationBridge(),
+                new DefaultConversionService(),
+                new ObjectMapper().findAndRegisterModules(),
+                null);
+        assertThatThrownBy(() -> lockedBridge.scanResourceAnomalies(
+                ctx,
+                new org.praxisplatform.config.ai.agent.spi.AgentAnomalyScanRequest(
+                        "workforce.locked-observed", List.of("ROBUST_MAD_ZSCORE"),
+                        Map.of(), 0.05d, null, null, null, null, false, null, null, null, null, null, Map.of())))
+                .isInstanceOf(SecurityException.class)
+                .hasMessageContaining("observedValue");
+    }
+
+    @Test
+    void endToEndLoopExecutesAnomalyScanProducesFallbackNarrativeAndSurvivesRedactor() {
+        StubPayrollService service = new StubPayrollService();
+        AnalyticalProvenance provenance = new AnalyticalProvenance(
+                IntelligenceContractVersion.V1, "praxis-intelligence-python", "0.1.0", "3.12",
+                SHA_LOCK, "WF-CARD-01", "1.0.0", 42L, LocalDate.of(2026, 11, 1),
+                SHA_SNAPSHOT, SHA_ASSUMPTIONS, EpistemicKind.CALIBRATED_PROBABILITY,
+                220L, 0, "corr-loop", "job-loop", Instant.parse("2026-11-24T00:00:00Z"));
+        ModelCardDescriptor card = new ModelCardDescriptor(
+                "WF-CARD-01", "1.0.0", "Workforce Card", "workforce.payroll",
+                "ROBUST_MAD_FDR", EpistemicKind.CALIBRATED_PROBABILITY,
+                "Audit payroll", List.of(), 15, List.of(), "Review required");
+        service.anomalyHandler = req -> new AnomalyScanResponse(
+                IntelligenceContractVersion.V1,
+                provenance,
+                card,
+                List.of(
+                        new AnomalyFinding(
+                                "f-1", AnomalyMethod.ROBUST_MAD_ZSCORE, AnomalyScope.COHORT_GROUP,
+                                null, "cohort_ops", "observedValue",
+                                new BigDecimal("5400.00"), new BigDecimal("1200.00"), new BigDecimal("4200.00"),
+                                new BigDecimal("1100.00"), new BigDecimal("50.00"), 6.2d, 0.0001d, 0.0005d, 0.72d,
+                                AnomalySeverity.CRITICAL, new BigDecimal("4200.00"), 30,
+                                SuppressionStatus.EXACT_RELEASE, List.of()),
+                        new AnomalyFinding(
+                                "f-2", AnomalyMethod.NIGRINI_BENFORD, AnomalyScope.DISTRIBUTION_FORENSIC,
+                                null, "retro_entries", "observedValue",
+                                new BigDecimal("0.018"), new BigDecimal("0.006"), new BigDecimal("0.012"),
+                                null, null, 2.8d, 0.003d, 0.006d, 0.30d,
+                                AnomalySeverity.WARNING, new BigDecimal("900.00"), 40,
+                                SuppressionStatus.EXACT_RELEASE, List.of())),
+                new AnomalyScanSummary(220L, 4, 2, 1, 1, 0, new BigDecimal("5100.00"), false));
+
+        MetadataStarterInProcessAgentBridge bridge = new MetadataStarterInProcessAgentBridge(
+                List.of(new StubPayrollController(service)),
+                List.of(),
+                List.of(),
+                List.of(),
+                null, null, null,
+                new DefaultMetadataGovernanceAgentAuthorizationBridge(),
+                new DefaultConversionService(),
+                new ObjectMapper().findAndRegisterModules(),
+                null);
+
+        final int[] round = {0};
+        AiToolCallingProvider provider = new AiToolCallingProvider() {
+            @Override public String providerId() { return "scripted"; }
+            @Override public boolean hasConfiguredCredentials(AiCallConfig c) { return true; }
+            @Override
+            public AgentModelTurnResponse generateTurn(
+                    org.praxisplatform.config.ai.agent.model.AgentModelTurnRequest request,
+                    org.praxisplatform.config.ai.agent.model.AgentModelStreamListener listener) {
+                if (round[0]++ == 0) {
+                    return new AgentModelTurnResponse(
+                            "scripted", "scripted-v1", "",
+                            List.of(new AgentToolCall(
+                                    "call-scan-1",
+                                    ScanResourceAnomaliesTool.TOOL_NAME,
+                                    Map.of(
+                                            "entityKey", "workforce.payroll-slips",
+                                            "methods", List.of("ROBUST_MAD_ZSCORE", "NIGRINI_BENFORD"),
+                                            "enableBenford", true),
+                                    null, null)),
+                            new AgentTokenUsage(80, 20, 100), "tool_calls", "r1", Map.of());
+                }
+                return new AgentModelTurnResponse(
+                        "scripted", "scripted-v1", "",
+                        List.of(),
+                        new AgentTokenUsage(90, 10, 100), "stop", "r2", Map.of());
+            }
+        };
+
+        PraxisOperationalAgentLoop loop = new PraxisOperationalAgentLoop(
+                provider,
+                List.of(new ScanResourceAnomaliesTool(bridge)),
+                new OperationalAssistantBlockComposer(
+                        new ObjectMapper().findAndRegisterModules(),
+                        List.of(new StatisticalIntelligenceBlockContributor())),
+                4,
+                bridge);
+
+        AgentExecutionContext ctx = new AgentExecutionContext(
+                UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID(),
+                "tenant-a", "auditor", "prod", "auditor",
+                Set.of("ROLE_READ"), null, null, Map.of(), Map.of());
+
+        PraxisOperationalAgentLoop.AgentTurnOutcome outcome = loop.execute(
+                ctx,
+                "Execute varredura estatistica de anomalias nas folhas.",
+                null,
+                List.of(),
+                AiCallConfig.builder().provider("scripted").model("scripted-v1").build(),
+                PraxisOperationalAgentLoop.TurnProgressObserver.NOOP);
+
+        assertThat(outcome.assistantMessage()).contains("Análise estatística consolidada com selo epistêmico abaixo.");
+        assertThat(outcome.traces()).hasSize(1);
+        assertThat(outcome.traces().get(0).itemCount()).isEqualTo(2);
+        JsonNode blocks = outcome.assistantContent().path("blocks");
+        assertThat(blocks).hasSize(4); // paragraph + epistemic-badge + boxplot + combo
+        assertThat(new AiSensitiveDataRedactor().sanitizeEventPayload(outcome.assistantContent()).toString())
+                .doesNotContain("[REDACTED]");
+    }
+
+    public static class LockedObservedDto {
+        private Long id;
+        @DomainGovernance(classification = DomainClassification.RESTRICTED,
+                aiUsage = @AiUsagePolicy(visibility = AiVisibilityMode.DENY))
+        private BigDecimal observedValue;
+        public Long getId() { return id; }
+        public BigDecimal getObservedValue() { return observedValue; }
+    }
+
+    @ApiResource(
+            value = "/api/workforce/locked-observed",
+            resourceKey = "workforce.locked-observed",
+            title = "Locked Observed",
+            identity = @ResourceIdentity(keyField = "id", titleField = "id"))
+    public static class StubLockedObservedController
+            extends AbstractResourceQueryController<LockedObservedDto, Long, PayrollSlipFilterDto> {
+        private final StubLockedObservedService service = new StubLockedObservedService();
+        @Override protected BaseResourceQueryService<LockedObservedDto, Long, PayrollSlipFilterDto> getService() { return service; }
+        @Override protected Long getResponseId(LockedObservedDto dto) { return dto.getId(); }
+    }
+
+    public static class StubLockedObservedService
+            implements BaseResourceQueryService<LockedObservedDto, Long, PayrollSlipFilterDto> {
+        @Override public String getIdFieldName() { return "id"; }
+        @Override public Sort getDefaultSort() { return Sort.by("id"); }
+        @Override public Optional<String> getDatasetVersion() { return Optional.empty(); }
+        @Override public StatsSupportMode getGroupByStatsSupportMode() { return StatsSupportMode.DISABLED; }
+        @Override public StatsSupportMode getTimeSeriesStatsSupportMode() { return StatsSupportMode.DISABLED; }
+        @Override public StatsSupportMode getDistributionStatsSupportMode() { return StatsSupportMode.DISABLED; }
+        @Override public StatsSupportMode getInferenceStatsSupportMode() { return StatsSupportMode.AUTO; }
+        @Override public StatsSupportMode getAnomalyStatsSupportMode() { return StatsSupportMode.AUTO; }
+        @Override public StatsFieldRegistry getStatsFieldRegistry() { return StatsFieldRegistry.empty(); }
+        @Override public OptionSourceRegistry getOptionSourceRegistry() { return null; }
+        @Override public boolean hasOptionSource(String sourceKey) { return false; }
+        @Override public OptionSourceDescriptor resolveOptionSource(String sourceKey) { return null; }
+        @Override public ResourceRepresentationResult<LockedObservedDto> findById(Long id) { return null; }
+        @Override public List<LockedObservedDto> findAll() { return List.of(); }
+        @Override public List<LockedObservedDto> findAllById(Collection<Long> ids) { return List.of(); }
+        @Override public Page<LockedObservedDto> filter(PayrollSlipFilterDto filter, Pageable pageable, Collection<Long> includeIds) { return Page.empty(); }
+        @Override public CursorPage<LockedObservedDto> filterByCursor(PayrollSlipFilterDto filter, Sort sort, String after, String before, int size) { return null; }
+        @Override public OptionalLong locate(PayrollSlipFilterDto filter, Sort sort, Long id) { return OptionalLong.empty(); }
+        @Override public Page<OptionDTO<Long>> filterOptions(PayrollSlipFilterDto filter, Pageable pageable) { return Page.empty(); }
+        @Override public List<OptionDTO<Long>> byIdsOptions(Collection<Long> ids) { return List.of(); }
+        @Override public Page<OptionDTO<Object>> filterOptionSourceOptions(String sourceKey, OptionSourceFilterRequest<PayrollSlipFilterDto> request, Pageable pageable) { return Page.empty(); }
+        @Override public List<OptionDTO<Object>> byIdsOptionSourceOptions(String sourceKey, Collection<Object> ids) { return List.of(); }
+        @Override public GroupByStatsResponse groupByStats(GroupByStatsRequest<PayrollSlipFilterDto> request) { return null; }
+        @Override public TimeSeriesStatsResponse timeSeriesStats(TimeSeriesStatsRequest<PayrollSlipFilterDto> request) { return null; }
+        @Override public DistributionStatsResponse distributionStats(DistributionStatsRequest<PayrollSlipFilterDto> request) { return null; }
+        @Override public ComparisonStatsResponse comparisonStats(ComparisonStatsRequest<PayrollSlipFilterDto> request) { return null; }
+    }
+}

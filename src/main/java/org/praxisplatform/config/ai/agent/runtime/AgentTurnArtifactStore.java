@@ -6,6 +6,7 @@ import java.util.List;
 import org.praxisplatform.config.ai.agent.spi.AgentEntityDossier;
 import org.praxisplatform.config.ai.agent.spi.AgentEntityMatch;
 import org.praxisplatform.config.ai.agent.spi.AgentEvaluatedCalculationMemory;
+import org.praxisplatform.config.ai.agent.spi.AgentExtensionArtifact;
 import org.praxisplatform.config.ai.agent.spi.AgentKnowledgeDocument;
 import org.praxisplatform.config.ai.agent.spi.AgentPersistedActionProposal;
 import org.praxisplatform.config.ai.agent.spi.AgentQueryResult;
@@ -34,6 +35,7 @@ public final class AgentTurnArtifactStore {
     private final List<AgentKnowledgeDocument> knowledgeCitations = new ArrayList<>();
     private final List<AgentSimulationPreview> simulationPreviews = new ArrayList<>();
     private final List<AgentPersistedActionProposal> actionProposals = new ArrayList<>();
+    private final List<AgentExtensionArtifact> extensionArtifacts = new ArrayList<>();
     private final List<ToolExecutionTrace> traces = new ArrayList<>();
 
     public synchronized void recordSearchMatches(List<AgentEntityMatch> matches) {
@@ -134,6 +136,12 @@ public final class AgentTurnArtifactStore {
         actionProposals.add(proposal);
     }
 
+    public synchronized void recordExtensionArtifact(AgentExtensionArtifact artifact) {
+        if (artifact != null) {
+            extensionArtifacts.add(artifact);
+        }
+    }
+
     public synchronized void recordTrace(String toolName, String description, long durationMs, int itemCount) {
         traces.add(new ToolExecutionTrace(toolName, description, durationMs, itemCount));
     }
@@ -168,6 +176,10 @@ public final class AgentTurnArtifactStore {
 
     public synchronized List<AgentPersistedActionProposal> actionProposals() {
         return Collections.unmodifiableList(new ArrayList<>(actionProposals));
+    }
+
+    public synchronized List<AgentExtensionArtifact> extensionArtifacts() {
+        return Collections.unmodifiableList(new ArrayList<>(extensionArtifacts));
     }
 
     public synchronized List<ToolExecutionTrace> traces() {

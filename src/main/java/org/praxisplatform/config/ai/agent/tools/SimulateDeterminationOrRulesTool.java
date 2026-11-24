@@ -33,6 +33,11 @@ public class SimulateDeterminationOrRulesTool implements OperationalAgentTool {
     }
 
     @Override
+    public AgentToolSafetyClass safetyClass() {
+        return AgentToolSafetyClass.SIMULATION;
+    }
+
+    @Override
     public AgentToolDeclaration declaration() {
         Map<String, Object> properties = new LinkedHashMap<>();
         properties.put("entityKey", Map.of(

@@ -222,4 +222,87 @@ class GoogleGenAiAgentToolGatewayTest {
         assertThat(replayedModelParts.get(0).thought()).contains(true);
         assertThat(replayedModelParts.get(1).thoughtSignature()).contains(new byte[]{1, 2, 3});
     }
+
+    @Test
+    void appliesVersionAwareThinkingConfigCachedContentResponseSchemaAndExtractsUsage() {
+        List<GenerateContentConfig> capturedConfigs = new ArrayList<>();
+
+        GoogleGenAiAgentToolGateway gateway = new GoogleGenAiAgentToolGateway(
+                new ObjectMapper(),
+                "test-gemini-key",
+                "gemini-2.5-flash",
+                (apiKey, model, contents, config) -> {
+                    capturedConfigs.add(config);
+                    return GenerateContentResponse.builder()
+                            .candidates(List.of(Candidate.builder()
+                                    .content(Content.builder()
+                                            .role("model")
+                                            .parts(List.of(Part.fromText("{\"ok\":true}")))
+                                            .build())
+                                    .build()))
+                            .usageMetadata(GenerateContentResponseUsageMetadata.builder()
+                                    .promptTokenCount(200)
+                                    .candidatesTokenCount(40)
+                                    .cachedContentTokenCount(120)
+                                    .thoughtsTokenCount(35)
+                                    .totalTokenCount(275)
+                                    .build())
+                            .build();
+                });
+
+        // Gemini 2.5 + explicit cachedContent -> omits systemInstruction/tools to prevent HTTP 400 conflict
+        AgentModelTurnResponse resp25 = gateway.generateTurn(
+                new AgentModelTurnRequest(
+                        "Rules",
+                        List.of(AgentConversationItem.userText("Analisar")),
+                        List.of(new AgentToolDeclaration("q", "query", Map.of("type", "object"), List.of())),
+                        AiCallConfig.builder()
+                                .provider("gemini")
+                                .model("gemini-2.5-flash")
+                                .timeoutSeconds(25)
+                                .thinkingProfile(org.praxisplatform.config.service.AiThinkingProfile.OPERATIONAL_AUDIT)
+                                .cachedContentName("cachedContents/ctx-123")
+                                .build(),
+                        true,
+                        Map.of("type", "object", "properties", Map.of("ok", Map.of("type", "boolean")))),
+                AgentModelStreamListener.NOOP);
+
+        GenerateContentConfig cfg25 = capturedConfigs.get(0);
+        assertThat(cfg25.cachedContent()).contains("cachedContents/ctx-123");
+        assertThat(cfg25.systemInstruction()).isEmpty();
+        assertThat(cfg25.tools()).isEmpty();
+        assertThat(cfg25.toolConfig()).isEmpty();
+        assertThat(cfg25.httpOptions()).isPresent();
+        assertThat(cfg25.httpOptions().get().timeout()).contains(25000);
+        assertThat(cfg25.responseMimeType()).contains("application/json");
+        assertThat(cfg25.responseJsonSchema()).isPresent();
+        assertThat(cfg25.thinkingConfig()).isPresent();
+        assertThat(cfg25.thinkingConfig().get().thinkingBudget()).contains(4096);
+        assertThat(cfg25.thinkingConfig().get().thinkingLevel()).isEmpty();
+        assertThat(resp25.usage().cacheReadInputTokens()).isEqualTo(120L);
+        assertThat(resp25.usage().thinkingTokens()).isEqualTo(35L);
+        assertThat(resp25.usage().cacheHit()).isTrue();
+
+        assertThat(GoogleGenAiAgentToolGateway.parseRetryAfterHint("Quota exceeded, please retry in 12s.")).isNotNull();
+
+        // Gemini 3.x without cachedContent -> sets systemInstruction & thinkingLevel
+        gateway.generateTurn(
+                new AgentModelTurnRequest(
+                        "Rules",
+                        List.of(AgentConversationItem.userText("Analisar")),
+                        List.of(),
+                        AiCallConfig.builder()
+                                .provider("gemini")
+                                .model("gemini-3.0-flash")
+                                .thinkingProfile(org.praxisplatform.config.service.AiThinkingProfile.DEEP_ANALYSIS)
+                                .build()),
+                AgentModelStreamListener.NOOP);
+
+        GenerateContentConfig cfg30 = capturedConfigs.get(1);
+        assertThat(cfg30.systemInstruction()).isPresent();
+        assertThat(cfg30.thinkingConfig()).isPresent();
+        assertThat(cfg30.thinkingConfig().get().thinkingLevel())
+                .contains(new com.google.genai.types.ThinkingLevel(com.google.genai.types.ThinkingLevel.Known.HIGH));
+        assertThat(cfg30.thinkingConfig().get().thinkingBudget()).isEmpty();
+    }
 }

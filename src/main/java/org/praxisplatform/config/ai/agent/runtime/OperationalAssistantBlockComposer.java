@@ -30,8 +30,10 @@ import org.praxisplatform.config.ai.agent.spi.AgentProactiveAlert;
 import org.praxisplatform.config.ai.agent.spi.AgentQueryResult;
 import org.praxisplatform.config.ai.agent.spi.AgentRelatedDataset;
 import org.praxisplatform.config.ai.agent.spi.AgentSimulationPreview;
+import org.praxisplatform.config.ai.agent.spi.AgentAnalyticalProvenance;
 import org.praxisplatform.config.ai.agent.spi.AgentStatsResult;
 import org.praxisplatform.config.ai.agent.spi.AgentStatsResult.AgentStatsBucket;
+import org.praxisplatform.config.ai.agent.spi.OperationalAssistantBlockContributor;
 import org.springframework.util.StringUtils;
 
 /**
@@ -51,9 +53,22 @@ public class OperationalAssistantBlockComposer {
     private static final int MAX_KNOWLEDGE_CITATIONS = 6;
 
     private final ObjectMapper objectMapper;
+    private final List<OperationalAssistantBlockContributor> blockContributors;
 
     public OperationalAssistantBlockComposer(ObjectMapper objectMapper) {
+        this(objectMapper, List.of());
+    }
+
+    public OperationalAssistantBlockComposer(
+            ObjectMapper objectMapper,
+            List<OperationalAssistantBlockContributor> blockContributors) {
         this.objectMapper = objectMapper != null ? objectMapper : new ObjectMapper().findAndRegisterModules();
+        this.blockContributors = blockContributors == null
+                ? List.of()
+                : blockContributors.stream()
+                        .filter(java.util.Objects::nonNull)
+                        .sorted(Comparator.comparingInt(OperationalAssistantBlockContributor::getOrder))
+                        .toList();
     }
 
     public ComposedAssistantOutput compose(String assistantNarrative, AgentTurnArtifactStore artifacts) {
@@ -120,6 +135,18 @@ public class OperationalAssistantBlockComposer {
         for (AgentStatsResult stats : statsResults) {
             if (stats != null && !stats.buckets().isEmpty()) {
                 appendChartWidgetBlock(blocks, stats);
+            }
+        }
+        if (artifacts != null && !blockContributors.isEmpty()) {
+            for (OperationalAssistantBlockContributor contributor : blockContributors) {
+                List<ObjectNode> contributed = contributor.contribute(artifacts, objectMapper);
+                if (contributed != null) {
+                    for (ObjectNode contributedNode : contributed) {
+                        if (contributedNode != null) {
+                            blocks.add(contributedNode);
+                        }
+                    }
+                }
             }
         }
         if (!knowledgeCitations.isEmpty()) {
@@ -763,6 +790,7 @@ public class OperationalAssistantBlockComposer {
         putIfText(widgetBlock, "entityKey", stats.entityKey());
         putIfText(widgetBlock, "resourceKey", stats.resourceKey());
         putIfText(widgetBlock, "resourcePath", stats.resourcePath());
+        appendAnalyticalProvenance(widgetBlock, stats.analyticalProvenance());
 
         ObjectNode widget = widgetBlock.putObject("widget");
         widget.put("id", "praxis-chart");
@@ -1082,6 +1110,65 @@ public class OperationalAssistantBlockComposer {
 
     private static String firstNonBlank(String first, String second) {
         return StringUtils.hasText(first) ? first.trim() : (StringUtils.hasText(second) ? second.trim() : null);
+    }
+
+    private void appendAnalyticalProvenance(ObjectNode widgetBlock, AgentAnalyticalProvenance provenance) {
+        if (widgetBlock == null || provenance == null) {
+            return;
+        }
+        ObjectNode provNode = widgetBlock.putObject("analyticalProvenance");
+        putIfText(provNode, "mode", provenance.mode());
+        putIfText(provNode, "recipeId", provenance.recipeId());
+        putIfText(provNode, "recipeTitle", maskPiiText(provenance.recipeTitle()));
+        putIfText(provNode, "recipeVersion", provenance.recipeVersion());
+        putIfText(provNode, "governanceTier", provenance.governanceTier());
+        putIfText(provNode, "provenanceDigest", provenance.provenanceDigest());
+        if (provenance.lockedFilters() != null && !provenance.lockedFilters().isEmpty()) {
+            provNode.set("lockedFilters", objectMapper.valueToTree(maskPiiInStructure(provenance.lockedFilters())));
+        }
+        if (provenance.appliedParameters() != null && !provenance.appliedParameters().isEmpty()) {
+            provNode.set("appliedParameters", objectMapper.valueToTree(maskPiiInStructure(provenance.appliedParameters())));
+        }
+    }
+
+    public static String maskPiiText(String value) {
+        return value == null ? null : TurnScopedPiiVault.maskRawEmails(maskMod11TaxIds(value));
+    }
+
+    public static Map<String, Object> maskPiiInStructure(Map<String, Object> payload) {
+        if (payload == null || payload.isEmpty()) {
+            return Map.of();
+        }
+        Map<String, Object> masked = new LinkedHashMap<>();
+        for (Map.Entry<String, Object> entry : payload.entrySet()) {
+            if (entry.getKey() != null) {
+                masked.put(entry.getKey(), maskPiiValue(entry.getValue()));
+            }
+        }
+        return masked;
+    }
+
+    public static Object maskPiiValue(Object value) {
+        if (value instanceof String str) {
+            return maskPiiText(str);
+        }
+        if (value instanceof Map<?, ?> map) {
+            Map<String, Object> out = new LinkedHashMap<>();
+            for (Map.Entry<?, ?> entry : map.entrySet()) {
+                if (entry.getKey() != null) {
+                    out.put(entry.getKey().toString(), maskPiiValue(entry.getValue()));
+                }
+            }
+            return out;
+        }
+        if (value instanceof List<?> list) {
+            List<Object> out = new ArrayList<>(list.size());
+            for (Object item : list) {
+                out.add(maskPiiValue(item));
+            }
+            return out;
+        }
+        return value;
     }
 
     public record ComposedAssistantOutput(
