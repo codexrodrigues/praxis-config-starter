@@ -354,6 +354,8 @@ final class MetadataStarterStatisticalIntelligenceSupport {
             entry.put("affectedCount", f.affectedCount());
             if (!f.decompositionSteps().isEmpty()) {
                 List<Map<String, Object>> steps = new ArrayList<>(f.decompositionSteps().size());
+                Map<Integer, Double> benfordObserved = new java.util.TreeMap<>();
+                Map<Integer, Double> benfordExpected = new java.util.TreeMap<>();
                 for (AnomalyDecompositionStep step : f.decompositionSteps()) {
                     Map<String, Object> s = new LinkedHashMap<>();
                     s.put("stepKey", step.stepKey());
@@ -364,8 +366,38 @@ final class MetadataStarterStatisticalIntelligenceSupport {
                     }
                     s.put("role", step.role().name());
                     steps.add(s);
+
+                    extractStructuredStepMetric(step, entry, benfordObserved, benfordExpected);
                 }
                 entry.put("decompositionSteps", steps);
+                if (f.method() == AnomalyMethod.NIGRINI_BENFORD && !benfordObserved.isEmpty()) {
+                    List<Map<String, Object>> digits = new ArrayList<>(9);
+                    for (int digit = 1; digit <= 9; digit++) {
+                        Double obs = benfordObserved.get(digit);
+                        Double exp = benfordExpected.get(digit);
+                        if (obs == null && exp == null) {
+                            continue;
+                        }
+                        Map<String, Object> digitRow = new LinkedHashMap<>();
+                        digitRow.put("digit", String.valueOf(digit));
+                        digitRow.put("label", "Dígito " + digit);
+                        if (obs != null) {
+                            digitRow.put("observedValue", obs);
+                        }
+                        if (exp != null) {
+                            digitRow.put("expectedValue", exp);
+                        }
+                        digits.add(digitRow);
+                    }
+                    if (!digits.isEmpty()) {
+                        entry.put("digitDistribution", digits);
+                    }
+                }
+            }
+            if (f.method() == AnomalyMethod.NIGRINI_BENFORD && f.observedValue() != null) {
+                double madValue = f.observedValue().doubleValue();
+                entry.put("nigriniMad", f.observedValue());
+                entry.put("nigriniConformity", classifyNigriniConformity(madValue));
             }
             boolean nonSignificant = f.qValueFdr() != null
                     ? f.qValueFdr() > effectiveAlpha
@@ -407,6 +439,51 @@ final class MetadataStarterStatisticalIntelligenceSupport {
         uiPayload.put("benfordFindings", benfordFindings);
         return new AgentStatisticalAnalysisResult(
                 entityKey, resourceKey, resourcePath, title, "anomaly-scan", envelope, modelPayload, uiPayload);
+    }
+
+    private static void extractStructuredStepMetric(
+            AnomalyDecompositionStep step,
+            Map<String, Object> entry,
+            Map<Integer, Double> benfordObserved,
+            Map<Integer, Double> benfordExpected) {
+        if (step == null || !StringUtils.hasText(step.stepKey()) || step.value() == null) {
+            return;
+        }
+        String key = step.stepKey().trim();
+        switch (key) {
+            case "cohort_min" -> entry.putIfAbsent("min", step.value());
+            case "cohort_q1" -> entry.putIfAbsent("q1", step.value());
+            case "cohort_median" -> entry.putIfAbsent("median", step.value());
+            case "cohort_q3" -> entry.putIfAbsent("q3", step.value());
+            case "cohort_max" -> entry.putIfAbsent("max", step.value());
+            case "cohort_sample_size" -> entry.putIfAbsent("sampleSize", step.value().longValue());
+            default -> {
+                if (key.startsWith("benford_digit_") && key.length() >= 16) {
+                    char digitChar = key.charAt("benford_digit_".length());
+                    if (digitChar >= '1' && digitChar <= '9') {
+                        int digit = digitChar - '0';
+                        if (key.endsWith("_observed")) {
+                            benfordObserved.put(digit, step.value().doubleValue());
+                        } else if (key.endsWith("_expected")) {
+                            benfordExpected.put(digit, step.value().doubleValue());
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private static String classifyNigriniConformity(double mad) {
+        if (mad <= 0.006d) {
+            return "CONFORMIDADE_ESTREITA";
+        }
+        if (mad <= 0.012d) {
+            return "CONFORMIDADE_ACEITAVEL";
+        }
+        if (mad <= 0.015d) {
+            return "MARGINALMENTE_ACEITAVEL";
+        }
+        return "NAO_CONFORMIDADE";
     }
 
     private static void populateBaseMetadata(

@@ -263,7 +263,7 @@ class GoogleGenAiAgentToolGatewayTest {
                                 .thinkingProfile(org.praxisplatform.config.service.AiThinkingProfile.OPERATIONAL_AUDIT)
                                 .cachedContentName("cachedContents/ctx-123")
                                 .build(),
-                        true,
+                        false,
                         Map.of("type", "object", "properties", Map.of("ok", Map.of("type", "boolean")))),
                 AgentModelStreamListener.NOOP);
 
@@ -304,5 +304,46 @@ class GoogleGenAiAgentToolGatewayTest {
         assertThat(cfg30.thinkingConfig().get().thinkingLevel())
                 .contains(new com.google.genai.types.ThinkingLevel(com.google.genai.types.ThinkingLevel.Known.HIGH));
         assertThat(cfg30.thinkingConfig().get().thinkingBudget()).isEmpty();
+    }
+
+    @Test
+    void appliesBaseUrlOverrideAndDisablesCachedContentDuringForcedSynthesis() {
+        List<GenerateContentConfig> capturedConfigs = new ArrayList<>();
+        GoogleGenAiAgentToolGateway gateway = new GoogleGenAiAgentToolGateway(
+                new ObjectMapper(),
+                "test-gemini-key",
+                "gemini-2.5-flash",
+                (apiKey, model, contents, config) -> {
+                    capturedConfigs.add(config);
+                    return GenerateContentResponse.builder()
+                            .candidates(List.of(Candidate.builder()
+                                    .content(Content.builder().role("model").parts(List.of(Part.fromText("Synthesized."))).build())
+                                    .build()))
+                            .build();
+                });
+
+        gateway.generateTurn(
+                new AgentModelTurnRequest(
+                        "System policy",
+                        List.of(AgentConversationItem.userText("Summarize")),
+                        List.of(new AgentToolDeclaration("q", "query", Map.of("type", "object"), List.of())),
+                        AiCallConfig.builder()
+                                .provider("gemini")
+                                .model("gemini-2.5-flash")
+                                .baseUrl("https://proxy.gemini.internal/v1beta")
+                                .cachedContentName("cachedContents/ctx-123")
+                                .build(),
+                        true,
+                        Map.of()),
+                AgentModelStreamListener.NOOP);
+
+        GenerateContentConfig cfg = capturedConfigs.get(0);
+        assertThat(cfg.httpOptions()).isPresent();
+        assertThat(cfg.httpOptions().get().baseUrl()).contains("https://proxy.gemini.internal/v1beta");
+        assertThat(cfg.cachedContent()).isEmpty();
+        assertThat(cfg.systemInstruction()).isPresent();
+        assertThat(cfg.toolConfig()).isPresent();
+        assertThat(cfg.toolConfig().get().functionCallingConfig().orElseThrow().mode())
+                .contains(new com.google.genai.types.FunctionCallingConfigMode(FunctionCallingConfigMode.Known.NONE));
     }
 }

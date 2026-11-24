@@ -19,6 +19,17 @@ public interface AgentSecurityGuard {
         return new InboundCheckResult(AgentSecurityVerdict.allow(), userMessage, context);
     }
 
+    default HistoryCheckResult guardHistoryEntry(
+            String role,
+            String text,
+            TurnSecurityState state
+    ) {
+        if (state != null && text != null && !text.isBlank()) {
+            state.groundFromTrustedHistoryText(text);
+        }
+        return new HistoryCheckResult(AgentSecurityVerdict.allow(), text);
+    }
+
     default AgentSecurityVerdict guardBeforeToolExecution(
             String toolName,
             AgentToolSafetyClass safetyClass,
@@ -55,5 +66,10 @@ public interface AgentSecurityGuard {
     record OutboundCheckResult(
             AgentSecurityVerdict verdict,
             String sanitizedNarrative
+    ) { }
+
+    record HistoryCheckResult(
+            AgentSecurityVerdict verdict,
+            String sanitizedText
     ) { }
 }

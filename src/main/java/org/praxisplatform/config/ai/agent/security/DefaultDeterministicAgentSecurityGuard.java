@@ -54,6 +54,11 @@ public final class DefaultDeterministicAgentSecurityGuard implements AgentSecuri
             "id", "recordId", "entityId", "targetId", "itemId", "businessKey"
     );
 
+    private static final Set<String> FREE_TEXT_CONTEXT_FIELDS = Set.of(
+            "observacao", "observacoes", "justificativa", "descricao", "notes", "comment",
+            "comments", "memo", "detalhe", "detalhes", "motivo", "parecer", "historico"
+    );
+
     @Override
     public InboundCheckResult guardInboundUserInput(
             String userMessage,
@@ -155,6 +160,42 @@ public final class DefaultDeterministicAgentSecurityGuard implements AgentSecuri
     }
 
     @Override
+    public HistoryCheckResult guardHistoryEntry(String role, String text, TurnSecurityState state) {
+        if (text == null || text.isBlank()) {
+            return new HistoryCheckResult(AgentSecurityVerdict.allow(), text);
+        }
+        if (isSuspicious(text)) {
+            AgentSecurityFinding finding = new AgentSecurityFinding(
+                    "inbound_history",
+                    "prompt-injection-in-history",
+                    AgentSecurityVerdict.Decision.QUARANTINE,
+                    "history." + (role != null ? role : "unknown"),
+                    "Prompt injection or meta-instruction override detected in conversation history"
+            );
+            if (state != null) {
+                state.markTainted(finding);
+            }
+            if (isEnforce(state)) {
+                return new HistoryCheckResult(
+                        AgentSecurityVerdict.quarantine(
+                                "prompt-injection-in-history",
+                                "Entrada suspeita no historico da conversa foi isolada."
+                        ),
+                        "[mensagem de historico suspeita isolada por seguranca]"
+                );
+            }
+            return new HistoryCheckResult(
+                    AgentSecurityVerdict.warn("prompt-injection-in-history", finding.detail()),
+                    text
+            );
+        }
+        if (state != null) {
+            state.groundFromTrustedHistoryText(text);
+        }
+        return new HistoryCheckResult(AgentSecurityVerdict.allow(), text);
+    }
+
+    @Override
     public AgentSecurityVerdict guardBeforeToolExecution(
             String toolName,
             AgentToolSafetyClass safetyClass,
@@ -205,6 +246,56 @@ public final class DefaultDeterministicAgentSecurityGuard implements AgentSecuri
                 }
             }
         }
+
+        if ("prepare_bulk_operation".equals(toolName) && arguments != null) {
+            Object rawSelectionMode = arguments.get("selectionMode");
+            if (rawSelectionMode != null && "QUERY".equalsIgnoreCase(String.valueOf(rawSelectionMode).trim())) {
+                List<String> excludedIds = new ArrayList<>();
+                collectTargetIdValue(arguments.get("excludedIds"), excludedIds);
+                for (String excludedId : excludedIds) {
+                    if (state != null && !state.isTargetGrounded(excludedId)) {
+                        AgentSecurityFinding finding = new AgentSecurityFinding(
+                                "pre_tool_mutation",
+                                "ungrounded-mutation-target",
+                                AgentSecurityVerdict.Decision.BLOCK,
+                                toolName + ".excludedIds",
+                                "Excluded ID '" + excludedId + "' was not verified by read tools or user request in this turn"
+                        );
+                        state.addFinding(finding);
+                        if (isEnforce(state)) {
+                            return AgentSecurityVerdict.block(
+                                    "ungrounded-mutation-target",
+                                    "Mutacao em lote bloqueada: o identificador em excludedIds '" + excludedId
+                                            + "' nao foi confirmado via consulta previa nem citado pelo usuario neste turno."
+                            );
+                        }
+                        return AgentSecurityVerdict.warn("ungrounded-mutation-target", finding.detail());
+                    }
+                }
+                Object rawFilters = arguments.get("filters");
+                boolean hasNonEmptyFilters = rawFilters instanceof Map<?, ?> filterMap && !filterMap.isEmpty();
+                boolean hasReadGrounding = state != null && state.hasReadGrounding();
+                if (!hasNonEmptyFilters && !hasReadGrounding) {
+                    AgentSecurityFinding finding = new AgentSecurityFinding(
+                            "pre_tool_mutation",
+                            "ungrounded-bulk-query-scope",
+                            AgentSecurityVerdict.Decision.BLOCK,
+                            toolName + ".filters",
+                            "QUERY-mode bulk operation requires explicit non-empty filters or prior read grounding in this turn"
+                    );
+                    if (state != null) {
+                        state.addFinding(finding);
+                    }
+                    if (isEnforce(state)) {
+                        return AgentSecurityVerdict.block(
+                                "ungrounded-bulk-query-scope",
+                                "Mutacao em lote no modo QUERY bloqueada: informe filtros explicitos nao vazios ou consulte os registros antes de preparar alteracoes coletivas."
+                        );
+                    }
+                    return AgentSecurityVerdict.warn("ungrounded-bulk-query-scope", finding.detail());
+                }
+            }
+        }
         return AgentSecurityVerdict.allow();
     }
 
@@ -218,13 +309,16 @@ public final class DefaultDeterministicAgentSecurityGuard implements AgentSecuri
         if (payload == null || payload.isEmpty()) {
             return new ToolOutputCheckResult(AgentSecurityVerdict.allow(), payload);
         }
-        if (state != null && GROUNDABLE_ENTITY_TOOLS.contains(toolName)) {
+        boolean groundableTool = GROUNDABLE_ENTITY_TOOLS.contains(toolName);
+        if (state != null && groundableTool) {
+            state.markReadGrounding();
             collectGroundedIds(payload, state);
         }
 
         boolean enforce = isEnforce(state);
         boolean[] quarantinedAny = { false };
-        Map<String, Object> sanitized = sanitizeMap(payload, "$", toolName, state, enforce, quarantinedAny);
+        Map<String, Object> sanitized = sanitizeMap(
+                payload, "$", toolName, state, enforce, groundableTool, quarantinedAny);
 
         if (quarantinedAny[0]) {
             return new ToolOutputCheckResult(
@@ -235,7 +329,7 @@ public final class DefaultDeterministicAgentSecurityGuard implements AgentSecuri
                     enforce ? sanitized : payload
             );
         }
-        return new ToolOutputCheckResult(AgentSecurityVerdict.allow(), payload);
+        return new ToolOutputCheckResult(AgentSecurityVerdict.allow(), enforce ? sanitized : payload);
     }
 
     @Override
@@ -273,6 +367,7 @@ public final class DefaultDeterministicAgentSecurityGuard implements AgentSecuri
             String toolName,
             TurnSecurityState state,
             boolean enforce,
+            boolean fenceFreeText,
             boolean[] quarantinedAny
     ) {
         Map<String, Object> copy = new LinkedHashMap<>(source.size());
@@ -280,7 +375,7 @@ public final class DefaultDeterministicAgentSecurityGuard implements AgentSecuri
             String key = entry.getKey();
             String childPath = path + "." + key;
             Object val = entry.getValue();
-            copy.put(key, sanitizeValue(val, key, childPath, toolName, state, enforce, quarantinedAny));
+            copy.put(key, sanitizeValue(val, key, childPath, toolName, state, enforce, fenceFreeText, quarantinedAny));
         }
         return copy;
     }
@@ -292,6 +387,7 @@ public final class DefaultDeterministicAgentSecurityGuard implements AgentSecuri
             String toolName,
             TurnSecurityState state,
             boolean enforce,
+            boolean fenceFreeText,
             boolean[] quarantinedAny
     ) {
         if (val instanceof String str) {
@@ -310,22 +406,44 @@ public final class DefaultDeterministicAgentSecurityGuard implements AgentSecuri
                 if (enforce) {
                     return "[conteudo suspeito isolado por seguranca — campo='" + fieldName + "']";
                 }
+            } else if (enforce && fenceFreeText && isFenceableFreeTextField(fieldName)
+                    && str.length() >= 20 && containsWhitespace(str)
+                    && !str.trim().startsWith("<untrusted_context_data")) {
+                String safeField = fieldName == null ? "text" : fieldName.replaceAll("[^A-Za-z0-9._-]", "_");
+                return "<untrusted_context_data field=\"" + safeField + "\">"
+                        + str
+                        + "</untrusted_context_data>";
             }
             return str;
         }
         if (val instanceof Map<?, ?> map) {
             Map<String, Object> typed = new LinkedHashMap<>();
             map.forEach((k, v) -> typed.put(String.valueOf(k), v));
-            return sanitizeMap(typed, path, toolName, state, enforce, quarantinedAny);
+            return sanitizeMap(typed, path, toolName, state, enforce, fenceFreeText, quarantinedAny);
         }
         if (val instanceof List<?> list) {
             List<Object> copy = new ArrayList<>(list.size());
             for (int i = 0; i < list.size(); i++) {
-                copy.add(sanitizeValue(list.get(i), fieldName, path + "[" + i + "]", toolName, state, enforce, quarantinedAny));
+                copy.add(sanitizeValue(
+                        list.get(i), fieldName, path + "[" + i + "]", toolName, state, enforce, fenceFreeText, quarantinedAny));
             }
             return copy;
         }
         return val;
+    }
+
+    private static boolean isFenceableFreeTextField(String fieldName) {
+        return fieldName != null
+                && FREE_TEXT_CONTEXT_FIELDS.contains(fieldName.trim().toLowerCase(Locale.ROOT));
+    }
+
+    private static boolean containsWhitespace(String text) {
+        for (int i = 0; i < text.length(); i++) {
+            if (Character.isWhitespace(text.charAt(i))) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static void collectGroundedIds(Object node, TurnSecurityState state) {

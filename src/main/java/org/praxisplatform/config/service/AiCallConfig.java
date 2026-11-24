@@ -43,6 +43,8 @@ public class AiCallConfig {
     private String promptCacheKey;
     @JsonIgnore
     private String cachedContentName;
+    @JsonIgnore
+    private String baseUrl;
 
     public AiCallConfig(
             String provider,
@@ -73,6 +75,44 @@ public class AiCallConfig {
                 null,
                 null,
                 null,
+                null,
+                null);
+    }
+
+    public AiCallConfig(
+            String provider,
+            String model,
+            Map<String, String> providerModelOverrides,
+            Double temperature,
+            Integer maxTokens,
+            Integer timeoutSeconds,
+            String apiKey,
+            String tenantId,
+            String environment,
+            String ragReleaseId,
+            AiExecutionProfile executionProfile,
+            AiProviderInvocationTrace invocationTrace,
+            AiThinkingProfile thinkingProfile,
+            Integer thinkingBudgetTokens,
+            String promptCacheKey,
+            String cachedContentName) {
+        this(
+                provider,
+                model,
+                providerModelOverrides,
+                temperature,
+                maxTokens,
+                timeoutSeconds,
+                apiKey,
+                tenantId,
+                environment,
+                ragReleaseId,
+                executionProfile,
+                invocationTrace,
+                thinkingProfile,
+                thinkingBudgetTokens,
+                promptCacheKey,
+                cachedContentName,
                 null);
     }
 
@@ -101,7 +141,8 @@ public class AiCallConfig {
                 .thinkingProfile(thinkingProfile)
                 .thinkingBudgetTokens(thinkingBudgetTokens)
                 .promptCacheKey(promptCacheKey)
-                .cachedContentName(cachedContentName);
+                .cachedContentName(cachedContentName)
+                .baseUrl(baseUrl);
     }
 
     /**
@@ -125,6 +166,7 @@ public class AiCallConfig {
         private Integer thinkingBudgetTokens;
         private String promptCacheKey;
         private String cachedContentName;
+        private String baseUrl;
 
         private AiCallConfigBuilder() {
         }
@@ -209,6 +251,11 @@ public class AiCallConfig {
             return this;
         }
 
+        public AiCallConfigBuilder baseUrl(String baseUrl) {
+            this.baseUrl = baseUrl;
+            return this;
+        }
+
         public AiCallConfig build() {
             return new AiCallConfig(
                     provider,
@@ -226,7 +273,8 @@ public class AiCallConfig {
                     thinkingProfile,
                     thinkingBudgetTokens,
                     promptCacheKey,
-                    cachedContentName);
+                    cachedContentName,
+                    baseUrl);
         }
     }
 }

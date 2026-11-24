@@ -165,6 +165,47 @@ class RoutingAiToolCallingProviderTest {
         assertThat(delegateCtx.get()).isEqualTo(richCtx);
     }
 
+    @Test
+    void preservesFallbackVendorApiKeyWhenResolvedMatchesFallbackProvider() {
+        org.praxisplatform.config.service.AiProviderManagementService mgmt =
+                org.mockito.Mockito.mock(org.praxisplatform.config.service.AiProviderManagementService.class);
+        org.mockito.Mockito.when(mgmt.resolveEffectiveCallConfig(
+                org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.any()))
+                .thenAnswer(inv -> {
+                    AiCallConfig seed = inv.getArgument(0);
+                    if ("openai".equals(seed.getProvider())) {
+                        return seed.toBuilder().apiKey("openai-fallback-secret").build();
+                    }
+                    return seed.toBuilder().apiKey("gemini-primary-secret").build();
+                });
+
+        AtomicReference<AiCallConfig> fallbackConfigCaptured = new AtomicReference<>();
+        AiToolCallingProvider gemini = stubProvider("gemini", req -> {
+            throw AiProviderCallException.fromHttpStatus("gemini", 429, "rate limited");
+        });
+        AiToolCallingProvider openai = stubProvider("openai", req -> {
+            fallbackConfigCaptured.set(req.callConfig());
+            return new AgentModelTurnResponse("openai", "gpt-4o-mini", "ok", List.of(), AgentTokenUsage.ZERO, "stop", "id2", Map.of());
+        });
+
+        RoutingAiToolCallingProvider router = new RoutingAiToolCallingProvider(
+                mgmt, List.of(gemini, openai), null, List.of());
+
+        router.generateTurn(
+                new AgentModelTurnRequest(
+                        "sys",
+                        List.of(AgentConversationItem.userText("hi")),
+                        List.of(),
+                        AiCallConfig.builder().provider("gemini").tenantId("t1").environment("prod").build()),
+                AgentModelStreamListener.NOOP);
+
+        assertThat(fallbackConfigCaptured.get()).isNotNull();
+        assertThat(fallbackConfigCaptured.get().getApiKey()).isEqualTo("openai-fallback-secret");
+    }
+
     private static AiToolCallingProvider stubProvider(
             String id,
             java.util.function.Function<AgentModelTurnRequest, AgentModelTurnResponse> fn) {

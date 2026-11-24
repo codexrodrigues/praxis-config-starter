@@ -142,13 +142,14 @@ public class OpenAiResponsesAgentToolGateway implements AiToolCallingProvider {
             throw new IllegalStateException("OpenAI API key is not configured.");
         }
         String model = firstNonBlank(callConfig != null ? callConfig.getModel() : null, defaultModel);
+        String effectiveBaseUrl = resolveEffectiveBaseUrl(callConfig);
 
-        ResponseCreateParams params = toResponseParams(request, model, callConfig);
+        ResponseCreateParams params = toResponseParams(request, model, callConfig, effectiveBaseUrl);
         Integer timeoutSeconds = callConfig != null ? callConfig.getTimeoutSeconds() : null;
         try {
             Response response = exchange != null
-                    ? exchange.create(apiKey, defaultBaseUrl, timeoutSeconds, params)
-                    : invokeSdk(apiKey, defaultBaseUrl, timeoutSeconds, params);
+                    ? exchange.create(apiKey, effectiveBaseUrl, timeoutSeconds, params)
+                    : invokeSdk(apiKey, effectiveBaseUrl, timeoutSeconds, params);
             return fromOpenAiResponse(model, response, listener);
         } catch (RuntimeException ex) {
             throw mapProviderException(ex);
@@ -159,6 +160,14 @@ public class OpenAiResponsesAgentToolGateway implements AiToolCallingProvider {
             AgentModelTurnRequest request,
             String model,
             AiCallConfig callConfig) {
+        return toResponseParams(request, model, callConfig, resolveEffectiveBaseUrl(callConfig));
+    }
+
+    private ResponseCreateParams toResponseParams(
+            AgentModelTurnRequest request,
+            String model,
+            AiCallConfig callConfig,
+            String effectiveBaseUrl) {
         List<AgentConversationItem> conversation = request.conversation() == null
                 ? List.of()
                 : request.conversation();
@@ -185,7 +194,7 @@ public class OpenAiResponsesAgentToolGateway implements AiToolCallingProvider {
                         .build());
             }
         }
-        boolean nativeOpenAi = isNativeOpenAiEndpoint();
+        boolean nativeOpenAi = isNativeOpenAiEndpoint(effectiveBaseUrl);
         if (nativeOpenAi && callConfig != null && StringUtils.hasText(callConfig.getPromptCacheKey())) {
             builder.promptCacheKey(callConfig.getPromptCacheKey().trim());
         }
@@ -208,13 +217,18 @@ public class OpenAiResponsesAgentToolGateway implements AiToolCallingProvider {
         }
         if (!request.tools().isEmpty()) {
             for (AgentToolDeclaration tool : request.tools()) {
-                builder.addTool(toFunctionTool(tool));
+                builder.addTool(toFunctionTool(tool, nativeOpenAi));
             }
             if (request.disableToolCalling()) {
                 builder.toolChoice(ToolChoiceOptions.NONE);
             }
         }
         return builder.build();
+    }
+
+    private String resolveEffectiveBaseUrl(AiCallConfig callConfig) {
+        String overrideBaseUrl = callConfig != null ? normalizeBaseUrl(callConfig.getBaseUrl()) : null;
+        return StringUtils.hasText(overrideBaseUrl) ? overrideBaseUrl : defaultBaseUrl;
     }
 
     static String normalizeBaseUrl(String raw) {
@@ -295,14 +309,14 @@ public class OpenAiResponsesAgentToolGateway implements AiToolCallingProvider {
         return items;
     }
 
-    private FunctionTool toFunctionTool(AgentToolDeclaration tool) {
+    private FunctionTool toFunctionTool(AgentToolDeclaration tool, boolean nativeOpenAi) {
         Map<String, Object> schema = new LinkedHashMap<>(tool.parametersJsonSchema());
         schema.putIfAbsent("type", "object");
         schema.putIfAbsent("additionalProperties", Boolean.FALSE);
         if (!schema.containsKey("required") && !tool.requiredParameters().isEmpty()) {
             schema.put("required", tool.requiredParameters());
         }
-        boolean strictTool = isNativeOpenAiEndpoint() && isStrictSchemaCompatible(schema);
+        boolean strictTool = nativeOpenAi && isStrictSchemaCompatible(schema);
         FunctionTool.Parameters.Builder paramBuilder = FunctionTool.Parameters.builder();
         for (Map.Entry<String, Object> entry : schema.entrySet()) {
             paramBuilder.putAdditionalProperty(
@@ -402,11 +416,15 @@ public class OpenAiResponsesAgentToolGateway implements AiToolCallingProvider {
     }
 
     private boolean isNativeOpenAiEndpoint() {
-        if (!StringUtils.hasText(defaultBaseUrl)) {
+        return isNativeOpenAiEndpoint(defaultBaseUrl);
+    }
+
+    private static boolean isNativeOpenAiEndpoint(String candidateBaseUrl) {
+        if (!StringUtils.hasText(candidateBaseUrl)) {
             return true;
         }
         try {
-            String host = URI.create(defaultBaseUrl).getHost();
+            String host = URI.create(candidateBaseUrl).getHost();
             return host == null || "api.openai.com".equalsIgnoreCase(host);
         } catch (IllegalArgumentException ignored) {
             return false;

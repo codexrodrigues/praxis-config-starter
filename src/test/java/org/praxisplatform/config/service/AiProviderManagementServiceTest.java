@@ -608,4 +608,34 @@ class AiProviderManagementServiceTest {
         assertEquals("gemini", response.getProvider());
         assertEquals("gemini-2.5-flash", response.getModel());
     }
+
+    @Test
+    void resolveEffectiveCallConfigDoesNotLeakStoredApiKeyAcrossDifferentVendors() {
+        var payload = objectMapper.createObjectNode();
+        payload.putObject("ai")
+                .put("provider", "gemini")
+                .put("model", "gemini-2.5-flash")
+                .put("apiKeyEncrypted", "encrypted-gemini-key");
+        when(userConfigService.getResolved(
+                "tenant-a", "user-a", "praxis-global-config-editor", "praxis:global-config:tenant-a", "prod"))
+                .thenReturn(Optional.of(new UserConfigService.ResolvedConfig(
+                        UiUserConfig.builder().payload(payload.toString()).build(), UserConfigService.Scope.TENANT)));
+        when(apiKeyCryptoService.decrypt("encrypted-gemini-key")).thenReturn("gem-secret-plain");
+
+        AiCallConfig openAiConfig = service.resolveEffectiveCallConfig(
+                AiCallConfig.builder().provider("openai").model("gpt-4o-mini").build(),
+                "tenant-a",
+                "user-a",
+                "prod");
+        assertEquals("openai", openAiConfig.getProvider());
+        assertEquals(null, openAiConfig.getApiKey());
+
+        AiCallConfig geminiConfig = service.resolveEffectiveCallConfig(
+                AiCallConfig.builder().provider("gemini").model("gemini-2.5-flash").build(),
+                "tenant-a",
+                "user-a",
+                "prod");
+        assertEquals("gemini", geminiConfig.getProvider());
+        assertEquals("gem-secret-plain", geminiConfig.getApiKey());
+    }
 }

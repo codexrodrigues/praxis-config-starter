@@ -24,8 +24,12 @@ public final class TurnSecurityState {
 
     private final AgentSecurityMode mode;
     private boolean tainted;
+    private boolean sovereignEscalated;
+    private boolean hasReadGrounding;
     private final List<AgentSecurityFinding> findings = new ArrayList<>();
     private final Set<String> groundedEntityIds = new LinkedHashSet<>();
+    private final Set<String> accessedResourcePaths = new LinkedHashSet<>();
+    private final Set<String> accessedTopicKeys = new LinkedHashSet<>();
 
     public TurnSecurityState(AgentSecurityMode mode) {
         this.mode = mode == null ? AgentSecurityMode.ENFORCE : mode;
@@ -110,5 +114,41 @@ public final class TurnSecurityState {
 
     public Set<String> groundedEntityIds() {
         return Collections.unmodifiableSet(groundedEntityIds);
+    }
+
+    public boolean isSovereignEscalated() {
+        return sovereignEscalated;
+    }
+
+    public void escalateToSovereign() {
+        this.sovereignEscalated = true;
+    }
+
+    public boolean hasReadGrounding() {
+        return hasReadGrounding;
+    }
+
+    public void markReadGrounding() {
+        this.hasReadGrounding = true;
+    }
+
+    public void recordAccessedResourcePath(String resourcePath) {
+        if (resourcePath != null && !resourcePath.isBlank()) {
+            accessedResourcePaths.add(resourcePath.trim());
+        }
+    }
+
+    public Set<String> accessedResourcePaths() {
+        return Collections.unmodifiableSet(accessedResourcePaths);
+    }
+
+    public void recordAccessedTopicKey(String topicKey) {
+        if (topicKey != null && !topicKey.isBlank()) {
+            accessedTopicKeys.add(topicKey.trim().toLowerCase());
+        }
+    }
+
+    public Set<String> accessedTopicKeys() {
+        return Collections.unmodifiableSet(accessedTopicKeys);
     }
 }

@@ -35,6 +35,12 @@ public final class MicrometerGenAiAgentTelemetryRecorder implements AgentTurnTel
                 .lowCardinalityKeyValue("gen_ai.system", safe(requestedProvider, "auto"))
                 .lowCardinalityKeyValue("gen_ai.request.model", safe(requestedModel, "auto"))
                 .lowCardinalityKeyValue("praxis.environment", safe(context != null ? context.environment() : null, "default"));
+        if (context != null && context.turnId() != null) {
+            turnObs.highCardinalityKeyValue("praxis.ai.turn_id", context.turnId().toString());
+        }
+        if (context != null && context.threadId() != null) {
+            turnObs.highCardinalityKeyValue("praxis.ai.thread_id", context.threadId().toString());
+        }
         turnObs.start();
 
         return new TurnSpan() {
@@ -214,6 +220,22 @@ public final class MicrometerGenAiAgentTelemetryRecorder implements AgentTurnTel
                         .lowCardinalityKeyValue("praxis.agent.security.rule_id", safe(finding.ruleId(), "unknown"))
                         .lowCardinalityKeyValue("praxis.agent.security.decision", finding.decision().name());
                 secObs.start().stop();
+            }
+
+            @Override
+            public void recordArtifactCorrelation(String epistemicKind, String provenanceHash, String proposalId) {
+                if (turnStopped.get()) {
+                    return;
+                }
+                if (epistemicKind != null && !epistemicKind.isBlank()) {
+                    turnObs.lowCardinalityKeyValue("praxis.epistemic.kind", epistemicKind.trim());
+                }
+                if (provenanceHash != null && !provenanceHash.isBlank()) {
+                    turnObs.highCardinalityKeyValue("praxis.intelligence.provenance_hash", provenanceHash.trim());
+                }
+                if (proposalId != null && !proposalId.isBlank()) {
+                    turnObs.highCardinalityKeyValue("praxis.ai.proposal_id", proposalId.trim());
+                }
             }
 
             @Override

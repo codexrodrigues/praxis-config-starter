@@ -115,6 +115,11 @@ public class StatisticalIntelligenceBlockContributor implements OperationalAssis
         }
         putIfText(badge, "failClosedNote", mask(textValue(uiPayload.get("failClosedNote"))));
         putIfText(badge, "errorCode", textValue(uiPayload.get("errorCode")));
+        NigriniSummary nigrini = extractNigriniSummary(uiPayload);
+        if (nigrini != null) {
+            badge.put("nigriniMad", nigrini.mad());
+            putIfText(badge, "nigriniConformity", nigrini.conformity());
+        }
         return badge;
     }
 
@@ -155,8 +160,13 @@ public class StatisticalIntelligenceBlockContributor implements OperationalAssis
         boxplotCfg.put("showOutliers", true);
         boxplotCfg.put("showSampleSize", true);
         ObjectNode quartileFields = boxplotCfg.putObject("quartileFields");
+        quartileFields.put("min", "min");
+        quartileFields.put("q1", "q1");
         quartileFields.put("median", "median");
+        quartileFields.put("q3", "q3");
+        quartileFields.put("max", "max");
         quartileFields.put("outliers", "outliers");
+        quartileFields.put("sampleSize", "sampleSize");
         ObjectNode docLegend = chartDocument.putObject("legend");
         docLegend.put("enabled", false);
         ObjectNode docTooltip = chartDocument.putObject("tooltip");
@@ -206,11 +216,19 @@ public class StatisticalIntelligenceBlockContributor implements OperationalAssis
         if (benfordRows.isEmpty()) {
             return null;
         }
+        NigriniSummary nigrini = extractNigriniSummary(uiPayload);
+        String subtitle = nigrini != null
+                ? String.format(
+                        Locale.ROOT,
+                        "Conformidade Nigrini: %s (MAD %.4f)",
+                        formatNigriniConformity(nigrini.conformity()),
+                        nigrini.mad())
+                : "Distribuição dos primeiros dígitos (Lei de Benford)";
         ObjectNode block = baseChartWidgetBlock(
                 artifact,
                 objectMapper,
                 firstNonBlank(textValue(uiPayload.get("benfordTitle")), "Auditoria Forense Nigrini-Benford"),
-                "Faixas de conformidade Nigrini (0.006 / 0.012 / 0.015)");
+                subtitle);
         ObjectNode inputs = (ObjectNode) block.path("widget").path("inputs");
 
         String chartId = "agent-intel-benford-" + safeSlug(textValue(uiPayload.get("entityKey")));
@@ -231,16 +249,14 @@ public class StatisticalIntelligenceBlockContributor implements OperationalAssis
         ObjectNode observedMetric = metrics.addObject();
         observedMetric.put("field", "observedValue");
         observedMetric.put("aggregation", "sum");
+        observedMetric.put("seriesKind", "bar");
         observedMetric.put("label", "Frequência observada");
         ObjectNode expectedMetric = metrics.addObject();
         expectedMetric.put("field", "expectedValue");
         expectedMetric.put("aggregation", "sum");
+        expectedMetric.put("seriesKind", "line");
         expectedMetric.put("label", "Esperado Benford");
 
-        ArrayNode bands = chartDocument.putArray("referenceBands");
-        addReferenceBand(bands, "Conformidade estreita (<= 0.006)", 0.0d, 0.006d, "success");
-        addReferenceBand(bands, "Conformidade aceitável (0.006 - 0.012)", 0.006d, 0.012d, "info");
-        addReferenceBand(bands, "Marginalmente aceitável (0.012 - 0.015)", 0.012d, 0.015d, "warning");
         ObjectNode docLegend = chartDocument.putObject("legend");
         docLegend.put("enabled", true);
         ObjectNode docTooltip = chartDocument.putObject("tooltip");
@@ -258,29 +274,27 @@ public class StatisticalIntelligenceBlockContributor implements OperationalAssis
         ObjectNode axes = config.putObject("axes");
         ObjectNode xAxis = axes.putObject("x");
         xAxis.put("field", "label");
-        xAxis.put("label", "Coorte");
+        xAxis.put("label", "Dígito inicial (1-9)");
         xAxis.put("type", "category");
         ObjectNode yAxis = axes.putObject("y");
         yAxis.put("field", "observedValue");
-        yAxis.put("label", "Desvio MAD Benford");
+        yAxis.put("label", "Proporção de frequência");
         yAxis.put("type", "value");
         ArrayNode series = config.putArray("series");
         ObjectNode sObserved = series.addObject();
         sObserved.put("id", "observedValue");
         sObserved.put("name", "Frequência observada");
+        sObserved.put("seriesKind", "bar");
         ObjectNode sObsMetric = sObserved.putObject("metric");
         sObsMetric.put("field", "observedValue");
         sObsMetric.put("aggregation", "sum");
         ObjectNode sExpected = series.addObject();
         sExpected.put("id", "expectedValue");
         sExpected.put("name", "Esperado Benford");
+        sExpected.put("seriesKind", "line");
         ObjectNode sExpMetric = sExpected.putObject("metric");
         sExpMetric.put("field", "expectedValue");
         sExpMetric.put("aggregation", "sum");
-        ArrayNode cfgBands = config.putArray("referenceBands");
-        addReferenceBand(cfgBands, "Conformidade estreita (<= 0.006)", 0.0d, 0.006d, "success");
-        addReferenceBand(cfgBands, "Conformidade aceitável (0.006 - 0.012)", 0.006d, 0.012d, "info");
-        addReferenceBand(cfgBands, "Marginalmente aceitável (0.012 - 0.015)", 0.012d, 0.015d, "warning");
         ObjectNode cfgTheme = config.putObject("theme");
         cfgTheme.putObject("surface").put("mode", "embedded");
         cfgTheme.putObject("legend").put("visible", true);
@@ -345,8 +359,15 @@ public class StatisticalIntelligenceBlockContributor implements OperationalAssis
             point.put("cohortKey", cohortKey);
             point.put("label", firstNonBlank(textValue(item.get("label")), cohortKey));
             copyIfPresent(item, point, "method");
+            copyFirstPresent(item, point, "min", "cohortMin");
+            copyFirstPresent(item, point, "q1", "cohortQ1");
             copyFirstPresent(item, point, "median", "cohortMedian");
+            copyFirstPresent(item, point, "q3", "cohortQ3");
+            copyFirstPresent(item, point, "max", "cohortMax");
             copyFirstPresent(item, point, "mad", "cohortMad");
+            copyFirstPresent(item, point, "sampleSize", "cohortSampleSize");
+            extractCohortStepsOntoPoint(item, point);
+            ensureOrderedQuartiles(point, item.get("observedValue"));
             copyIfPresent(item, point, "observedValue");
             copyIfPresent(item, point, "expectedValue");
             copyIfPresent(item, point, "residualValue");
@@ -369,6 +390,19 @@ public class StatisticalIntelligenceBlockContributor implements OperationalAssis
         List<Map<String, Object>> source = !explicit.isEmpty() ? explicit : asMapList(uiPayload.get("findings"));
         if (source.isEmpty()) {
             return List.of();
+        }
+        for (Map<String, Object> item : source) {
+            if (!isExactRelease(item)) {
+                continue;
+            }
+            String method = textValue(item.get("method")).toUpperCase(Locale.ROOT);
+            if (explicit.isEmpty() && !"NIGRINI_BENFORD".equals(method)) {
+                continue;
+            }
+            List<Map<String, Object>> digitRows = extractBenfordDigitRows(item);
+            if (!digitRows.isEmpty()) {
+                return digitRows;
+            }
         }
         List<Map<String, Object>> filtered = new ArrayList<>();
         for (Map<String, Object> item : source) {
@@ -408,6 +442,210 @@ public class StatisticalIntelligenceBlockContributor implements OperationalAssis
         return filtered;
     }
 
+    private static List<Map<String, Object>> extractBenfordDigitRows(Map<String, Object> item) {
+        List<Map<String, Object>> preBuilt = asMapList(item.get("digitDistribution"));
+        if (!preBuilt.isEmpty()) {
+            List<Map<String, Object>> rows = new ArrayList<>(preBuilt.size());
+            for (Map<String, Object> entry : preBuilt) {
+                String digit = textValue(entry.get("digit"));
+                if (!StringUtils.hasText(digit)) {
+                    continue;
+                }
+                Map<String, Object> row = new LinkedHashMap<>();
+                row.put("digit", digit);
+                row.put("label", firstNonBlank(textValue(entry.get("label")), "Dígito " + digit));
+                copyIfPresent(entry, row, "observedValue");
+                copyIfPresent(entry, row, "expectedValue");
+                row.put("suppressionStatus", "EXACT_RELEASE");
+                row.put("suppressed", false);
+                rows.add(row);
+            }
+            if (!rows.isEmpty()) {
+                return rows;
+            }
+        }
+        List<Map<String, Object>> steps = asMapList(item.get("decompositionSteps"));
+        if (steps.isEmpty()) {
+            return List.of();
+        }
+        Map<Integer, Object> observed = new java.util.TreeMap<>();
+        Map<Integer, Object> expected = new java.util.TreeMap<>();
+        for (Map<String, Object> step : steps) {
+            String key = textValue(step.get("stepKey"));
+            Object val = step.get("value");
+            if (val == null || !key.startsWith("benford_digit_") || key.length() < 16) {
+                continue;
+            }
+            char digitChar = key.charAt("benford_digit_".length());
+            if (digitChar >= '1' && digitChar <= '9') {
+                int digit = digitChar - '0';
+                if (key.endsWith("_observed")) {
+                    observed.put(digit, val);
+                } else if (key.endsWith("_expected")) {
+                    expected.put(digit, val);
+                }
+            }
+        }
+        if (observed.isEmpty()) {
+            return List.of();
+        }
+        List<Map<String, Object>> rows = new ArrayList<>(9);
+        for (int digit = 1; digit <= 9; digit++) {
+            Object obs = observed.get(digit);
+            Object exp = expected.get(digit);
+            if (obs == null && exp == null) {
+                continue;
+            }
+            Map<String, Object> row = new LinkedHashMap<>();
+            row.put("digit", String.valueOf(digit));
+            row.put("label", "Dígito " + digit);
+            if (obs != null) {
+                row.put("observedValue", obs);
+            }
+            if (exp != null) {
+                row.put("expectedValue", exp);
+            }
+            row.put("suppressionStatus", "EXACT_RELEASE");
+            row.put("suppressed", false);
+            rows.add(row);
+        }
+        return rows;
+    }
+
+    private static void extractCohortStepsOntoPoint(Map<String, Object> item, Map<String, Object> point) {
+        List<Map<String, Object>> steps = asMapList(item.get("decompositionSteps"));
+        if (steps.isEmpty()) {
+            return;
+        }
+        for (Map<String, Object> step : steps) {
+            String key = textValue(step.get("stepKey"));
+            Object val = step.get("value");
+            if (val == null) {
+                continue;
+            }
+            switch (key) {
+                case "cohort_min" -> point.putIfAbsent("min", val);
+                case "cohort_q1" -> point.putIfAbsent("q1", val);
+                case "cohort_median" -> point.putIfAbsent("median", val);
+                case "cohort_q3" -> point.putIfAbsent("q3", val);
+                case "cohort_max" -> point.putIfAbsent("max", val);
+                case "cohort_sample_size" -> {
+                    if (val instanceof Number n) {
+                        point.putIfAbsent("sampleSize", n.longValue());
+                    }
+                }
+                default -> { }
+            }
+        }
+    }
+
+    private static void ensureOrderedQuartiles(Map<String, Object> point, Object observedObj) {
+        Double medianVal = asFiniteDouble(point.get("median"));
+        if (medianVal == null) {
+            return;
+        }
+        Double q1Val = asFiniteDouble(point.get("q1"));
+        Double q3Val = asFiniteDouble(point.get("q3"));
+        Double minVal = asFiniteDouble(point.get("min"));
+        Double maxVal = asFiniteDouble(point.get("max"));
+        if (minVal == null || q1Val == null || q3Val == null || maxVal == null) {
+            Double madVal = asFiniteDouble(point.get("mad"));
+            double spread = (madVal != null && madVal > 0.0d)
+                    ? madVal
+                    : Math.max(Math.abs(medianVal) * 0.05d, 1.0d);
+            if (q1Val == null) {
+                q1Val = medianVal - spread;
+            }
+            if (q3Val == null) {
+                q3Val = medianVal + spread;
+            }
+            if (minVal == null) {
+                minVal = q1Val - 1.5d * spread;
+            }
+            if (maxVal == null) {
+                maxVal = q3Val + 1.5d * spread;
+            }
+            Double observedVal = asFiniteDouble(observedObj);
+            if (observedVal != null) {
+                minVal = Math.min(minVal, observedVal);
+                maxVal = Math.max(maxVal, observedVal);
+            }
+        }
+        q1Val = Math.min(q1Val, medianVal);
+        q3Val = Math.max(q3Val, medianVal);
+        minVal = Math.min(minVal, q1Val);
+        maxVal = Math.max(maxVal, q3Val);
+        point.put("min", minVal);
+        point.put("q1", q1Val);
+        point.put("median", medianVal);
+        point.put("q3", q3Val);
+        point.put("max", maxVal);
+    }
+
+    private static Double asFiniteDouble(Object value) {
+        if (value instanceof Number n) {
+            double d = n.doubleValue();
+            return Double.isFinite(d) ? d : null;
+        }
+        return null;
+    }
+
+    private record NigriniSummary(double mad, String conformity) { }
+
+    private static NigriniSummary extractNigriniSummary(Map<String, Object> uiPayload) {
+        if (uiPayload == null || uiPayload.isEmpty()) {
+            return null;
+        }
+        List<Map<String, Object>> explicit = asMapList(uiPayload.get("benfordFindings"));
+        List<Map<String, Object>> source = !explicit.isEmpty() ? explicit : asMapList(uiPayload.get("findings"));
+        for (Map<String, Object> item : source) {
+            if (!isExactRelease(item)) {
+                continue;
+            }
+            String method = textValue(item.get("method")).toUpperCase(Locale.ROOT);
+            if (explicit.isEmpty() && !"NIGRINI_BENFORD".equals(method)) {
+                continue;
+            }
+            Double madVal = asFiniteDouble(item.get("nigriniMad"));
+            if (madVal == null) {
+                madVal = asFiniteDouble(item.get("observedValue"));
+            }
+            if (madVal != null) {
+                String conformity = textValue(item.get("nigriniConformity"));
+                if (!StringUtils.hasText(conformity)) {
+                    conformity = classifyNigriniConformity(madVal);
+                }
+                return new NigriniSummary(madVal, conformity);
+            }
+        }
+        return null;
+    }
+
+    private static String classifyNigriniConformity(double mad) {
+        if (mad <= 0.006d) {
+            return "CONFORMIDADE_ESTREITA";
+        }
+        if (mad <= 0.012d) {
+            return "CONFORMIDADE_ACEITAVEL";
+        }
+        if (mad <= 0.015d) {
+            return "MARGINALMENTE_ACEITAVEL";
+        }
+        return "NAO_CONFORMIDADE";
+    }
+
+    private static String formatNigriniConformity(String conformity) {
+        if (!StringUtils.hasText(conformity)) {
+            return "Não avaliada";
+        }
+        return switch (conformity.trim().toUpperCase(Locale.ROOT)) {
+            case "CONFORMIDADE_ESTREITA" -> "Conformidade estreita";
+            case "CONFORMIDADE_ACEITAVEL" -> "Conformidade aceitável";
+            case "MARGINALMENTE_ACEITAVEL" -> "Marginalmente aceitável";
+            default -> "Não conformidade";
+        };
+    }
+
     private static boolean isExactRelease(Map<String, Object> item) {
         if (item == null || Boolean.TRUE.equals(item.get("suppressed"))) {
             return false;
@@ -430,20 +668,6 @@ public class StatisticalIntelligenceBlockContributor implements OperationalAssis
         }
         putIfText(target, "modelCardId", mask(env.modelCardId()));
         putIfText(target, "provenanceHash", env.provenanceHash());
-    }
-
-    private static void addReferenceBand(
-            ArrayNode bands,
-            String label,
-            double minValue,
-            double maxValue,
-            String tone) {
-        ObjectNode band = bands.addObject();
-        band.put("label", label);
-        band.put("min", minValue);
-        band.put("max", maxValue);
-        band.put("axis", "y");
-        band.put("tone", tone);
     }
 
     @SuppressWarnings("unchecked")

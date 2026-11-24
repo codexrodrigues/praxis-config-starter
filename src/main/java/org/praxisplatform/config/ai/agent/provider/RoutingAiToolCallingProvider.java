@@ -243,16 +243,21 @@ public class RoutingAiToolCallingProvider implements AiToolCallingProvider {
                 .model(overrideModel)
                 .apiKey(null)
                 .build();
+        String normalizedFallback = normalize(fallbackProvider);
         if (providerManagementService != null) {
             AiCallConfig resolved = providerManagementService.resolveEffectiveCallConfig(
                     fallbackSeed,
                     fallbackSeed.getTenantId(),
                     null,
                     fallbackSeed.getEnvironment());
-            // Do not blindly forward stored primary provider's API key into another vendor's SDK client.
-            return resolved != null
-                    ? resolved.toBuilder().apiKey(null).build()
-                    : fallbackSeed;
+            // Keep key only when resolved provider matches the requested fallback vendor.
+            if (resolved != null) {
+                String resolvedProvider = normalize(resolved.getProvider());
+                return normalizedFallback != null && normalizedFallback.equals(resolvedProvider)
+                        ? resolved
+                        : resolved.toBuilder().apiKey(null).build();
+            }
+            return fallbackSeed;
         }
         return fallbackSeed;
     }

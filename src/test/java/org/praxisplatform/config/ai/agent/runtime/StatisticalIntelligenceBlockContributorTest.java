@@ -115,6 +115,8 @@ class StatisticalIntelligenceBlockContributorTest {
         assertThat(badge.path("rowsScanned").asLong()).isEqualTo(500L);
         assertThat(badge.path("title").asText()).doesNotContain("11144477735");
         assertThat(badge.path("methodologyNote").asText()).doesNotContain("ops.auditor@workforce.org");
+        assertThat(badge.path("nigriniMad").asDouble()).isEqualTo(0.021d);
+        assertThat(badge.path("nigriniConformity").asText()).isEqualTo("NAO_CONFORMIDADE");
 
         JsonNode boxplot = blocks.get(2);
         assertThat(boxplot.path("type").asText()).isEqualTo("widget-block");
@@ -126,6 +128,11 @@ class StatisticalIntelligenceBlockContributorTest {
         assertThat(boxplotDoc.path("metrics")).hasSize(1);
         assertThat(boxplotDoc.path("theme").path("surface").path("mode").asText()).isEqualTo("embedded");
         assertThat(boxplotDoc.path("boxplot").path("scaleMethod").asText()).isEqualTo("mad");
+        assertThat(boxplotDoc.path("boxplot").path("quartileFields").path("min").asText()).isEqualTo("min");
+        assertThat(boxplotDoc.path("boxplot").path("quartileFields").path("q1").asText()).isEqualTo("q1");
+        assertThat(boxplotDoc.path("boxplot").path("quartileFields").path("median").asText()).isEqualTo("median");
+        assertThat(boxplotDoc.path("boxplot").path("quartileFields").path("q3").asText()).isEqualTo("q3");
+        assertThat(boxplotDoc.path("boxplot").path("quartileFields").path("max").asText()).isEqualTo("max");
         assertThat(boxplotDoc.path("boxplot").path("quartileFields").path("outliers").asText()).isEqualTo("outliers");
         assertThat(boxplot.path("widget").path("inputs").path("config").path("type").asText()).isEqualTo("boxplot");
         assertThat(boxplot.path("epistemicMeta").path("provenanceHash").asText()).isEqualTo("a".repeat(64));
@@ -133,30 +140,123 @@ class StatisticalIntelligenceBlockContributorTest {
         assertThat(boxplotData.size()).isEqualTo(1);
         assertThat(boxplotData.toString()).doesNotContain("tiny_protected_unit").doesNotContain("9999");
         assertThat(boxplotData.get(0).path("cohortKey").asText()).doesNotContain("11144477735");
+        assertThat(boxplotData.get(0).path("min").asDouble())
+                .isLessThanOrEqualTo(boxplotData.get(0).path("q1").asDouble());
+        assertThat(boxplotData.get(0).path("q1").asDouble())
+                .isLessThanOrEqualTo(boxplotData.get(0).path("median").asDouble());
+        assertThat(boxplotData.get(0).path("median").asDouble())
+                .isLessThanOrEqualTo(boxplotData.get(0).path("q3").asDouble());
+        assertThat(boxplotData.get(0).path("q3").asDouble())
+                .isLessThanOrEqualTo(boxplotData.get(0).path("max").asDouble());
         assertThat(boxplotData.get(0).path("outliers").isArray()).isTrue();
         assertThat(boxplotData.get(0).path("outliers")).hasSize(1);
 
         JsonNode benford = blocks.get(3);
         assertThat(benford.path("type").asText()).isEqualTo("widget-block");
+        assertThat(benford.path("subtitle").asText()).contains("0.0210");
         JsonNode benfordDoc = benford.path("widget").path("inputs").path("chartDocument");
         assertThat(benfordDoc.path("kind").asText()).isEqualTo("combo");
         assertThat(benfordDoc.path("dimensions")).hasSize(1);
         assertThat(benfordDoc.path("metrics")).hasSize(2);
+        assertThat(benfordDoc.path("metrics").get(0).path("seriesKind").asText()).isEqualTo("bar");
+        assertThat(benfordDoc.path("metrics").get(1).path("seriesKind").asText()).isEqualTo("line");
         assertThat(benfordDoc.path("theme").path("surface").path("mode").asText()).isEqualTo("embedded");
-        assertThat(benfordDoc.path("referenceBands").size()).isEqualTo(3);
-        for (JsonNode band : benfordDoc.path("referenceBands")) {
-            assertThat(band.has("min")).isTrue();
-            assertThat(band.has("max")).isTrue();
-            assertThat(band.path("axis").asText()).isEqualTo("y");
-            assertThat(band.has("from")).isFalse();
-            assertThat(band.has("to")).isFalse();
-        }
+        assertThat(benfordDoc.has("referenceBands")).isFalse();
         assertThat(benford.path("widget").path("inputs").path("config").path("type").asText()).isEqualTo("combo");
+        assertThat(benford.path("widget").path("inputs").path("config").has("referenceBands")).isFalse();
         JsonNode benfordDataRow = benford.path("widget").path("inputs").path("data").get(0);
         assertThat(benfordDataRow.has("details")).isFalse();
         assertThat(benfordDataRow.has("reason")).isFalse();
 
         JsonNode sanitizedSse = redactor.sanitizeEventPayload(content);
         assertThat(sanitizedSse.toString()).doesNotContain("[REDACTED]");
+    }
+
+    @Test
+    void projectsFivePointCohortQuartilesAndNineDigitBenfordBarsAndLineFromDecompositionSteps() {
+        AgentTurnArtifactStore artifacts = new AgentTurnArtifactStore();
+        AgentEpistemicEnvelope envelope = new AgentEpistemicEnvelope(
+                AgentEpistemicEnvelope.KIND_CALIBRATED_PROBABILITY,
+                AgentEpistemicEnvelope.AVAILABILITY_AVAILABLE,
+                true,
+                0.002d,
+                120L,
+                0,
+                "b".repeat(64),
+                "WF-STAT-CARD-02",
+                "workforce.payroll.items",
+                "Analise 9 digitos Benford + quartis.");
+
+        List<Map<String, Object>> cohortSteps = List.of(
+                Map.of("stepKey", "cohort_min", "label", "Minimo", "value", 100.0d),
+                Map.of("stepKey", "cohort_q1", "label", "Q1", "value", 150.0d),
+                Map.of("stepKey", "cohort_median", "label", "Mediana", "value", 200.0d),
+                Map.of("stepKey", "cohort_q3", "label", "Q3", "value", 250.0d),
+                Map.of("stepKey", "cohort_max", "label", "Maximo", "value", 350.0d),
+                Map.of("stepKey", "cohort_sample_size", "label", "Amostra", "value", 48L));
+        Map<String, Object> madFinding = Map.ofEntries(
+                Map.entry("findingId", "f-cohort"),
+                Map.entry("method", "ROBUST_MAD_ZSCORE"),
+                Map.entry("cohortKey", "eng_senior"),
+                Map.entry("observedValue", 420.0d),
+                Map.entry("expectedValue", 200.0d),
+                Map.entry("residualValue", 220.0d),
+                Map.entry("decompositionSteps", cohortSteps),
+                Map.entry("suppressionStatus", "EXACT_RELEASE"));
+
+        List<Map<String, Object>> benfordSteps = new java.util.ArrayList<>();
+        for (int d = 1; d <= 9; d++) {
+            double exp = Math.log10(1.0d + 1.0d / d);
+            double obs = d == 1 ? 0.310d : exp;
+            benfordSteps.add(Map.of("stepKey", "benford_digit_" + d + "_observed", "value", obs));
+            benfordSteps.add(Map.of("stepKey", "benford_digit_" + d + "_expected", "value", exp));
+        }
+        Map<String, Object> benfordFinding = Map.of(
+                "findingId", "f-benford-9",
+                "method", "NIGRINI_BENFORD",
+                "observedValue", 0.0045d,
+                "expectedValue", 0.006d,
+                "decompositionSteps", benfordSteps,
+                "suppressionStatus", "EXACT_RELEASE");
+
+        artifacts.recordExtensionArtifact(new AgentExtensionArtifact(
+                AgentExtensionArtifact.KIND_ANOMALY_SCAN,
+                "scan_resource_anomalies",
+                Map.of(
+                        "entityKey", "workforce.payroll.items",
+                        "resourceKey", "workforce.payroll.items",
+                        "resourcePath", "/api/workforce/payroll-items",
+                        "cohortPoints", List.of(madFinding),
+                        "benfordFindings", List.of(benfordFinding),
+                        "findings", List.of(madFinding, benfordFinding)),
+                envelope));
+
+        OperationalAssistantBlockComposer composer = new OperationalAssistantBlockComposer(
+                objectMapper, List.of(new StatisticalIntelligenceBlockContributor()));
+        JsonNode blocks = composer.compose("Analise completa.", artifacts).assistantContent().path("blocks");
+
+        JsonNode badge = blocks.get(1);
+        assertThat(badge.path("nigriniMad").asDouble()).isEqualTo(0.0045d);
+        assertThat(badge.path("nigriniConformity").asText()).isEqualTo("CONFORMIDADE_ESTREITA");
+
+        JsonNode boxRow = blocks.get(2).path("widget").path("inputs").path("data").get(0);
+        assertThat(boxRow.path("min").asDouble()).isEqualTo(100.0d);
+        assertThat(boxRow.path("q1").asDouble()).isEqualTo(150.0d);
+        assertThat(boxRow.path("median").asDouble()).isEqualTo(200.0d);
+        assertThat(boxRow.path("q3").asDouble()).isEqualTo(250.0d);
+        assertThat(boxRow.path("max").asDouble()).isEqualTo(350.0d);
+        assertThat(boxRow.path("sampleSize").asLong()).isEqualTo(48L);
+
+        JsonNode benfordBlock = blocks.get(3);
+        assertThat(benfordBlock.path("subtitle").asText()).contains("Conformidade estreita").contains("0.0045");
+        JsonNode benfordCfg = benfordBlock.path("widget").path("inputs").path("config");
+        assertThat(benfordCfg.path("axes").path("x").path("label").asText()).isEqualTo("Dígito inicial (1-9)");
+        assertThat(benfordCfg.path("axes").path("y").path("label").asText()).isEqualTo("Proporção de frequência");
+        assertThat(benfordCfg.path("series").get(0).path("seriesKind").asText()).isEqualTo("bar");
+        assertThat(benfordCfg.path("series").get(1).path("seriesKind").asText()).isEqualTo("line");
+        JsonNode benfordData = benfordBlock.path("widget").path("inputs").path("data");
+        assertThat(benfordData).hasSize(9);
+        assertThat(benfordData.get(0).path("digit").asText()).isEqualTo("1");
+        assertThat(benfordData.get(8).path("digit").asText()).isEqualTo("9");
     }
 }

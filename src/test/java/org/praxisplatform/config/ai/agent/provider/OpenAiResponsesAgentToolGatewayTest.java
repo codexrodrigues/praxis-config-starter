@@ -500,4 +500,61 @@ class OpenAiResponsesAgentToolGatewayTest {
         Headers headers = Headers.builder().put("Retry-After", "15").build();
         assertThat(OpenAiResponsesAgentToolGateway.parseRetryAfter(headers)).isNotNull();
     }
+
+    @Test
+    void respectsPerCallBaseUrlOverrideAndDisablesNativeStrictOptimizationsForNonNativeEndpoints() {
+        AtomicReference<String> capturedBaseUrl = new AtomicReference<>();
+        AtomicReference<ResponseCreateParams> capturedParams = new AtomicReference<>();
+        OpenAiResponsesAgentToolGateway gateway = new OpenAiResponsesAgentToolGateway(
+                new ObjectMapper(),
+                "sk-test-openai",
+                "",
+                "gpt-4o-mini",
+                (apiKey, baseUrl, timeout, params) -> {
+                    capturedBaseUrl.set(baseUrl);
+                    capturedParams.set(params);
+                    return Response.builder()
+                            .id("resp-override")
+                            .createdAt(1.0d)
+                            .model(ResponsesModel.ofString("sovereign-model"))
+                            .parallelToolCalls(true)
+                            .toolChoice(Response.ToolChoice.ofOptions(ToolChoiceOptions.AUTO))
+                            .tools(List.of())
+                            .error(java.util.Optional.empty())
+                            .incompleteDetails(java.util.Optional.empty())
+                            .instructions(java.util.Optional.empty())
+                            .metadata(java.util.Optional.empty())
+                            .temperature(0.2d)
+                            .topP(1.0d)
+                            .output(List.of())
+                            .build();
+                });
+
+        AgentToolDeclaration strictEligibleTool = new AgentToolDeclaration(
+                "lookup_item",
+                "Lookup",
+                Map.of(
+                        "type", "object",
+                        "additionalProperties", false,
+                        "properties", Map.of("id", Map.of("type", "string")),
+                        "required", List.of("id")),
+                List.of("id"));
+
+        gateway.generateTurn(
+                new AgentModelTurnRequest(
+                        "Rules",
+                        List.of(AgentConversationItem.userText("Test")),
+                        List.of(strictEligibleTool),
+                        AiCallConfig.builder()
+                                .provider("openai")
+                                .model("sovereign-model")
+                                .baseUrl("https://llm.sovereign.local/v1/")
+                                .promptCacheKey("tenant-cache-key")
+                                .build()),
+                AgentModelStreamListener.NOOP);
+
+        assertThat(capturedBaseUrl.get()).isEqualTo("https://llm.sovereign.local/v1");
+        assertThat(capturedParams.get().promptCacheKey()).isEmpty();
+        assertThat(capturedParams.get().tools().orElseThrow().get(0).asFunction().strict()).contains(false);
+    }
 }

@@ -101,7 +101,7 @@ public class AiProviderManagementService {
                 stored != null ? stored.provider() : null);
         AiCallConfig config = AiCallConfig.builder()
                 .provider(provider)
-                .apiKey(resolveApiKey(request != null ? request.getApiKey() : null, stored))
+                .apiKey(resolveApiKey(request != null ? request.getApiKey() : null, provider, stored))
                 .build();
         try {
             List<AiProviderModel> models = listModelsByProvider(provider, config);
@@ -138,7 +138,7 @@ public class AiProviderManagementService {
                 stored != null ? stored.provider() : null);
         AiCallConfig config = AiCallConfig.builder()
                 .provider(provider)
-                .apiKey(resolveApiKey(request != null ? request.getApiKey() : null, stored))
+                .apiKey(resolveApiKey(request != null ? request.getApiKey() : null, provider, stored))
                 .model(resolveModel(request != null ? request.getModel() : null, stored))
                 .temperature(0.0)
                 .maxTokens(CONNECTION_PROBE_MAX_TOKENS)
@@ -239,7 +239,7 @@ public class AiProviderManagementService {
                 : AiCallConfig.builder();
         AiCallConfig config = configBuilder
                 .provider(provider)
-                .apiKey(resolveApiKey(requestConfig != null ? requestConfig.getApiKey() : null, stored))
+                .apiKey(resolveApiKey(requestConfig != null ? requestConfig.getApiKey() : null, provider, stored))
                 .model(resolveCallModel(provider, requestConfig, stored))
                 .temperature(requestConfig != null ? requestConfig.getTemperature() : null)
                 .maxTokens(requestConfig != null ? requestConfig.getMaxTokens() : null)
@@ -279,7 +279,7 @@ public class AiProviderManagementService {
                 : AiCallConfig.builder();
         AiCallConfig config = configBuilder
                 .provider(provider)
-                .apiKey(resolveApiKey(requestConfig != null ? requestConfig.getApiKey() : null, stored))
+                .apiKey(resolveApiKey(requestConfig != null ? requestConfig.getApiKey() : null, provider, stored))
                 .model(resolveCallModel(provider, requestConfig, stored))
                 .temperature(requestConfig != null ? requestConfig.getTemperature() : null)
                 .maxTokens(requestConfig != null ? requestConfig.getMaxTokens() : null)
@@ -322,7 +322,7 @@ public class AiProviderManagementService {
                 : AiCallConfig.builder();
         return builder
                 .provider(provider)
-                .apiKey(resolveApiKey(requestConfig != null ? requestConfig.getApiKey() : null, stored))
+                .apiKey(resolveApiKey(requestConfig != null ? requestConfig.getApiKey() : null, provider, stored))
                 .model(model)
                 .temperature(requestConfig != null ? requestConfig.getTemperature() : null)
                 .maxTokens(requestConfig != null ? requestConfig.getMaxTokens() : null)
@@ -779,12 +779,23 @@ public class AiProviderManagementService {
         }
     }
 
-    private String resolveApiKey(String requested, StoredAiConfig stored) {
+    private String resolveApiKey(String requested, String resolvedProvider, StoredAiConfig stored) {
         String resolved = trimToNull(requested);
         if (resolved != null) {
             return resolved;
         }
-        return stored != null ? trimToNull(stored.apiKey()) : null;
+        if (stored == null) {
+            return null;
+        }
+        String storedProvider = trimToNull(stored.provider());
+        if (storedProvider != null && resolvedProvider != null) {
+            String canonicalStored = normalizeAlias(normalizeProvider(storedProvider));
+            String canonicalResolved = normalizeAlias(normalizeProvider(resolvedProvider));
+            if (!canonicalStored.equals(canonicalResolved)) {
+                return null;
+            }
+        }
+        return trimToNull(stored.apiKey());
     }
 
     private String resolveCallModel(String provider, AiCallConfig request, StoredAiConfig stored) {

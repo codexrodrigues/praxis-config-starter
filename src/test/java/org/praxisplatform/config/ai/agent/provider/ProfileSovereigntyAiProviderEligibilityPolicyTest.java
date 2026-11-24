@@ -127,6 +127,16 @@ class ProfileSovereigntyAiProviderEligibilityPolicyTest {
         assertThat(policy.evaluate("open-ai", "self-hosted", restrictedByTopic).eligible()).isTrue();
         assertThat(policy.evaluate("openai", "self-hosted", restrictedBySegment).eligible()).isTrue();
         assertThat(policy.evaluate("gemini", "gemini-2.5-flash", publicCtx).eligible()).isTrue();
+
+        AgentExecutionContext midTurnTopicEscalated = contextWith(
+                "/api/workforce/public-catalog",
+                Map.of("accessedTopicKeys", List.of("catalog", "payroll")));
+        AgentExecutionContext midTurnPathEscalated = contextWith(
+                "/api/workforce/public-catalog",
+                Map.of("accessedResourcePaths", List.of("/api/workforce/v2/confidential-payslip/items")));
+        assertThat(policy.evaluate("gemini", "gemini-2.5-flash", midTurnTopicEscalated).eligible()).isFalse();
+        assertThat(policy.evaluate("gemini", "gemini-2.5-flash", midTurnPathEscalated).eligible()).isFalse();
+        assertThat(policy.evaluate("openai", "self-hosted", midTurnTopicEscalated).eligible()).isTrue();
     }
 
     private static AgentExecutionContext contextWith(String screenPath, Map<String, Object> claims) {

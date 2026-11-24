@@ -1,11 +1,15 @@
 package org.praxisplatform.config.ai.agent.runtime;
 
 import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Collections;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import lombok.extern.slf4j.Slf4j;
 import org.praxisplatform.config.ai.agent.model.AgentConversationItem;
 import org.praxisplatform.config.ai.agent.model.AgentModelStreamListener;
@@ -25,6 +29,7 @@ import org.praxisplatform.config.ai.agent.security.TurnSecurityState;
 import org.praxisplatform.config.ai.agent.spi.AgentEpistemicEnvelope;
 import org.praxisplatform.config.ai.agent.spi.AgentExecutionContext;
 import org.praxisplatform.config.ai.agent.spi.AgentExtensionArtifact;
+import org.praxisplatform.config.ai.agent.spi.AgentPersistedActionProposal;
 import org.praxisplatform.config.ai.agent.spi.AgentResourceExecutionBridge;
 import org.praxisplatform.config.ai.agent.spi.AgentTopicDescriptor;
 import org.praxisplatform.config.ai.agent.telemetry.AgentTurnTelemetryRecorder;
@@ -228,16 +233,9 @@ public class PraxisOperationalAgentLoop {
             AgentExecutionContext effectiveContext = inbound.sanitizedContext();
             AgentExecutionContext modelSafeContext = sanitizeExecutionContextForModel(effectiveContext);
             String safePrompt = inbound.sanitizedUserMessage();
-            if (history != null) {
-                for (ConversationHistoryEntry entry : history) {
-                    if (entry != null && StringUtils.hasText(entry.text())
-                            && !DefaultDeterministicAgentSecurityGuard.isSuspicious(entry.text())) {
-                        securityState.groundFromTrustedHistoryText(entry.text());
-                    }
-                }
-            }
-            List<AgentConversationItem> conversation = buildInitialConversation(history, safePrompt, vault);
-            String systemInstruction = buildSystemInstruction(effectiveContext);
+            List<AgentConversationItem> conversation = buildInitialConversation(
+                    history, safePrompt, vault, securityGuard, securityState, turnSpan);
+            String systemInstruction = buildSystemInstruction(modelSafeContext, effectiveContext);
 
             for (int round = 1; round <= maxIterations; round++) {
                 if (progress.isCancelled()) {
@@ -252,6 +250,7 @@ public class PraxisOperationalAgentLoop {
                 rounds = round;
                 progress.onStatus("reasoning", "Analisando solicitação operacional...");
 
+                AgentExecutionContext roundModelContext = enrichModelContextForTurn(modelSafeContext, securityState);
                 AgentModelTurnResponse response;
                 try (AgentTurnTelemetryRecorder.ModelRoundSpan roundSpan =
                         turnSpan.startModelRound(round, provider, model)) {
@@ -264,7 +263,7 @@ public class PraxisOperationalAgentLoop {
                                         callConfig,
                                         false,
                                         Map.of(),
-                                        modelSafeContext),
+                                        roundModelContext),
                                 AgentModelStreamListener.NOOP);
                     } catch (RuntimeException ex) {
                         roundSpan.fail(ex);
@@ -340,6 +339,7 @@ public class PraxisOperationalAgentLoop {
                         } else {
                             try {
                                 Map<String, Object> rawOutput = tool.execute(effectiveContext, vault, artifacts, call.arguments());
+                                recordToolAccessAndSovereignty(call.arguments(), rawOutput, securityState);
                                 Map<String, Object> scrubbed = rawOutput == null
                                         ? Map.of()
                                         : vault.scrubOutboundForModel(
@@ -365,6 +365,12 @@ public class PraxisOperationalAgentLoop {
                 }
                 conversation.add(AgentConversationItem.toolResults(results));
                 if (round == maxIterations && !progress.isCancelled()) {
+                    if (TransactionSynchronizationManager.isActualTransactionActive()) {
+                        finishStatus = "error";
+                        throw new IllegalStateException(
+                                "Agent loop must never hold an active database transaction during LLM I/O.");
+                    }
+                    AgentExecutionContext synthModelContext = enrichModelContextForTurn(modelSafeContext, securityState);
                     try (AgentTurnTelemetryRecorder.ModelRoundSpan synthSpan =
                             turnSpan.startModelRound(round + 1, provider, model)) {
                         AgentModelTurnResponse synthesis;
@@ -377,7 +383,7 @@ public class PraxisOperationalAgentLoop {
                                             callConfig,
                                             true,
                                             Map.of(),
-                                            modelSafeContext),
+                                            synthModelContext),
                                     AgentModelStreamListener.NOOP);
                         } catch (RuntimeException ex) {
                             synthSpan.fail(ex);
@@ -415,6 +421,7 @@ public class PraxisOperationalAgentLoop {
             OperationalAssistantBlockComposer.ComposedAssistantOutput composed =
                     blockComposer.compose(finalText, artifacts);
 
+            recordTurnArtifactCorrelation(turnSpan, artifacts);
             AgentTurnTelemetrySummary summary = turnSpan.complete(
                     provider, model, rounds, totalUsage, securityState.isTainted(), finishStatus);
             return new AgentTurnOutcome(
@@ -452,7 +459,10 @@ public class PraxisOperationalAgentLoop {
     private static List<AgentConversationItem> buildInitialConversation(
             List<ConversationHistoryEntry> history,
             String sanitizedPrompt,
-            TurnScopedPiiVault vault) {
+            TurnScopedPiiVault vault,
+            AgentSecurityGuard securityGuard,
+            TurnSecurityState securityState,
+            AgentTurnTelemetryRecorder.TurnSpan turnSpan) {
         List<AgentConversationItem> items = new ArrayList<>();
         if (history != null) {
             for (ConversationHistoryEntry entry : history) {
@@ -460,10 +470,17 @@ public class PraxisOperationalAgentLoop {
                     continue;
                 }
                 String safeHistory = vault.tokenizeAdditional(entry.text());
+                int before = securityState.findings().size();
+                AgentSecurityGuard.HistoryCheckResult historyCheck =
+                        securityGuard.guardHistoryEntry(entry.role(), safeHistory, securityState);
+                recordNewFindings(turnSpan, securityState, before);
+                String finalHistoryText = historyCheck != null && StringUtils.hasText(historyCheck.sanitizedText())
+                        ? historyCheck.sanitizedText()
+                        : safeHistory;
                 if ("assistant".equalsIgnoreCase(entry.role())) {
-                    items.add(AgentConversationItem.assistantText(safeHistory));
+                    items.add(AgentConversationItem.assistantText(finalHistoryText));
                 } else {
-                    items.add(AgentConversationItem.userText(safeHistory));
+                    items.add(AgentConversationItem.userText(finalHistoryText));
                 }
             }
         }
@@ -471,8 +488,135 @@ public class PraxisOperationalAgentLoop {
         return items;
     }
 
-    private String buildSystemInstruction(AgentExecutionContext context) {
-        return instructionComposer.compose(context, buildTopicDiscoverySummary(context));
+    private String buildSystemInstruction(AgentExecutionContext modelSafeContext, AgentExecutionContext effectiveContext) {
+        return instructionComposer.compose(modelSafeContext, buildTopicDiscoverySummary(effectiveContext));
+    }
+
+    private static void recordTurnArtifactCorrelation(
+            AgentTurnTelemetryRecorder.TurnSpan turnSpan,
+            AgentTurnArtifactStore artifacts) {
+        if (turnSpan == null || artifacts == null) {
+            return;
+        }
+        String epistemicKind = null;
+        String provenanceHash = null;
+        List<AgentExtensionArtifact> extensions = artifacts.extensionArtifacts();
+        if (!extensions.isEmpty()) {
+            AgentExtensionArtifact latest = extensions.get(extensions.size() - 1);
+            if (latest != null && latest.epistemicEnvelope() != null) {
+                epistemicKind = latest.epistemicEnvelope().epistemicKind();
+                provenanceHash = latest.epistemicEnvelope().provenanceHash();
+            }
+        }
+        String proposalId = null;
+        List<AgentPersistedActionProposal> proposals = artifacts.actionProposals();
+        if (!proposals.isEmpty()) {
+            AgentPersistedActionProposal latestProposal = proposals.get(proposals.size() - 1);
+            if (latestProposal != null && latestProposal.proposalId() != null) {
+                proposalId = latestProposal.proposalId().toString();
+            }
+        }
+        if (StringUtils.hasText(epistemicKind) || StringUtils.hasText(provenanceHash) || StringUtils.hasText(proposalId)) {
+            turnSpan.recordArtifactCorrelation(epistemicKind, provenanceHash, proposalId);
+        }
+    }
+
+    private static void recordToolAccessAndSovereignty(
+            Map<String, Object> arguments,
+            Map<String, Object> rawOutput,
+            TurnSecurityState state) {
+        if (state == null) {
+            return;
+        }
+        collectAccessMetadata(arguments, state, 0);
+        collectAccessMetadata(rawOutput, state, 0);
+    }
+
+    private static void collectAccessMetadata(Object node, TurnSecurityState state, int depth) {
+        if (node == null || depth > 4) {
+            return;
+        }
+        if (node instanceof Map<?, ?> map) {
+            for (Map.Entry<?, ?> entry : map.entrySet()) {
+                String key = entry.getKey() == null ? null : entry.getKey().toString();
+                Object val = entry.getValue();
+                if (val == null || "fields".equals(key) || "columns".equals(key)) {
+                    continue;
+                }
+                if ("resourcePath".equals(key) && val instanceof String s && StringUtils.hasText(s)) {
+                    state.recordAccessedResourcePath(s);
+                } else if (("topicKey".equals(key) || "activeTopicKey".equals(key))
+                        && val instanceof String s && StringUtils.hasText(s)) {
+                    state.recordAccessedTopicKey(s);
+                } else if ("sovereignOnly".equals(key)
+                        && (Boolean.TRUE.equals(val) || "true".equalsIgnoreCase(String.valueOf(val).trim()))) {
+                    state.escalateToSovereign();
+                } else if (val instanceof Map<?, ?> || val instanceof Collection<?>) {
+                    collectAccessMetadata(val, state, depth + 1);
+                }
+            }
+        } else if (node instanceof Collection<?> col) {
+            for (Object item : col) {
+                collectAccessMetadata(item, state, depth + 1);
+            }
+        }
+    }
+
+    private static AgentExecutionContext enrichModelContextForTurn(
+            AgentExecutionContext base,
+            TurnSecurityState state) {
+        if (base == null || state == null) {
+            return base;
+        }
+        Set<String> accessedPaths = state.accessedResourcePaths();
+        Set<String> accessedTopics = state.accessedTopicKeys();
+        boolean escalated = state.isSovereignEscalated();
+        if (accessedPaths.isEmpty() && accessedTopics.isEmpty() && !escalated) {
+            return base;
+        }
+        Map<String, Object> claims = base.propagatedClaims() != null
+                ? new LinkedHashMap<>(base.propagatedClaims())
+                : new LinkedHashMap<>();
+        if (!accessedPaths.isEmpty()) {
+            Set<String> merged = new LinkedHashSet<>();
+            addStringsFromClaim(claims.get("accessedResourcePaths"), merged);
+            merged.addAll(accessedPaths);
+            claims.put("accessedResourcePaths", List.copyOf(merged));
+        }
+        if (!accessedTopics.isEmpty()) {
+            Set<String> merged = new LinkedHashSet<>();
+            addStringsFromClaim(claims.get("accessedTopicKeys"), merged);
+            merged.addAll(accessedTopics);
+            claims.put("accessedTopicKeys", List.copyOf(merged));
+        }
+        if (escalated) {
+            claims.put("sovereignOnly", true);
+        }
+        return new AgentExecutionContext(
+                base.threadId(),
+                base.turnId(),
+                base.streamId(),
+                base.tenantId(),
+                base.userId(),
+                base.environment(),
+                base.principalName(),
+                base.authorities(),
+                base.activeScreenResourcePath(),
+                base.activeTopicKey(),
+                base.activeSelectionHints(),
+                Collections.unmodifiableMap(claims));
+    }
+
+    private static void addStringsFromClaim(Object rawClaim, Set<String> sink) {
+        if (rawClaim instanceof String s && StringUtils.hasText(s)) {
+            sink.add(s.trim());
+        } else if (rawClaim instanceof Collection<?> col) {
+            for (Object item : col) {
+                if (item != null && StringUtils.hasText(item.toString())) {
+                    sink.add(item.toString().trim());
+                }
+            }
+        }
     }
 
     private String buildTopicDiscoverySummary(AgentExecutionContext context) {

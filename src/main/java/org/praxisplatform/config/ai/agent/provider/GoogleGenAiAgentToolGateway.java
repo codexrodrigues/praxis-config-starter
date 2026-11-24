@@ -137,13 +137,14 @@ public class GoogleGenAiAgentToolGateway implements AiToolCallingProvider {
             throw new IllegalStateException("Gemini API key is not configured.");
         }
         String model = firstNonBlank(callConfig != null ? callConfig.getModel() : null, defaultModel);
+        String effectiveBaseUrl = firstNonBlank(callConfig != null ? callConfig.getBaseUrl() : null, defaultBaseUrl);
 
         List<Content> contents = toGeminiContents(request.conversation());
-        GenerateContentConfig config = toGeminiConfig(request, model, callConfig);
+        GenerateContentConfig config = toGeminiConfig(request, model, callConfig, effectiveBaseUrl);
 
         try {
             GenerateContentResponse response = exchange == null
-                    ? invokeSdk(apiKey, defaultBaseUrl, model, contents, config)
+                    ? invokeSdk(apiKey, effectiveBaseUrl, model, contents, config)
                     : exchange.generate(apiKey, model, contents, config);
             return fromGeminiResponse(model, response, listener);
         } catch (RuntimeException ex) {
@@ -221,17 +222,32 @@ public class GoogleGenAiAgentToolGateway implements AiToolCallingProvider {
             AgentModelTurnRequest request,
             String resolvedModel,
             AiCallConfig callConfig) {
+        String effectiveBaseUrl = firstNonBlank(callConfig != null ? callConfig.getBaseUrl() : null, defaultBaseUrl);
+        return toGeminiConfig(request, resolvedModel, callConfig, effectiveBaseUrl);
+    }
+
+    private GenerateContentConfig toGeminiConfig(
+            AgentModelTurnRequest request,
+            String resolvedModel,
+            AiCallConfig callConfig,
+            String effectiveBaseUrl) {
         GenerateContentConfig.Builder builder = GenerateContentConfig.builder()
                 .automaticFunctionCalling(AutomaticFunctionCallingConfig.builder().disable(true).build());
-        if (callConfig != null && callConfig.getTimeoutSeconds() != null && callConfig.getTimeoutSeconds() > 0) {
-            int timeoutMs = (int) Math.min(Integer.MAX_VALUE, callConfig.getTimeoutSeconds() * 1000L);
-            HttpOptions.Builder httpOptionsBuilder = HttpOptions.builder().timeout(timeoutMs);
-            if (StringUtils.hasText(defaultBaseUrl)) {
-                httpOptionsBuilder.baseUrl(defaultBaseUrl);
+        Integer timeoutSeconds = callConfig != null ? callConfig.getTimeoutSeconds() : null;
+        if ((timeoutSeconds != null && timeoutSeconds > 0) || StringUtils.hasText(effectiveBaseUrl)) {
+            HttpOptions.Builder httpOptionsBuilder = HttpOptions.builder();
+            if (timeoutSeconds != null && timeoutSeconds > 0) {
+                int timeoutMs = (int) Math.min(Integer.MAX_VALUE, timeoutSeconds * 1000L);
+                httpOptionsBuilder.timeout(timeoutMs);
+            }
+            if (StringUtils.hasText(effectiveBaseUrl)) {
+                httpOptionsBuilder.baseUrl(effectiveBaseUrl);
             }
             builder.httpOptions(httpOptionsBuilder.build());
         }
-        boolean hasCachedContent = callConfig != null && StringUtils.hasText(callConfig.getCachedContentName());
+        boolean hasCachedContent = !request.disableToolCalling()
+                && callConfig != null
+                && StringUtils.hasText(callConfig.getCachedContentName());
         if (hasCachedContent) {
             // Gemini rejects systemInstruction/tools/toolConfig alongside explicit cachedContent.
             builder.cachedContent(callConfig.getCachedContentName().trim());

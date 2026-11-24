@@ -36,8 +36,10 @@ class MicrometerGenAiAgentTelemetryRecorderTest {
         });
 
         MicrometerGenAiAgentTelemetryRecorder recorder = new MicrometerGenAiAgentTelemetryRecorder(registry);
+        java.util.UUID threadId = java.util.UUID.randomUUID();
+        java.util.UUID turnId = java.util.UUID.randomUUID();
         AgentExecutionContext ctx = new AgentExecutionContext(
-                null, null, null, "tenant-x", "user-1", "prod", "joao.silva", Set.of(), null, null, null, null);
+                threadId, turnId, null, "tenant-x", "user-1", "prod", "joao.silva", Set.of(), null, null, null, null);
 
         AgentTurnTelemetryRecorder.TurnSpan span = recorder.startTurn(ctx, "gemini", "gemini-2.5-flash");
         span.recordModelRound(
@@ -58,6 +60,7 @@ class MicrometerGenAiAgentTelemetryRecorderTest {
         span.recordSecurityFinding(new AgentSecurityFinding(
                 "tool_output", "indirect-prompt-injection-in-tool-output",
                 AgentSecurityVerdict.Decision.QUARANTINE, "notes", "Prompt injection isolated"));
+        span.recordArtifactCorrelation("CALIBRATED_PROBABILITY", "prov-hash-xyz", "prop-123");
 
         AgentTurnTelemetrySummary summary = span.complete(
                 "gemini",
@@ -74,6 +77,25 @@ class MicrometerGenAiAgentTelemetryRecorderTest {
                         MicrometerGenAiAgentTelemetryRecorder.OBS_EXECUTE_TOOL,
                         MicrometerGenAiAgentTelemetryRecorder.OBS_SECURITY_EVENT,
                         MicrometerGenAiAgentTelemetryRecorder.OBS_AGENT_TURN);
+        Observation.Context turnContext = stoppedContexts.stream()
+                .filter(c -> MicrometerGenAiAgentTelemetryRecorder.OBS_AGENT_TURN.equals(c.getName()))
+                .findFirst().orElseThrow();
+        assertThat(turnContext.getHighCardinalityKeyValues())
+                .anySatisfy(kv -> assertThat(kv.getKey()).isEqualTo("praxis.ai.turn_id"))
+                .anySatisfy(kv -> assertThat(kv.getKey()).isEqualTo("praxis.ai.thread_id"))
+                .anySatisfy(kv -> {
+                    assertThat(kv.getKey()).isEqualTo("praxis.intelligence.provenance_hash");
+                    assertThat(kv.getValue()).isEqualTo("prov-hash-xyz");
+                })
+                .anySatisfy(kv -> {
+                    assertThat(kv.getKey()).isEqualTo("praxis.ai.proposal_id");
+                    assertThat(kv.getValue()).isEqualTo("prop-123");
+                });
+        assertThat(turnContext.getLowCardinalityKeyValues())
+                .anySatisfy(kv -> {
+                    assertThat(kv.getKey()).isEqualTo("praxis.epistemic.kind");
+                    assertThat(kv.getValue()).isEqualTo("CALIBRATED_PROBABILITY");
+                });
 
         Map<String, Object> safeMeta = summary.toSafeEventMeta();
         assertThat(safeMeta).containsEntry("provider", "gemini")

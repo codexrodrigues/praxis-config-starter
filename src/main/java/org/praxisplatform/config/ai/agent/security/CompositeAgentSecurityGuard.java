@@ -40,6 +40,21 @@ public final class CompositeAgentSecurityGuard implements AgentSecurityGuard {
     }
 
     @Override
+    public HistoryCheckResult guardHistoryEntry(String role, String text, TurnSecurityState state) {
+        String current = text;
+        AgentSecurityVerdict strongest = AgentSecurityVerdict.allow();
+        for (AgentSecurityGuard guard : guards) {
+            HistoryCheckResult result = guard.guardHistoryEntry(role, current, state);
+            current = result.sanitizedText();
+            strongest = mergeVerdict(strongest, result.verdict());
+            if (result.verdict().isBlocked()) {
+                return new HistoryCheckResult(result.verdict(), current);
+            }
+        }
+        return new HistoryCheckResult(strongest, current);
+    }
+
+    @Override
     public AgentSecurityVerdict guardBeforeToolExecution(
             String toolName,
             AgentToolSafetyClass safetyClass,

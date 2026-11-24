@@ -732,7 +732,7 @@ public class OperationalAgentTurnStreamService {
                 .apiKey(corporateMode ? null : request.apiKey())
                 .tenantId(principalContext.tenantId())
                 .environment(principalContext.environment())
-                .thinkingProfile(AiThinkingProfile.OPERATIONAL_AUDIT)
+                .thinkingProfile(resolveThinkingProfile(request))
                 .promptCacheKey("praxis-op-agent:" + tenantKey + ":" + envKey)
                 .build();
         if (providerManagementService == null) {
@@ -743,6 +743,23 @@ public class OperationalAgentTurnStreamService {
                 principalContext.tenantId(),
                 principalContext.userId(),
                 principalContext.environment());
+    }
+
+    private static AiThinkingProfile resolveThinkingProfile(OperationalAgentTurnStreamRequest request) {
+        if (request == null || request.contextHints() == null || request.contextHints().isMissingNode()) {
+            return AiThinkingProfile.OPERATIONAL_AUDIT;
+        }
+        String raw = request.contextHints().path("thinkingProfile").asText(null);
+        if (!StringUtils.hasText(raw)) {
+            return AiThinkingProfile.OPERATIONAL_AUDIT;
+        }
+        String normalized = raw.trim().toUpperCase(java.util.Locale.ROOT);
+        for (AiThinkingProfile candidate : AiThinkingProfile.values()) {
+            if (candidate.name().equals(normalized)) {
+                return candidate;
+            }
+        }
+        return AiThinkingProfile.OPERATIONAL_AUDIT;
     }
 
     private AgenticAuthoringTurnStreamStartResponse startResponse(

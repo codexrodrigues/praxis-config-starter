@@ -43,6 +43,9 @@ public interface AgentTurnTelemetryRecorder {
         default void recordSecurityFinding(AgentSecurityFinding finding) {
         }
 
+        default void recordArtifactCorrelation(String epistemicKind, String provenanceHash, String proposalId) {
+        }
+
         default AgentTurnTelemetrySummary complete(
                 String finalProvider,
                 String finalModel,

@@ -94,16 +94,65 @@ public class ProfileSovereigntyAiProviderEligibilityPolicy implements AiProvider
             }
         }
         String screenPath = context.activeScreenResourcePath();
-        if (StringUtils.hasText(screenPath)) {
-            String normalizedPath = screenPath.trim().toLowerCase(Locale.ROOT);
-            for (String prefix : restrictedResourcePrefixes) {
-                if (normalizedPath.startsWith(prefix.toLowerCase(Locale.ROOT))) {
+        if (StringUtils.hasText(screenPath) && matchesRestrictedPath(screenPath)) {
+            return true;
+        }
+        if (claims != null && !claims.isEmpty()) {
+            if (!restrictedTopics.isEmpty() && matchesStringOrCollection(claims.get("accessedTopicKeys"), restrictedTopics, true)) {
+                return true;
+            }
+            if ((!restrictedResourcePrefixes.isEmpty() || !restrictedPathSegments.isEmpty())
+                    && matchesAccessedPaths(claims.get("accessedResourcePaths"))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private boolean matchesRestrictedPath(String pathValue) {
+        if (!StringUtils.hasText(pathValue)) {
+            return false;
+        }
+        String normalizedPath = pathValue.trim().toLowerCase(Locale.ROOT);
+        for (String prefix : restrictedResourcePrefixes) {
+            if (normalizedPath.startsWith(prefix.toLowerCase(Locale.ROOT))) {
+                return true;
+            }
+        }
+        for (String segment : restrictedPathSegments) {
+            if (normalizedPath.contains(segment)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private boolean matchesAccessedPaths(Object rawPaths) {
+        if (rawPaths instanceof String s) {
+            return matchesRestrictedPath(s);
+        }
+        if (rawPaths instanceof java.util.Collection<?> col) {
+            for (Object item : col) {
+                if (item != null && matchesRestrictedPath(item.toString())) {
                     return true;
                 }
             }
-            for (String segment : restrictedPathSegments) {
-                if (normalizedPath.contains(segment)) {
-                    return true;
+        }
+        return false;
+    }
+
+    private static boolean matchesStringOrCollection(Object rawValue, Set<String> candidates, boolean lowercase) {
+        if (rawValue instanceof String s) {
+            String key = lowercase ? s.trim().toLowerCase(Locale.ROOT) : s.trim();
+            return candidates.contains(key);
+        }
+        if (rawValue instanceof java.util.Collection<?> col) {
+            for (Object item : col) {
+                if (item != null) {
+                    String key = lowercase ? item.toString().trim().toLowerCase(Locale.ROOT) : item.toString().trim();
+                    if (candidates.contains(key)) {
+                        return true;
+                    }
                 }
             }
         }
