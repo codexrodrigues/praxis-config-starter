@@ -12,11 +12,14 @@ import java.util.Set;
 import java.util.UUID;
 import org.praxisplatform.config.domain.DomainRuleDefinition;
 import org.praxisplatform.config.dto.DomainRuleDefinitionResponse;
+import org.praxisplatform.config.dto.DomainRuleFactCatalogResponse;
+import org.praxisplatform.config.dto.DomainRuleFactDescriptor;
 import org.praxisplatform.config.dto.DomainRuleMaterializationResponse;
 import org.praxisplatform.config.dto.DomainRuleTimelineEventResponse;
 import org.praxisplatform.config.dto.DomainRuleTimelineResponse;
 import org.praxisplatform.config.exception.ConfigurationIngestionException;
 import org.praxisplatform.rules.digest.PraxisCanonicalJson;
+import org.praxisplatform.rules.facts.RuleFactDescriptor;
 import org.praxisplatform.rules.jsonlogic.PraxisJsonLogicEngine;
 import org.praxisplatform.rules.jsonlogic.model.JsonLogicValidationOptions;
 
@@ -97,6 +100,7 @@ public class DomainRuleExplanationProjectionService {
         DomainRuleDefinitionResponse definition = domainRuleService.definition(definitionId, principal);
         requireExactSelection(definition, expectedRuleKey, expectedVersion);
 
+        DomainRuleFactCatalogResponse factCatalog = domainRuleService.definitionFacts(definitionId, principal);
         DomainRuleTimelineResponse timeline = domainRuleService.definitionTimeline(
                 definitionId,
                 principal.tenantId(),
@@ -115,7 +119,12 @@ public class DomainRuleExplanationProjectionService {
         String conditionHash = PraxisCanonicalJson.sha256(
                 condition == null ? objectMapper.nullNode() : condition);
         ExposurePolicy exposure = exposurePolicy(definition.governance());
-        ConditionInspection inspection = inspectCondition(condition, exposure);
+        List<DomainRuleFactDescriptor> resolvedDescriptors =
+                resolveFactDescriptors(factCatalog, definition.definition());
+        Set<String> restrictedFactPaths = collectRestrictedFactPaths(resolvedDescriptors);
+        ConditionInspection inspection =
+                inspectCondition(condition, exposure, restrictedFactPaths);
+        SafeFactProjectionResult safeFacts = safeFacts(resolvedDescriptors, exposure);
         List<DomainRuleExplanationEvidenceProjection.SafeTimelineEvent> safeEvents = safeEvents(timeline);
         List<DomainRuleExplanationEvidenceProjection.MaterializationEvidence> safeMaterializations =
                 safeMaterializations(materializations);
@@ -134,13 +143,20 @@ public class DomainRuleExplanationProjectionService {
                         materialization.id(), safeRefPart(materialization.sourceHash())))
                 .forEach(sourceRefs::add);
 
+        boolean conditionSuppressedForRestrictedFacts =
+                exposure.exposeAst() && condition != null && inspection.containsRestrictedFacts();
         List<String> omittedFields = new ArrayList<>(ALWAYS_OMITTED_FIELDS);
         if (!"full".equals(exposure.mode())) {
             omittedFields.add("conditionAst");
+        } else if (conditionSuppressedForRestrictedFacts) {
+            omittedFields.add("conditionAst.containsRestrictedFacts");
         }
         if (!exposure.exposeFactPaths()) {
             omittedFields.add("conditionFactPaths");
+        } else if (inspection.redactedRestrictedFactPaths()) {
+            omittedFields.add("conditionFactPaths.restrictedFacts");
         }
+        omittedFields.addAll(safeFacts.omittedMarkers());
 
         return new DomainRuleExplanationEvidenceProjection(
                 DomainRuleExplanationEvidenceProjection.SCHEMA_VERSION,
@@ -160,7 +176,9 @@ public class DomainRuleExplanationProjectionService {
                         definition.semanticOwner()),
                 new DomainRuleExplanationEvidenceProjection.ConditionEvidence(
                         exposure.mode(),
-                        exposure.exposeAst() && condition != null ? condition : null,
+                        exposure.exposeAst() && condition != null && !inspection.containsRestrictedFacts()
+                                ? condition
+                                : null,
                         inspection.operators(),
                         inspection.factPaths(),
                         inspection.valid(),
@@ -181,7 +199,8 @@ public class DomainRuleExplanationProjectionService {
                 new DomainRuleExplanationEvidenceProjection.VersionAttestation(
                         expectedVersion,
                         definition.version(),
-                        Objects.equals(expectedVersion, definition.version())));
+                        Objects.equals(expectedVersion, definition.version())),
+                safeFacts.facts());
     }
 
     private void requireExactSelection(
@@ -220,9 +239,10 @@ public class DomainRuleExplanationProjectionService {
         };
     }
 
-    private ConditionInspection inspectCondition(JsonNode condition, ExposurePolicy exposure) {
+    private ConditionInspection inspectCondition(
+            JsonNode condition, ExposurePolicy exposure, Set<String> restrictedFactPaths) {
         if (condition == null || condition.isNull()) {
-            return new ConditionInspection(true, List.of(), List.of(), List.of());
+            return new ConditionInspection(true, List.of(), List.of(), List.of(), false, false);
         }
         var validation = jsonLogicEngine.validateResult(condition, VALIDATION_OPTIONS);
         List<DomainRuleExplanationEvidenceProjection.ValidationIssue> validationIssues = validation.issues().stream()
@@ -230,26 +250,53 @@ public class DomainRuleExplanationProjectionService {
                         issue.code().name(), issue.path(), issue.operator()))
                 .toList();
         if ("denied".equals(exposure.mode())) {
-            return new ConditionInspection(validation.valid(), List.of(), List.of(), List.of());
+            return new ConditionInspection(
+                    validation.valid(), List.of(), List.of(), List.of(), false, false);
         }
         if ("masked".equals(exposure.mode())) {
             List<DomainRuleExplanationEvidenceProjection.ValidationIssue> redactedIssues = validation.issues().stream()
                     .map(issue -> new DomainRuleExplanationEvidenceProjection.ValidationIssue(
                             issue.code().name(), null, null))
                     .toList();
-            return new ConditionInspection(validation.valid(), List.of(), List.of(), redactedIssues);
+            return new ConditionInspection(
+                    validation.valid(), List.of(), List.of(), redactedIssues, false, false);
         }
         LinkedHashSet<String> operators = new LinkedHashSet<>();
         LinkedHashSet<String> factPaths = new LinkedHashSet<>();
         collectConditionShape(condition, operators, factPaths);
-        List<String> visibleFactPaths = exposure.exposeFactPaths()
-                ? factPaths.stream().sorted().toList()
-                : List.of();
+        boolean containsRestrictedFacts =
+                factPaths.stream().anyMatch(path -> isRestrictedConditionPath(path, restrictedFactPaths));
+        List<String> visibleFactPaths = List.of();
+        boolean redactedRestrictedPaths = false;
+        if (exposure.exposeFactPaths()) {
+            List<String> filtered = new ArrayList<>(factPaths.size());
+            for (String path : factPaths) {
+                if (isRestrictedConditionPath(path, restrictedFactPaths)) {
+                    redactedRestrictedPaths = true;
+                } else {
+                    filtered.add(path);
+                }
+            }
+            visibleFactPaths = filtered.stream().sorted().toList();
+        }
         return new ConditionInspection(
                 validation.valid(),
                 operators.stream().sorted().toList(),
                 visibleFactPaths,
-                validationIssues);
+                validationIssues,
+                containsRestrictedFacts,
+                redactedRestrictedPaths);
+    }
+
+    private static boolean isRestrictedConditionPath(String path, Set<String> restrictedFactPaths) {
+        if (path == null || restrictedFactPaths == null || restrictedFactPaths.isEmpty()) {
+            return false;
+        }
+        if (restrictedFactPaths.contains(path)) {
+            return true;
+        }
+        String stable = RuleFactDescriptor.toStableFactPath(path);
+        return restrictedFactPaths.contains(stable);
     }
 
     private void collectConditionShape(
@@ -384,6 +431,129 @@ public class DomainRuleExplanationProjectionService {
         return normalized == null ? "none" : normalized.replaceAll("[^a-zA-Z0-9._-]", "_");
     }
 
+    private List<DomainRuleFactDescriptor> resolveFactDescriptors(
+            DomainRuleFactCatalogResponse factCatalog, JsonNode definitionJson) {
+        return factCatalog != null && factCatalog.facts() != null
+                ? factCatalog.facts()
+                : fallbackFactsFromDefinition(definitionJson);
+    }
+
+    private Set<String> collectRestrictedFactPaths(List<DomainRuleFactDescriptor> descriptors) {
+        if (descriptors == null || descriptors.isEmpty()) {
+            return Set.of();
+        }
+        Set<String> restricted = new LinkedHashSet<>();
+        for (DomainRuleFactDescriptor fact : descriptors) {
+            if (fact == null || fact.path() == null || !isRestrictedFact(fact)) {
+                continue;
+            }
+            String trimmed = fact.path().trim();
+            if (!trimmed.isEmpty()) {
+                restricted.add(trimmed);
+                restricted.add(RuleFactDescriptor.toStableFactPath(trimmed));
+            }
+        }
+        return restricted.isEmpty() ? Set.of() : Set.copyOf(restricted);
+    }
+
+    private SafeFactProjectionResult safeFacts(
+            List<DomainRuleFactDescriptor> descriptors, ExposurePolicy exposure) {
+        if (descriptors == null || descriptors.isEmpty()) {
+            return new SafeFactProjectionResult(List.of(), List.of());
+        }
+        if ("denied".equals(exposure.mode()) || "masked".equals(exposure.mode())) {
+            return new SafeFactProjectionResult(List.of(), List.of("factCatalog"));
+        }
+        List<DomainRuleExplanationEvidenceProjection.SafeFactEvidence> safe = new ArrayList<>();
+        boolean omittedRestricted = false;
+        boolean summarizedOrMasked = false;
+        for (DomainRuleFactDescriptor fact : descriptors) {
+            if (fact == null || isRestrictedFact(fact)) {
+                omittedRestricted = true;
+                continue;
+            }
+            boolean trimDetails = requiresSummaryOrMaskTrim(fact, exposure);
+            if (trimDetails) {
+                summarizedOrMasked = true;
+            }
+            safe.add(new DomainRuleExplanationEvidenceProjection.SafeFactEvidence(
+                    fact.path(),
+                    fact.valueType(),
+                    fact.nullable(),
+                    fact.labels(),
+                    fact.descriptions(),
+                    trimDetails ? null : fact.hints(),
+                    fact.groupKey(),
+                    fact.groupLabels(),
+                    fact.valuePresentation(),
+                    fact.unit(),
+                    trimDetails ? null : fact.allowedValues(),
+                    trimDetails ? null : fact.constraints(),
+                    fact.sensitivity(),
+                    fact.redaction()));
+        }
+        List<String> omittedMarkers = new ArrayList<>();
+        if (omittedRestricted) {
+            omittedMarkers.add("factCatalog.secretOrDeniedFacts");
+        }
+        if (summarizedOrMasked) {
+            omittedMarkers.add("factCatalog.summarizedOrMaskedFacts");
+        }
+        return new SafeFactProjectionResult(List.copyOf(safe), List.copyOf(omittedMarkers));
+    }
+
+    private boolean requiresSummaryOrMaskTrim(
+            DomainRuleFactDescriptor fact, ExposurePolicy exposure) {
+        if ("summary_only".equals(exposure.mode())) {
+            return true;
+        }
+        if ("MASK".equalsIgnoreCase(fact.redaction()) || "HASH".equalsIgnoreCase(fact.redaction())) {
+            return true;
+        }
+        DomainRuleFactDescriptor.GovernanceMetadata governance = fact.governance();
+        return governance != null
+                && ("mask".equalsIgnoreCase(governance.aiVisibility())
+                        || "summarize_only".equalsIgnoreCase(governance.aiVisibility()));
+    }
+
+    private List<DomainRuleFactDescriptor> fallbackFactsFromDefinition(JsonNode definitionJson) {
+        if (definitionJson == null || definitionJson.isNull()) {
+            return List.of();
+        }
+        JsonNode factsNode = definitionJson.path("factCatalog").path("facts");
+        if (!factsNode.isArray() || factsNode.isEmpty()) {
+            return List.of();
+        }
+        List<DomainRuleFactDescriptor> fallback = new ArrayList<>();
+        for (JsonNode item : factsNode) {
+            if (item == null || !item.isObject()) {
+                continue;
+            }
+            try {
+                DomainRuleFactDescriptor parsed = objectMapper.treeToValue(item, DomainRuleFactDescriptor.class);
+                if (parsed != null && parsed.path() != null) {
+                    fallback.add(parsed);
+                }
+            } catch (Exception ignored) {
+                // Fail-closed: skip malformed inline fallback nodes cleanly
+            }
+        }
+        return List.copyOf(fallback);
+    }
+
+    private boolean isRestrictedFact(DomainRuleFactDescriptor fact) {
+        if ("SECRET".equalsIgnoreCase(fact.sensitivity()) || "OMIT".equalsIgnoreCase(fact.redaction())) {
+            return true;
+        }
+        DomainRuleFactDescriptor.GovernanceMetadata governance = fact.governance();
+        return governance != null && "deny".equalsIgnoreCase(governance.aiVisibility());
+    }
+
+    private record SafeFactProjectionResult(
+            List<DomainRuleExplanationEvidenceProjection.SafeFactEvidence> facts,
+            List<String> omittedMarkers) {
+    }
+
     private record ExposurePolicy(
             String mode,
             boolean exposeAst,
@@ -410,6 +580,8 @@ public class DomainRuleExplanationProjectionService {
             boolean valid,
             List<String> operators,
             List<String> factPaths,
-            List<DomainRuleExplanationEvidenceProjection.ValidationIssue> validationIssues) {
+            List<DomainRuleExplanationEvidenceProjection.ValidationIssue> validationIssues,
+            boolean containsRestrictedFacts,
+            boolean redactedRestrictedFactPaths) {
     }
 }

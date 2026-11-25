@@ -242,6 +242,26 @@ public final class GovernedRuleFamilyDescriptor<O extends Enum<O>> {
      * Retorna uma nova instância enriquecida com metadados semânticos de catálogo e vínculos de
      * raízes ontológicas ({@code conceptRootSpecs}), preservando a documentação didática atual.
      */
+    public GovernedRuleFamilyDescriptor<O> withFactMetadata(
+            RuleFactCatalogDocument factCatalogDocument, Map<String, Class<?>> rootDtoBindings) {
+        return new GovernedRuleFamilyDescriptor<>(
+                this.runtime,
+                factCatalogDocument,
+                rootDtoBindings != null ? rootDtoBindings : Map.of(),
+                this.resourceKey,
+                this.title,
+                this.description,
+                this.conceptRootSpecs,
+                this.ruleSetDocumentation,
+                this.slotDocumentation,
+                this.ruleDocumentation);
+    }
+
+    public GovernedRuleFamilyDescriptor<O> withRootDtoBindings(
+            Map<String, Class<?>> rootDtoBindings) {
+        return withFactMetadata(this.factCatalogDocument, rootDtoBindings);
+    }
+
     public GovernedRuleFamilyDescriptor<O> withMetadata(
             String resourceKey,
             String title,

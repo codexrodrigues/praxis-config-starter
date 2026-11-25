@@ -9,13 +9,17 @@ import static org.mockito.Mockito.when;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.praxisplatform.config.dto.DomainRuleDefinitionResponse;
+import org.praxisplatform.config.dto.DomainRuleFactCatalogResponse;
+import org.praxisplatform.config.dto.DomainRuleFactDescriptor;
 import org.praxisplatform.config.dto.DomainRuleMaterializationResponse;
 import org.praxisplatform.config.dto.DomainRuleTimelineEventResponse;
 import org.praxisplatform.config.dto.DomainRuleTimelineResponse;
@@ -173,6 +177,248 @@ class DomainRuleExplanationProjectionServiceTest {
 
         assertThat(projection.conditionEvidence().exposureMode()).isEqualTo("full");
         assertThat(projection.conditionEvidence().conditionAst()).isNotNull();
+    }
+
+    @Test
+    void projectsSanitizedFactEvidenceAndExcludesSecretOrDeniedFacts() throws Exception {
+        DomainRuleDefinitionResponse definition = definition("""
+                {
+                  "aiUsage": {
+                    "visibility": "allow",
+                    "reasoningUse": "allow",
+                    "trainingUse": "deny"
+                  }
+                }
+                """);
+        stubCanonicalReads(definition);
+        when(domainRuleService.definitionFacts(DEFINITION_ID, PRINCIPAL))
+                .thenReturn(new DomainRuleFactCatalogResponse(
+                        DEFINITION_ID,
+                        RULE_KEY,
+                        VERSION,
+                        "praxis.domain-rule-fact-catalog.v1",
+                        List.of(
+                                new DomainRuleFactDescriptor(
+                                        "employee.age",
+                                        "number",
+                                        false,
+                                        Map.of("pt-BR", "Idade do servidor"),
+                                        Map.of("pt-BR", "Idade em anos completos na data de referência."),
+                                        "host:employees",
+                                        List.of("dto:EmployeeDTO"),
+                                        "NON_SENSITIVE",
+                                        "NONE",
+                                        Map.of("pt-BR", "Considerar idade civil."),
+                                        "identificacao",
+                                        Map.of("pt-BR", "Identificação"),
+                                        "integer",
+                                        "anos",
+                                        null,
+                                        List.of(new DomainRuleFactDescriptor.AllowedValue(
+                                                65, Map.of("pt-BR", "Limite padrão"), null, "info", null)),
+                                        null,
+                                        "should-not-copy-example",
+                                        new DomainRuleFactDescriptor.Constraints(
+                                                new BigDecimal("18"), new BigDecimal("75"), null, null, null, null),
+                                        new DomainRuleFactDescriptor.GovernanceMetadata(
+                                                "internal", "operational", true, "allow", null),
+                                        new DomainRuleFactDescriptor.LineageMetadata(
+                                                "workforce.employees.age", "workforce.employees", "DIRECT")),
+                                new DomainRuleFactDescriptor(
+                                        "actor.secretCredential",
+                                        "string",
+                                        false,
+                                        Map.of("pt-BR", "Credencial secreta"),
+                                        Map.of("pt-BR", "Token privado."),
+                                        "host:auth",
+                                        List.of("dto:ActorDTO"),
+                                        "SECRET",
+                                        "OMIT"),
+                                new DomainRuleFactDescriptor(
+                                        "employee.restrictedAuditNote",
+                                        "string",
+                                        true,
+                                        Map.of("pt-BR", "Nota restrita"),
+                                        Map.of("pt-BR", "Uso vedado para IA."),
+                                        "host:employees",
+                                        List.of("dto:EmployeeDTO"),
+                                        "SENSITIVE",
+                                        "MASK",
+                                        null,
+                                        null,
+                                        null,
+                                        "text",
+                                        null,
+                                        null,
+                                        null,
+                                        null,
+                                        null,
+                                        null,
+                                        new DomainRuleFactDescriptor.GovernanceMetadata(
+                                                "restricted", "audit", false, "deny", null),
+                                        null))));
+
+        DomainRuleExplanationEvidenceProjection projection =
+                service.project(DEFINITION_ID, RULE_KEY, VERSION, PRINCIPAL);
+
+        assertThat(projection.facts()).singleElement().satisfies(fact -> {
+            assertThat(fact.path()).isEqualTo("employee.age");
+            assertThat(fact.labels()).containsEntry("pt-BR", "Idade do servidor");
+            assertThat(fact.hints()).containsEntry("pt-BR", "Considerar idade civil.");
+            assertThat(fact.valuePresentation()).isEqualTo("integer");
+            assertThat(fact.unit()).isEqualTo("anos");
+            assertThat(fact.allowedValues()).hasSize(1);
+            assertThat(fact.constraints().max()).isEqualByComparingTo("75");
+        });
+        assertThat(projection.redaction().omittedFields()).contains("factCatalog.secretOrDeniedFacts");
+        String serialized = objectMapper.writeValueAsString(projection);
+        assertThat(serialized)
+                .doesNotContain("actor.secretCredential")
+                .doesNotContain("employee.restrictedAuditNote")
+                .doesNotContain("should-not-copy-example")
+                .doesNotContain("workforce.employees.age");
+    }
+
+    @Test
+    void suppressesConditionAstAndRestrictedPathsWhenConditionReferencesSecretOrDeniedFacts()
+            throws Exception {
+        DomainRuleDefinitionResponse base = definition("""
+                {
+                  "aiUsage": {
+                    "visibility": "allow",
+                    "reasoningUse": "allow",
+                    "trainingUse": "deny"
+                  }
+                }
+                """);
+        DomainRuleDefinitionResponse withRestrictedCondition = new DomainRuleDefinitionResponse(
+                base.id(),
+                base.tenantId(),
+                base.environment(),
+                base.ruleKey(),
+                base.version(),
+                base.ruleType(),
+                base.status(),
+                base.contextKey(),
+                base.resourceKey(),
+                base.serviceKey(),
+                base.semanticOwner(),
+                base.steward(),
+                base.sourceReleaseId(),
+                base.sourceChangeSetId(),
+                base.definition(),
+                base.parameters(),
+                json("""
+                        {
+                          "and": [
+                            {"<=": [{"var": "employee.age"}, 65]},
+                            {"==": [{"var": "actor.secretCredential"}, "ROOT"]}
+                          ]
+                        }
+                        """),
+                base.governance(),
+                base.validationResult(),
+                base.createdByType(),
+                base.createdBy(),
+                base.approvedBy(),
+                base.createdAt(),
+                base.updatedAt(),
+                base.approvedAt(),
+                base.activatedAt());
+        stubCanonicalReads(withRestrictedCondition);
+        when(domainRuleService.definitionFacts(DEFINITION_ID, PRINCIPAL))
+                .thenReturn(new DomainRuleFactCatalogResponse(
+                        DEFINITION_ID,
+                        RULE_KEY,
+                        VERSION,
+                        "praxis.domain-rule-fact-catalog.v1",
+                        List.of(
+                                new DomainRuleFactDescriptor(
+                                        "employee.age",
+                                        "number",
+                                        false,
+                                        Map.of("pt-BR", "Idade"),
+                                        Map.of("pt-BR", "Idade civil."),
+                                        "host:employees",
+                                        List.of("r:1"),
+                                        "NON_SENSITIVE",
+                                        "NONE"),
+                                new DomainRuleFactDescriptor(
+                                        "actor.secretCredential",
+                                        "string",
+                                        false,
+                                        Map.of("pt-BR", "Credencial secreta"),
+                                        Map.of("pt-BR", "Segredo."),
+                                        "host:auth",
+                                        List.of("r:2"),
+                                        "SECRET",
+                                        "OMIT"))));
+
+        DomainRuleExplanationEvidenceProjection projection =
+                service.project(DEFINITION_ID, RULE_KEY, VERSION, PRINCIPAL);
+
+        assertThat(projection.conditionEvidence().exposureMode()).isEqualTo("full");
+        assertThat(projection.conditionEvidence().conditionAst()).isNull();
+        assertThat(projection.conditionEvidence().factPaths()).containsExactly("employee.age");
+        assertThat(projection.redaction().omittedFields())
+                .contains("conditionAst.containsRestrictedFacts", "conditionFactPaths.restrictedFacts");
+    }
+
+    @Test
+    void trimsHintsAllowedValuesAndConstraintsForSummaryOnlyExposureAndMaskedFacts() {
+        DomainRuleDefinitionResponse summaryDefinition = definition("""
+                {
+                  "aiUsage": {
+                    "visibility": "summarize_only",
+                    "reasoningUse": "allow"
+                  }
+                }
+                """);
+        stubCanonicalReads(summaryDefinition);
+        when(domainRuleService.definitionFacts(DEFINITION_ID, PRINCIPAL))
+                .thenReturn(new DomainRuleFactCatalogResponse(
+                        DEFINITION_ID,
+                        RULE_KEY,
+                        VERSION,
+                        "praxis.domain-rule-fact-catalog.v1",
+                        List.of(new DomainRuleFactDescriptor(
+                                "employee.salary",
+                                "number",
+                                false,
+                                Map.of("pt-BR", "Salário"),
+                                Map.of("pt-BR", "Valor remuneratório."),
+                                "host:employees",
+                                List.of("r:1"),
+                                "SENSITIVE",
+                                "MASK",
+                                Map.of("pt-BR", "Hint restrito."),
+                                "remuneracao",
+                                Map.of("pt-BR", "Remuneração"),
+                                "currency",
+                                "BRL",
+                                null,
+                                List.of(new DomainRuleFactDescriptor.AllowedValue(
+                                        1000, Map.of("pt-BR", "Piso"), null, null, null)),
+                                null,
+                                null,
+                                new DomainRuleFactDescriptor.Constraints(
+                                        new BigDecimal("1000"), null, null, null, null, null),
+                                new DomainRuleFactDescriptor.GovernanceMetadata(
+                                        "confidential", "financial", false, "mask", null),
+                                null))));
+
+        DomainRuleExplanationEvidenceProjection projection =
+                service.project(DEFINITION_ID, RULE_KEY, VERSION, PRINCIPAL);
+
+        assertThat(projection.facts()).singleElement().satisfies(fact -> {
+            assertThat(fact.path()).isEqualTo("employee.salary");
+            assertThat(fact.labels()).containsEntry("pt-BR", "Salário");
+            assertThat(fact.hints()).isNull();
+            assertThat(fact.allowedValues()).isNull();
+            assertThat(fact.constraints()).isNull();
+        });
+        assertThat(projection.redaction().omittedFields())
+                .contains("factCatalog.summarizedOrMaskedFacts");
     }
 
     @Test

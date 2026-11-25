@@ -11,8 +11,10 @@ import static org.mockito.Mockito.when;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -25,6 +27,7 @@ import org.praxisplatform.config.domain.DomainRuleEvent;
 import org.praxisplatform.config.domain.DomainRuleMaterialization;
 import org.praxisplatform.config.dto.DomainRuleDefinitionRequest;
 import org.praxisplatform.config.dto.DomainRuleDefinitionStatusTransitionRequest;
+import org.praxisplatform.config.dto.DomainRuleFactDescriptor;
 import org.praxisplatform.config.dto.DomainRuleIntakeRequest;
 import org.praxisplatform.config.dto.DomainRuleMaterializationRequest;
 import org.praxisplatform.config.dto.DomainRulePublicationRequest;
@@ -4790,6 +4793,539 @@ class DomainRuleServiceTest {
                 objectMapper,
                 provider,
                 new GovernedColorPaletteContractValidator(objectMapper), mock(DomainRuleEntityRefresh.class));
+    }
+
+    @Test
+    void exposesRichCanonicalFactCatalogAndEnforcesFailClosedLimits() throws Exception {
+        DomainRuleDefinitionRepository definitionRepository = mock(DomainRuleDefinitionRepository.class);
+        DomainRuleMaterializationRepository materializationRepository = mock(DomainRuleMaterializationRepository.class);
+        DomainRuleService service = service(definitionRepository, materializationRepository);
+        UUID definitionId = UUID.randomUUID();
+        ObjectNode richCatalog = objectMapper.readValue("""
+                {
+                  "factCatalog": {
+                    "schemaVersion": "praxis.domain-rule-fact-catalog.v1",
+                    "facts": [{
+                      "path": "request.requestedAmount",
+                      "valueType": "number",
+                      "nullable": false,
+                      "labels": {"pt-BR": "Valor solicitado"},
+                      "descriptions": {"pt-BR": "Valor monetário solicitado na requisição."},
+                      "hints": {"pt-BR": "Informar valor líquido sem acréscimos."},
+                      "groupKey": "valores-financeiros",
+                      "groupLabels": {"pt-BR": "Valores financeiros"},
+                      "valuePresentation": "currency",
+                      "unit": "BRL",
+                      "mask": "#.##0,00",
+                      "allowedValues": [{
+                        "value": 1000,
+                        "labels": {"pt-BR": "Faixa padrão"},
+                        "tone": "info",
+                        "description": "Limite inicial pré-aprovado"
+                      }],
+                      "optionSourceRef": {"sourceKey": "amount-brackets", "resourceKey": "finance.brackets"},
+                      "example": "1000.00",
+                      "constraints": {
+                        "min": 100.00,
+                        "max": 50000.00,
+                        "step": 0.01
+                      },
+                      "governance": {
+                        "classification": "confidential",
+                        "dataCategory": "financial",
+                        "exportable": true,
+                        "aiVisibility": "allow",
+                        "complianceTags": ["FIN_CONTROL"]
+                      },
+                      "lineage": {
+                        "attributeId": "finance.request.amount",
+                        "sourceResourceKey": "finance.requests",
+                        "transformation": "DIRECT"
+                      },
+                      "providerRef": "host:extraordinary-benefit-request",
+                      "evidenceRefs": ["ruleset:grant.amount-parameters"],
+                      "sensitivity": "SENSITIVE",
+                      "redaction": "MASK"
+                    }]
+                  }
+                }
+                """, ObjectNode.class);
+        DomainRuleDefinition stored = DomainRuleDefinition.builder()
+                .id(definitionId)
+                .tenantId("tenant-a")
+                .environment("dev")
+                .ruleKey("grant.amount-parameters")
+                .version(4)
+                .ruleType("selection_eligibility")
+                .status("draft")
+                .definition(richCatalog.toString())
+                .parameters("{}")
+                .governance("{}")
+                .build();
+        when(definitionRepository.findById(definitionId)).thenReturn(Optional.of(stored));
+
+        var catalog = service.definitionFacts(definitionId, principal("reader"));
+        assertThat(catalog.facts()).singleElement().satisfies(fact -> {
+            assertThat(fact.hints()).containsEntry("pt-BR", "Informar valor líquido sem acréscimos.");
+            assertThat(fact.groupKey()).isEqualTo("valores-financeiros");
+            assertThat(fact.groupLabels()).containsEntry("pt-BR", "Valores financeiros");
+            assertThat(fact.valuePresentation()).isEqualTo("currency");
+            assertThat(fact.unit()).isEqualTo("BRL");
+            assertThat(fact.mask()).isEqualTo("#.##0,00");
+            assertThat(fact.example()).isEqualTo("1000.00");
+            assertThat(fact.allowedValues()).singleElement().satisfies(opt -> {
+                assertThat(opt.value()).isEqualTo(1000);
+                assertThat(opt.labels()).containsEntry("pt-BR", "Faixa padrão");
+            });
+            assertThat(fact.optionSourceRef().sourceKey()).isEqualTo("amount-brackets");
+            assertThat(fact.constraints().min()).isEqualByComparingTo("100.00");
+            assertThat(fact.constraints().max()).isEqualByComparingTo("50000.00");
+            assertThat(fact.governance().aiVisibility()).isEqualTo("allow");
+            assertThat(fact.lineage().attributeId()).isEqualTo("finance.request.amount");
+        });
+
+        List<String> invalidCatalogPayloads = List.of(
+                """
+                {"factCatalog":{"schemaVersion":"praxis.domain-rule-fact-catalog.v1","facts":[{
+                  "path":"secret.token","valueType":"string","nullable":false,
+                  "labels":{"pt-BR":"Token"},"descriptions":{"pt-BR":"Segredo."},
+                  "providerRef":"host:req","evidenceRefs":["r:1"],
+                  "sensitivity":"SECRET","redaction":"OMIT","example":"leak"
+                }]}}""",
+                """
+                {"factCatalog":{"schemaVersion":"praxis.domain-rule-fact-catalog.v1","facts":[{
+                  "path":"secret.role","valueType":"string","nullable":false,
+                  "labels":{"pt-BR":"Perfil"},"descriptions":{"pt-BR":"Segredo."},
+                  "providerRef":"host:req","evidenceRefs":["r:1"],
+                  "sensitivity":"SECRET","redaction":"OMIT",
+                  "allowedValues":[{"value":"ADMIN","labels":{"pt-BR":"Admin"}}]
+                }]}}""",
+                """
+                {"factCatalog":{"schemaVersion":"praxis.domain-rule-fact-catalog.v1","facts":[{
+                  "path":"request.amount","valueType":"number","nullable":false,
+                  "labels":{"pt-BR":"Valor"},"descriptions":{"pt-BR":"Valor."},
+                  "providerRef":"host:req","evidenceRefs":["r:1"],
+                  "sensitivity":"NON_SENSITIVE","redaction":"NONE","valuePresentation":"CURRENCY"
+                }]}}""",
+                """
+                {"factCatalog":{"schemaVersion":"praxis.domain-rule-fact-catalog.v1","facts":[{
+                  "path":"request.amount","valueType":"number","nullable":false,
+                  "labels":{"pt-BR":"Valor"},"descriptions":{"pt-BR":"Valor."},
+                  "providerRef":"host:req","evidenceRefs":["r:1"],
+                  "sensitivity":"NON_SENSITIVE","redaction":"NONE",
+                  "constraints":{"min":50,"max":10}
+                }]}}""",
+                """
+                {"factCatalog":{"schemaVersion":"praxis.domain-rule-fact-catalog.v1","facts":[{
+                  "path":"request.code","valueType":"string","nullable":false,
+                  "labels":{"pt-BR":"Código"},"descriptions":{"pt-BR":"Código."},
+                  "providerRef":"host:req","evidenceRefs":["r:1"],
+                  "sensitivity":"NON_SENSITIVE","redaction":"NONE",
+                  "constraints":{"pattern":"[unclosed"}
+                }]}}""",
+                """
+                {"factCatalog":{"schemaVersion":"praxis.domain-rule-fact-catalog.v1","facts":[{
+                  "path":"request.code","valueType":"string","nullable":false,
+                  "labels":{"pt-BR":"Código"},"descriptions":{"pt-BR":"Código."},
+                  "providerRef":"host:req","evidenceRefs":["r:1"],
+                  "sensitivity":"NON_SENSITIVE","redaction":"NONE",
+                  "lineage":{"attributeId":"x","sourcePaths":["internal_table.col"]}
+                }]}}"""
+        );
+        for (String payload : invalidCatalogPayloads) {
+            assertThatThrownBy(() -> service.createDefinition(new DomainRuleDefinitionRequest(
+                    "grant.amount-parameters", 1, "selection_eligibility", "draft",
+                    "human-resources", "extraordinary-benefit", "praxis-api-quickstart",
+                    "policy-owner", "policy-owner", null, null,
+                    objectMapper.readTree(payload),
+                    objectMapper.readTree("{}"), null,
+                    objectMapper.readTree("{\"requiredApprovals\":[\"policy-owner\"]}"), null),
+                    principal("author")))
+                    .isInstanceOf(ConfigurationIngestionException.class);
+        }
+        verify(definitionRepository, org.mockito.Mockito.never()).save(any(DomainRuleDefinition.class));
+    }
+
+    @Test
+    void appliesReadOnlyFactMetadataOverlayWithoutWeakeningPrivacyOrChangingIdentity() throws Exception {
+        DomainRuleDefinitionRepository definitionRepository = mock(DomainRuleDefinitionRepository.class);
+        DomainRuleMaterializationRepository materializationRepository = mock(DomainRuleMaterializationRepository.class);
+        DomainRuleService service = service(definitionRepository, materializationRepository);
+        service.setFactMetadataOverlayProviders(List.of((definition, persistedFacts) -> List.of(
+                new DomainRuleFactDescriptor(
+                        "request.requestedAmount",
+                        "number",
+                        false,
+                        Map.of("pt-BR", "Valor solicitado (DTO)"),
+                        Map.of("pt-BR", "Valor monetário oficial vindo do DTO."),
+                        "host:req",
+                        List.of("dto:RequestDTO"),
+                        "SENSITIVE",
+                        "MASK",
+                        Map.of("pt-BR", "Orientação viva do DTO."),
+                        "valores",
+                        Map.of("pt-BR", "Valores"),
+                        "currency",
+                        "BRL",
+                        null,
+                        null,
+                        null,
+                        "1250.00",
+                        new DomainRuleFactDescriptor.Constraints(
+                                new BigDecimal("10.00"), new BigDecimal("9999.00"), null, null, null, null),
+                        new DomainRuleFactDescriptor.GovernanceMetadata(
+                                "confidential", "financial", true, "allow", null),
+                        null),
+                new DomainRuleFactDescriptor(
+                        "actor.secretToken",
+                        "string",
+                        false,
+                        Map.of("pt-BR", "Token"),
+                        Map.of("pt-BR", "Segredo."),
+                        "host:req",
+                        List.of("dto:RequestDTO"),
+                        "NON_SENSITIVE",
+                        "NONE",
+                        Map.of("pt-BR", "Hint seguro"),
+                        null,
+                        null,
+                        "text",
+                        null,
+                        null,
+                        List.of(new DomainRuleFactDescriptor.AllowedValue(
+                                "ROOT", Map.of("pt-BR", "Root"), null, null, null)),
+                        null,
+                        "should-be-stripped",
+                        null,
+                        new DomainRuleFactDescriptor.GovernanceMetadata(
+                                "restricted", "credential", false, "allow", null),
+                        null))));
+        UUID definitionId = UUID.randomUUID();
+        DomainRuleDefinition stored = DomainRuleDefinition.builder()
+                .id(definitionId)
+                .tenantId("tenant-a")
+                .environment("dev")
+                .ruleKey("grant.amount-parameters")
+                .version(1)
+                .ruleType("selection_eligibility")
+                .status("approved")
+                .definition(objectMapper.readTree("""
+                        {
+                          "factCatalog": {
+                            "schemaVersion": "praxis.domain-rule-fact-catalog.v1",
+                            "facts": [
+                              {
+                                "path": "request.requestedAmount",
+                                "valueType": "number",
+                                "nullable": false,
+                                "labels": {"pt-BR": "requestedAmount"},
+                                "descriptions": {"pt-BR": "Fato de avaliação do RuleSet grant.amount-parameters (request.requestedAmount)."},
+                                "providerRef": "host:req",
+                                "evidenceRefs": ["r:1"],
+                                "sensitivity": "NON_SENSITIVE",
+                                "redaction": "NONE"
+                              },
+                              {
+                                "path": "actor.secretToken",
+                                "valueType": "string",
+                                "nullable": false,
+                                "labels": {"pt-BR": "Token secreto"},
+                                "descriptions": {"pt-BR": "Credencial."},
+                                "providerRef": "host:req",
+                                "evidenceRefs": ["r:1"],
+                                "sensitivity": "SECRET",
+                                "redaction": "OMIT"
+                              }
+                            ]
+                          }
+                        }
+                        """).toString())
+                .parameters("{}")
+                .governance("{}")
+                .build();
+        when(definitionRepository.findById(definitionId)).thenReturn(Optional.of(stored));
+
+        var catalog = service.definitionFacts(definitionId, principal("reader"));
+        assertThat(catalog.facts()).hasSize(2);
+
+        DomainRuleFactDescriptor amount = catalog.facts().get(0);
+        assertThat(amount.labels()).containsEntry("pt-BR", "Valor solicitado (DTO)");
+        assertThat(amount.descriptions()).containsEntry("pt-BR", "Valor monetário oficial vindo do DTO.");
+        assertThat(amount.hints()).containsEntry("pt-BR", "Orientação viva do DTO.");
+        assertThat(amount.valuePresentation()).isEqualTo("currency");
+        assertThat(amount.unit()).isEqualTo("BRL");
+        assertThat(amount.sensitivity()).isEqualTo("SENSITIVE");
+        assertThat(amount.redaction()).isEqualTo("MASK");
+
+        DomainRuleFactDescriptor secret = catalog.facts().get(1);
+        assertThat(secret.sensitivity()).isEqualTo("SECRET");
+        assertThat(secret.redaction()).isEqualTo("OMIT");
+        assertThat(secret.example()).isNull();
+        assertThat(secret.allowedValues()).isNull();
+        assertThat(secret.governance().aiVisibility()).isEqualTo("deny");
+    }
+
+    @Test
+    void replacesLegacyRootColonAndSpaceSeparatedGenericFactLabelsDuringOverlayWhilePreservingCuratedLabels()
+            throws Exception {
+        DomainRuleDefinitionRepository definitionRepository = mock(DomainRuleDefinitionRepository.class);
+        DomainRuleMaterializationRepository materializationRepository = mock(DomainRuleMaterializationRepository.class);
+        DomainRuleService service = service(definitionRepository, materializationRepository);
+        service.setFactMetadataOverlayProviders(List.of((definition, persistedFacts) -> List.of(
+                new DomainRuleFactDescriptor(
+                        "request.requestedAmount",
+                        "number",
+                        false,
+                        Map.of(
+                                "pt-BR", "Valor solicitado oficial",
+                                "en-US", "Official requested amount"),
+                        Map.of(
+                                "pt-BR", "Valor monetário oficial vindo do DTO.",
+                                "en-US", "Official monetary amount from DTO."),
+                        "host:req",
+                        List.of("dto:RequestDTO"),
+                        "SENSITIVE",
+                        "MASK"),
+                new DomainRuleFactDescriptor(
+                        "request.customLimit",
+                        "number",
+                        false,
+                        Map.of("pt-BR", "Limite do DTO"),
+                        Map.of("pt-BR", "Descrição do DTO."),
+                        "host:req",
+                        List.of("dto:RequestDTO"),
+                        "NON_SENSITIVE",
+                        "NONE"))));
+
+        UUID definitionId = UUID.randomUUID();
+        DomainRuleDefinition stored = DomainRuleDefinition.builder()
+                .id(definitionId)
+                .tenantId("tenant-a")
+                .environment("dev")
+                .ruleKey("grant.amount-parameters")
+                .version(1)
+                .ruleType("selection_eligibility")
+                .status("approved")
+                .definition(objectMapper.readTree("""
+                        {
+                          "factCatalog": {
+                            "schemaVersion": "praxis.domain-rule-fact-catalog.v1",
+                            "facts": [
+                              {
+                                "path": "request.requestedAmount",
+                                "valueType": "number",
+                                "nullable": false,
+                                "labels": {
+                                  "pt-BR": "request: requestedAmount",
+                                  "en-US": "request requestedAmount"
+                                },
+                                "descriptions": {
+                                  "pt-BR": "Fato de avaliação do RuleSet grant.amount-parameters (request.requestedAmount).",
+                                  "en-US": "Evaluation fact for RuleSet grant.amount-parameters (request.requestedAmount)."
+                                },
+                                "providerRef": "host:req",
+                                "evidenceRefs": ["r:1"],
+                                "sensitivity": "NON_SENSITIVE",
+                                "redaction": "NONE"
+                              },
+                              {
+                                "path": "request.customLimit",
+                                "valueType": "number",
+                                "nullable": false,
+                                "labels": { "pt-BR": "Limite curado específico" },
+                                "descriptions": { "pt-BR": "Descrição curada específica." },
+                                "providerRef": "host:req",
+                                "evidenceRefs": ["r:1"],
+                                "sensitivity": "NON_SENSITIVE",
+                                "redaction": "NONE"
+                              }
+                            ]
+                          }
+                        }
+                        """).toString())
+                .parameters("{}")
+                .governance("{}")
+                .build();
+        when(definitionRepository.findById(definitionId)).thenReturn(Optional.of(stored));
+
+        var catalog = service.definitionFacts(definitionId, principal("reader"));
+        assertThat(catalog.facts()).hasSize(2);
+
+        DomainRuleFactDescriptor requested = catalog.facts().get(0);
+        assertThat(requested.labels())
+                .containsEntry("pt-BR", "Valor solicitado oficial")
+                .containsEntry("en-US", "Official requested amount");
+        assertThat(requested.descriptions())
+                .containsEntry("pt-BR", "Valor monetário oficial vindo do DTO.")
+                .containsEntry("en-US", "Official monetary amount from DTO.");
+
+        DomainRuleFactDescriptor custom = catalog.facts().get(1);
+        assertThat(custom.labels()).containsEntry("pt-BR", "Limite curado específico");
+        assertThat(custom.descriptions()).containsEntry("pt-BR", "Descrição curada específica.");
+    }
+
+    @Test
+    void removesStaleBoilerplateFallbackLocalesUnionsEvidenceProtectsGroupKeyMismatchAndGuardsGovernanceAndNanAllowedValues()
+            throws Exception {
+        DomainRuleDefinitionRepository definitionRepository = mock(DomainRuleDefinitionRepository.class);
+        DomainRuleMaterializationRepository materializationRepository = mock(DomainRuleMaterializationRepository.class);
+        DomainRuleService service = service(definitionRepository, materializationRepository);
+        service.setFactMetadataOverlayProviders(List.of((definition, persistedFacts) -> List.of(
+                new DomainRuleFactDescriptor(
+                        "draft.dtexerc",
+                        "date",
+                        false,
+                        Map.of("pt-BR", "Início de exercício"),
+                        Map.of("pt-BR", "Data oficial de entrada em exercício no vínculo."),
+                        "host:vinculos",
+                        List.of("dto:VinculoResponseDTO", "LGPD_ART_5_I"),
+                        "SECRET",
+                        "OMIT",
+                        Map.of("pt-BR", "Informe dd/MM/yyyy."),
+                        "grupo-novo",
+                        Map.of("pt-BR", "Grupo Novo Conflitante"),
+                        "date",
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        new DomainRuleFactDescriptor.GovernanceMetadata(
+                                "confidential", "personal", true, "allow", List.of("HR_CORE")),
+                        null),
+                new DomainRuleFactDescriptor(
+                        "draft.startWithTranslation",
+                        "date",
+                        false,
+                        Map.of("pt-BR", "Data inicial"),
+                        Map.of("pt-BR", "Data inicial oficial do afastamento."),
+                        "host:afast",
+                        List.of(),
+                        "NON_SENSITIVE",
+                        "NONE"),
+                new DomainRuleFactDescriptor(
+                        "draft.nanOption",
+                        "number",
+                        false,
+                        Map.of("pt-BR", "Opção numérica"),
+                        Map.of("pt-BR", "Valor numérico de faixa."),
+                        "host:afast",
+                        List.of(),
+                        "NON_SENSITIVE",
+                        "NONE",
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        List.of(new DomainRuleFactDescriptor.AllowedValue(
+                                Double.NaN, Map.of("pt-BR", "Inválido"), null, null, null)),
+                        null,
+                        null,
+                        null,
+                        null,
+                        null))));
+
+        UUID definitionId = UUID.randomUUID();
+        DomainRuleDefinition stored = DomainRuleDefinition.builder()
+                .id(definitionId)
+                .tenantId("tenant-a")
+                .environment("dev")
+                .ruleKey("workforce.vinculos.ruleset")
+                .version(1)
+                .ruleType("selection_eligibility")
+                .status("approved")
+                .definition(objectMapper.readTree("""
+                        {
+                          "factCatalog": {
+                            "schemaVersion": "praxis.domain-rule-fact-catalog.v1",
+                            "facts": [
+                              {
+                                "path": "draft.dtexerc",
+                                "valueType": "date",
+                                "nullable": false,
+                                "labels": { "pt-BR": "draft: dtexerc", "en-US": "draft dtexerc" },
+                                "descriptions": {
+                                  "pt-BR": "Fato de avaliação do RuleSet workforce.vinculos.ruleset (draft.dtexerc).",
+                                  "en-US": "Governed evaluation fact for RuleSet workforce.vinculos.ruleset (draft.dtexerc)."
+                                },
+                                "groupKey": "grupo-original",
+                                "groupLabels": { "pt-BR": "Grupo Original" },
+                                "providerRef": "host:vinculos",
+                                "evidenceRefs": ["PKG_VINC.P_EXERC"],
+                                "sensitivity": "NON_SENSITIVE",
+                                "redaction": "NONE",
+                                "governance": {
+                                  "classification": "internal",
+                                  "dataCategory": "operational",
+                                  "exportable": true,
+                                  "aiVisibility": "allow",
+                                  "complianceTags": ["WORKFORCE_AUDIT"]
+                                }
+                              },
+                              {
+                                "path": "draft.startWithTranslation",
+                                "valueType": "date",
+                                "nullable": false,
+                                "labels": { "pt-BR": "draft: startWithTranslation", "en-US": "Effective Start Date" },
+                                "descriptions": {
+                                  "pt-BR": "Projeção primitiva de Afastamento.",
+                                  "en-US": "Official start date of leave."
+                                },
+                                "providerRef": "host:afast",
+                                "evidenceRefs": ["r:2"],
+                                "sensitivity": "NON_SENSITIVE",
+                                "redaction": "NONE"
+                              },
+                              {
+                                "path": "draft.nanOption",
+                                "valueType": "number",
+                                "nullable": false,
+                                "labels": { "pt-BR": "Opção numérica" },
+                                "descriptions": { "pt-BR": "Valor numérico de faixa." },
+                                "providerRef": "host:afast",
+                                "evidenceRefs": ["r:3"],
+                                "sensitivity": "NON_SENSITIVE",
+                                "redaction": "NONE"
+                              }
+                            ]
+                          }
+                        }
+                        """).toString())
+                .parameters("{}")
+                .governance("{}")
+                .build();
+        when(definitionRepository.findById(definitionId)).thenReturn(Optional.of(stored));
+
+        var catalog = service.definitionFacts(definitionId, principal("reader"));
+        assertThat(catalog.facts()).hasSize(3);
+
+        DomainRuleFactDescriptor dtexerc = catalog.facts().get(0);
+        assertThat(dtexerc.labels()).containsEntry("pt-BR", "Início de exercício").doesNotContainKey("en-US");
+        assertThat(dtexerc.descriptions())
+                .containsEntry("pt-BR", "Data oficial de entrada em exercício no vínculo.")
+                .doesNotContainKey("en-US");
+        assertThat(dtexerc.evidenceRefs())
+                .containsExactly("PKG_VINC.P_EXERC", "dto:VinculoResponseDTO", "LGPD_ART_5_I");
+        assertThat(dtexerc.groupKey()).isEqualTo("grupo-original");
+        assertThat(dtexerc.groupLabels()).containsEntry("pt-BR", "Grupo Original");
+        assertThat(dtexerc.governance().classification()).isEqualTo("confidential");
+        assertThat(dtexerc.governance().exportable()).isFalse();
+        assertThat(dtexerc.governance().aiVisibility()).isEqualTo("deny");
+        assertThat(dtexerc.governance().complianceTags()).containsExactly("WORKFORCE_AUDIT", "HR_CORE");
+
+        DomainRuleFactDescriptor translated = catalog.facts().get(1);
+        assertThat(translated.labels())
+                .containsEntry("pt-BR", "Data inicial")
+                .containsEntry("en-US", "Effective Start Date");
+        assertThat(translated.descriptions())
+                .containsEntry("pt-BR", "Data inicial oficial do afastamento.")
+                .containsEntry("en-US", "Official start date of leave.");
+
+        DomainRuleFactDescriptor nanOption = catalog.facts().get(2);
+        assertThat(nanOption.allowedValues()).isNull();
     }
 
     private DomainRuleGovernancePrincipal principal(String actorRef) {

@@ -68,7 +68,7 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.autoconfigure.data.jpa.JpaRepositoriesAutoConfiguration;
 import org.springframework.boot.autoconfigure.orm.jpa.HibernateJpaAutoConfiguration;
 import org.springframework.context.annotation.Bean;
-import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.Import;
 import org.springframework.context.annotation.Primary;
 import org.springframework.core.convert.ConversionService;
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -87,9 +87,12 @@ import org.springframework.transaction.PlatformTransactionManager;
         ConfigTransactionManagerAliasAutoConfiguration.class
 })
 @ConditionalOnProperty(prefix = "praxis.ai.agent", name = "enabled", havingValue = "true", matchIfMissing = true)
+@Import({
+        OperationalAgentAutoConfiguration.SecurityPropagationConfiguration.class,
+        OperationalAgentAutoConfiguration.MetadataStarterBridgeConfiguration.class
+})
 public class OperationalAgentAutoConfiguration {
 
-    @Configuration(proxyBeanMethods = false)
     @ConditionalOnClass(SecurityContextHolder.class)
     static class SecurityPropagationConfiguration {
 
@@ -100,7 +103,6 @@ public class OperationalAgentAutoConfiguration {
         }
     }
 
-    @Configuration(proxyBeanMethods = false)
     @ConditionalOnClass(AbstractResourceQueryController.class)
     static class MetadataStarterBridgeConfiguration {
 

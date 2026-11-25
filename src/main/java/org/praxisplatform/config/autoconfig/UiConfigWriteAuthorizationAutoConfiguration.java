@@ -14,7 +14,7 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
-import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.Import;
 
 /**
  * Auto-configura a autorização padrão de escrita para {@code ui_user_config}, mantendo
@@ -23,6 +23,7 @@ import org.springframework.context.annotation.Configuration;
  */
 @AutoConfiguration
 @EnableConfigurationProperties(UiConfigWriteGuardProperties.class)
+@Import(UiConfigWriteAuthorizationAutoConfiguration.MetadataGovernanceDiscoveryConfiguration.class)
 public class UiConfigWriteAuthorizationAutoConfiguration {
 
     @Bean
@@ -42,7 +43,6 @@ public class UiConfigWriteAuthorizationAutoConfiguration {
         return guard::assertAllowed;
     }
 
-    @Configuration(proxyBeanMethods = false)
     @ConditionalOnClass(name = {
         "org.praxisplatform.uischema.annotation.DomainGovernance",
         "org.praxisplatform.uischema.filter.annotation.Filterable"

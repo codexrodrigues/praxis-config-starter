@@ -448,6 +448,83 @@ class AiApiContractOpenApiTest {
                 "AccessTokenQuery");
     }
 
+    @Test
+    @SuppressWarnings("unchecked")
+    void shouldPublishCanonicalFactCatalogAndSafeExplanationEvidenceSchemas() throws IOException {
+        Path contractPath = resolveContractPath();
+        Map<String, Object> document;
+        try (InputStream in = Files.newInputStream(contractPath)) {
+            document = new Yaml().load(in);
+        }
+        Map<String, Object> components = (Map<String, Object>) document.get("components");
+        Map<String, Object> schemas = (Map<String, Object>) components.get("schemas");
+        assertThat(schemas).containsKeys(
+                "DomainRuleFactCatalogResponse",
+                "DomainRuleFactDescriptor",
+                "DomainRuleFactAllowedValue",
+                "DomainRuleFactOptionSourceRef",
+                "DomainRuleFactConstraints",
+                "DomainRuleFactGovernanceMetadata",
+                "DomainRuleFactLineageMetadata",
+                "DomainDecisionExplanationSafeFact",
+                "DomainDecisionExplanationEvidence");
+
+        Map<String, Object> factDescriptor = (Map<String, Object>) schemas.get("DomainRuleFactDescriptor");
+        Map<String, Object> factProperties = (Map<String, Object>) factDescriptor.get("properties");
+        assertThat((Map<String, Object>) factProperties.get("path"))
+                .containsEntry("pattern", "^[A-Za-z][A-Za-z0-9_.:-]{0,254}$")
+                .containsEntry("maxLength", 255);
+        assertThat((Map<String, Object>) ((Map<String, Object>) factProperties.get("hints")).get("additionalProperties"))
+                .containsEntry("maxLength", 500);
+        assertThat((Map<String, Object>) factProperties.get("groupKey"))
+                .containsEntry("maxLength", 64);
+        assertThat((Map<String, Object>) factProperties.get("allowedValues"))
+                .containsEntry("maxItems", 64);
+
+        Map<String, Object> constraintsProps = (Map<String, Object>)
+                ((Map<String, Object>) schemas.get("DomainRuleFactConstraints")).get("properties");
+        assertThat((Map<String, Object>) constraintsProps.get("pattern"))
+                .containsEntry("maxLength", 256);
+
+        Map<String, Object> govProps = (Map<String, Object>)
+                ((Map<String, Object>) schemas.get("DomainRuleFactGovernanceMetadata")).get("properties");
+        assertThat((Map<String, Object>) govProps.get("complianceTags"))
+                .containsEntry("maxItems", 32);
+
+        Map<String, Object> lineageProps = (Map<String, Object>)
+                ((Map<String, Object>) schemas.get("DomainRuleFactLineageMetadata")).get("properties");
+        assertThat(lineageProps)
+                .containsKeys("attributeId", "sourceResourceKey", "transformation")
+                .doesNotContainKey("sourcePaths");
+
+        Map<String, Object> safeFact = (Map<String, Object>) schemas.get("DomainDecisionExplanationSafeFact");
+        Map<String, Object> safeFactProps = (Map<String, Object>) safeFact.get("properties");
+        assertThat(safeFactProps)
+                .containsKeys(
+                        "path",
+                        "valueType",
+                        "nullable",
+                        "labels",
+                        "descriptions",
+                        "hints",
+                        "groupKey",
+                        "groupLabels",
+                        "valuePresentation",
+                        "unit",
+                        "allowedValues",
+                        "constraints",
+                        "sensitivity",
+                        "redaction")
+                .doesNotContainKeys("example", "lineage", "optionSourceRef");
+
+        Map<String, Object> explanationEvidence =
+                (Map<String, Object>) schemas.get("DomainDecisionExplanationEvidence");
+        Map<String, Object> explanationProps = (Map<String, Object>) explanationEvidence.get("properties");
+        assertThat(explanationProps).containsKeys("redaction", "facts");
+        assertThat((Map<String, Object>) ((Map<String, Object>) explanationProps.get("facts")).get("items"))
+                .containsEntry("$ref", "#/components/schemas/DomainDecisionExplanationSafeFact");
+    }
+
     private Path resolveContractPath() {
         Path cwd = Paths.get("").toAbsolutePath();
         List<Path> candidates = List.of(

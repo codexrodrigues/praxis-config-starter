@@ -4,7 +4,9 @@ import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.databind.JsonNode;
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
+import org.praxisplatform.config.dto.DomainRuleFactDescriptor;
 
 /**
  * Sanitized, read-only evidence for explaining one exact governed rule definition.
@@ -23,7 +25,8 @@ public record DomainRuleExplanationEvidenceProjection(
         List<MaterializationEvidence> materializations,
         List<String> sourceRefs,
         RedactionEvidence redaction,
-        VersionAttestation versionAttestation) {
+        VersionAttestation versionAttestation,
+        List<SafeFactEvidence> facts) {
 
     public static final String SCHEMA_VERSION = "praxis-domain-decision-explanation-evidence.v1";
 
@@ -33,6 +36,59 @@ public record DomainRuleExplanationEvidenceProjection(
                 : schemaVersion.trim();
         materializations = materializations == null ? List.of() : List.copyOf(materializations);
         sourceRefs = sourceRefs == null ? List.of() : List.copyOf(sourceRefs);
+        facts = facts == null ? List.of() : List.copyOf(facts);
+    }
+
+    /** Backward-compatible 10-argument constructor defaulting {@code facts} to empty. */
+    public DomainRuleExplanationEvidenceProjection(
+            String schemaVersion,
+            DecisionRef decisionRef,
+            ScopeAttestation scopeAttestation,
+            SemanticContext semanticContext,
+            ConditionEvidence conditionEvidence,
+            LifecycleEvidence lifecycle,
+            List<MaterializationEvidence> materializations,
+            List<String> sourceRefs,
+            RedactionEvidence redaction,
+            VersionAttestation versionAttestation) {
+        this(
+                schemaVersion,
+                decisionRef,
+                scopeAttestation,
+                semanticContext,
+                conditionEvidence,
+                lifecycle,
+                materializations,
+                sourceRefs,
+                redaction,
+                versionAttestation,
+                List.of());
+    }
+
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    public record SafeFactEvidence(
+            String path,
+            String valueType,
+            boolean nullable,
+            Map<String, String> labels,
+            Map<String, String> descriptions,
+            Map<String, String> hints,
+            String groupKey,
+            Map<String, String> groupLabels,
+            String valuePresentation,
+            String unit,
+            List<DomainRuleFactDescriptor.AllowedValue> allowedValues,
+            DomainRuleFactDescriptor.Constraints constraints,
+            String sensitivity,
+            String redaction) {
+
+        public SafeFactEvidence {
+            labels = labels == null ? null : Map.copyOf(labels);
+            descriptions = descriptions == null ? null : Map.copyOf(descriptions);
+            hints = hints == null ? null : Map.copyOf(hints);
+            groupLabels = groupLabels == null ? null : Map.copyOf(groupLabels);
+            allowedValues = allowedValues == null ? null : List.copyOf(allowedValues);
+        }
     }
 
     public record DecisionRef(

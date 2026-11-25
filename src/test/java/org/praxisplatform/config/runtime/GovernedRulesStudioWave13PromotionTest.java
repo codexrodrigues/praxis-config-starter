@@ -29,12 +29,14 @@ import java.util.UUID;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.praxisplatform.config.autoconfig.DomainRuleSnapshotAutoConfiguration;
 import org.praxisplatform.config.autoconfig.GovernedRulesStudioAutoConfiguration;
 import org.praxisplatform.config.contract.DomainRuleTestRunRecordRequest;
 import org.praxisplatform.config.contract.DomainRuleTestRunResponse;
 import org.praxisplatform.config.contract.DomainRuleTestRunResultResponse;
 import org.praxisplatform.config.controller.GovernedRulesStudioSandboxController;
 import org.praxisplatform.config.domain.DomainRuleChangeWorkspace;
+import org.praxisplatform.config.domain.DomainRuleDefinition;
 import org.praxisplatform.config.domain.DomainRuleSnapshotHead;
 import org.praxisplatform.config.domain.DomainRuleTestRun;
 import org.praxisplatform.config.domain.DomainRuleTestScenario;
@@ -43,6 +45,7 @@ import org.praxisplatform.config.dto.DomainRuleChangeWorkspaceResponse;
 import org.praxisplatform.config.dto.DomainRuleCompositionManifestResponse;
 import org.praxisplatform.config.dto.DomainRuleDefinitionRequest;
 import org.praxisplatform.config.dto.DomainRuleDefinitionResponse;
+import org.praxisplatform.config.dto.DomainRuleFactDescriptor;
 import org.praxisplatform.config.dto.DomainRulePendingRolloutResponse;
 import org.praxisplatform.config.dto.DomainRuleRolloutPolicyCatalogResponse;
 import org.praxisplatform.config.dto.DomainRuleRolloutPolicyMutationResponse;
@@ -53,7 +56,15 @@ import org.praxisplatform.config.dto.DomainRuleSnapshotActivationResponse;
 import org.praxisplatform.config.dto.DomainRuleSnapshotHeadStatusResponse;
 import org.praxisplatform.config.dto.DomainRuleSnapshotStoredResponse;
 import org.praxisplatform.config.dto.DomainRuleTestScenarioResponse;
+import org.praxisplatform.config.repository.DomainCatalogReleaseRepository;
+import org.praxisplatform.config.repository.DomainKnowledgeChangeSetRepository;
 import org.praxisplatform.config.repository.DomainRuleChangeWorkspaceRepository;
+import org.praxisplatform.config.repository.DomainRuleCompositionApprovalRepository;
+import org.praxisplatform.config.repository.DomainRuleDefinitionApprovalRepository;
+import org.praxisplatform.config.repository.DomainRuleDefinitionRepository;
+import org.praxisplatform.config.repository.DomainRuleEventRepository;
+import org.praxisplatform.config.repository.DomainRuleMaterializationRepository;
+import org.praxisplatform.config.repository.DomainRuleSnapshotEventRepository;
 import org.praxisplatform.config.repository.DomainRuleSnapshotHeadRepository;
 import org.praxisplatform.config.repository.DomainRuleSnapshotRepository;
 import org.praxisplatform.config.repository.DomainRuleTestRunRepository;
@@ -63,14 +74,20 @@ import org.praxisplatform.config.runtime.GovernedHostRuleBundleRuntime.Operation
 import org.praxisplatform.config.runtime.GovernedMultiTenantSnapshotBootstrapper.BootstrapReport;
 import org.praxisplatform.config.service.AiPrincipalContextResolver;
 import org.praxisplatform.config.service.DomainRuleChangeWorkspaceService;
+import org.praxisplatform.config.service.DomainRuleDefinitionEvidenceGateService;
+import org.praxisplatform.config.service.DomainRuleDefinitionFingerprint;
+import org.praxisplatform.config.service.DomainRuleEntityRefresh;
+import org.praxisplatform.config.service.DomainRuleFactMetadataOverlayProvider;
 import org.praxisplatform.config.service.DomainRuleGovernancePrincipal;
 import org.praxisplatform.config.service.DomainRuleGovernancePrincipalResolver;
 import org.praxisplatform.config.service.DomainRuleImplementationCatalog;
 import org.praxisplatform.config.service.DomainRuleRolloutPolicyService;
 import org.praxisplatform.config.service.DomainRuleRolloutService;
 import org.praxisplatform.config.service.DomainRuleService;
+import org.praxisplatform.config.service.DomainRuleSnapshotScopeLock;
 import org.praxisplatform.config.service.DomainRuleSnapshotService;
 import org.praxisplatform.config.service.DomainRuleTestRunService;
+import org.praxisplatform.config.service.GovernedColorPaletteContractValidator;
 import org.praxisplatform.rules.contract.CompositionPolicy;
 import org.praxisplatform.rules.contract.DecisionAggregationPolicy;
 import org.praxisplatform.rules.contract.DecisionBinding;
@@ -93,6 +110,8 @@ import org.praxisplatform.rules.contract.RuleSnapshotApproval;
 import org.praxisplatform.rules.contract.RuleSnapshotSource;
 import org.praxisplatform.rules.contract.SlotCardinality;
 import org.praxisplatform.rules.digest.PraxisCanonicalJson;
+import org.praxisplatform.rules.facts.RuleFactCatalogDocument;
+import org.praxisplatform.rules.facts.RuleFactCatalogLoader;
 import org.praxisplatform.rules.facts.RuleFactContract;
 import org.praxisplatform.rules.facts.RuleFactContractException;
 import org.praxisplatform.rules.facts.RuleFactSchema;
@@ -108,11 +127,15 @@ import org.praxisplatform.uischema.annotation.DomainGovernancePreset;
 import org.praxisplatform.uischema.extension.annotation.UISchema;
 import org.praxisplatform.uischema.openapi.CanonicalOperationRef;
 import org.praxisplatform.uischema.schema.CanonicalSchemaRef;
+import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.boot.autoconfigure.AutoConfigurationExcludeFilter;
 import org.springframework.boot.autoconfigure.AutoConfigurations;
 import org.springframework.boot.test.context.FilteredClassLoader;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.ComponentScan;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.FilterType;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
@@ -202,10 +225,182 @@ class GovernedRulesStudioWave13PromotionTest {
                         roots,
                         null);
         assertThat(enriched).isPresent();
+        assertThat(enriched.get().path("schemaVersion").asText())
+                .isEqualTo("praxis.domain-rule-fact-catalog.v1");
         JsonNode factsArray = enriched.get().path("facts");
         assertThat(factsArray.isArray()).isTrue();
         assertThat(factsArray.toString()).contains("PERSONAL");
         assertThat(factsArray.toString()).contains("Requested Days");
+
+        // Non-mocked DomainRuleService validation round-trip + read-only overlay enrichment
+        DomainRuleDefinitionResponse persistedSummary = new DomainRuleDefinitionResponse(
+                UUID.randomUUID(),
+                "tenant-a",
+                "local",
+                "workforce.leave-requests.validation",
+                1,
+                "selection_eligibility",
+                "approved",
+                "workforce",
+                "workforce.leave-requests",
+                "hr-service",
+                "policy-owner",
+                GovernedRulesStudioDefinitionSeeder.SEED_ACTOR,
+                null,
+                null,
+                JSON.readTree("""
+                        {
+                          "ruleSetKey": "workforce.leave-requests",
+                          "factCatalog": {
+                            "schemaVersion": "praxis.domain-rule-fact-catalog.v1",
+                            "facts": [
+                              {
+                                "path": "draft.requestedDays",
+                                "valueType": "number",
+                                "nullable": true,
+                                "labels": {"pt-BR": "requestedDays"},
+                                "descriptions": {"pt-BR": "Fato de avaliação do RuleSet workforce.leave-requests (draft.requestedDays)."},
+                                "providerRef": "hr-service:workforce.draft.requestedDays",
+                                "evidenceRefs": ["ruleset:workforce.leave-requests"],
+                                "sensitivity": "NON_SENSITIVE",
+                                "redaction": "NONE"
+                              }
+                            ]
+                          }
+                        }
+                        """),
+                JSON.readTree("{}"),
+                null,
+                JSON.readTree("{}"),
+                JSON.readTree("{}"),
+                "system",
+                "seed",
+                null,
+                NOW,
+                NOW,
+                NOW,
+                NOW);
+        var persistedCatalog = new MetadataDtoFactMetadataOverlayProvider(
+                new GovernedRuleFamilyRegistry(List.of(sampleFamily())), JSON)
+                .enrich(persistedSummary, List.of(new DomainRuleFactDescriptor(
+                        "draft.requestedDays",
+                        "number",
+                        true,
+                        Map.of("pt-BR", "requestedDays"),
+                        Map.of("pt-BR", "Fato de avaliação do RuleSet workforce.leave-requests (draft.requestedDays)."),
+                        "hr-service:workforce.draft.requestedDays",
+                        List.of("ruleset:workforce.leave-requests"),
+                        "NON_SENSITIVE",
+                        "NONE")));
+        assertThat(persistedCatalog).singleElement().satisfies(fact -> {
+            assertThat(fact.labels()).containsEntry("pt-BR", "Requested Days");
+            assertThat(fact.descriptions()).containsEntry("pt-BR", "Requested duration in calendar days");
+        });
+
+        String curatedJson =
+                """
+                {
+                  "schemaVersion": "praxis.domain-rule-fact-catalog.v2",
+                  "operations": [
+                    {
+                      "operationKey": "CREATE",
+                      "snapshotSchema": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "maxProperties": 2,
+                        "required": ["draft", "neighborhood"],
+                        "properties": {
+                          "draft": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "maxProperties": 1,
+                            "required": ["requestedDays"],
+                            "properties": {
+                              "requestedDays": { "type": "integer", "minimum": 0, "maximum": 365 }
+                            }
+                          },
+                          "neighborhood": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "maxProperties": 1,
+                            "required": ["activeTeamCount"],
+                            "properties": {
+                              "activeTeamCount": { "type": "integer", "minimum": 0, "maximum": 100 }
+                            }
+                          }
+                        }
+                      },
+                      "facts": [
+                        {
+                          "schemaPointer": "#/properties/draft/properties/requestedDays",
+                          "labels": { "pt-BR": "requestedDays", "en-US": "Requested days" },
+                          "descriptions": {
+                            "pt-BR": "Projeção primitiva de Solicitação de Licença; ignorar quando houver DTO."
+                          },
+                          "providerRef": "curated-catalog#v2",
+                          "evidenceRefs": ["CURATED_LEAVE_DOC"],
+                          "sensitivity": "SENSITIVE",
+                          "redaction": "OMIT"
+                        },
+                        {
+                          "schemaPointer": "#/properties/neighborhood/properties/activeTeamCount",
+                          "labels": { "pt-BR": "Equipe ativa na unidade" },
+                          "descriptions": { "pt-BR": "Total de integrantes ativos na equipe no período." },
+                          "providerRef": "curated-catalog#v2",
+                          "evidenceRefs": ["CURATED_NEIGHBORHOOD_DOC"],
+                          "sensitivity": "NON_SENSITIVE",
+                          "redaction": "NONE"
+                        }
+                      ]
+                    }
+                  ]
+                }
+                """;
+        RuleFactCatalogDocument curatedCatalog = RuleFactCatalogLoader.parse(JSON.readTree(curatedJson));
+        GovernedRuleFamilyDescriptor<LeaveOp> curatedFamily =
+                sampleFamily().withFactMetadata(curatedCatalog, Map.of("draft", LeaveRequestDraftDto.class));
+        var hybridCatalog = new MetadataDtoFactMetadataOverlayProvider(
+                new GovernedRuleFamilyRegistry(List.of(curatedFamily)), JSON)
+                .enrich(persistedSummary, List.of(
+                        new DomainRuleFactDescriptor(
+                                "draft.requestedDays",
+                                "number",
+                                true,
+                                Map.of("pt-BR", "draft: requestedDays"),
+                                Map.of("pt-BR", "Fato de avaliação do RuleSet workforce.leave-requests (draft.requestedDays)."),
+                                "hr-service:workforce.draft.requestedDays",
+                                List.of("ruleset:workforce.leave-requests"),
+                                "NON_SENSITIVE",
+                                "NONE"),
+                        new DomainRuleFactDescriptor(
+                                "neighborhood.activeTeamCount",
+                                "number",
+                                false,
+                                Map.of("pt-BR", "neighborhood: activeTeamCount"),
+                                Map.of("pt-BR", "Fato de avaliação do RuleSet workforce.leave-requests (neighborhood.activeTeamCount)."),
+                                "hr-service:workforce.neighborhood.activeTeamCount",
+                                List.of("ruleset:workforce.leave-requests"),
+                                "NON_SENSITIVE",
+                                "NONE")));
+        assertThat(hybridCatalog).hasSize(2);
+        DomainRuleFactDescriptor enrichedDraft = hybridCatalog.get(0);
+        assertThat(enrichedDraft.labels())
+                .containsEntry("pt-BR", "Requested Days")
+                .containsEntry("en-US", "Requested days");
+        assertThat(enrichedDraft.descriptions())
+                .containsEntry("pt-BR", "Requested duration in calendar days")
+                .doesNotContainValue("Projeção primitiva de Solicitação de Licença; ignorar quando houver DTO.");
+        assertThat(enrichedDraft.sensitivity()).isEqualTo("SENSITIVE");
+        assertThat(enrichedDraft.redaction()).isEqualTo("OMIT");
+        assertThat(enrichedDraft.governance()).isNotNull();
+        assertThat(enrichedDraft.governance().aiVisibility()).isEqualTo("deny");
+        assertThat(enrichedDraft.evidenceRefs()).contains("ruleset:workforce.leave-requests", "CURATED_LEAVE_DOC");
+
+        DomainRuleFactDescriptor enrichedNeighborhood = hybridCatalog.get(1);
+        assertThat(enrichedNeighborhood.labels()).containsEntry("pt-BR", "Equipe ativa na unidade");
+        assertThat(enrichedNeighborhood.descriptions())
+                .containsEntry("pt-BR", "Total de integrantes ativos na equipe no período.");
+        assertThat(enrichedNeighborhood.evidenceRefs()).contains("CURATED_NEIGHBORHOOD_DOC");
 
         GovernedRuleFamilyDescriptor<LeaveOp> descriptor = sampleFamily();
         GovernedRuleFamilyRegistry registry = new GovernedRuleFamilyRegistry(List.of(descriptor));
@@ -2124,5 +2319,273 @@ class GovernedRulesStudioWave13PromotionTest {
                             false, true, "tenant-a", "local", "alice", "RULE_DEFINITION_AUTHOR"),
                     false);
         }
+    }
+
+    static class LiveOverlayTestDto {
+        @Schema(description = "Quantidade de dias solicitados pelo servidor.")
+        @UISchema(label = "Dias solicitados (DTO)", helpText = "Informe o total de dias corridos.")
+        @DomainGovernance(preset = DomainGovernancePreset.INTERNAL_OPERATIONAL)
+        private Integer days;
+    }
+
+    @Configuration(proxyBeanMethods = false)
+    @ComponentScan(
+            basePackages = "org.praxisplatform.config.autoconfig",
+            excludeFilters = {
+                @ComponentScan.Filter(
+                        type = FilterType.CUSTOM,
+                        classes = AutoConfigurationExcludeFilter.class),
+                @ComponentScan.Filter(
+                        type = FilterType.REGEX,
+                        pattern = "org\\.praxisplatform\\.config\\.autoconfig\\..*Test.*")
+            })
+    static class ComponentScanBootHostConfig {
+
+        @Bean
+        ObjectMapper objectMapper() {
+            return JSON;
+        }
+
+        @Bean
+        DomainRuleDefinitionRepository domainRuleDefinitionRepository() throws Exception {
+            DomainRuleDefinitionRepository repo = mock(DomainRuleDefinitionRepository.class);
+            UUID defId = UUID.fromString("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
+            DomainRuleDefinition stored =
+                    DomainRuleDefinition.builder()
+                            .id(defId)
+                            .tenantId("tenant-a")
+                            .environment("local")
+                            .ruleKey("leave.max-days")
+                            .version(1)
+                            .ruleType("selection_eligibility")
+                            .status("approved")
+                            .resourceKey("workforce.leave-requests")
+                            .definition(
+                                    JSON.readTree(
+                                            """
+                                            {
+                                              "ruleSetKey": "workforce.leave-requests",
+                                              "factCatalog": {
+                                                "schemaVersion": "praxis.domain-rule-fact-catalog.v1",
+                                                "facts": [
+                                                  {
+                                                    "path": "draft.days",
+                                                    "valueType": "number",
+                                                    "nullable": false,
+                                                    "labels": { "pt-BR": "draft: days" },
+                                                    "descriptions": {
+                                                      "pt-BR": "Fato de avaliação do RuleSet workforce.leave-requests (draft.days)."
+                                                    },
+                                                    "providerRef": "host:leave",
+                                                    "evidenceRefs": ["r:1"],
+                                                    "sensitivity": "NON_SENSITIVE",
+                                                    "redaction": "NONE"
+                                                  }
+                                                ]
+                                              }
+                                            }
+                                            """)
+                                            .toString())
+                            .parameters("{}")
+                            .governance("{}")
+                            .build();
+            when(repo.findById(defId)).thenReturn(Optional.of(stored));
+            return repo;
+        }
+
+        @Bean
+        DomainRuleDefinitionApprovalRepository domainRuleDefinitionApprovalRepository() {
+            return mock(DomainRuleDefinitionApprovalRepository.class);
+        }
+
+        @Bean
+        DomainRuleCompositionApprovalRepository domainRuleCompositionApprovalRepository() {
+            return mock(DomainRuleCompositionApprovalRepository.class);
+        }
+
+        @Bean
+        DomainRuleSnapshotRepository domainRuleSnapshotRepository() {
+            return mock(DomainRuleSnapshotRepository.class);
+        }
+
+        @Bean
+        DomainRuleSnapshotHeadRepository domainRuleSnapshotHeadRepository() {
+            return mock(DomainRuleSnapshotHeadRepository.class);
+        }
+
+        @Bean
+        DomainRuleSnapshotEventRepository domainRuleSnapshotEventRepository() {
+            return mock(DomainRuleSnapshotEventRepository.class);
+        }
+
+        @Bean
+        DomainRuleMaterializationRepository domainRuleMaterializationRepository() {
+            return mock(DomainRuleMaterializationRepository.class);
+        }
+
+        @Bean
+        DomainRuleEventRepository domainRuleEventRepository() {
+            return mock(DomainRuleEventRepository.class);
+        }
+
+        @Bean
+        DomainCatalogReleaseRepository domainCatalogReleaseRepository() {
+            return mock(DomainCatalogReleaseRepository.class);
+        }
+
+        @Bean
+        DomainKnowledgeChangeSetRepository domainKnowledgeChangeSetRepository() {
+            return mock(DomainKnowledgeChangeSetRepository.class);
+        }
+
+        @Bean
+        DomainRuleEntityRefresh domainRuleEntityRefresh() {
+            return mock(DomainRuleEntityRefresh.class);
+        }
+
+        @Bean
+        DomainRuleSnapshotScopeLock domainRuleSnapshotScopeLock() {
+            return mock(DomainRuleSnapshotScopeLock.class);
+        }
+
+        @Bean
+        AiPrincipalContextResolver aiPrincipalContextResolver() {
+            return new AiPrincipalContextResolver(
+                    false, true, "tenant-a", "local", "alice", "RULE_DEFINITION_AUTHOR");
+        }
+
+        @Bean
+        DomainRuleService domainRuleService(
+                DomainRuleDefinitionRepository definitionRepository,
+                DomainRuleMaterializationRepository materializationRepository,
+                DomainRuleEventRepository eventRepository,
+                DomainCatalogReleaseRepository releaseRepository,
+                DomainKnowledgeChangeSetRepository changeSetRepository,
+                DomainRuleDefinitionApprovalRepository approvalRepository,
+                DomainRuleDefinitionFingerprint definitionFingerprint,
+                ObjectMapper objectMapper,
+                ObjectProvider<DomainRuleDefinitionEvidenceGateService> evidenceGateProvider,
+                DomainRuleEntityRefresh entityRefresh) {
+            return new DomainRuleService(
+                    definitionRepository,
+                    materializationRepository,
+                    eventRepository,
+                    releaseRepository,
+                    changeSetRepository,
+                    approvalRepository,
+                    definitionFingerprint,
+                    objectMapper,
+                    evidenceGateProvider,
+                    new GovernedColorPaletteContractValidator(objectMapper),
+                    entityRefresh);
+        }
+
+        @Bean
+        GovernedRuleFamilyDescriptor<LeaveOp> leaveFamilyDescriptor() throws Exception {
+            return sampleFamily().withRootDtoBindings(Map.of("draft", LiveOverlayTestDto.class));
+        }
+    }
+
+    @Test
+    void componentScanHostStillActivatesMetadataOverlayProviderAfterSnapshotRegistryIsReady()
+            throws Exception {
+        UUID defId = UUID.fromString("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
+        new ApplicationContextRunner()
+                .withConfiguration(
+                        AutoConfigurations.of(
+                                DomainRuleSnapshotAutoConfiguration.class,
+                                GovernedRulesStudioAutoConfiguration.class))
+                .withUserConfiguration(ComponentScanBootHostConfig.class)
+                .run(
+                        context -> {
+                            assertThat(context).hasNotFailed();
+                            assertThat(context).hasSingleBean(GovernedRuleFamilyRegistry.class);
+                            assertThat(context)
+                                    .hasSingleBean(DomainRuleFactMetadataOverlayProvider.class);
+                            assertThat(context)
+                                    .hasSingleBean(MetadataDtoFactMetadataOverlayProvider.class);
+
+                            DomainRuleService service = context.getBean(DomainRuleService.class);
+                            var catalog =
+                                    service.definitionFacts(
+                                            defId,
+                                            new DomainRuleGovernancePrincipal(
+                                                    "tenant-a", "alice", "local"));
+                            assertThat(catalog.facts()).singleElement().satisfies(fact -> {
+                                assertThat(fact.path()).isEqualTo("draft.days");
+                                assertThat(fact.labels())
+                                        .containsEntry("pt-BR", "Dias solicitados (DTO)");
+                                assertThat(fact.descriptions())
+                                        .containsEntry(
+                                                "pt-BR",
+                                                "Quantidade de dias solicitados pelo servidor.");
+                                assertThat(fact.hints())
+                                        .containsEntry("pt-BR", "Informe o total de dias corridos.");
+                            });
+                        });
+    }
+
+    @Test
+    void contractFactoryCachesByStructuralCatalogFingerprintWithoutHashCodeCollisions()
+            throws Exception {
+        MetadataDtoRuleFactContractFactory factory =
+                new MetadataDtoRuleFactContractFactory(JSON);
+        String catalogJsonA =
+                """
+                {
+                  "schemaVersion": "praxis.domain-rule-fact-catalog.v2",
+                  "operations": [
+                    {
+                      "operationKey": "validate",
+                      "snapshotSchema": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "maxProperties": 1,
+                        "required": ["draft"],
+                        "properties": {
+                          "draft": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "maxProperties": 1,
+                            "required": ["days"],
+                            "properties": {
+                              "days": { "type": "integer", "minimum": 1, "maximum": 30 }
+                            }
+                          }
+                        }
+                      },
+                      "facts": [
+                        {
+                          "schemaPointer": "#/properties/draft/properties/days",
+                          "labels": { "pt-BR": "Dias" },
+                          "descriptions": { "pt-BR": "Dias de afastamento." },
+                          "providerRef": "WorkforceSource#v1",
+                          "evidenceRefs": ["WF-1"],
+                          "sensitivity": "NON_SENSITIVE",
+                          "redaction": "NONE"
+                        }
+                      ]
+                    }
+                  ]
+                }
+                """;
+        String catalogJsonB = catalogJsonA.replace("Dias de afastamento.", "Total de dias úteis.");
+        RuleFactCatalogDocument docA1 = RuleFactCatalogLoader.parse(JSON.readTree(catalogJsonA));
+        RuleFactCatalogDocument docA2 = RuleFactCatalogLoader.parse(JSON.readTree(catalogJsonA));
+        RuleFactCatalogDocument docB = RuleFactCatalogLoader.parse(JSON.readTree(catalogJsonB));
+
+        RuleFactContract c1 =
+                factory.buildOrGetContract(
+                        "1", "validate", "ref", Map.of(), List.of("draft.days"), List.of(), docA1);
+        RuleFactContract c2 =
+                factory.buildOrGetContract(
+                        "1", "validate", "ref", Map.of(), List.of("draft.days"), List.of(), docA2);
+        RuleFactContract c3 =
+                factory.buildOrGetContract(
+                        "1", "validate", "ref", Map.of(), List.of("draft.days"), List.of(), docB);
+
+        assertThat(c2).isSameAs(c1);
+        assertThat(c3).isNotSameAs(c1);
+        assertThat(factory.cacheSize()).isEqualTo(2);
     }
 }

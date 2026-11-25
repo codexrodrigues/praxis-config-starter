@@ -374,12 +374,6 @@ public final class GovernedRulesStudioDefinitionSeeder implements ApplicationRun
                 return enriched.get();
             }
         }
-        if (family.factCatalogDocument().isPresent()) {
-            JsonNode explicit = objectMapper.valueToTree(family.factCatalogDocument().get());
-            if (explicit.isObject() && explicit.path("facts").isArray() && !explicit.path("facts").isEmpty()) {
-                return (ObjectNode) explicit;
-            }
-        }
         ObjectNode catalog = objectMapper.createObjectNode();
         catalog.put("schemaVersion", FACT_CATALOG_SCHEMA_VERSION);
         ArrayNode facts = catalog.putArray("facts");
@@ -392,19 +386,11 @@ public final class GovernedRulesStudioDefinitionSeeder implements ApplicationRun
             String root = dot >= 0 ? path.substring(0, dot) : "fato";
             String leaf = dot >= 0 ? path.substring(dot + 1) : path;
             node.putObject("labels")
-                    .put("pt-BR", root + ": " + leaf)
-                    .put("en-US", path.replace('.', ' '));
+                    .put("pt-BR", root + ": " + leaf);
             node.putObject("descriptions")
                     .put(
                             "pt-BR",
                             "Fato governado do RuleSet "
-                                    + ruleSet.ref().ruleSetKey()
-                                    + " ("
-                                    + path
-                                    + ").")
-                    .put(
-                            "en-US",
-                            "Governed evaluation fact for RuleSet "
                                     + ruleSet.ref().ruleSetKey()
                                     + " ("
                                     + path

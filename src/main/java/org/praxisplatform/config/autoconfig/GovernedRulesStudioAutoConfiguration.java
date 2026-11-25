@@ -20,8 +20,10 @@ import org.praxisplatform.config.runtime.GovernedRulesStudioCompositionService;
 import org.praxisplatform.config.runtime.GovernedRulesStudioDefinitionSeeder;
 import org.praxisplatform.config.runtime.GovernedRulesStudioSandboxEndpointOwner;
 import org.praxisplatform.config.runtime.GovernedRulesStudioSandboxService;
+import org.praxisplatform.config.runtime.MetadataDtoFactMetadataOverlayProvider;
 import org.praxisplatform.config.runtime.MetadataDtoRuleFactContractFactory;
 import org.praxisplatform.config.service.DomainRuleChangeWorkspaceService;
+import org.praxisplatform.config.service.DomainRuleFactMetadataOverlayProvider;
 import org.praxisplatform.config.service.DomainRuleGovernancePrincipalResolver;
 import org.praxisplatform.config.service.DomainRuleImplementationCatalog;
 import org.praxisplatform.config.service.DomainRuleRolloutPolicyService;
@@ -43,7 +45,7 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.ApplicationContext;
 import org.springframework.context.annotation.Bean;
-import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.Import;
 import org.springframework.util.ClassUtils;
 
 /**
@@ -66,6 +68,11 @@ import org.springframework.util.ClassUtils;
         after = DomainRuleSnapshotAutoConfiguration.class,
         afterName = "org.springframework.boot.autoconfigure.jackson.JacksonAutoConfiguration",
         beforeName = "org.praxisplatform.uischema.configuration.OpenApiUiSchemaAutoConfiguration")
+@Import({
+    GovernedRulesStudioAutoConfiguration.MetadataFactContractConfiguration.class,
+    GovernedRulesStudioAutoConfiguration.MetadataActionRegistryConfiguration.class,
+    GovernedRulesStudioAutoConfiguration.MetadataDomainRuleSetCatalogBridgeConfiguration.class
+})
 public class GovernedRulesStudioAutoConfiguration {
 
     @Bean
@@ -303,7 +310,6 @@ public class GovernedRulesStudioAutoConfiguration {
                 failFast);
     }
 
-    @Configuration(proxyBeanMethods = false)
     @ConditionalOnClass(
             name = {
                 "org.praxisplatform.uischema.authoring.DtoMetadataFactCatalogEnricher",
@@ -316,9 +322,16 @@ public class GovernedRulesStudioAutoConfiguration {
         DtoRuleFactContractFactory dtoRuleFactContractFactory(ObjectMapper objectMapper) {
             return new MetadataDtoRuleFactContractFactory(objectMapper);
         }
+
+        @Bean
+        @ConditionalOnMissingBean(DomainRuleFactMetadataOverlayProvider.class)
+        @ConditionalOnBean(GovernedRuleFamilyRegistry.class)
+        MetadataDtoFactMetadataOverlayProvider metadataDtoFactMetadataOverlayProvider(
+                GovernedRuleFamilyRegistry familyRegistry, ObjectMapper objectMapper) {
+            return new MetadataDtoFactMetadataOverlayProvider(familyRegistry, objectMapper);
+        }
     }
 
-    @Configuration(proxyBeanMethods = false)
     @ConditionalOnClass(name = "org.praxisplatform.uischema.action.ActionDefinitionRegistry")
     @ConditionalOnBean(GovernedRuleFamilyRegistry.class)
     static class MetadataActionRegistryConfiguration {
@@ -346,7 +359,6 @@ public class GovernedRulesStudioAutoConfiguration {
         }
     }
 
-    @Configuration(proxyBeanMethods = false)
     @ConditionalOnClass(name = "org.praxisplatform.uischema.domain.DomainRuleSetCatalogProvider")
     @ConditionalOnBean(GovernedRuleFamilyRegistry.class)
     static class MetadataDomainRuleSetCatalogBridgeConfiguration {

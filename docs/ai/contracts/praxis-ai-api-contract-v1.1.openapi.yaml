@@ -4551,32 +4551,430 @@ components:
       properties:
         path:
           type: string
+          pattern: '^[A-Za-z][A-Za-z0-9_.:-]{0,254}$'
+          maxLength: 255
         valueType:
           type: string
-          enum: [boolean, string, number, date, string-array, date-array]
+          enum: [boolean, string, number, date, string-array, date-array, number-array, array<number>]
         nullable:
           type: boolean
         labels:
           type: object
+          description: Rotulos curtos por idioma realmente disponivel, sem duplicacao artificial de locales.
           additionalProperties:
             type: string
+            minLength: 1
         descriptions:
           type: object
+          description: Descricoes de negocio por idioma, sem concatenar texto operacional de hint.
           additionalProperties:
             type: string
+            minLength: 1
         providerRef:
           type: string
+          minLength: 1
         evidenceRefs:
           type: array
           minItems: 1
           items:
             type: string
+            minLength: 1
         sensitivity:
           type: string
           enum: [NON_SENSITIVE, PERSONAL, SENSITIVE, SECRET]
         redaction:
           type: string
           enum: [NONE, MASK, HASH, OMIT]
+        hints:
+          type: object
+          description: Orientacao operacional complementar por idioma (derivada de @UISchema.helpText / hint).
+          additionalProperties:
+            type: string
+            minLength: 1
+            maxLength: 500
+        groupKey:
+          type: string
+          pattern: '^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$'
+          maxLength: 64
+        groupLabels:
+          type: object
+          description: Rotulos editoriais de agrupamento por idioma (derivados de @UISchema.group).
+          additionalProperties:
+            type: string
+            minLength: 1
+            maxLength: 120
+        valuePresentation:
+          type: string
+          enum: [currency, percentage, date, datetime, time, boolean, number, integer, duration, identifier, text]
+        unit:
+          type: string
+          minLength: 1
+          maxLength: 32
+        mask:
+          type: string
+          minLength: 1
+          maxLength: 64
+        allowedValues:
+          type: array
+          description: Dominio fechado com valores escalares unicos compativeis com valueType. Proibido quando sensitivity=SECRET ou redaction=OMIT.
+          minItems: 1
+          maxItems: 64
+          items:
+            $ref: '#/components/schemas/DomainRuleFactAllowedValue'
+        optionSourceRef:
+          $ref: '#/components/schemas/DomainRuleFactOptionSourceRef'
+        example:
+          type: string
+          minLength: 1
+          maxLength: 256
+          description: Valor de exemplo seguro. Proibido quando sensitivity=SECRET ou redaction=OMIT.
+        constraints:
+          $ref: '#/components/schemas/DomainRuleFactConstraints'
+        governance:
+          $ref: '#/components/schemas/DomainRuleFactGovernanceMetadata'
+        lineage:
+          $ref: '#/components/schemas/DomainRuleFactLineageMetadata'
+      additionalProperties: false
+
+    DomainRuleFactAllowedValue:
+      type: object
+      required: [value, labels]
+      properties:
+        value:
+          oneOf:
+            - type: string
+            - type: number
+            - type: boolean
+        labels:
+          type: object
+          additionalProperties:
+            type: string
+            minLength: 1
+        icon:
+          type: string
+          minLength: 1
+          maxLength: 64
+        tone:
+          type: string
+          minLength: 1
+          maxLength: 32
+        description:
+          type: string
+          minLength: 1
+          maxLength: 256
+      additionalProperties: false
+
+    DomainRuleFactOptionSourceRef:
+      type: object
+      required: [sourceKey]
+      properties:
+        sourceKey:
+          type: string
+          minLength: 1
+          maxLength: 128
+        resourceKey:
+          type: string
+          minLength: 1
+          maxLength: 255
+      additionalProperties: false
+
+    DomainRuleFactConstraints:
+      type: object
+      description: Restricoes editoriais e de dominio do fato (min <= max, step > 0, minLength <= maxLength e regex valida).
+      properties:
+        min:
+          type: number
+        max:
+          type: number
+        step:
+          type: number
+          minimum: 0
+          exclusiveMinimum: true
+        minLength:
+          type: integer
+          minimum: 0
+        maxLength:
+          type: integer
+          minimum: 0
+        pattern:
+          type: string
+          minLength: 1
+          maxLength: 256
+      additionalProperties: false
+
+    DomainRuleFactGovernanceMetadata:
+      type: object
+      properties:
+        classification:
+          type: string
+          enum: [public, internal, confidential, restricted]
+        dataCategory:
+          type: string
+          minLength: 1
+          maxLength: 64
+        exportable:
+          type: boolean
+        aiVisibility:
+          type: string
+          enum: [allow, mask, summarize_only, deny]
+          description: Obrigatoriamente deny quando sensitivity=SECRET ou redaction=OMIT.
+        complianceTags:
+          type: array
+          maxItems: 32
+          items:
+            type: string
+            minLength: 1
+      additionalProperties: false
+
+    DomainRuleFactLineageMetadata:
+      type: object
+      description: Linhagem semantica publicada para fatos governados; sourcePaths internos sao proibidos e nunca publicados.
+      properties:
+        attributeId:
+          type: string
+          minLength: 1
+          maxLength: 255
+        sourceResourceKey:
+          type: string
+          minLength: 1
+          maxLength: 255
+        transformation:
+          type: string
+          minLength: 1
+          maxLength: 64
+      additionalProperties: false
+
+    DomainDecisionExplanationSafeFact:
+      type: object
+      description: >-
+        Vocabulario sanitizado de fatos projetado na evidencia de explicacao de decisao da IA.
+        Exclui fatos com sensitivity=SECRET, redaction=OMIT ou governance.aiVisibility=deny;
+        nunca copia example, lineage ou optionSourceRef e suprime hints, allowedValues e constraints
+        quando o fato exige mask ou summarize_only.
+      required: [path, valueType, nullable, sensitivity, redaction]
+      properties:
+        path:
+          type: string
+          pattern: '^[A-Za-z][A-Za-z0-9_.:-]{0,254}$'
+          maxLength: 255
+        valueType:
+          type: string
+          enum: [boolean, string, number, date, string-array, date-array, number-array, array<number>]
+        nullable:
+          type: boolean
+        labels:
+          type: object
+          nullable: true
+          additionalProperties:
+            type: string
+            minLength: 1
+        descriptions:
+          type: object
+          nullable: true
+          additionalProperties:
+            type: string
+            minLength: 1
+        hints:
+          type: object
+          nullable: true
+          additionalProperties:
+            type: string
+            minLength: 1
+            maxLength: 500
+        groupKey:
+          type: string
+          nullable: true
+          pattern: '^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$'
+          maxLength: 64
+        groupLabels:
+          type: object
+          nullable: true
+          additionalProperties:
+            type: string
+            minLength: 1
+            maxLength: 120
+        valuePresentation:
+          type: string
+          nullable: true
+          enum: [currency, percentage, date, datetime, time, boolean, number, integer, duration, identifier, text]
+        unit:
+          type: string
+          nullable: true
+          minLength: 1
+          maxLength: 32
+        allowedValues:
+          type: array
+          nullable: true
+          maxItems: 64
+          items:
+            $ref: '#/components/schemas/DomainRuleFactAllowedValue'
+        constraints:
+          $ref: '#/components/schemas/DomainRuleFactConstraints'
+          nullable: true
+        sensitivity:
+          type: string
+          enum: [NON_SENSITIVE, PERSONAL, SENSITIVE, SECRET]
+        redaction:
+          type: string
+          enum: [NONE, MASK, HASH, OMIT]
+      additionalProperties: false
+
+    DomainDecisionExplanationEvidence:
+      type: object
+      description: >-
+        Projecao read-only sanitizada emitida em evidenceBundle.domainDecision para explicacao de
+        decisao governada sem expor tenantId, atores, fatos de runtime, payloads materializados
+        ou fatos restritos.
+      required:
+        - schemaVersion
+        - decisionRef
+        - scopeAttestation
+        - semanticContext
+        - conditionEvidence
+        - lifecycle
+        - materializations
+        - sourceRefs
+        - redaction
+        - versionAttestation
+        - facts
+      properties:
+        schemaVersion:
+          type: string
+          enum: [praxis-domain-decision-explanation-evidence.v1]
+        decisionRef:
+          type: object
+          required: [definitionId, ruleKey, version, definitionHash, conditionHash]
+          properties:
+            definitionId: {type: string, format: uuid}
+            ruleKey: {type: string}
+            version: {type: integer}
+            definitionHash: {type: string}
+            conditionHash: {type: string}
+          additionalProperties: false
+        scopeAttestation:
+          type: object
+          required: [tenantBound, environmentBound]
+          properties:
+            tenantBound: {type: boolean}
+            environmentBound: {type: boolean}
+          additionalProperties: false
+        semanticContext:
+          type: object
+          required: [ruleType, status]
+          properties:
+            ruleType: {type: string}
+            status: {type: string}
+            contextKey: {type: string, nullable: true}
+            resourceKey: {type: string, nullable: true}
+            serviceKey: {type: string, nullable: true}
+            semanticOwner: {type: string, nullable: true}
+          additionalProperties: false
+        conditionEvidence:
+          type: object
+          required: [exposureMode, operators, factPaths, valid, validationIssues]
+          properties:
+            exposureMode:
+              type: string
+              enum: [full, summary_only, masked, denied]
+            conditionAst:
+              nullable: true
+              description: Omitido quando exposureMode != full ou quando a condicao referencia fato restrito.
+            operators:
+              type: array
+              items: {type: string}
+            factPaths:
+              type: array
+              items: {type: string}
+            valid:
+              type: boolean
+            validationIssues:
+              type: array
+              items:
+                type: object
+                required: [code]
+                properties:
+                  code: {type: string}
+                  path: {type: string, nullable: true}
+                  operator: {type: string, nullable: true}
+                additionalProperties: false
+          additionalProperties: false
+        lifecycle:
+          type: object
+          required: [status, safeEvents]
+          properties:
+            status: {type: string}
+            safeEvents:
+              type: array
+              items:
+                type: object
+                required: [eventType, occurredAt, summary]
+                properties:
+                  eventType: {type: string}
+                  occurredAt: {type: string, format: date-time}
+                  summary: {type: string}
+                  status: {type: string, nullable: true}
+                  targetLayer: {type: string, nullable: true}
+                  targetArtifactType: {type: string, nullable: true}
+                  targetArtifactKey: {type: string, nullable: true}
+                  materializationId: {type: string, format: uuid, nullable: true}
+                  materializationKey: {type: string, nullable: true}
+                  sourceHash: {type: string, nullable: true}
+                additionalProperties: false
+          additionalProperties: false
+        materializations:
+          type: array
+          items:
+            type: object
+            required: [id, materializationKey, targetLayer, targetArtifactType, targetArtifactKey, status]
+            properties:
+              id: {type: string, format: uuid}
+              materializationKey: {type: string}
+              targetLayer: {type: string}
+              targetArtifactType: {type: string}
+              targetArtifactKey: {type: string}
+              status: {type: string}
+              sourceHash: {type: string, nullable: true}
+              appliedAt: {type: string, format: date-time, nullable: true}
+            additionalProperties: false
+        sourceRefs:
+          type: array
+          items: {type: string}
+        redaction:
+          type: object
+          required:
+            - policyRef
+            - mode
+            - omittedFields
+            - rawRuntimeFactsCopied
+            - rawMaterializedPayloadCopied
+            - actorRefsCopied
+            - tenantIdCopied
+            - workspaceRationaleCopied
+          properties:
+            policyRef: {type: string}
+            mode: {type: string, enum: [full, summary_only, masked, denied]}
+            omittedFields:
+              type: array
+              description: Campos suprimidos na evidencia (inclui factCatalog.secretOrDeniedFacts, factCatalog.summarizedOrMaskedFacts ou conditionAst.containsRestrictedFacts quando aplicavel).
+              items: {type: string}
+            rawRuntimeFactsCopied: {type: boolean}
+            rawMaterializedPayloadCopied: {type: boolean}
+            actorRefsCopied: {type: boolean}
+            tenantIdCopied: {type: boolean}
+            workspaceRationaleCopied: {type: boolean}
+          additionalProperties: false
+        versionAttestation:
+          type: object
+          required: [requestedVersion, resolvedVersion, exactMatch]
+          properties:
+            requestedVersion: {type: integer}
+            resolvedVersion: {type: integer}
+            exactMatch: {type: boolean}
+          additionalProperties: false
+        facts:
+          type: array
+          items:
+            $ref: '#/components/schemas/DomainDecisionExplanationSafeFact'
       additionalProperties: false
 
     DomainRuleTimelineResponse:

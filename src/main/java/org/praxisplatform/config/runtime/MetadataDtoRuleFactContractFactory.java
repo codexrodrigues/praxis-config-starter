@@ -3,8 +3,12 @@ package org.praxisplatform.config.runtime;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -18,6 +22,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import org.praxisplatform.rules.facts.RuleFactCatalogDocument;
 import org.praxisplatform.rules.facts.RuleFactContract;
 import org.praxisplatform.rules.facts.RuleFactDescriptor;
+import org.praxisplatform.rules.facts.RuleFactOperationCatalog;
 import org.praxisplatform.rules.facts.RuleFactSchema;
 import org.praxisplatform.uischema.authoring.DtoMetadataFactCatalogEnricher;
 import org.praxisplatform.uischema.authoring.DtoMetadataFactCatalogEnricher.DtoFactPropertyMetadata;
@@ -79,7 +84,7 @@ public class MetadataDtoRuleFactContractFactory implements DtoRuleFactContractFa
             bindingSignature(safeRoots),
             safePaths,
             safeExecutors,
-            existingCatalog != null ? existingCatalog.hashCode() : 0);
+            catalogFingerprint(existingCatalog));
 
     return contractCache.computeIfAbsent(
         cacheKey,
@@ -119,22 +124,35 @@ public class MetadataDtoRuleFactContractFactory implements DtoRuleFactContractFa
             nullToEmpty(operationKey),
             bindingSignature(safeRoots),
             safePaths,
-            existingCatalog != null ? existingCatalog.hashCode() : 0);
+            catalogFingerprint(existingCatalog));
 
+    String providerPrefix = resolveProviderPrefix(serviceKey, domainKey);
     ObjectNode cached =
         catalogCache.computeIfAbsent(
             key,
             ignored ->
                 enricher.buildEnrichedFactCatalog(
                     objectMapper,
+                    GovernedRulesStudioDefinitionSeeder.FACT_CATALOG_SCHEMA_VERSION,
                     familyKey,
-                    serviceKey,
-                    domainKey,
                     operationKey,
+                    providerPrefix,
                     safePaths,
                     safeRoots,
                     existingCatalog));
     return Optional.of(cached.deepCopy());
+  }
+
+  private static String resolveProviderPrefix(String serviceKey, String domainKey) {
+    String cleanService = serviceKey == null ? "" : serviceKey.trim();
+    String cleanDomain = domainKey == null ? "" : domainKey.trim();
+    if (!cleanService.isEmpty() && !cleanDomain.isEmpty()) {
+      return cleanService + ":" + cleanDomain;
+    }
+    if (!cleanService.isEmpty()) {
+      return cleanService;
+    }
+    return !cleanDomain.isEmpty() ? cleanDomain : "host";
   }
 
   @Override
@@ -348,7 +366,7 @@ public class MetadataDtoRuleFactContractFactory implements DtoRuleFactContractFa
     if (!StringUtils.hasText(rawPath)) {
       return List.of();
     }
-    String normalized = rawPath.trim();
+    String normalized = rawPath.trim().replace(":items", "").replace(":any", "").replace("[]", "");
     if (normalized.startsWith("$.")) {
       normalized = normalized.substring(2);
     } else if (normalized.startsWith("/")) {
@@ -362,6 +380,54 @@ public class MetadataDtoRuleFactContractFactory implements DtoRuleFactContractFa
       }
     }
     return List.copyOf(out);
+  }
+
+  private static String catalogFingerprint(RuleFactCatalogDocument catalog) {
+    if (catalog == null) {
+      return "";
+    }
+    try {
+      MessageDigest md = MessageDigest.getInstance("SHA-256");
+      updateHash(md, catalog.schemaVersion());
+      if (catalog.operations() != null && !catalog.operations().isEmpty()) {
+        List<String> opKeys = new ArrayList<>(catalog.operations().keySet());
+        opKeys.sort(Comparator.naturalOrder());
+        for (String opKey : opKeys) {
+          updateHash(md, opKey);
+          RuleFactOperationCatalog op = catalog.operations().get(opKey);
+          if (op != null) {
+            if (op.schema() != null) {
+              updateHash(md, op.schema().digest());
+            }
+            if (op.facts() != null) {
+              for (RuleFactDescriptor fact : op.facts()) {
+                if (fact != null) {
+                  updateHash(md, fact.schemaPointer());
+                  updateHash(md, fact.factPath());
+                  updateHash(md, fact.valueType());
+                  updateHash(md, Boolean.toString(fact.nullable()));
+                  updateHash(md, String.valueOf(fact.labels()));
+                  updateHash(md, String.valueOf(fact.descriptions()));
+                  updateHash(md, fact.providerRef());
+                  updateHash(md, String.valueOf(fact.evidenceRefs()));
+                  updateHash(md, fact.sensitivity());
+                  updateHash(md, fact.redaction());
+                }
+              }
+            }
+          }
+        }
+      }
+      return HexFormat.of().formatHex(md.digest());
+    } catch (NoSuchAlgorithmException ex) {
+      throw new IllegalStateException("SHA-256 unavailable", ex);
+    }
+  }
+
+  private static void updateHash(MessageDigest md, String value) {
+    byte[] bytes = (value == null ? "<null>" : value).getBytes(StandardCharsets.UTF_8);
+    md.update(bytes);
+    md.update((byte) '\0');
   }
 
   private static String requireText(String value, String name) {
@@ -384,7 +450,7 @@ public class MetadataDtoRuleFactContractFactory implements DtoRuleFactContractFa
       Map<String, String> rootClassBindings,
       List<String> declaredFactPaths,
       List<RuleFactContract.JavaInputs> javaExecutors,
-      int catalogHash) {}
+      String catalogFingerprint) {}
 
   private record CatalogCacheKey(
       String familyKey,
@@ -393,7 +459,7 @@ public class MetadataDtoRuleFactContractFactory implements DtoRuleFactContractFa
       String operationKey,
       Map<String, String> rootClassBindings,
       List<String> factPaths,
-      int catalogHash) {}
+      String catalogFingerprint) {}
 
   private static final class SchemaTreeNode {
     final boolean isObject;

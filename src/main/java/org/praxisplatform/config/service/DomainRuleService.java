@@ -9,6 +9,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.io.IOException;
+import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
@@ -19,12 +20,15 @@ import java.util.Comparator;
 import java.util.HashSet;
 import java.util.HexFormat;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
 import java.util.regex.Pattern;
+import java.util.regex.PatternSyntaxException;
 import lombok.RequiredArgsConstructor;
 import org.praxisplatform.authz.contracts.policy.AuthorizationPolicyDefinition;
 import org.praxisplatform.config.domain.DomainCatalogRelease;
@@ -58,9 +62,11 @@ import org.praxisplatform.config.repository.DomainRuleDefinitionApprovalReposito
 import org.praxisplatform.config.repository.DomainRuleEventRepository;
 import org.praxisplatform.config.repository.DomainRuleMaterializationRepository;
 import org.praxisplatform.config.tx.ConfigTransactionManagerNames;
+import org.praxisplatform.rules.facts.RuleFactDescriptor;
+import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 import org.springframework.stereotype.Service;
-import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
@@ -104,6 +110,31 @@ public class DomainRuleService {
             "NON_SENSITIVE", "PERSONAL", "SENSITIVE", "SECRET");
     private static final Set<String> FACT_REDACTION_POLICIES = Set.of(
             "NONE", "MASK", "HASH", "OMIT");
+    private static final Pattern FACT_GROUP_KEY_PATTERN =
+            Pattern.compile("^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$");
+    private static final Set<String> FACT_VALUE_PRESENTATIONS = Set.of(
+            "currency", "percentage", "date", "datetime", "time", "boolean",
+            "number", "integer", "duration", "identifier", "text");
+    private static final Set<String> FACT_CLASSIFICATIONS = Set.of(
+            "public", "internal", "confidential", "restricted");
+    private static final Set<String> FACT_AI_VISIBILITIES = Set.of(
+            "allow", "mask", "summarize_only", "deny");
+    private static final int MAX_FACT_HINTS_LENGTH = 500;
+    private static final int MAX_FACT_GROUP_LABEL_LENGTH = 120;
+    private static final int MAX_FACT_UNIT_LENGTH = 32;
+    private static final int MAX_FACT_MASK_LENGTH = 64;
+    private static final int MAX_FACT_ALLOWED_VALUES = 64;
+    private static final int MAX_FACT_EXAMPLE_LENGTH = 256;
+    private static final int MAX_FACT_PATTERN_LENGTH = 256;
+    private static final int MAX_FACT_ICON_LENGTH = 64;
+    private static final int MAX_FACT_TONE_LENGTH = 32;
+    private static final int MAX_FACT_OPTION_DESCRIPTION_LENGTH = 256;
+    private static final int MAX_FACT_SOURCE_KEY_LENGTH = 128;
+    private static final int MAX_FACT_RESOURCE_KEY_LENGTH = 255;
+    private static final int MAX_FACT_DATA_CATEGORY_LENGTH = 64;
+    private static final int MAX_FACT_COMPLIANCE_TAGS = 32;
+    private static final int MAX_FACT_ATTRIBUTE_ID_LENGTH = 255;
+    private static final int MAX_FACT_TRANSFORMATION_LENGTH = 64;
 
     private final DomainRuleDefinitionRepository definitionRepository;
     private final DomainRuleMaterializationRepository materializationRepository;
@@ -116,6 +147,39 @@ public class DomainRuleService {
     private final ObjectProvider<DomainRuleDefinitionEvidenceGateService> evidenceGateProvider;
     private final GovernedColorPaletteContractValidator governedColorPaletteValidator;
     private final DomainRuleEntityRefresh lifecycleRefresh;
+
+    /**
+     * Optional read-only overlay providers injected via setter so {@code @RequiredArgsConstructor}
+     * retains its 10-argument signature for unit and integration tests.
+     */
+    private volatile List<DomainRuleFactMetadataOverlayProvider> factMetadataOverlayProviders = List.of();
+    private volatile ObjectProvider<DomainRuleFactMetadataOverlayProvider> factMetadataOverlayProviderSource;
+
+    @Autowired(required = false)
+    void setFactMetadataOverlayProviders(ObjectProvider<DomainRuleFactMetadataOverlayProvider> providers) {
+        this.factMetadataOverlayProviderSource = providers;
+        this.factMetadataOverlayProviders = List.of();
+    }
+
+    void setFactMetadataOverlayProviders(List<DomainRuleFactMetadataOverlayProvider> providers) {
+        this.factMetadataOverlayProviderSource = null;
+        this.factMetadataOverlayProviders = providers == null ? List.of() : List.copyOf(providers);
+    }
+
+    private List<DomainRuleFactMetadataOverlayProvider> resolvedFactMetadataOverlayProviders() {
+        ObjectProvider<DomainRuleFactMetadataOverlayProvider> source = this.factMetadataOverlayProviderSource;
+        if (source != null) {
+            synchronized (this) {
+                if (this.factMetadataOverlayProviderSource != null) {
+                    List<DomainRuleFactMetadataOverlayProvider> resolved =
+                            this.factMetadataOverlayProviderSource.orderedStream().toList();
+                    this.factMetadataOverlayProviders = List.copyOf(resolved);
+                    this.factMetadataOverlayProviderSource = null;
+                }
+            }
+        }
+        return this.factMetadataOverlayProviders;
+    }
 
     void prepareLifecycleScope(DomainRuleGovernancePrincipal principal) {
         requirePrincipal(principal);
@@ -399,17 +463,28 @@ public class DomainRuleService {
                 ? objectMapper.missingNode()
                 : definition.definition().path("factCatalog");
         validateFactCatalog(definition.definition());
-        List<DomainRuleFactDescriptor> facts = new ArrayList<>();
+        List<DomainRuleFactDescriptor> baseFacts = new ArrayList<>();
         JsonNode items = catalog.path("facts");
         if (items.isArray()) {
-            items.forEach(item -> facts.add(toFactDescriptor(item)));
+            items.forEach(item -> baseFacts.add(toFactDescriptor(item)));
+        }
+        List<DomainRuleFactDescriptor> resolvedFacts = List.copyOf(baseFacts);
+        List<DomainRuleFactMetadataOverlayProvider> providers = resolvedFactMetadataOverlayProviders();
+        if (providers != null && !providers.isEmpty() && !resolvedFacts.isEmpty()) {
+            for (DomainRuleFactMetadataOverlayProvider provider : providers) {
+                if (provider == null) {
+                    continue;
+                }
+                List<DomainRuleFactDescriptor> overlaid = provider.enrich(definition, resolvedFacts);
+                resolvedFacts = mergeOverlayFacts(resolvedFacts, overlaid);
+            }
         }
         return new DomainRuleFactCatalogResponse(
                 definition.id(),
                 definition.ruleKey(),
                 definition.version(),
                 catalog.path("schemaVersion").asText(FACT_CATALOG_SCHEMA_VERSION),
-                List.copyOf(facts));
+                resolvedFacts);
     }
 
     @Transactional(transactionManager = ConfigTransactionManagerNames.CONFIG, readOnly = true)
@@ -4091,7 +4166,7 @@ public class DomainRuleService {
             if (!paths.add(path)) {
                 throw new ConfigurationIngestionException("definition.factCatalog fact path is duplicated: " + path);
             }
-            requireFactEnum(item, "valueType", FACT_VALUE_TYPES);
+            String valueType = requireFactEnum(item, "valueType", FACT_VALUE_TYPES);
             if (!item.has("nullable") || !item.path("nullable").isBoolean()) {
                 throw new ConfigurationIngestionException(
                         "definition.factCatalog fact nullable must be boolean: " + path);
@@ -4106,8 +4181,20 @@ public class DomainRuleService {
                 throw new ConfigurationIngestionException(
                         "definition.factCatalog fact evidenceRefs must contain non-empty references: " + path);
             }
-            requireFactEnum(item, "sensitivity", FACT_SENSITIVITIES);
-            requireFactEnum(item, "redaction", FACT_REDACTION_POLICIES);
+            String sensitivity = requireFactEnum(item, "sensitivity", FACT_SENSITIVITIES);
+            String redaction = requireFactEnum(item, "redaction", FACT_REDACTION_POLICIES);
+            validateOptionalLocalizedMap(item, "hints", path, MAX_FACT_HINTS_LENGTH);
+            validateOptionalPatternText(item, "groupKey", path, FACT_GROUP_KEY_PATTERN);
+            validateOptionalLocalizedMap(item, "groupLabels", path, MAX_FACT_GROUP_LABEL_LENGTH);
+            validateOptionalEnumText(item, "valuePresentation", path, FACT_VALUE_PRESENTATIONS);
+            validateOptionalBoundedText(item, "unit", path, MAX_FACT_UNIT_LENGTH);
+            validateOptionalBoundedText(item, "mask", path, MAX_FACT_MASK_LENGTH);
+            validateOptionalExample(item, path, sensitivity, redaction);
+            validateOptionalAllowedValues(item, path, valueType, sensitivity, redaction);
+            validateOptionalOptionSourceRef(item, path);
+            validateOptionalConstraints(item, path);
+            validateOptionalGovernance(item, path, sensitivity, redaction);
+            validateOptionalLineage(item, path);
         });
     }
 
@@ -4123,7 +4210,1002 @@ public class DomainRuleService {
                         .map(JsonNode::asText)
                         .toList(),
                 item.path("sensitivity").asText(),
-                item.path("redaction").asText());
+                item.path("redaction").asText(),
+                optionalLocalizedFactText(item.get("hints")),
+                optionalText(item.get("groupKey")),
+                optionalLocalizedFactText(item.get("groupLabels")),
+                optionalText(item.get("valuePresentation")),
+                optionalText(item.get("unit")),
+                optionalText(item.get("mask")),
+                parseAllowedValues(item.get("allowedValues")),
+                parseOptionSourceRef(item.get("optionSourceRef")),
+                optionalText(item.get("example")),
+                parseConstraints(item.get("constraints")),
+                parseGovernanceMetadata(item.get("governance")),
+                parseLineageMetadata(item.get("lineage")));
+    }
+
+    private Map<String, String> optionalLocalizedFactText(JsonNode source) {
+        if (source == null || source.isNull() || !source.isObject() || source.isEmpty()) {
+            return null;
+        }
+        Map<String, String> values = new LinkedHashMap<>();
+        source.fields().forEachRemaining(entry -> {
+            if (StringUtils.hasText(entry.getKey())
+                    && entry.getValue().isTextual()
+                    && StringUtils.hasText(entry.getValue().asText())) {
+                values.put(entry.getKey().trim(), entry.getValue().asText().trim());
+            }
+        });
+        return values.isEmpty() ? null : Map.copyOf(values);
+    }
+
+    private String optionalText(JsonNode node) {
+        if (node == null || node.isNull() || !node.isTextual()) {
+            return null;
+        }
+        String trimmed = node.asText().trim();
+        return trimmed.isEmpty() ? null : trimmed;
+    }
+
+    private List<DomainRuleFactDescriptor.AllowedValue> parseAllowedValues(JsonNode node) {
+        if (node == null || node.isNull() || !node.isArray() || node.isEmpty()) {
+            return null;
+        }
+        List<DomainRuleFactDescriptor.AllowedValue> result = new ArrayList<>();
+        for (JsonNode entry : node) {
+            if (entry == null || !entry.isObject()) {
+                continue;
+            }
+            JsonNode valueNode = entry.get("value");
+            Object scalar = scalarJsonValue(valueNode);
+            Map<String, String> labels = optionalLocalizedFactText(entry.get("labels"));
+            if (scalar == null || labels == null) {
+                continue;
+            }
+            result.add(new DomainRuleFactDescriptor.AllowedValue(
+                    scalar,
+                    labels,
+                    optionalText(entry.get("icon")),
+                    optionalText(entry.get("tone")),
+                    optionalText(entry.get("description"))));
+        }
+        return result.isEmpty() ? null : List.copyOf(result);
+    }
+
+    private Object scalarJsonValue(JsonNode valueNode) {
+        if (valueNode == null || valueNode.isNull()) {
+            return null;
+        }
+        if (valueNode.isBoolean()) {
+            return valueNode.booleanValue();
+        }
+        if (valueNode.isNumber()) {
+            return valueNode.numberValue();
+        }
+        if (valueNode.isTextual()) {
+            String trimmed = valueNode.asText().trim();
+            return trimmed.isEmpty() ? null : trimmed;
+        }
+        return null;
+    }
+
+    private DomainRuleFactDescriptor.OptionSourceRef parseOptionSourceRef(JsonNode node) {
+        if (node == null || node.isNull() || !node.isObject()) {
+            return null;
+        }
+        String sourceKey = optionalText(node.get("sourceKey"));
+        if (sourceKey == null) {
+            return null;
+        }
+        return new DomainRuleFactDescriptor.OptionSourceRef(
+                sourceKey, optionalText(node.get("resourceKey")));
+    }
+
+    private DomainRuleFactDescriptor.Constraints parseConstraints(JsonNode node) {
+        if (node == null || node.isNull() || !node.isObject() || node.isEmpty()) {
+            return null;
+        }
+        BigDecimal min = optionalDecimal(node.get("min"));
+        BigDecimal max = optionalDecimal(node.get("max"));
+        BigDecimal step = optionalDecimal(node.get("step"));
+        Integer minLength = optionalInt(node.get("minLength"));
+        Integer maxLength = optionalInt(node.get("maxLength"));
+        String pattern = optionalText(node.get("pattern"));
+        if (min == null && max == null && step == null
+                && minLength == null && maxLength == null && pattern == null) {
+            return null;
+        }
+        return new DomainRuleFactDescriptor.Constraints(min, max, step, minLength, maxLength, pattern);
+    }
+
+    private BigDecimal optionalDecimal(JsonNode node) {
+        if (node == null || node.isNull() || !node.isNumber()) {
+            return null;
+        }
+        return node.decimalValue();
+    }
+
+    private Integer optionalInt(JsonNode node) {
+        if (node == null || node.isNull() || !node.isIntegralNumber() || !node.canConvertToInt()) {
+            return null;
+        }
+        return node.intValue();
+    }
+
+    private DomainRuleFactDescriptor.GovernanceMetadata parseGovernanceMetadata(JsonNode node) {
+        if (node == null || node.isNull() || !node.isObject() || node.isEmpty()) {
+            return null;
+        }
+        String classification = optionalText(node.get("classification"));
+        String dataCategory = optionalText(node.get("dataCategory"));
+        Boolean exportable = node.has("exportable") && node.get("exportable").isBoolean()
+                ? node.get("exportable").booleanValue()
+                : null;
+        String aiVisibility = optionalText(node.get("aiVisibility"));
+        List<String> complianceTags = null;
+        JsonNode tagsNode = node.get("complianceTags");
+        if (tagsNode != null && tagsNode.isArray() && !tagsNode.isEmpty()) {
+            List<String> tags = new ArrayList<>();
+            tagsNode.forEach(tag -> {
+                if (tag.isTextual() && StringUtils.hasText(tag.asText())) {
+                    tags.add(tag.asText().trim());
+                }
+            });
+            if (!tags.isEmpty()) {
+                complianceTags = List.copyOf(tags);
+            }
+        }
+        if (classification == null && dataCategory == null && exportable == null
+                && aiVisibility == null && complianceTags == null) {
+            return null;
+        }
+        return new DomainRuleFactDescriptor.GovernanceMetadata(
+                classification, dataCategory, exportable, aiVisibility, complianceTags);
+    }
+
+    private DomainRuleFactDescriptor.LineageMetadata parseLineageMetadata(JsonNode node) {
+        if (node == null || node.isNull() || !node.isObject() || node.isEmpty()) {
+            return null;
+        }
+        String attributeId = optionalText(node.get("attributeId"));
+        String sourceResourceKey = optionalText(node.get("sourceResourceKey"));
+        String transformation = optionalText(node.get("transformation"));
+        if (attributeId == null && sourceResourceKey == null && transformation == null) {
+            return null;
+        }
+        return new DomainRuleFactDescriptor.LineageMetadata(attributeId, sourceResourceKey, transformation);
+    }
+
+    private void validateOptionalLocalizedMap(JsonNode item, String field, String path, int maxLength) {
+        if (!item.has(field) || item.get(field).isNull()) {
+            return;
+        }
+        JsonNode values = item.get(field);
+        if (!values.isObject() || values.isEmpty()) {
+            throw new ConfigurationIngestionException(
+                    "definition.factCatalog fact " + field + " must be a non-empty localized object: " + path);
+        }
+        values.fields().forEachRemaining(entry -> {
+            if (!StringUtils.hasText(entry.getKey())
+                    || !entry.getValue().isTextual()
+                    || !StringUtils.hasText(entry.getValue().asText())) {
+                throw new ConfigurationIngestionException(
+                        "definition.factCatalog fact " + field + " must contain non-blank localized text: " + path);
+            }
+            if (entry.getValue().asText().trim().length() > maxLength) {
+                throw new ConfigurationIngestionException(
+                        "definition.factCatalog fact " + field + " exceeds max length " + maxLength + ": " + path);
+            }
+        });
+    }
+
+    private void validateOptionalPatternText(JsonNode item, String field, String path, Pattern pattern) {
+        if (!item.has(field) || item.get(field).isNull()) {
+            return;
+        }
+        JsonNode node = item.get(field);
+        if (!node.isTextual() || !pattern.matcher(node.asText().trim()).matches()) {
+            throw new ConfigurationIngestionException(
+                    "definition.factCatalog fact " + field + " is invalid: " + path);
+        }
+    }
+
+    private void validateOptionalEnumText(JsonNode item, String field, String path, Set<String> allowed) {
+        if (!item.has(field) || item.get(field).isNull()) {
+            return;
+        }
+        JsonNode node = item.get(field);
+        if (!node.isTextual() || !allowed.contains(node.asText().trim())) {
+            throw new ConfigurationIngestionException(
+                    "definition.factCatalog fact " + field + " must be one of " + allowed + ": " + path);
+        }
+    }
+
+    private void validateOptionalBoundedText(JsonNode item, String field, String path, int maxLength) {
+        if (!item.has(field) || item.get(field).isNull()) {
+            return;
+        }
+        JsonNode node = item.get(field);
+        if (!node.isTextual() || !StringUtils.hasText(node.asText())) {
+            throw new ConfigurationIngestionException(
+                    "definition.factCatalog fact " + field + " must be a non-blank string: " + path);
+        }
+        if (node.asText().trim().length() > maxLength) {
+            throw new ConfigurationIngestionException(
+                    "definition.factCatalog fact " + field + " exceeds max length " + maxLength + ": " + path);
+        }
+    }
+
+    private void validateOptionalExample(
+            JsonNode item, String path, String sensitivity, String redaction) {
+        if (!item.has("example") || item.get("example").isNull()) {
+            return;
+        }
+        if (isRestrictedFact(sensitivity, redaction)) {
+            throw new ConfigurationIngestionException(
+                    "definition.factCatalog fact example is forbidden for SECRET/OMIT facts: " + path);
+        }
+        validateOptionalBoundedText(item, "example", path, MAX_FACT_EXAMPLE_LENGTH);
+    }
+
+    private void validateOptionalAllowedValues(
+            JsonNode item, String path, String valueType, String sensitivity, String redaction) {
+        if (!item.has("allowedValues") || item.get("allowedValues").isNull()) {
+            return;
+        }
+        if (isRestrictedFact(sensitivity, redaction)) {
+            throw new ConfigurationIngestionException(
+                    "definition.factCatalog fact allowedValues is forbidden for SECRET/OMIT facts: " + path);
+        }
+        JsonNode allowed = item.get("allowedValues");
+        if (!allowed.isArray() || allowed.isEmpty()) {
+            throw new ConfigurationIngestionException(
+                    "definition.factCatalog fact allowedValues must be a non-empty array: " + path);
+        }
+        if (allowed.size() > MAX_FACT_ALLOWED_VALUES) {
+            throw new ConfigurationIngestionException(
+                    "definition.factCatalog fact allowedValues exceeds max size "
+                            + MAX_FACT_ALLOWED_VALUES + ": " + path);
+        }
+        Set<String> seenValues = new HashSet<>();
+        for (JsonNode option : allowed) {
+            if (!option.isObject()) {
+                throw new ConfigurationIngestionException(
+                        "definition.factCatalog fact allowedValues entries must be objects: " + path);
+            }
+            JsonNode valueNode = option.get("value");
+            if (!isAllowedScalarForValueType(valueNode, valueType)) {
+                throw new ConfigurationIngestionException(
+                        "definition.factCatalog fact allowedValues value mismatches valueType "
+                                + valueType + ": " + path);
+            }
+            String canonicalKey = valueNode.isNumber()
+                    ? valueNode.decimalValue().stripTrailingZeros().toPlainString()
+                    : valueNode.asText().trim();
+            if (!seenValues.add(canonicalKey)) {
+                throw new ConfigurationIngestionException(
+                        "definition.factCatalog fact allowedValues contains duplicate value: " + path);
+            }
+            requireLocalizedFactText(option, "labels", path);
+            validateOptionalBoundedText(option, "icon", path, MAX_FACT_ICON_LENGTH);
+            validateOptionalBoundedText(option, "tone", path, MAX_FACT_TONE_LENGTH);
+            validateOptionalBoundedText(
+                    option, "description", path, MAX_FACT_OPTION_DESCRIPTION_LENGTH);
+        }
+    }
+
+    private boolean isAllowedScalarForValueType(JsonNode valueNode, String valueType) {
+        if (valueNode == null || valueNode.isNull()) {
+            return false;
+        }
+        return switch (valueType) {
+            case "boolean" -> valueNode.isBoolean();
+            case "number", "number-array", "array<number>" -> valueNode.isNumber();
+            case "string", "date", "string-array", "date-array" ->
+                    valueNode.isTextual() && StringUtils.hasText(valueNode.asText());
+            default -> false;
+        };
+    }
+
+    private void validateOptionalOptionSourceRef(JsonNode item, String path) {
+        if (!item.has("optionSourceRef") || item.get("optionSourceRef").isNull()) {
+            return;
+        }
+        JsonNode ref = item.get("optionSourceRef");
+        if (!ref.isObject()) {
+            throw new ConfigurationIngestionException(
+                    "definition.factCatalog fact optionSourceRef must be an object: " + path);
+        }
+        String sourceKey = requiredFactText(ref, "sourceKey");
+        if (sourceKey.length() > MAX_FACT_SOURCE_KEY_LENGTH) {
+            throw new ConfigurationIngestionException(
+                    "definition.factCatalog fact optionSourceRef.sourceKey exceeds max length: " + path);
+        }
+        validateOptionalBoundedText(ref, "resourceKey", path, MAX_FACT_RESOURCE_KEY_LENGTH);
+    }
+
+    private void validateOptionalConstraints(JsonNode item, String path) {
+        if (!item.has("constraints") || item.get("constraints").isNull()) {
+            return;
+        }
+        JsonNode constraints = item.get("constraints");
+        if (!constraints.isObject()) {
+            throw new ConfigurationIngestionException(
+                    "definition.factCatalog fact constraints must be an object: " + path);
+        }
+        BigDecimal min = requireOptionalJsonNumber(constraints, "min", path);
+        BigDecimal max = requireOptionalJsonNumber(constraints, "max", path);
+        BigDecimal step = requireOptionalJsonNumber(constraints, "step", path);
+        if (min != null && max != null && min.compareTo(max) > 0) {
+            throw new ConfigurationIngestionException(
+                    "definition.factCatalog fact constraints min cannot exceed max: " + path);
+        }
+        if (step != null && step.compareTo(BigDecimal.ZERO) <= 0) {
+            throw new ConfigurationIngestionException(
+                    "definition.factCatalog fact constraints step must be positive: " + path);
+        }
+        Integer minLength = requireOptionalNonNegativeInt(constraints, "minLength", path);
+        Integer maxLength = requireOptionalNonNegativeInt(constraints, "maxLength", path);
+        if (minLength != null && maxLength != null && minLength > maxLength) {
+            throw new ConfigurationIngestionException(
+                    "definition.factCatalog fact constraints minLength cannot exceed maxLength: " + path);
+        }
+        if (constraints.has("pattern") && !constraints.get("pattern").isNull()) {
+            JsonNode patternNode = constraints.get("pattern");
+            if (!patternNode.isTextual() || !StringUtils.hasText(patternNode.asText())) {
+                throw new ConfigurationIngestionException(
+                        "definition.factCatalog fact constraints.pattern must be non-blank text: " + path);
+            }
+            String regex = patternNode.asText();
+            if (regex.length() > MAX_FACT_PATTERN_LENGTH) {
+                throw new ConfigurationIngestionException(
+                        "definition.factCatalog fact constraints.pattern exceeds max length: " + path);
+            }
+            try {
+                Pattern.compile(regex);
+            } catch (PatternSyntaxException ex) {
+                throw new ConfigurationIngestionException(
+                        "definition.factCatalog fact constraints.pattern is invalid regex: " + path, ex);
+            }
+        }
+    }
+
+    private BigDecimal requireOptionalJsonNumber(JsonNode parent, String field, String path) {
+        if (!parent.has(field) || parent.get(field).isNull()) {
+            return null;
+        }
+        JsonNode node = parent.get(field);
+        if (!node.isNumber()) {
+            throw new ConfigurationIngestionException(
+                    "definition.factCatalog fact constraints." + field + " must be numeric: " + path);
+        }
+        return node.decimalValue();
+    }
+
+    private Integer requireOptionalNonNegativeInt(JsonNode parent, String field, String path) {
+        if (!parent.has(field) || parent.get(field).isNull()) {
+            return null;
+        }
+        JsonNode node = parent.get(field);
+        if (!node.isIntegralNumber() || !node.canConvertToInt() || node.intValue() < 0) {
+            throw new ConfigurationIngestionException(
+                    "definition.factCatalog fact constraints." + field + " must be a non-negative integer: " + path);
+        }
+        return node.intValue();
+    }
+
+    private void validateOptionalGovernance(
+            JsonNode item, String path, String sensitivity, String redaction) {
+        if (!item.has("governance") || item.get("governance").isNull()) {
+            return;
+        }
+        JsonNode gov = item.get("governance");
+        if (!gov.isObject()) {
+            throw new ConfigurationIngestionException(
+                    "definition.factCatalog fact governance must be an object: " + path);
+        }
+        validateOptionalEnumText(gov, "classification", path, FACT_CLASSIFICATIONS);
+        validateOptionalBoundedText(gov, "dataCategory", path, MAX_FACT_DATA_CATEGORY_LENGTH);
+        if (gov.has("exportable") && !gov.get("exportable").isNull() && !gov.get("exportable").isBoolean()) {
+            throw new ConfigurationIngestionException(
+                    "definition.factCatalog fact governance.exportable must be boolean: " + path);
+        }
+        validateOptionalEnumText(gov, "aiVisibility", path, FACT_AI_VISIBILITIES);
+        String aiVisibility = optionalText(gov.get("aiVisibility"));
+        if (isRestrictedFact(sensitivity, redaction)
+                && aiVisibility != null
+                && !"deny".equalsIgnoreCase(aiVisibility)) {
+            throw new ConfigurationIngestionException(
+                    "definition.factCatalog fact governance.aiVisibility must be deny for SECRET/OMIT facts: " + path);
+        }
+        if (gov.has("complianceTags") && !gov.get("complianceTags").isNull()) {
+            JsonNode tags = gov.get("complianceTags");
+            if (!tags.isArray() || tags.size() > MAX_FACT_COMPLIANCE_TAGS) {
+                throw new ConfigurationIngestionException(
+                        "definition.factCatalog fact governance.complianceTags must be an array with at most "
+                                + MAX_FACT_COMPLIANCE_TAGS + " entries: " + path);
+            }
+            for (JsonNode tag : tags) {
+                if (!tag.isTextual() || !StringUtils.hasText(tag.asText())) {
+                    throw new ConfigurationIngestionException(
+                            "definition.factCatalog fact governance.complianceTags entries must be non-blank text: "
+                                    + path);
+                }
+            }
+        }
+    }
+
+    private void validateOptionalLineage(JsonNode item, String path) {
+        if (!item.has("lineage") || item.get("lineage").isNull()) {
+            return;
+        }
+        JsonNode lineage = item.get("lineage");
+        if (!lineage.isObject()) {
+            throw new ConfigurationIngestionException(
+                    "definition.factCatalog fact lineage must be an object: " + path);
+        }
+        if (lineage.has("sourcePaths") && !lineage.get("sourcePaths").isNull()) {
+            throw new ConfigurationIngestionException(
+                    "definition.factCatalog fact lineage.sourcePaths is forbidden in published fact catalogs: "
+                            + path);
+        }
+        validateOptionalBoundedText(lineage, "attributeId", path, MAX_FACT_ATTRIBUTE_ID_LENGTH);
+        validateOptionalBoundedText(lineage, "sourceResourceKey", path, MAX_FACT_RESOURCE_KEY_LENGTH);
+        validateOptionalBoundedText(lineage, "transformation", path, MAX_FACT_TRANSFORMATION_LENGTH);
+    }
+
+    private List<DomainRuleFactDescriptor> mergeOverlayFacts(
+            List<DomainRuleFactDescriptor> baseFacts,
+            List<DomainRuleFactDescriptor> candidateFacts) {
+        if (candidateFacts == null || candidateFacts.size() != baseFacts.size()) {
+            return baseFacts;
+        }
+        List<DomainRuleFactDescriptor> merged = new ArrayList<>(baseFacts.size());
+        for (int i = 0; i < baseFacts.size(); i++) {
+            DomainRuleFactDescriptor base = baseFacts.get(i);
+            DomainRuleFactDescriptor candidate = candidateFacts.get(i);
+            merged.add(applyOverlayEntry(base, candidate));
+        }
+        return List.copyOf(merged);
+    }
+
+    private DomainRuleFactDescriptor applyOverlayEntry(
+            DomainRuleFactDescriptor base, DomainRuleFactDescriptor candidate) {
+        if (candidate == null
+                || !Objects.equals(base.path(), candidate.path())
+                || !Objects.equals(base.valueType(), candidate.valueType())
+                || base.nullable() != candidate.nullable()) {
+            return base;
+        }
+        String sensitivity = stricterSensitivity(base.sensitivity(), candidate.sensitivity());
+        String redaction = stricterRedaction(base.redaction(), candidate.redaction());
+        boolean restricted = isRestrictedFact(sensitivity, redaction);
+
+        Map<String, String> labels = mergeLocalizedEditorialMap(
+                base.labels(), candidate.labels(), 255, value -> isGenericFactLabel(value, base.path()));
+        Map<String, String> descriptions = mergeLocalizedEditorialMap(
+                base.descriptions(), candidate.descriptions(), 2000, this::isBoilerplateFactDescription);
+        Map<String, String> hints = mergeLocalizedEditorialMap(
+                base.hints(), candidate.hints(), MAX_FACT_HINTS_LENGTH, value -> false);
+
+        String candidateGroupKey = validPatternText(candidate.groupKey(), FACT_GROUP_KEY_PATTERN);
+        boolean mismatchedGroupKey = base.groupKey() != null
+                && candidateGroupKey != null
+                && !base.groupKey().equals(candidateGroupKey);
+        Map<String, String> groupLabels = mismatchedGroupKey
+                ? base.groupLabels()
+                : mergeLocalizedEditorialMap(
+                        base.groupLabels(), candidate.groupLabels(), MAX_FACT_GROUP_LABEL_LENGTH, value -> false);
+
+        String groupKey = base.groupKey() != null
+                ? base.groupKey()
+                : candidateGroupKey;
+        List<String> evidenceRefs = mergeOverlayEvidenceRefs(base.evidenceRefs(), candidate.evidenceRefs());
+        String valuePresentation = base.valuePresentation() != null
+                ? base.valuePresentation()
+                : validEnumText(candidate.valuePresentation(), FACT_VALUE_PRESENTATIONS);
+        String unit = base.unit() != null
+                ? base.unit()
+                : validBoundedText(candidate.unit(), MAX_FACT_UNIT_LENGTH);
+        String mask = base.mask() != null
+                ? base.mask()
+                : validBoundedText(candidate.mask(), MAX_FACT_MASK_LENGTH);
+
+        List<DomainRuleFactDescriptor.AllowedValue> allowedValues = null;
+        if (!restricted) {
+            allowedValues = base.allowedValues() != null && !base.allowedValues().isEmpty()
+                    ? base.allowedValues()
+                    : sanitizeOverlayAllowedValues(candidate.allowedValues(), base.valueType());
+        }
+
+        DomainRuleFactDescriptor.OptionSourceRef optionSourceRef = base.optionSourceRef() != null
+                ? base.optionSourceRef()
+                : sanitizeOverlayOptionSourceRef(candidate.optionSourceRef());
+
+        String example = restricted
+                ? null
+                : (base.example() != null
+                        ? base.example()
+                        : validBoundedText(candidate.example(), MAX_FACT_EXAMPLE_LENGTH));
+
+        DomainRuleFactDescriptor.Constraints constraints =
+                mergeConstraints(base.constraints(), candidate.constraints());
+        DomainRuleFactDescriptor.GovernanceMetadata governance =
+                mergeGovernance(base.governance(), candidate.governance(), restricted);
+        DomainRuleFactDescriptor.LineageMetadata lineage = base.lineage() != null
+                ? base.lineage()
+                : sanitizeOverlayLineage(candidate.lineage());
+
+        return new DomainRuleFactDescriptor(
+                base.path(),
+                base.valueType(),
+                base.nullable(),
+                labels,
+                descriptions,
+                base.providerRef(),
+                evidenceRefs,
+                sensitivity,
+                redaction,
+                hints,
+                groupKey,
+                groupLabels,
+                valuePresentation,
+                unit,
+                mask,
+                allowedValues,
+                optionSourceRef,
+                example,
+                constraints,
+                governance,
+                lineage);
+    }
+
+    private List<String> mergeOverlayEvidenceRefs(
+            List<String> baseRefs, List<String> candidateRefs) {
+        if (candidateRefs == null || candidateRefs.isEmpty()) {
+            return baseRefs;
+        }
+        Set<String> union = new LinkedHashSet<>();
+        if (baseRefs != null) {
+            for (String ref : baseRefs) {
+                String clean = validBoundedText(ref, 255);
+                if (clean != null) {
+                    union.add(clean);
+                }
+            }
+        }
+        for (String ref : candidateRefs) {
+            String clean = validBoundedText(ref, 255);
+            if (clean != null) {
+                union.add(clean);
+            }
+        }
+        return union.isEmpty() ? baseRefs : List.copyOf(union);
+    }
+
+    private Map<String, String> mergeLocalizedEditorialMap(
+            Map<String, String> base,
+            Map<String, String> candidate,
+            int maxLength,
+            java.util.function.Predicate<String> replaceableFallbackPredicate) {
+        if ((base == null || base.isEmpty()) && (candidate == null || candidate.isEmpty())) {
+            return null;
+        }
+        Map<String, String> merged = new LinkedHashMap<>();
+        Set<String> unreplacedBaseLocales = new LinkedHashSet<>();
+        if (base != null) {
+            base.forEach((locale, value) -> {
+                if (StringUtils.hasText(locale) && StringUtils.hasText(value)) {
+                    String loc = locale.trim();
+                    merged.put(loc, value.trim());
+                    unreplacedBaseLocales.add(loc);
+                }
+            });
+        }
+        boolean candidateContributedRich = false;
+        if (candidate != null) {
+            for (Map.Entry<String, String> entry : candidate.entrySet()) {
+                String locale = entry.getKey();
+                String rawValue = entry.getValue();
+                if (!StringUtils.hasText(locale) || !StringUtils.hasText(rawValue)) {
+                    continue;
+                }
+                String loc = locale.trim();
+                String trimmed = rawValue.trim();
+                if (trimmed.length() > maxLength) {
+                    continue;
+                }
+                boolean candidateIsRich = !replaceableFallbackPredicate.test(trimmed);
+                if (candidateIsRich) {
+                    candidateContributedRich = true;
+                }
+                String existing = merged.get(loc);
+                if (existing == null || (candidateIsRich && replaceableFallbackPredicate.test(existing))) {
+                    merged.put(loc, trimmed);
+                    unreplacedBaseLocales.remove(loc);
+                }
+            }
+        }
+        if (candidateContributedRich && !unreplacedBaseLocales.isEmpty()) {
+            for (String staleLocale : unreplacedBaseLocales) {
+                String val = merged.get(staleLocale);
+                if (val != null && replaceableFallbackPredicate.test(val)) {
+                    merged.remove(staleLocale);
+                }
+            }
+        }
+        return merged.isEmpty() ? null : Map.copyOf(merged);
+    }
+
+    private boolean isGenericFactLabel(String label, String path) {
+        if (!StringUtils.hasText(label)) {
+            return true;
+        }
+        String trimmed = label.trim();
+        if (trimmed.equals(path) || (StringUtils.hasText(path) && trimmed.equals(path.replace('.', ' ')))) {
+            return true;
+        }
+        int lastDot = path.lastIndexOf('.');
+        if (lastDot < 0) {
+            return trimmed.equals("fato: " + path);
+        }
+        String root = path.substring(0, lastDot);
+        String leaf = path.substring(lastDot + 1);
+        return trimmed.equals(leaf) || trimmed.equals(root + ": " + leaf);
+    }
+
+    private boolean isBoilerplateFactDescription(String description) {
+        if (!StringUtils.hasText(description)) {
+            return true;
+        }
+        String trimmed = description.trim();
+        return trimmed.startsWith("Fato governado do RuleSet")
+                || trimmed.startsWith("Fato de avaliação do RuleSet")
+                || trimmed.startsWith("Governed fact for RuleSet")
+                || trimmed.startsWith("Governed evaluation fact for RuleSet")
+                || trimmed.startsWith("Evaluation fact for RuleSet")
+                || trimmed.startsWith("Projeção primitiva de ");
+    }
+
+    private String validPatternText(String value, Pattern pattern) {
+        if (!StringUtils.hasText(value)) {
+            return null;
+        }
+        String trimmed = value.trim();
+        return pattern.matcher(trimmed).matches() ? trimmed : null;
+    }
+
+    private String validEnumText(String value, Set<String> allowed) {
+        if (!StringUtils.hasText(value)) {
+            return null;
+        }
+        String trimmed = value.trim();
+        return allowed.contains(trimmed) ? trimmed : null;
+    }
+
+    private String validBoundedText(String value, int maxLength) {
+        if (!StringUtils.hasText(value)) {
+            return null;
+        }
+        String trimmed = value.trim();
+        return trimmed.length() <= maxLength ? trimmed : null;
+    }
+
+    private List<DomainRuleFactDescriptor.AllowedValue> sanitizeOverlayAllowedValues(
+            List<DomainRuleFactDescriptor.AllowedValue> values, String valueType) {
+        if (values == null || values.isEmpty() || values.size() > MAX_FACT_ALLOWED_VALUES) {
+            return null;
+        }
+        List<DomainRuleFactDescriptor.AllowedValue> sanitized = new ArrayList<>();
+        Set<String> seen = new HashSet<>();
+        for (DomainRuleFactDescriptor.AllowedValue option : values) {
+            if (option == null || !isAllowedScalarObjectForValueType(option.value(), valueType)) {
+                return null;
+            }
+            if (option.value() instanceof Double d && !Double.isFinite(d)) {
+                return null;
+            }
+            if (option.value() instanceof Float f && !Float.isFinite(f)) {
+                return null;
+            }
+            if (option.labels() == null || option.labels().isEmpty()
+                    || option.labels().entrySet().stream().anyMatch(
+                            e -> !StringUtils.hasText(e.getKey()) || !StringUtils.hasText(e.getValue()))) {
+                return null;
+            }
+            String key;
+            if (option.value() instanceof BigDecimal bd) {
+                key = bd.stripTrailingZeros().toPlainString();
+            } else if (option.value() instanceof Number num) {
+                try {
+                    key = new BigDecimal(num.toString()).stripTrailingZeros().toPlainString();
+                } catch (NumberFormatException ex) {
+                    return null;
+                }
+            } else {
+                key = String.valueOf(option.value()).trim();
+            }
+            if (!seen.add(key)) {
+                return null;
+            }
+            sanitized.add(new DomainRuleFactDescriptor.AllowedValue(
+                    option.value(),
+                    option.labels(),
+                    validBoundedText(option.icon(), MAX_FACT_ICON_LENGTH),
+                    validBoundedText(option.tone(), MAX_FACT_TONE_LENGTH),
+                    validBoundedText(option.description(), MAX_FACT_OPTION_DESCRIPTION_LENGTH)));
+        }
+        return sanitized.isEmpty() ? null : List.copyOf(sanitized);
+    }
+
+    private boolean isAllowedScalarObjectForValueType(Object value, String valueType) {
+        if (value == null) {
+            return false;
+        }
+        return switch (valueType) {
+            case "boolean" -> value instanceof Boolean;
+            case "number", "number-array", "array<number>" -> value instanceof Number;
+            case "string", "date", "string-array", "date-array" ->
+                    value instanceof String str && StringUtils.hasText(str);
+            default -> false;
+        };
+    }
+
+    private DomainRuleFactDescriptor.OptionSourceRef sanitizeOverlayOptionSourceRef(
+            DomainRuleFactDescriptor.OptionSourceRef ref) {
+        if (ref == null) {
+            return null;
+        }
+        String sourceKey = validBoundedText(ref.sourceKey(), MAX_FACT_SOURCE_KEY_LENGTH);
+        if (sourceKey == null) {
+            return null;
+        }
+        return new DomainRuleFactDescriptor.OptionSourceRef(
+                sourceKey, validBoundedText(ref.resourceKey(), MAX_FACT_RESOURCE_KEY_LENGTH));
+    }
+
+    private DomainRuleFactDescriptor.Constraints mergeConstraints(
+            DomainRuleFactDescriptor.Constraints base,
+            DomainRuleFactDescriptor.Constraints candidate) {
+        if (base != null) {
+            return base;
+        }
+        if (candidate == null) {
+            return null;
+        }
+        BigDecimal min = candidate.min();
+        BigDecimal max = candidate.max();
+        BigDecimal step = candidate.step();
+        Integer minLength = candidate.minLength();
+        Integer maxLength = candidate.maxLength();
+        String pattern = candidate.pattern();
+        if (min != null && max != null && min.compareTo(max) > 0) {
+            return null;
+        }
+        if (step != null && step.compareTo(BigDecimal.ZERO) <= 0) {
+            step = null;
+        }
+        if ((minLength != null && minLength < 0)
+                || (maxLength != null && maxLength < 0)
+                || (minLength != null && maxLength != null && minLength > maxLength)) {
+            minLength = null;
+            maxLength = null;
+        }
+        if (pattern != null) {
+            if (!StringUtils.hasText(pattern) || pattern.length() > MAX_FACT_PATTERN_LENGTH) {
+                pattern = null;
+            } else {
+                try {
+                    Pattern.compile(pattern);
+                } catch (PatternSyntaxException ex) {
+                    pattern = null;
+                }
+            }
+        }
+        if (min == null && max == null && step == null
+                && minLength == null && maxLength == null && pattern == null) {
+            return null;
+        }
+        return new DomainRuleFactDescriptor.Constraints(
+                min, max, step, minLength, maxLength, pattern);
+    }
+
+    private DomainRuleFactDescriptor.GovernanceMetadata mergeGovernance(
+            DomainRuleFactDescriptor.GovernanceMetadata base,
+            DomainRuleFactDescriptor.GovernanceMetadata candidate,
+            boolean restricted) {
+        if (base == null && candidate == null) {
+            if (!restricted) {
+                return null;
+            }
+            return new DomainRuleFactDescriptor.GovernanceMetadata(null, null, Boolean.FALSE, "deny", null);
+        }
+        String classification = stricterClassification(
+                base != null ? validEnumText(base.classification(), FACT_CLASSIFICATIONS) : null,
+                candidate != null ? validEnumText(candidate.classification(), FACT_CLASSIFICATIONS) : null);
+        String dataCategory = base != null && base.dataCategory() != null
+                ? base.dataCategory()
+                : (candidate != null ? validBoundedText(candidate.dataCategory(), MAX_FACT_DATA_CATEGORY_LENGTH) : null);
+        Boolean baseExport = base != null ? base.exportable() : null;
+        Boolean candExport = candidate != null ? candidate.exportable() : null;
+        Boolean exportable;
+        if (restricted) {
+            exportable = Boolean.FALSE;
+        } else if (Boolean.FALSE.equals(baseExport) || Boolean.FALSE.equals(candExport)) {
+            exportable = Boolean.FALSE;
+        } else {
+            exportable = baseExport != null ? baseExport : candExport;
+        }
+
+        String aiVisibility;
+        if (restricted) {
+            aiVisibility = "deny";
+        } else {
+            aiVisibility = stricterAiVisibility(
+                    base != null ? base.aiVisibility() : null,
+                    candidate != null ? validEnumText(candidate.aiVisibility(), FACT_AI_VISIBILITIES) : null);
+        }
+        List<String> complianceTags = mergeGovernanceTags(
+                base != null ? base.complianceTags() : null,
+                candidate != null ? candidate.complianceTags() : null);
+        return new DomainRuleFactDescriptor.GovernanceMetadata(
+                classification, dataCategory, exportable, aiVisibility, complianceTags);
+    }
+
+    private List<String> mergeGovernanceTags(List<String> baseTags, List<String> candidateTags) {
+        if ((baseTags == null || baseTags.isEmpty()) && (candidateTags == null || candidateTags.isEmpty())) {
+            return null;
+        }
+        Set<String> union = new LinkedHashSet<>();
+        if (baseTags != null) {
+            for (String tag : baseTags) {
+                if (StringUtils.hasText(tag) && union.size() < MAX_FACT_COMPLIANCE_TAGS) {
+                    union.add(tag.trim());
+                }
+            }
+        }
+        if (candidateTags != null) {
+            for (String tag : candidateTags) {
+                if (StringUtils.hasText(tag) && union.size() < MAX_FACT_COMPLIANCE_TAGS) {
+                    union.add(tag.trim());
+                }
+            }
+        }
+        return union.isEmpty() ? null : List.copyOf(union);
+    }
+
+    private String stricterClassification(String base, String candidate) {
+        if (base == null) {
+            return candidate;
+        }
+        if (candidate == null) {
+            return base;
+        }
+        return classificationRank(candidate) > classificationRank(base) ? candidate : base;
+    }
+
+    private int classificationRank(String value) {
+        if (value == null) {
+            return -1;
+        }
+        return switch (value.toLowerCase(Locale.ROOT)) {
+            case "public" -> 0;
+            case "internal" -> 1;
+            case "confidential" -> 2;
+            case "restricted" -> 3;
+            default -> -1;
+        };
+    }
+
+    private DomainRuleFactDescriptor.LineageMetadata sanitizeOverlayLineage(
+            DomainRuleFactDescriptor.LineageMetadata lineage) {
+        if (lineage == null) {
+            return null;
+        }
+        String attributeId = validBoundedText(lineage.attributeId(), MAX_FACT_ATTRIBUTE_ID_LENGTH);
+        String sourceResourceKey = validBoundedText(lineage.sourceResourceKey(), MAX_FACT_RESOURCE_KEY_LENGTH);
+        String transformation = validBoundedText(lineage.transformation(), MAX_FACT_TRANSFORMATION_LENGTH);
+        if (attributeId == null && sourceResourceKey == null && transformation == null) {
+            return null;
+        }
+        return new DomainRuleFactDescriptor.LineageMetadata(
+                attributeId, sourceResourceKey, transformation);
+    }
+
+    private boolean isRestrictedFact(String sensitivity, String redaction) {
+        return "SECRET".equalsIgnoreCase(sensitivity) || "OMIT".equalsIgnoreCase(redaction);
+    }
+
+    private String stricterSensitivity(String base, String candidate) {
+        String normBase = normalizeSensitivityToken(base);
+        String normCandidate = normalizeSensitivityToken(candidate);
+        if (normBase == null) {
+            return normCandidate != null ? normCandidate : base;
+        }
+        if (normCandidate == null) {
+            return normBase;
+        }
+        return sensitivityRank(normCandidate) > sensitivityRank(normBase) ? normCandidate : normBase;
+    }
+
+    private String normalizeSensitivityToken(String value) {
+        if (!StringUtils.hasText(value)) {
+            return null;
+        }
+        String upper = value.trim().toUpperCase(Locale.ROOT);
+        return FACT_SENSITIVITIES.contains(upper)
+                ? upper
+                : RuleFactDescriptor.normalizeSensitivity(upper);
+    }
+
+    private int sensitivityRank(String value) {
+        if (value == null) {
+            return -1;
+        }
+        return switch (value.toUpperCase(Locale.ROOT)) {
+            case "NON_SENSITIVE" -> 0;
+            case "PERSONAL" -> 1;
+            case "SENSITIVE" -> 2;
+            case "SECRET" -> 3;
+            default -> -1;
+        };
+    }
+
+    private String stricterRedaction(String base, String candidate) {
+        String normBase = normalizeRedactionToken(base);
+        String normCandidate = normalizeRedactionToken(candidate);
+        if (normBase == null) {
+            return normCandidate != null ? normCandidate : base;
+        }
+        if (normCandidate == null) {
+            return normBase;
+        }
+        return redactionRank(normCandidate) > redactionRank(normBase) ? normCandidate : normBase;
+    }
+
+    private String normalizeRedactionToken(String value) {
+        if (!StringUtils.hasText(value)) {
+            return null;
+        }
+        String upper = value.trim().toUpperCase(Locale.ROOT);
+        return FACT_REDACTION_POLICIES.contains(upper) ? upper : null;
+    }
+
+    private int redactionRank(String value) {
+        if (value == null) {
+            return -1;
+        }
+        return switch (value.toUpperCase(Locale.ROOT)) {
+            case "NONE" -> 0;
+            case "MASK" -> 1;
+            case "HASH" -> 2;
+            case "OMIT" -> 3;
+            default -> -1;
+        };
+    }
+
+    private String stricterAiVisibility(String base, String candidate) {
+        if (base == null) {
+            return candidate;
+        }
+        if (candidate == null) {
+            return base;
+        }
+        return aiVisibilityRank(candidate) > aiVisibilityRank(base) ? candidate : base;
+    }
+
+    private int aiVisibilityRank(String value) {
+        if (value == null) {
+            return -1;
+        }
+        return switch (value.toLowerCase(Locale.ROOT)) {
+            case "allow" -> 0;
+            case "summarize_only" -> 1;
+            case "mask" -> 2;
+            case "deny" -> 3;
+            default -> -1;
+        };
     }
 
     private Map<String, String> localizedFactText(JsonNode source) {
@@ -4154,12 +5236,13 @@ public class DomainRuleService {
         }
     }
 
-    private void requireFactEnum(JsonNode item, String field, Set<String> allowed) {
+    private String requireFactEnum(JsonNode item, String field, Set<String> allowed) {
         String value = requiredFactText(item, field);
         if (!allowed.contains(value)) {
             throw new ConfigurationIngestionException(
                     "definition.factCatalog fact " + field + " must be one of " + allowed);
         }
+        return value;
     }
 
     private void requireText(String value, String field) {
