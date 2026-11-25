@@ -41,7 +41,9 @@ class DeclarativeWidgetCertificationTest {
                         "widget:footer-links",
                         "widget:legal-notice",
                         "widget:rich-text-block",
-                        "form:user-context-summary");
+                        "form:user-context-summary",
+                        "praxis-kpi-strip",
+                        "praxis-kpi-card");
 
         Set<UiLayoutDeclarativeWidgetRevisionReproduction.Spec> coveredSpecs =
                 EnumSet.noneOf(UiLayoutDeclarativeWidgetRevisionReproduction.Spec.class);
@@ -71,6 +73,14 @@ class DeclarativeWidgetCertificationTest {
             if (!candidateConfig.has("label")) {
                 candidateConfig.put("label", "Updated " + componentType);
             }
+            if (spec == UiLayoutDeclarativeWidgetRevisionReproduction.Spec.KPI_STRIP) {
+                candidateConfig.withObject("config").put("title", "Updated KPI Strip");
+            } else if (spec == UiLayoutDeclarativeWidgetRevisionReproduction.Spec.KPI_CARD) {
+                candidateConfig
+                        .withObject("config")
+                        .withObject("presentation")
+                        .put("label", "Updated KPI Card");
+            }
             ObjectNode candidateDoc =
                     UiLayoutDeclarativeWidgetRevisionReproduction.buildNativeChild(
                             MAPPER, spec, candidateConfig);
@@ -97,7 +107,7 @@ class DeclarativeWidgetCertificationTest {
         }
 
         assertThat(coveredSpecs).hasSize(newlyPromotedWidgetTypes.size());
-        assertThat(UiLayoutDeclarativeWidgetRevisionReproduction.Spec.values()).hasSize(24);
+        assertThat(UiLayoutDeclarativeWidgetRevisionReproduction.Spec.values()).hasSize(26);
     }
 
     @Test
@@ -163,6 +173,38 @@ class DeclarativeWidgetCertificationTest {
     }
 
     private static ObjectNode sampleWidgetConfig(UiLayoutDeclarativeWidgetRevisionReproduction.Spec spec) {
+        if (spec == UiLayoutDeclarativeWidgetRevisionReproduction.Spec.KPI_STRIP
+                || spec == UiLayoutDeclarativeWidgetRevisionReproduction.Spec.KPI_CARD) {
+            ObjectNode card = MAPPER.createObjectNode();
+            card.put("schemaVersion", 1);
+            card.put("id", "11111111-1111-4111-8111-111111111111");
+            ObjectNode presentation = card.putObject("presentation");
+            presentation.put("label", "Active Headcount Share");
+            presentation.put("icon", "groups");
+            presentation.put("tone", "primary");
+            presentation.put("format", "percent");
+            ObjectNode source = card.putObject("source");
+            source.put("kind", "stats-query");
+            source.put("resourcePath", "workforce/assignments");
+            source.put("operation", "group-by");
+            source.putObject("request").put("field", "status");
+            ObjectNode derivation = card.putObject("derivation");
+            derivation.put("kind", "ratio");
+            derivation.putArray("numeratorKeys").add("ACTIVE");
+            derivation.put("denominatorMode", "population-total");
+
+            ObjectNode wrapper = MAPPER.createObjectNode();
+            wrapper.put("density", "comfortable");
+            if (spec == UiLayoutDeclarativeWidgetRevisionReproduction.Spec.KPI_CARD) {
+                wrapper.set("config", card);
+            } else {
+                ObjectNode strip = wrapper.putObject("config");
+                strip.put("schemaVersion", 1);
+                strip.put("title", "Executive Strip");
+                strip.putArray("cards").add(card);
+            }
+            return wrapper;
+        }
         ObjectNode config = MAPPER.createObjectNode();
         if (spec.bindingFields.contains("resourcePath")) {
             config.put("resourcePath", "/api/workforce/employees");

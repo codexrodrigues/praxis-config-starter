@@ -115,6 +115,8 @@ public final class AgenticAuthoringTargetResolverRegistry {
             "widget-page-definition-root",
             "widget-page-canvas",
             "page-builder-persistence-identity",
+            "kpi-strip-root",
+            "kpi-card-root",
             "agentic-preview-result",
             "component-config");
 
@@ -330,6 +332,7 @@ public final class AgenticAuthoringTargetResolverRegistry {
             case "composition-link-by-id" -> addArrayMatches(candidates, config, "composition.links[]", List.of("linkId", "id"), targetValue);
             case "page-state-path" -> addPageStatePathMatch(candidates, config, target);
             case "widget-child-authoring-manifest-operation" -> addPageBuilderChildOperationMatch(candidates, config, target);
+            case "kpi-card-by-id" -> addArrayMatches(candidates, config, "cards[]", List.of("id"), targetValue);
             default -> {
                 if (hasResolutionSpec(resolutionSpec)) {
                     addResolutionSpecMatches(candidates, config, resolutionSpec, target, targetValue);
@@ -705,6 +708,10 @@ public final class AgenticAuthoringTargetResolverRegistry {
         return unresolved(componentId, operationId, kind, resolver, "target not found: " + targetValue);
     }
 
+    boolean supportsResolver(String resolver) {
+        return isSupportedResolver(resolver);
+    }
+
     private boolean isSupportedResolver(String resolver) {
         return GLOBAL_RESOLVERS.contains(resolver)
                 || Set.of(
@@ -774,6 +781,9 @@ public final class AgenticAuthoringTargetResolverRegistry {
                 "composition-link-by-id",
                 "page-state-path",
                 "widget-child-authoring-manifest-operation",
+                "kpi-strip-root",
+                "kpi-card-root",
+                "kpi-card-by-id",
                 "json-logic-condition-by-node",
                 "property-effect-by-node").contains(resolver);
     }

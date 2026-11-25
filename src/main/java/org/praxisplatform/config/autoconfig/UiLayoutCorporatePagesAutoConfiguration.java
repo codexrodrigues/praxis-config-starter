@@ -11,6 +11,7 @@ import org.praxisplatform.config.service.PageLifecycleAdmission;
 import org.praxisplatform.config.service.PageRuntimeReadService;
 import org.praxisplatform.config.service.UiLayoutBaselineMetadataAdmission;
 import org.praxisplatform.config.service.UiLayoutDraftWorkspaceSource;
+import org.praxisplatform.config.service.UiLayoutKpiCatalogOracle;
 import org.praxisplatform.config.service.UiLayoutLifecycleAdmission;
 import org.praxisplatform.config.service.UiLayoutLifecycleInvocationProvider;
 import org.praxisplatform.config.service.UiLayoutLifecycleStructureValidator;
@@ -32,6 +33,7 @@ import org.springframework.context.annotation.Bean;
  * customização pontual sem abrir mão do restante da infraestrutura.
  */
 @AutoConfiguration(
+        after = UiLayoutKpiCatalogAutoConfiguration.class,
         before = {
             UiLayoutResolutionAutoConfiguration.class,
             EnterpriseRuntimeAutoConfiguration.class
@@ -45,12 +47,13 @@ public class UiLayoutCorporatePagesAutoConfiguration {
             CorporatePageCatalogContributor contributor,
             ObjectProvider<ObjectMapper> objectMapperProvider,
             ObjectProvider<Clock> clockProvider,
-            ObjectProvider<PageRuntimeReadService> pageRuntimeReadServiceProvider) {
+            ObjectProvider<PageRuntimeReadService> pageRuntimeReadServiceProvider,
+            ObjectProvider<UiLayoutKpiCatalogOracle> kpiCatalogOracleProvider) {
         ObjectMapper mapper =
                 objectMapperProvider.getIfAvailable(() -> new ObjectMapper().findAndRegisterModules());
         Clock clock = clockProvider.getIfAvailable(Clock::systemUTC);
         return new CorporatePageRuntimeSupport(
-                contributor, mapper, clock, pageRuntimeReadServiceProvider);
+                contributor, mapper, clock, pageRuntimeReadServiceProvider, kpiCatalogOracleProvider);
     }
 
     @Bean

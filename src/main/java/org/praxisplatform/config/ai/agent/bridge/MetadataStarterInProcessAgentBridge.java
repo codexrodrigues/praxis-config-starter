@@ -3861,7 +3861,10 @@ public class MetadataStarterInProcessAgentBridge implements AgentResourceExecuti
             }
         }
         AgentEntityDescriptor d = res.descriptor();
-        StatsCapabilityDigest statsCapability = extractStatsCapability(context, res);
+        StatsFieldRegistry statsRegistry = tryMetadataLookup("statsDigest:" + d.entityKey(),
+                () -> res.service().getStatsFieldRegistry());
+        Set<String> blockedStatsFields = findBlockedStatsFields(context, res, statsRegistry);
+        StatsCapabilityDigest statsCapability = extractStatsCapability(res, statsRegistry, blockedStatsFields);
         List<QuickFilterSummary> quickFilters = extractQuickFilters(res);
         List<ResourceFactSummary> resourceFacts = extractResourceFacts(context, res);
         List<String> calculationTrailIds = extractCalculationTrailIds(res.responseDtoType());
@@ -3870,7 +3873,11 @@ public class MetadataStarterInProcessAgentBridge implements AgentResourceExecuti
                 : res.determinations().stream().map(DeterminationEndpoint::toSummary).toList();
         BulkCapabilityDigest bulkCapability = res.bulkSupport() != null ? res.bulkSupport().digest() : null;
         List<AgentAnalyticalRecipeSummary> verifiedRecipes = MetadataStarterVerifiedRecipeSupport.extractRecipes(
-                res.controller(), verifiedAnalyticalRecipeResolver, objectMapper);
+                res.controller(),
+                verifiedAnalyticalRecipeResolver,
+                objectMapper,
+                res.filterDtoType(),
+                blockedStatsFields);
         return new CompactAgentSchemaDigest(
                 d.entityKey(),
                 d.resourceKey(),
@@ -3901,8 +3908,15 @@ public class MetadataStarterInProcessAgentBridge implements AgentResourceExecuti
             RegisteredResource res,
             AgentStatsAggregationRequest request) {
         if (verifiedRecipePolicy != VerifiedRecipePolicy.ALLOW_EXPLORATORY) {
+            StatsFieldRegistry policyRegistry = tryMetadataLookup("statsRegistry:" + res.descriptor().entityKey(),
+                    () -> res.service().getStatsFieldRegistry());
+            Set<String> blockedForRecipes = findBlockedStatsFields(context, res, policyRegistry);
             List<AgentAnalyticalRecipeSummary> recipes = MetadataStarterVerifiedRecipeSupport.extractRecipes(
-                    res.controller(), verifiedAnalyticalRecipeResolver, objectMapper);
+                    res.controller(),
+                    verifiedAnalyticalRecipeResolver,
+                    objectMapper,
+                    res.filterDtoType(),
+                    blockedForRecipes);
             if (verifiedRecipePolicy == VerifiedRecipePolicy.STRICT_VERIFIED_ONLY) {
                 throw new IllegalStateException(recipes.isEmpty()
                         ? "Exploratory aggregation blocked by STRICT_VERIFIED_ONLY policy and resource '"
@@ -4368,9 +4382,10 @@ public class MetadataStarterInProcessAgentBridge implements AgentResourceExecuti
         return filterDto;
     }
 
-    private StatsCapabilityDigest extractStatsCapability(AgentExecutionContext context, RegisteredResource res) {
-        StatsFieldRegistry registry = tryMetadataLookup("statsDigest:" + res.descriptor().entityKey(),
-                () -> res.service().getStatsFieldRegistry());
+    private StatsCapabilityDigest extractStatsCapability(
+            RegisteredResource res,
+            StatsFieldRegistry registry,
+            Set<String> blockedFields) {
         if (registry == null || registry.isEmpty()) {
             return null;
         }
@@ -4384,7 +4399,6 @@ public class MetadataStarterInProcessAgentBridge implements AgentResourceExecuti
         if (cap.fields().isEmpty()) {
             return null;
         }
-        Set<String> blockedFields = findBlockedStatsFields(context, res, registry);
         List<StatsFieldDigest> fields = cap.fields().stream()
                 .filter(fc -> !blockedFields.contains(fc.field().toLowerCase(Locale.ROOT)))
                 .map(fc -> new StatsFieldDigest(
@@ -4475,30 +4489,30 @@ public class MetadataStarterInProcessAgentBridge implements AgentResourceExecuti
             AgentExecutionContext context,
             RegisteredResource res,
             StatsFieldRegistry registry) {
-        Map<String, Object> probeMap = new LinkedHashMap<>();
+        Set<String> candidateFields = new LinkedHashSet<>();
         for (ResponseFieldMeta meta : res.responseFields()) {
             if (StringUtils.hasText(meta.name())) {
-                probeMap.put(meta.name(), Boolean.TRUE);
+                candidateFields.add(meta.name().trim());
             }
         }
         if (registry != null) {
             for (StatsFieldDescriptor desc : registry.descriptors()) {
                 if (desc != null && StringUtils.hasText(desc.field())) {
-                    probeMap.putIfAbsent(desc.field(), Boolean.TRUE);
+                    candidateFields.add(desc.field().trim());
                 }
             }
         }
         Set<String> blocked = new LinkedHashSet<>();
-        if (!probeMap.isEmpty()) {
-            DualProjectedPayload projected = authorizationBridge.projectRecord(
+        if (!candidateFields.isEmpty()) {
+            Set<String> deniedAttributes = authorizationBridge.resolveDeniedFieldUseAttributes(
                     context,
                     res.descriptor().resourcePath(),
                     res.responseDtoType(),
-                    probeMap);
-            if (projected != null && projected.hiddenFields() != null) {
-                for (String hidden : projected.hiddenFields()) {
-                    if (StringUtils.hasText(hidden)) {
-                        blocked.add(hidden.trim().toLowerCase(Locale.ROOT));
+                    Set.copyOf(candidateFields));
+            if (deniedAttributes != null) {
+                for (String denied : deniedAttributes) {
+                    if (StringUtils.hasText(denied)) {
+                        blocked.add(denied.trim().toLowerCase(Locale.ROOT));
                     }
                 }
             }

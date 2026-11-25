@@ -17,6 +17,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.UUID;
 import org.springframework.scheduling.support.CronExpression;
 
 public final class AgenticAuthoringEffectCompilerRegistry {
@@ -212,6 +213,8 @@ public final class AgenticAuthoringEffectCompilerRegistry {
                 || "visual-builder-variable-add".equals(handler)
                 || "manual-field-add".equals(handler)
                 || "editorial-data-block-add".equals(handler)
+                || "kpi-card-add-from-recipe".equals(handler)
+                || "kpi-card-add-from-stats-query".equals(handler)
                 || "page-builder-widget-add".equals(handler)
                 || "page-builder-composition-link-add".equals(handler)
                 || "page-builder-ui-composition-plan-compile".equals(handler);
@@ -347,7 +350,16 @@ public final class AgenticAuthoringEffectCompilerRegistry {
                 || "settings-panel-apply-behavior-set".equals(handler)
                 || "settings-panel-save-behavior-set".equals(handler)
                 || "settings-panel-reset-behavior-set".equals(handler)
-                || "settings-panel-editor-host-configure".equals(handler);
+                || "settings-panel-editor-host-configure".equals(handler)
+                || "kpi-card-add-from-recipe".equals(handler)
+                || "kpi-card-add-from-stats-query".equals(handler)
+                || "kpi-card-update-presentation".equals(handler)
+                || "kpi-card-set-target-and-thresholds".equals(handler)
+                || "kpi-card-change-visualization".equals(handler)
+                || "kpi-card-set-interaction".equals(handler)
+                || "kpi-strip-reorder-cards".equals(handler)
+                || "kpi-strip-duplicate-card".equals(handler)
+                || "kpi-strip-remove-card".equals(handler);
     }
 
     private ObjectNode compileAndApplyEffect(
@@ -1081,6 +1093,24 @@ public final class AgenticAuthoringEffectCompilerRegistry {
                     effect,
                     planOperation,
                     proposedConfig);
+            case "kpi-card-add-from-recipe" -> compileKpiCardAddFromRecipe(
+                    componentId, operation, effect, planOperation, proposedConfig);
+            case "kpi-card-add-from-stats-query" -> compileKpiCardAddFromStatsQuery(
+                    componentId, operation, effect, planOperation, proposedConfig);
+            case "kpi-card-update-presentation" -> compileKpiCardUpdatePresentation(
+                    componentId, operation, effect, planOperation, resolved, proposedConfig, failures);
+            case "kpi-card-set-target-and-thresholds" -> compileKpiCardSetTargetAndThresholds(
+                    componentId, operation, effect, planOperation, resolved, proposedConfig, failures);
+            case "kpi-card-change-visualization" -> compileKpiCardChangeVisualization(
+                    componentId, operation, effect, planOperation, resolved, proposedConfig, failures);
+            case "kpi-card-set-interaction" -> compileKpiCardSetInteraction(
+                    componentId, operation, effect, planOperation, resolved, proposedConfig, failures);
+            case "kpi-strip-reorder-cards" -> compileKpiStripReorderCards(
+                    componentId, operation, effect, planOperation, proposedConfig, failures);
+            case "kpi-strip-duplicate-card" -> compileKpiStripDuplicateCard(
+                    componentId, operation, effect, planOperation, resolved, proposedConfig, failures);
+            case "kpi-strip-remove-card" -> compileKpiStripRemoveCard(
+                    componentId, operation, effect, planOperation, resolved, proposedConfig, failures);
             default -> {
                 failures.add("domain compiler is required for operation: " + text(operation, "operationId"));
                 yield null;
@@ -8466,5 +8496,414 @@ public final class AgenticAuthoringEffectCompilerRegistry {
             }
         }
         return MissingNode.getInstance();
+    }
+
+    private ObjectNode compileKpiCardAddFromRecipe(
+            String componentId,
+            JsonNode operation,
+            JsonNode effect,
+            JsonNode planOperation,
+            ObjectNode proposedConfig) {
+        JsonNode input = planOperation.path("input");
+        ObjectNode source = objectMapper.createObjectNode();
+        source.put("kind", "verified-recipe");
+        source.put("resourcePath", text(input, "resourcePath").trim());
+        source.put("recipeId", text(input, "recipeId").trim());
+        if (input.has("parameters") && input.path("parameters").isObject()) {
+            source.set("parameters", input.path("parameters").deepCopy());
+        }
+        return upsertKpiCard(componentId, operation, effect, planOperation, proposedConfig, source, "add-kpi-from-recipe");
+    }
+
+    private ObjectNode compileKpiCardAddFromStatsQuery(
+            String componentId,
+            JsonNode operation,
+            JsonNode effect,
+            JsonNode planOperation,
+            ObjectNode proposedConfig) {
+        JsonNode input = planOperation.path("input");
+        ObjectNode source = objectMapper.createObjectNode();
+        source.put("kind", "stats-query");
+        source.put("resourcePath", text(input, "resourcePath").trim());
+        source.put("operation", firstNonBlank(text(input, "operation").trim(), "group-by"));
+
+        ObjectNode request = source.putObject("request");
+        request.put("field", text(input, "field").trim());
+        ObjectNode metric = request.putObject("metric");
+        metric.put("operation", firstNonBlank(text(input, "metricOperation").trim(), "COUNT"));
+        if (!text(input, "metricField").isBlank()) {
+            metric.put("field", text(input, "metricField").trim());
+        }
+        if (!text(input, "granularity").isBlank()) {
+            request.put("granularity", text(input, "granularity").trim());
+        }
+        if (!text(input, "comparisonPreset").isBlank()) {
+            request.put("comparisonPreset", text(input, "comparisonPreset").trim());
+        }
+        if (input.has("baseFilter") && input.path("baseFilter").isObject()) {
+            request.set("baseFilter", input.path("baseFilter").deepCopy());
+        }
+        return upsertKpiCard(componentId, operation, effect, planOperation, proposedConfig, source, "add-kpi-from-stats-query");
+    }
+
+    private ObjectNode upsertKpiCard(
+            String componentId,
+            JsonNode operation,
+            JsonNode effect,
+            JsonNode planOperation,
+            ObjectNode proposedConfig,
+            ObjectNode sourceNode,
+            String compiledOp) {
+        JsonNode input = planOperation.path("input");
+        boolean stripMode = isKpiStripTarget(componentId, proposedConfig);
+        ObjectNode card = stripMode ? objectMapper.createObjectNode() : proposedConfig;
+        JsonNode previous = stripMode ? MissingNode.getInstance() : proposedConfig.deepCopy();
+
+        card.put("schemaVersion", 1);
+        String cardId = !text(input, "id").isBlank()
+                ? text(input, "id").trim()
+                : (!stripMode && !text(card, "id").isBlank() ? text(card, "id").trim() : UUID.randomUUID().toString());
+        card.put("id", cardId);
+        card.set("source", sourceNode);
+
+        if (input.has("derivation") && input.path("derivation").isObject()) {
+            card.set("derivation", input.path("derivation").deepCopy());
+        } else if (!card.has("derivation")) {
+            ObjectNode fallbackDeriv = card.putObject("derivation");
+            fallbackDeriv.put("kind", "scalar");
+            fallbackDeriv.put("aggregation", "total");
+        }
+
+        ObjectNode presentation = objectAt(card, "presentation", true);
+        if (!text(input, "label").isBlank()) {
+            presentation.put("label", text(input, "label").trim());
+        }
+        copyKpiIfPresent(input, presentation, "icon");
+        copyKpiIfPresent(input, presentation, "tone");
+        copyKpiIfPresent(input, presentation, "format");
+        copyKpiIfPresent(input, presentation, "decimals");
+        copyKpiIfPresent(input, presentation, "polarity");
+
+        if (input.has("visualization") && input.path("visualization").isObject()) {
+            card.set("visualization", input.path("visualization").deepCopy());
+        }
+        if (!text(input, "lockLevel").isBlank()) {
+            ObjectNode governance = objectAt(card, "governance", true);
+            governance.put("lockLevel", text(input, "lockLevel").trim());
+        }
+
+        ObjectNode compiled = baseDomainPatch(componentId, operation, effect, planOperation, null);
+        compiled.put("op", compiledOp);
+        if (stripMode) {
+            ArrayNode cards = arrayAt(proposedConfig, "cards", true);
+            cards.add(card);
+            compiled.put("path", "cards");
+            compiled.put("cardId", cardId);
+        } else {
+            compiled.put("path", "$");
+            compiled.set("previousValue", previous);
+        }
+        compiled.set("value", card.deepCopy());
+        return compiled;
+    }
+
+    private ObjectNode compileKpiCardUpdatePresentation(
+            String componentId,
+            JsonNode operation,
+            JsonNode effect,
+            JsonNode planOperation,
+            AgenticAuthoringResolvedTarget resolved,
+            ObjectNode proposedConfig,
+            List<String> failures) {
+        ObjectNode card = resolveKpiCardObject(componentId, planOperation, resolved, proposedConfig, failures);
+        if (card == null) {
+            return null;
+        }
+        JsonNode input = planOperation.path("input");
+        ObjectNode presentation = objectAt(card, "presentation", true);
+        JsonNode previous = presentation.deepCopy();
+
+        copyKpiIfPresent(input, presentation, "label");
+        copyKpiIfPresent(input, presentation, "icon");
+        copyKpiIfPresent(input, presentation, "tone");
+        copyKpiIfPresent(input, presentation, "format");
+        copyKpiIfPresent(input, presentation, "decimals");
+        copyKpiIfPresent(input, presentation, "currencyCode");
+        copyKpiIfPresent(input, presentation, "polarity");
+        copyKpiIfPresent(input, presentation, "badgeTemplate");
+        copyKpiIfPresent(input, presentation, "badgeContextLabel");
+
+        ObjectNode compiled = baseDomainPatch(componentId, operation, effect, planOperation, resolved);
+        compiled.put("op", "update-kpi-presentation");
+        compiled.put("path", resolved != null && !resolved.path().isBlank() ? resolved.path() + ".presentation" : "presentation");
+        compiled.set("previousValue", previous);
+        compiled.set("value", presentation.deepCopy());
+        return compiled;
+    }
+
+    private ObjectNode compileKpiCardSetTargetAndThresholds(
+            String componentId,
+            JsonNode operation,
+            JsonNode effect,
+            JsonNode planOperation,
+            AgenticAuthoringResolvedTarget resolved,
+            ObjectNode proposedConfig,
+            List<String> failures) {
+        ObjectNode card = resolveKpiCardObject(componentId, planOperation, resolved, proposedConfig, failures);
+        if (card == null) {
+            return null;
+        }
+        JsonNode input = planOperation.path("input");
+        ObjectNode visualization = objectAt(card, "visualization", true);
+        JsonNode previous = visualization.deepCopy();
+        if (!visualization.has("kind")) {
+            visualization.put("kind", "bullet");
+        }
+        if (input.has("target")) {
+            if (input.path("target").isNull()) {
+                visualization.remove("target");
+            } else {
+                visualization.set("target", input.path("target").deepCopy());
+            }
+        }
+        copyKpiIfPresent(input, visualization, "targetLabel");
+        copyKpiIfPresent(input, visualization, "scaleMode");
+        copyKpiIfPresent(input, visualization, "scaleMin");
+        copyKpiIfPresent(input, visualization, "scaleMax");
+        if (input.has("thresholds") && input.path("thresholds").isArray()) {
+            visualization.set("thresholds", input.path("thresholds").deepCopy());
+        }
+
+        ObjectNode compiled = baseDomainPatch(componentId, operation, effect, planOperation, resolved);
+        compiled.put("op", "set-kpi-target-and-thresholds");
+        compiled.put("path", resolved != null && !resolved.path().isBlank() ? resolved.path() + ".visualization" : "visualization");
+        compiled.set("previousValue", previous);
+        compiled.set("value", visualization.deepCopy());
+        return compiled;
+    }
+
+    private ObjectNode compileKpiCardChangeVisualization(
+            String componentId,
+            JsonNode operation,
+            JsonNode effect,
+            JsonNode planOperation,
+            AgenticAuthoringResolvedTarget resolved,
+            ObjectNode proposedConfig,
+            List<String> failures) {
+        ObjectNode card = resolveKpiCardObject(componentId, planOperation, resolved, proposedConfig, failures);
+        if (card == null) {
+            return null;
+        }
+        JsonNode input = planOperation.path("input");
+        ObjectNode visualization = objectAt(card, "visualization", true);
+        JsonNode previous = visualization.deepCopy();
+
+        visualization.put("kind", text(input, "kind").trim());
+        copyKpiIfPresent(input, visualization, "showLegend");
+        copyKpiIfPresent(input, visualization, "showTargetMarker");
+
+        ObjectNode compiled = baseDomainPatch(componentId, operation, effect, planOperation, resolved);
+        compiled.put("op", "change-kpi-visualization");
+        compiled.put("path", resolved != null && !resolved.path().isBlank() ? resolved.path() + ".visualization" : "visualization");
+        compiled.set("previousValue", previous);
+        compiled.set("value", visualization.deepCopy());
+        return compiled;
+    }
+
+    private ObjectNode compileKpiCardSetInteraction(
+            String componentId,
+            JsonNode operation,
+            JsonNode effect,
+            JsonNode planOperation,
+            AgenticAuthoringResolvedTarget resolved,
+            ObjectNode proposedConfig,
+            List<String> failures) {
+        ObjectNode card = resolveKpiCardObject(componentId, planOperation, resolved, proposedConfig, failures);
+        if (card == null) {
+            return null;
+        }
+        JsonNode input = planOperation.path("input");
+        ObjectNode interaction = objectAt(card, "interaction", true);
+        JsonNode previous = interaction.deepCopy();
+
+        if (input.has("crossFilter")) {
+            if (input.path("crossFilter").isNull()) {
+                interaction.remove("crossFilter");
+            } else if (input.path("crossFilter").isObject()) {
+                interaction.set("crossFilter", input.path("crossFilter").deepCopy());
+            }
+        }
+        if (input.has("drillDown")) {
+            if (input.path("drillDown").isNull()) {
+                interaction.remove("drillDown");
+            } else if (input.path("drillDown").isObject()) {
+                interaction.set("drillDown", input.path("drillDown").deepCopy());
+            }
+        }
+        if (!text(input, "filterReactionMode").isBlank()) {
+            ObjectNode reaction = objectAt(interaction, "filterReaction", true);
+            reaction.put("mode", text(input, "filterReactionMode").trim());
+        }
+
+        ObjectNode compiled = baseDomainPatch(componentId, operation, effect, planOperation, resolved);
+        compiled.put("op", "set-kpi-interaction");
+        compiled.put("path", resolved != null && !resolved.path().isBlank() ? resolved.path() + ".interaction" : "interaction");
+        compiled.set("previousValue", previous);
+        compiled.set("value", interaction.deepCopy());
+        return compiled;
+    }
+
+    private ObjectNode compileKpiStripReorderCards(
+            String componentId,
+            JsonNode operation,
+            JsonNode effect,
+            JsonNode planOperation,
+            ObjectNode proposedConfig,
+            List<String> failures) {
+        JsonNode orderedIds = planOperation.path("input").path("orderedIds");
+        ArrayNode cards = arrayAt(proposedConfig, "cards", false);
+        if (!orderedIds.isArray() || cards == null) {
+            failures.add("kpi-strip-reorder-cards requires cards[] and input.orderedIds[]");
+            return null;
+        }
+        java.util.Map<String, JsonNode> byId = new java.util.LinkedHashMap<>();
+        cards.forEach(c -> byId.put(text(c, "id"), c.deepCopy()));
+        ArrayNode reordered = objectMapper.createArrayNode();
+        for (JsonNode idNode : orderedIds) {
+            JsonNode matched = byId.get(idNode.asText(""));
+            if (matched == null) {
+                failures.add("kpi-strip-reorder-cards unknown card id: " + idNode.asText(""));
+                return null;
+            }
+            reordered.add(matched);
+        }
+        JsonNode previous = cards.deepCopy();
+        proposedConfig.set("cards", reordered);
+
+        ObjectNode compiled = baseDomainPatch(componentId, operation, effect, planOperation, null);
+        compiled.put("op", "reorder-kpi-cards");
+        compiled.put("path", "cards");
+        compiled.set("previousValue", previous);
+        compiled.set("value", reordered.deepCopy());
+        return compiled;
+    }
+
+    private ObjectNode compileKpiStripDuplicateCard(
+            String componentId,
+            JsonNode operation,
+            JsonNode effect,
+            JsonNode planOperation,
+            AgenticAuthoringResolvedTarget resolved,
+            ObjectNode proposedConfig,
+            List<String> failures) {
+        ObjectNode sourceCard = resolveKpiCardObject(componentId, planOperation, resolved, proposedConfig, failures);
+        ArrayNode cards = arrayAt(proposedConfig, "cards", false);
+        if (sourceCard == null || cards == null) {
+            return null;
+        }
+        JsonNode input = planOperation.path("input");
+        String newId = !text(input, "newCardId").isBlank()
+                ? text(input, "newCardId").trim()
+                : UUID.randomUUID().toString();
+        ObjectNode cloned = sourceCard.deepCopy();
+        cloned.put("id", newId);
+        ObjectNode pres = objectAt(cloned, "presentation", true);
+        String nextLabel = !text(input, "newLabel").isBlank()
+                ? text(input, "newLabel").trim()
+                : firstNonBlank(text(pres, "label"), text(sourceCard, "id")) + " (cópia)";
+        pres.put("label", nextLabel);
+
+        int insertIndex = cards.size();
+        String sourceId = text(sourceCard, "id");
+        for (int i = 0; i < cards.size(); i++) {
+            if (sourceId.equals(text(cards.get(i), "id"))) {
+                insertIndex = i + 1;
+                break;
+            }
+        }
+        cards.insert(insertIndex, cloned);
+
+        ObjectNode compiled = baseDomainPatch(componentId, operation, effect, planOperation, resolved);
+        compiled.put("op", "duplicate-kpi-card");
+        compiled.put("path", "cards");
+        compiled.put("cardId", newId);
+        compiled.set("value", cloned.deepCopy());
+        return compiled;
+    }
+
+    private ObjectNode compileKpiStripRemoveCard(
+            String componentId,
+            JsonNode operation,
+            JsonNode effect,
+            JsonNode planOperation,
+            AgenticAuthoringResolvedTarget resolved,
+            ObjectNode proposedConfig,
+            List<String> failures) {
+        ObjectNode targetCard = resolveKpiCardObject(componentId, planOperation, resolved, proposedConfig, failures);
+        ArrayNode cards = arrayAt(proposedConfig, "cards", false);
+        if (targetCard == null || cards == null) {
+            return null;
+        }
+        String targetId = text(targetCard, "id");
+        int removeIdx = -1;
+        for (int i = 0; i < cards.size(); i++) {
+            if (targetId.equals(text(cards.get(i), "id"))) {
+                removeIdx = i;
+                break;
+            }
+        }
+        if (removeIdx < 0) {
+            failures.add("kpi-strip-remove-card could not locate card id: " + targetId);
+            return null;
+        }
+        JsonNode removed = cards.get(removeIdx).deepCopy();
+        cards.remove(removeIdx);
+
+        ObjectNode compiled = baseDomainPatch(componentId, operation, effect, planOperation, resolved);
+        compiled.put("op", "remove-kpi-card");
+        compiled.put("path", "cards");
+        compiled.put("removedCardId", targetId);
+        compiled.set("previousValue", removed);
+        return compiled;
+    }
+
+    private ObjectNode resolveKpiCardObject(
+            String componentId,
+            JsonNode planOperation,
+            AgenticAuthoringResolvedTarget resolved,
+            ObjectNode proposedConfig,
+            List<String> failures) {
+        if (!isKpiStripTarget(componentId, proposedConfig)) {
+            return proposedConfig;
+        }
+        if (resolved != null && !resolved.path().isBlank() && !"$".equals(resolved.path())) {
+            JsonNode node = nodeAtResolvedPath(proposedConfig, resolved.path());
+            if (node instanceof ObjectNode obj) {
+                return obj;
+            }
+        }
+        String cardId = firstNonBlank(
+                text(planOperation.path("input"), "cardId"),
+                targetText(planOperation.path("target")));
+        ArrayNode cards = arrayAt(proposedConfig, "cards", false);
+        if (cards != null && !cardId.isBlank()) {
+            for (JsonNode item : cards) {
+                if (item instanceof ObjectNode obj && cardId.equals(text(obj, "id"))) {
+                    return obj;
+                }
+            }
+        }
+        failures.add("kpi card target not found in cards[]: " + cardId);
+        return null;
+    }
+
+    private static boolean isKpiStripTarget(String componentId, ObjectNode proposedConfig) {
+        return "praxis-kpi-strip".equals(componentId) || (proposedConfig != null && proposedConfig.has("cards"));
+    }
+
+    private static void copyKpiIfPresent(JsonNode source, ObjectNode target, String key) {
+        if (source != null && source.has(key) && !source.path(key).isMissingNode() && !source.path(key).isNull()) {
+            target.set(key, source.path(key).deepCopy());
+        }
     }
 }

@@ -301,7 +301,21 @@ final class UiLayoutDeclarativeWidgetRevisionReproduction {
         false,
         List.of("ariaLabel", "title", "subtitle", "appearance", "fields", "actionLabel"),
         List.of("fields", "title"),
-        List.of("instanceId", "analyticsId", "source", "context", "actionId"));
+        List.of("instanceId", "analyticsId", "source", "context", "actionId")),
+    KPI_STRIP(
+        "praxis-kpi-strip",
+        "praxis.kpi-strip.editor",
+        false,
+        List.of("config", "density"),
+        List.of("config"),
+        List.of("queryContext")),
+    KPI_CARD(
+        "praxis-kpi-card",
+        "praxis.kpi-card.editor",
+        false,
+        List.of("config", "density"),
+        List.of("config"),
+        List.of("queryContext"));
 
     final String componentType;
     final String documentType;

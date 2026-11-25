@@ -12,6 +12,7 @@ import org.praxisplatform.config.domain.UiUserConfig;
 import org.praxisplatform.config.http.HttpEntityTagCondition;
 import org.praxisplatform.config.repository.UiUserConfigRepository;
 import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
@@ -47,6 +48,7 @@ public class UserConfigService {
   private final AiApiKeyProtectionService apiKeyProtectionService;
   private final ObjectProvider<NamedParameterJdbcTemplate> jdbcTemplateProvider;
   private final CanonicalJsonHashService canonicalJsonHashService;
+  private final ObjectProvider<KpiGovernanceUserConfigGuard> kpiGovernanceGuardProvider;
 
   public UserConfigService(
       UiUserConfigRepository repository,
@@ -54,11 +56,29 @@ public class UserConfigService {
       AiApiKeyProtectionService apiKeyProtectionService,
       @Qualifier("configNamedParameterJdbcTemplate") ObjectProvider<NamedParameterJdbcTemplate> jdbcTemplateProvider,
       CanonicalJsonHashService canonicalJsonHashService) {
+    this(
+        repository,
+        objectMapper,
+        apiKeyProtectionService,
+        jdbcTemplateProvider,
+        canonicalJsonHashService,
+        null);
+  }
+
+  @Autowired
+  public UserConfigService(
+      UiUserConfigRepository repository,
+      ObjectMapper objectMapper,
+      AiApiKeyProtectionService apiKeyProtectionService,
+      @Qualifier("configNamedParameterJdbcTemplate") ObjectProvider<NamedParameterJdbcTemplate> jdbcTemplateProvider,
+      CanonicalJsonHashService canonicalJsonHashService,
+      ObjectProvider<KpiGovernanceUserConfigGuard> kpiGovernanceGuardProvider) {
     this.repository = repository;
     this.objectMapper = objectMapper;
     this.apiKeyProtectionService = apiKeyProtectionService;
     this.jdbcTemplateProvider = jdbcTemplateProvider;
     this.canonicalJsonHashService = canonicalJsonHashService;
+    this.kpiGovernanceGuardProvider = kpiGovernanceGuardProvider;
   }
 
   public enum Scope {
@@ -178,6 +198,7 @@ public class UserConfigService {
 
     JsonNode sanitizedPayload = apiKeyProtectionService.sanitizeForStorage(payload, null);
     validatePayloadSize(sanitizedPayload);
+    assertKpiGovernanceWriteAllowed(effectiveIdentity, sanitizedPayload);
     JsonNode sanitizedAuthoringSource = sanitizeAuthoringSource(authoringSource, null);
     if (sanitizedAuthoringSource != null) {
       sanitizedAuthoringSource = attestAuthoringSource(
@@ -286,10 +307,11 @@ public class UserConfigService {
 
     Optional<UiUserConfig> existing =
         findConfig(effectiveIdentity);
-    validateIfMatch(existing, ifMatch);
+    validateIfMatch(existing, ifMatch, effectiveIdentity);
     JsonNode existingPayload = existing.map(cfg -> readJson(cfg.getPayload())).orElse(null);
     JsonNode sanitizedPayload = apiKeyProtectionService.sanitizeForStorage(payload, existingPayload);
     validatePayloadSize(sanitizedPayload);
+    assertKpiGovernanceWriteAllowed(effectiveIdentity, sanitizedPayload);
     JsonNode resolvedAuthoringSource = replaceAuthoringSource
         ? sanitizeAuthoringSource(
             authoringSource,
@@ -507,14 +529,15 @@ public class UserConfigService {
     ConfigIdentity effectiveIdentity = scope == Scope.USER ? identity : identity.withUserId(null);
     Optional<UiUserConfig> existing =
         findConfig(effectiveIdentity);
-    validateIfMatch(existing, ifMatch);
+    validateIfMatch(existing, ifMatch, effectiveIdentity);
     if (existing.isEmpty()) {
       throw new NotFoundException("Configuration not found for the requested scope");
     }
     repository.delete(existing.get());
   }
 
-  private void validateIfMatch(Optional<UiUserConfig> existing, String ifMatch) {
+  private void validateIfMatch(
+      Optional<UiUserConfig> existing, String ifMatch, ConfigIdentity identity) {
     if (ifMatch == null || ifMatch.isBlank()) {
       return;
     }
@@ -525,11 +548,43 @@ public class UserConfigService {
     }
 
     HttpEntityTagCondition condition = HttpEntityTagCondition.parse(ifMatch);
-    String current = String.valueOf(existing.get().getEtag());
-    if (!condition.matchesStrong(current)) {
+    String baseEtag = String.valueOf(existing.get().getEtag());
+    String effectiveEtag =
+        computeEffectiveEtag(
+            baseEtag,
+            identity.tenantId(),
+            identity.userId(),
+            identity.componentType(),
+            identity.componentId(),
+            identity.environment());
+    if (!condition.matchesStrong(effectiveEtag)) {
       throw new PreconditionFailedException(
           "If-Match precondition failed: stale configuration version");
     }
+  }
+
+  public String computeEffectiveEtag(
+      String baseEtag,
+      String tenantId,
+      String userId,
+      String componentType,
+      String componentId,
+      String environment) {
+    if (baseEtag == null || baseEtag.isBlank()) {
+      return baseEtag;
+    }
+    KpiGovernanceUserConfigGuard guard =
+        kpiGovernanceGuardProvider == null ? null : kpiGovernanceGuardProvider.getIfAvailable();
+    if (guard == null) {
+      return baseEtag;
+    }
+    String governanceToken =
+        guard.resolveGovernanceVersionToken(
+            tenantId, userId, componentType, componentId, environment);
+    if (governanceToken == null || governanceToken.isBlank()) {
+      return baseEtag;
+    }
+    return baseEtag + "-kpi-" + governanceToken;
   }
 
   private Optional<UiUserConfig> findConfig(ConfigIdentity identity) {
@@ -602,6 +657,36 @@ public class UserConfigService {
       throw new IllegalArgumentException(
           fieldName + " exceeds max length of " + maxLength + " characters");
     }
+  }
+
+  private void assertKpiGovernanceWriteAllowed(ConfigIdentity identity, JsonNode candidatePayload) {
+    KpiGovernanceUserConfigGuard guard =
+        kpiGovernanceGuardProvider == null ? null : kpiGovernanceGuardProvider.getIfAvailable();
+    if (guard != null) {
+      guard.assertWriteAllowed(
+          identity.tenantId(),
+          identity.userId(),
+          identity.componentType(),
+          identity.componentId(),
+          identity.environment(),
+          candidatePayload);
+    }
+  }
+
+  public JsonNode reconcileResolvedPayload(
+      String tenantId,
+      String userId,
+      String componentType,
+      String componentId,
+      String environment,
+      JsonNode payload) {
+    KpiGovernanceUserConfigGuard guard =
+        kpiGovernanceGuardProvider == null ? null : kpiGovernanceGuardProvider.getIfAvailable();
+    if (guard == null) {
+      return payload;
+    }
+    return guard.reconcileResolvedPayload(
+        tenantId, userId, componentType, componentId, environment, payload);
   }
 
   private void validatePayloadSize(JsonNode payload) {

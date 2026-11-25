@@ -349,6 +349,134 @@ class UserConfigControllerTest {
         .build();
   }
 
+  @Test
+  void shouldTranslateKpiGovernanceDeniedToUnprocessableEntityProblemDetailWithErrorCode() {
+    ResponseEntity<org.springframework.http.ProblemDetail> response =
+        controller.handleResponseStatus(
+            new org.praxisplatform.config.service.UiConfigWriteDeniedException(
+                HttpStatus.UNPROCESSABLE_ENTITY,
+                org.praxisplatform.config.service.KpiGovernanceUserConfigGuard
+                    .KPI_GOVERNANCE_LOCK_ERROR_CODE,
+                "Cannot modify source of metric-locked KPI card."));
+
+    assertThat(response.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_ENTITY);
+    assertThat(response.getBody()).isNotNull();
+    assertThat(response.getBody().getProperties())
+        .containsEntry(
+            "errorCode",
+            org.praxisplatform.config.service.KpiGovernanceUserConfigGuard
+                .KPI_GOVERNANCE_LOCK_ERROR_CODE);
+  }
+
+  @Test
+  void shouldApplyNonNullKpiReconciledPayloadOnGetAndPreserveFallbackWhenNull() {
+    String componentId = "page:11111111-1111-4111-8111-111111111111";
+    JsonNode persisted = readJson("{\"widgets\":[{\"key\":\"k1\",\"tampered\":true}]}");
+    JsonNode reconciled = readJson("{\"widgets\":[{\"key\":\"k1\",\"tampered\":false}]}");
+    UiUserConfig config =
+        buildConfig("tenant-a", "user-1", "praxis-dynamic-page", componentId, persisted.toString());
+    config.setEnvironment("prod");
+
+    when(service.getResolved("tenant-a", "user-1", "praxis-dynamic-page", componentId, "prod"))
+        .thenReturn(Optional.of(new UserConfigService.ResolvedConfig(config, UserConfigService.Scope.USER)));
+    when(apiKeyProtectionService.sanitizeForResponse(any())).thenAnswer(inv -> inv.getArgument(0));
+    when(service.reconcileResolvedPayload(
+            eq("tenant-a"),
+            eq("user-1"),
+            eq("praxis-dynamic-page"),
+            eq(componentId),
+            eq("prod"),
+            any(JsonNode.class)))
+        .thenReturn(reconciled);
+
+    ResponseEntity<UserConfigResponse> reconciledResponse =
+        controller.getConfigByParams(
+            "praxis-dynamic-page", componentId, "tenant-a", "user-1", "prod", null, null);
+    assertThat(reconciledResponse.getStatusCode()).isEqualTo(HttpStatus.OK);
+    assertThat(reconciledResponse.getBody()).isNotNull();
+    assertThat(reconciledResponse.getBody().getPayload()).isEqualTo(reconciled);
+
+    when(service.reconcileResolvedPayload(
+            eq("tenant-a"),
+            eq("user-1"),
+            eq("praxis-dynamic-page"),
+            eq(componentId),
+            eq("prod"),
+            any(JsonNode.class)))
+        .thenReturn(null);
+
+    ResponseEntity<UserConfigResponse> fallbackResponse =
+        controller.getConfigByParams(
+            "praxis-dynamic-page", componentId, "tenant-a", "user-1", "prod", null, null);
+    assertThat(fallbackResponse.getStatusCode()).isEqualTo(HttpStatus.OK);
+    assertThat(fallbackResponse.getBody()).isNotNull();
+    assertThat(fallbackResponse.getBody().getPayload()).isEqualTo(persisted);
+  }
+
+  @Test
+  void shouldInvalidate304WithCompositeGovernanceEtagAndPassEffectiveEnvOnFallbackRow() {
+    String componentId = "page:11111111-1111-4111-8111-111111111111";
+    JsonNode persisted = readJson("{\"widgets\":[{\"key\":\"k1\",\"tampered\":true}]}");
+    JsonNode reconciled = readJson("{\"widgets\":[{\"key\":\"k1\",\"tampered\":false}]}");
+    UiUserConfig envAgnosticConfig =
+        buildConfig("tenant-a", "user-1", "praxis-dynamic-page", componentId, persisted.toString());
+    envAgnosticConfig.setEnvironment(null);
+    String compositeEtagV1 = envAgnosticConfig.getEtag() + "-kpi-revhashv1";
+    String compositeEtagV2 = envAgnosticConfig.getEtag() + "-kpi-revhashv2";
+
+    when(service.getResolved("tenant-a", "user-1", "praxis-dynamic-page", componentId, "prod"))
+        .thenReturn(
+            Optional.of(
+                new UserConfigService.ResolvedConfig(
+                    envAgnosticConfig, UserConfigService.Scope.USER)));
+    when(apiKeyProtectionService.sanitizeForResponse(any())).thenAnswer(inv -> inv.getArgument(0));
+    when(service.computeEffectiveEtag(
+            envAgnosticConfig.getEtag().toString(),
+            "tenant-a",
+            "user-1",
+            "praxis-dynamic-page",
+            componentId,
+            "prod"))
+        .thenReturn(compositeEtagV2);
+    when(service.reconcileResolvedPayload(
+            eq("tenant-a"),
+            eq("user-1"),
+            eq("praxis-dynamic-page"),
+            eq(componentId),
+            eq("prod"),
+            any(JsonNode.class)))
+        .thenReturn(reconciled);
+
+    // Caller holds composite ETag from previous KPI lock revision (or raw UUID): must NOT get 304
+    ResponseEntity<UserConfigResponse> staleClientRes =
+        controller.getConfigByParams(
+            "praxis-dynamic-page",
+            componentId,
+            "tenant-a",
+            "user-1",
+            "prod",
+            "\"" + compositeEtagV1 + "\"",
+            null);
+    assertThat(staleClientRes.getStatusCode()).isEqualTo(HttpStatus.OK);
+    assertThat(staleClientRes.getHeaders().getETag()).isEqualTo("\"" + compositeEtagV2 + "\"");
+    assertThat(staleClientRes.getBody()).isNotNull();
+    assertThat(staleClientRes.getBody().getEtag()).isEqualTo(compositeEtagV2);
+    assertThat(staleClientRes.getBody().getPayload()).isEqualTo(reconciled);
+
+    // Caller presenting the current composite ETag receives 304 Not Modified
+    ResponseEntity<UserConfigResponse> freshClientRes =
+        controller.getConfigByParams(
+            "praxis-dynamic-page",
+            componentId,
+            "tenant-a",
+            "user-1",
+            "prod",
+            "\"" + compositeEtagV2 + "\"",
+            null);
+    assertThat(freshClientRes.getStatusCode()).isEqualTo(HttpStatus.NOT_MODIFIED);
+    assertThat(freshClientRes.getHeaders().getETag()).isEqualTo("\"" + compositeEtagV2 + "\"");
+  }
+
   private JsonNode readJson(String raw) {
     try {
       return objectMapper.readTree(raw);

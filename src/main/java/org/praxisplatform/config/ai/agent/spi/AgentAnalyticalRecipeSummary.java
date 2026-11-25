@@ -18,11 +18,43 @@ public record AgentAnalyticalRecipeSummary(
         String provenanceDigest,
         String endpointPath,
         Map<String, Object> lockedFilters,
-        List<AgentAnalyticalRecipeParameterSummary> adjustableParams
+        List<AgentAnalyticalRecipeParameterSummary> adjustableParams,
+        Map<String, Object> kpiHint
 ) {
     public AgentAnalyticalRecipeSummary {
         lockedFilters = AgentMapCopies.immutableOrderedMap(lockedFilters);
         adjustableParams = AgentMapCopies.immutableList(adjustableParams);
+        kpiHint = AgentMapCopies.immutableOrderedMap(kpiHint);
+    }
+
+    public AgentAnalyticalRecipeSummary(
+            String recipeId,
+            String title,
+            String description,
+            String intent,
+            String operation,
+            String field,
+            String governanceTier,
+            String version,
+            String provenanceDigest,
+            String endpointPath,
+            Map<String, Object> lockedFilters,
+            List<AgentAnalyticalRecipeParameterSummary> adjustableParams
+    ) {
+        this(
+                recipeId,
+                title,
+                description,
+                intent,
+                operation,
+                field,
+                governanceTier,
+                version,
+                provenanceDigest,
+                endpointPath,
+                lockedFilters,
+                adjustableParams,
+                Map.of());
     }
 
     public record AgentAnalyticalRecipeParameterSummary(

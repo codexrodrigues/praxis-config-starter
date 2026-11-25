@@ -2943,6 +2943,12 @@
               },
               {
                 "$ref": "#/$defs/userContextSummaryWidget"
+              },
+              {
+                "$ref": "#/$defs/kpiStripWidget"
+              },
+              {
+                "$ref": "#/$defs/kpiCardWidget"
               }
             ]
           }
@@ -3359,6 +3365,1195 @@
       "required": [
         "componentType",
         "componentId"
+      ],
+      "additionalProperties": false
+    },
+    "kpiUuid": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}(?![\\s\\S])",
+      "minLength": 36,
+      "maxLength": 36
+    },
+    "kpiShortText": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 160,
+      "pattern": "^(?![\\s\\S]*[\\u0000-\\u001f\\u007f\\u2028\\u2029])[^\\u0009-\\u000d\\u0020\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000\\ufeff](?:[\\s\\S]*[^\\u0009-\\u000d\\u0020\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000\\ufeff])?(?![\\s\\S])"
+    },
+    "kpiTextValue": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/kpiShortText"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "key": {
+              "$ref": "#/$defs/kpiShortText"
+            },
+            "text": {
+              "$ref": "#/$defs/kpiShortText"
+            },
+            "params": {
+              "type": "object",
+              "maxProperties": 16,
+              "additionalProperties": {
+                "type": [
+                  "string",
+                  "number",
+                  "boolean",
+                  "null"
+                ]
+              }
+            }
+          },
+          "anyOf": [
+            {
+              "required": [
+                "key"
+              ]
+            },
+            {
+              "required": [
+                "text"
+              ]
+            }
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "kpiIcon": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 80,
+      "pattern": "^[a-z][a-z0-9_]*(?![\\s\\S])"
+    },
+    "kpiCanonicalResourcePath": {
+      "type": "string",
+      "minLength": 2,
+      "maxLength": 255,
+      "pattern": "^(?!.*\\.\\.)/?[a-z0-9][a-z0-9_-]*(?:/[a-z0-9][a-z0-9_-]*)*(?![\\s\\S])"
+    },
+    "kpiIdentifier": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}(?![\\s\\S])"
+    },
+    "kpiScalarValue": {
+      "type": [
+        "string",
+        "number",
+        "boolean"
+      ]
+    },
+    "kpiRecipeParameters": {
+      "type": "object",
+      "maxProperties": 24,
+      "additionalProperties": {
+        "oneOf": [
+          {
+            "type": [
+              "string",
+              "number",
+              "boolean"
+            ]
+          },
+          {
+            "type": "array",
+            "maxItems": 50,
+            "items": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "kpiFilterRecord": {
+      "type": "object",
+      "maxProperties": 24,
+      "additionalProperties": {
+        "oneOf": [
+          {
+            "type": [
+              "string",
+              "number",
+              "boolean",
+              "null"
+            ]
+          },
+          {
+            "type": "array",
+            "maxItems": 50,
+            "items": {
+              "type": [
+                "string",
+                "number",
+                "boolean"
+              ]
+            }
+          }
+        ]
+      }
+    },
+    "kpiMetricRequest": {
+      "type": "object",
+      "properties": {
+        "operation": {
+          "enum": [
+            "COUNT",
+            "DISTINCT_COUNT",
+            "SUM",
+            "AVG",
+            "MIN",
+            "MAX",
+            "MEDIAN",
+            "PERCENTILE_25",
+            "PERCENTILE_75",
+            "PERCENTILE_90",
+            "PERCENTILE_95",
+            "AVG_PER_CYCLE_OCCURRENCE"
+          ]
+        },
+        "field": {
+          "$ref": "#/$defs/kpiIdentifier"
+        },
+        "alias": {
+          "$ref": "#/$defs/kpiIdentifier"
+        }
+      },
+      "required": [
+        "operation"
+      ],
+      "additionalProperties": false
+    },
+    "kpiPresentation": {
+      "type": "object",
+      "properties": {
+        "label": {
+          "$ref": "#/$defs/kpiTextValue"
+        },
+        "icon": {
+          "$ref": "#/$defs/kpiIcon"
+        },
+        "tone": {
+          "enum": [
+            "neutral",
+            "primary",
+            "info",
+            "success",
+            "warning",
+            "danger"
+          ]
+        },
+        "format": {
+          "enum": [
+            "percent",
+            "integer",
+            "decimal",
+            "currency",
+            "compact-number",
+            "compact-currency",
+            "ratio-fraction",
+            "days"
+          ]
+        },
+        "currencyCode": {
+          "type": "string",
+          "pattern": "^[A-Z]{3}(?![\\s\\S])"
+        },
+        "decimals": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 4
+        },
+        "unitLabel": {
+          "type": "object",
+          "properties": {
+            "singular": {
+              "$ref": "#/$defs/kpiTextValue"
+            },
+            "plural": {
+              "$ref": "#/$defs/kpiTextValue"
+            }
+          },
+          "required": [
+            "singular",
+            "plural"
+          ],
+          "additionalProperties": false
+        },
+        "polarity": {
+          "enum": [
+            "higher-is-better",
+            "lower-is-better",
+            "target-band",
+            "neutral"
+          ]
+        },
+        "badgeTemplate": {
+          "enum": [
+            "auto",
+            "fraction",
+            "delta",
+            "top-share",
+            "target-gap",
+            "none"
+          ]
+        },
+        "badgeContextLabel": {
+          "$ref": "#/$defs/kpiTextValue"
+        }
+      },
+      "required": [
+        "label",
+        "format"
+      ],
+      "additionalProperties": false
+    },
+    "kpiMetricSource": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "const": "verified-recipe"
+            },
+            "resourcePath": {
+              "$ref": "#/$defs/kpiCanonicalResourcePath"
+            },
+            "recipeId": {
+              "$ref": "#/$defs/kpiIdentifier"
+            },
+            "parameters": {
+              "$ref": "#/$defs/kpiRecipeParameters"
+            }
+          },
+          "required": [
+            "kind",
+            "resourcePath",
+            "recipeId"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "const": "analytics-projection"
+            },
+            "resourcePath": {
+              "$ref": "#/$defs/kpiCanonicalResourcePath"
+            },
+            "projectionId": {
+              "$ref": "#/$defs/kpiIdentifier"
+            },
+            "baseFilter": {
+              "$ref": "#/$defs/kpiFilterRecord"
+            }
+          },
+          "required": [
+            "kind",
+            "resourcePath",
+            "projectionId"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "const": "stats-query"
+            },
+            "resourcePath": {
+              "$ref": "#/$defs/kpiCanonicalResourcePath"
+            },
+            "operation": {
+              "const": "group-by"
+            },
+            "request": {
+              "type": "object",
+              "properties": {
+                "field": {
+                  "$ref": "#/$defs/kpiIdentifier"
+                },
+                "metric": {
+                  "$ref": "#/$defs/kpiMetricRequest"
+                },
+                "baseFilter": {
+                  "$ref": "#/$defs/kpiFilterRecord"
+                },
+                "limit": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 100
+                },
+                "orderBy": {
+                  "enum": [
+                    "KEY_ASC",
+                    "KEY_DESC",
+                    "VALUE_ASC",
+                    "VALUE_DESC"
+                  ]
+                }
+              },
+              "required": [
+                "field"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "kind",
+            "resourcePath",
+            "operation",
+            "request"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "const": "stats-query"
+            },
+            "resourcePath": {
+              "$ref": "#/$defs/kpiCanonicalResourcePath"
+            },
+            "operation": {
+              "const": "timeseries"
+            },
+            "request": {
+              "type": "object",
+              "properties": {
+                "field": {
+                  "$ref": "#/$defs/kpiIdentifier"
+                },
+                "granularity": {
+                  "enum": [
+                    "DAY",
+                    "WEEK",
+                    "MONTH"
+                  ]
+                },
+                "rollingWindow": {
+                  "type": "object",
+                  "properties": {
+                    "unit": {
+                      "enum": [
+                        "DAYS",
+                        "WEEKS",
+                        "MONTHS"
+                      ]
+                    },
+                    "count": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 120
+                    }
+                  },
+                  "required": [
+                    "unit",
+                    "count"
+                  ],
+                  "additionalProperties": false
+                },
+                "metric": {
+                  "$ref": "#/$defs/kpiMetricRequest"
+                },
+                "baseFilter": {
+                  "$ref": "#/$defs/kpiFilterRecord"
+                },
+                "timezone": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 64
+                },
+                "fillGaps": {
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "field",
+                "granularity",
+                "rollingWindow"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "kind",
+            "resourcePath",
+            "operation",
+            "request"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "const": "stats-query"
+            },
+            "resourcePath": {
+              "$ref": "#/$defs/kpiCanonicalResourcePath"
+            },
+            "operation": {
+              "const": "comparison"
+            },
+            "request": {
+              "type": "object",
+              "properties": {
+                "field": {
+                  "$ref": "#/$defs/kpiIdentifier"
+                },
+                "periodField": {
+                  "$ref": "#/$defs/kpiIdentifier"
+                },
+                "periodPreset": {
+                  "enum": [
+                    "TODAY",
+                    "YESTERDAY",
+                    "LAST_7_DAYS",
+                    "LAST_30_DAYS",
+                    "THIS_MONTH",
+                    "LAST_MONTH",
+                    "THIS_QUARTER",
+                    "THIS_YEAR"
+                  ]
+                },
+                "periodMode": {
+                  "enum": [
+                    "PREVIOUS_ALIGNED",
+                    "PREVIOUS_CALENDAR_PERIOD"
+                  ]
+                },
+                "timezone": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 64
+                },
+                "metrics": {
+                  "type": "array",
+                  "minItems": 1,
+                  "maxItems": 8,
+                  "items": {
+                    "$ref": "#/$defs/kpiMetricRequest"
+                  }
+                },
+                "baseFilter": {
+                  "$ref": "#/$defs/kpiFilterRecord"
+                },
+                "limit": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 100
+                },
+                "orderBy": {
+                  "enum": [
+                    "KEY_ASC",
+                    "KEY_DESC",
+                    "VALUE_ASC",
+                    "VALUE_DESC"
+                  ]
+                }
+              },
+              "required": [
+                "field",
+                "periodField",
+                "periodPreset",
+                "periodMode",
+                "metrics"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "kind",
+            "resourcePath",
+            "operation",
+            "request"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "kpiDerivation": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "const": "ratio"
+            },
+            "metricAlias": {
+              "$ref": "#/$defs/kpiIdentifier"
+            },
+            "numeratorKeys": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 32,
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              }
+            },
+            "denominatorMode": {
+              "enum": [
+                "population-total",
+                "explicit-keys",
+                "exclude-keys"
+              ]
+            },
+            "denominatorKeys": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 32,
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              }
+            },
+            "scale": {
+              "enum": [
+                1,
+                100
+              ]
+            },
+            "decimals": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 4
+            }
+          },
+          "required": [
+            "kind",
+            "numeratorKeys",
+            "denominatorMode"
+          ],
+          "if": {
+            "properties": {
+              "denominatorMode": {
+                "enum": [
+                  "explicit-keys",
+                  "exclude-keys"
+                ]
+              }
+            },
+            "required": [
+              "denominatorMode"
+            ]
+          },
+          "then": {
+            "required": [
+              "denominatorKeys"
+            ]
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "const": "composition"
+            },
+            "metricAlias": {
+              "$ref": "#/$defs/kpiIdentifier"
+            },
+            "segments": {
+              "type": "array",
+              "maxItems": 12,
+              "items": {
+                "type": "object",
+                "properties": {
+                  "key": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 128
+                  },
+                  "label": {
+                    "$ref": "#/$defs/kpiTextValue"
+                  },
+                  "tone": {
+                    "enum": [
+                      "neutral",
+                      "info",
+                      "success",
+                      "warning",
+                      "danger",
+                      "critical"
+                    ]
+                  }
+                },
+                "required": [
+                  "key"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "maxVisible": {
+              "type": "integer",
+              "minimum": 2,
+              "maximum": 12
+            },
+            "unmatchedPolicy": {
+              "enum": [
+                "group-as-other",
+                "include-dynamically",
+                "exclude-from-total"
+              ]
+            },
+            "headlineMode": {
+              "enum": [
+                "total",
+                "key-share"
+              ]
+            },
+            "headlineKey": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "const": "timeseries-summary"
+            },
+            "metricAlias": {
+              "$ref": "#/$defs/kpiIdentifier"
+            },
+            "seriesAggregation": {
+              "enum": [
+                "sum",
+                "latest",
+                "avg"
+              ]
+            },
+            "deltaMode": {
+              "enum": [
+                "last-vs-previous",
+                "last-vs-first",
+                "none"
+              ]
+            },
+            "baselineZeroPolicy": {
+              "enum": [
+                "show-absolute",
+                "label-no-baseline",
+                "hide-pct"
+              ]
+            }
+          },
+          "required": [
+            "kind",
+            "seriesAggregation"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "const": "comparison-delta"
+            },
+            "metricAlias": {
+              "$ref": "#/$defs/kpiIdentifier"
+            },
+            "bucketKeys": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 32,
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              }
+            },
+            "deltaMode": {
+              "enum": [
+                "percent",
+                "absolute"
+              ]
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "const": "weighted-average"
+            },
+            "metricAlias": {
+              "$ref": "#/$defs/kpiIdentifier"
+            },
+            "decimals": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 4
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "const": "scalar"
+            },
+            "metricAlias": {
+              "$ref": "#/$defs/kpiIdentifier"
+            },
+            "aggregation": {
+              "enum": [
+                "total",
+                "sum-keys"
+              ]
+            },
+            "keys": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 32,
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              }
+            }
+          },
+          "required": [
+            "kind",
+            "aggregation"
+          ],
+          "if": {
+            "properties": {
+              "aggregation": {
+                "const": "sum-keys"
+              }
+            },
+            "required": [
+              "aggregation"
+            ]
+          },
+          "then": {
+            "required": [
+              "keys"
+            ]
+          },
+          "additionalProperties": false
+        }
+      ]
+    },
+    "kpiVisualization": {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "enum": [
+            "bullet",
+            "radial",
+            "harveyBall",
+            "stackedBar",
+            "area",
+            "line",
+            "column",
+            "delta",
+            "comparison",
+            "none"
+          ]
+        },
+        "title": {
+          "$ref": "#/$defs/kpiTextValue"
+        },
+        "target": {
+          "type": "number"
+        },
+        "targetLabel": {
+          "$ref": "#/$defs/kpiTextValue"
+        },
+        "scaleMode": {
+          "enum": [
+            "fixed-100",
+            "auto-max",
+            "population-total"
+          ]
+        },
+        "thresholds": {
+          "type": "array",
+          "maxItems": 6,
+          "items": {
+            "type": "object",
+            "properties": {
+              "min": {
+                "type": "number"
+              },
+              "max": {
+                "type": "number"
+              },
+              "tone": {
+                "enum": [
+                  "neutral",
+                  "info",
+                  "success",
+                  "warning",
+                  "danger",
+                  "critical"
+                ]
+              },
+              "label": {
+                "$ref": "#/$defs/kpiTextValue"
+              }
+            },
+            "required": [
+              "max",
+              "tone"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "showLegend": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "additionalProperties": false
+    },
+    "kpiInteraction": {
+      "type": "object",
+      "properties": {
+        "crossFilter": {
+          "type": "object",
+          "properties": {
+            "field": {
+              "$ref": "#/$defs/kpiIdentifier"
+            },
+            "values": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 32,
+              "items": {
+                "$ref": "#/$defs/kpiScalarValue"
+              }
+            },
+            "targetResourcePath": {
+              "$ref": "#/$defs/kpiCanonicalResourcePath"
+            },
+            "activateTargetSurfaceId": {
+              "$ref": "#/$defs/kpiIdentifier"
+            }
+          },
+          "required": [
+            "field",
+            "values"
+          ],
+          "additionalProperties": false
+        },
+        "filterReaction": {
+          "type": "object",
+          "properties": {
+            "mode": {
+              "enum": [
+                "all-except-own-dimension",
+                "page-scope-only",
+                "all-cross-filters"
+              ]
+            },
+            "excludeFields": {
+              "type": "array",
+              "maxItems": 16,
+              "items": {
+                "$ref": "#/$defs/kpiIdentifier"
+              }
+            }
+          },
+          "required": [
+            "mode"
+          ],
+          "additionalProperties": false
+        },
+        "drillDown": {
+          "type": "object",
+          "properties": {
+            "resourcePath": {
+              "$ref": "#/$defs/kpiCanonicalResourcePath"
+            },
+            "surfaceId": {
+              "$ref": "#/$defs/kpiIdentifier"
+            },
+            "applyEffectiveFilter": {
+              "type": "boolean"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "kpiGovernance": {
+      "type": "object",
+      "properties": {
+        "lockLevel": {
+          "enum": [
+            "none",
+            "metric-locked",
+            "full"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "kpiCardSpec": {
+      "type": "object",
+      "properties": {
+        "schemaVersion": {
+          "const": 1
+        },
+        "id": {
+          "$ref": "#/$defs/kpiUuid"
+        },
+        "presentation": {
+          "$ref": "#/$defs/kpiPresentation"
+        },
+        "source": {
+          "$ref": "#/$defs/kpiMetricSource"
+        },
+        "derivation": {
+          "$ref": "#/$defs/kpiDerivation"
+        },
+        "visualization": {
+          "$ref": "#/$defs/kpiVisualization"
+        },
+        "interaction": {
+          "$ref": "#/$defs/kpiInteraction"
+        },
+        "governance": {
+          "$ref": "#/$defs/kpiGovernance"
+        }
+      },
+      "required": [
+        "schemaVersion",
+        "id",
+        "presentation",
+        "source",
+        "derivation"
+      ],
+      "additionalProperties": false
+    },
+    "kpiStripConfig": {
+      "type": "object",
+      "properties": {
+        "schemaVersion": {
+          "const": 1
+        },
+        "title": {
+          "$ref": "#/$defs/kpiTextValue"
+        },
+        "columns": {
+          "oneOf": [
+            {
+              "const": "auto"
+            },
+            {
+              "enum": [
+                2,
+                3,
+                4
+              ]
+            }
+          ]
+        },
+        "minCardWidthPx": {
+          "type": "integer",
+          "minimum": 180,
+          "maximum": 420
+        },
+        "density": {
+          "enum": [
+            "comfortable",
+            "compact"
+          ]
+        },
+        "cards": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 12,
+          "items": {
+            "$ref": "#/$defs/kpiCardSpec"
+          }
+        }
+      },
+      "required": [
+        "schemaVersion",
+        "cards"
+      ],
+      "additionalProperties": false
+    },
+    "kpiStripInputs": {
+      "type": "object",
+      "properties": {
+        "config": {
+          "$ref": "#/$defs/kpiStripConfig"
+        },
+        "queryContext": {
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "density": {
+          "enum": [
+            "comfortable",
+            "compact"
+          ]
+        }
+      },
+      "required": [
+        "config"
+      ],
+      "additionalProperties": false
+    },
+    "kpiCardInputs": {
+      "type": "object",
+      "properties": {
+        "config": {
+          "$ref": "#/$defs/kpiCardSpec"
+        },
+        "queryContext": {
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "density": {
+          "enum": [
+            "comfortable",
+            "compact"
+          ]
+        }
+      },
+      "required": [
+        "config"
+      ],
+      "additionalProperties": false
+    },
+    "kpiStripWidget": {
+      "type": "object",
+      "properties": {
+        "key": {
+          "$ref": "#/$defs/kpiUuid"
+        },
+        "definition": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "const": "praxis-kpi-strip"
+            },
+            "inputs": {
+              "$ref": "#/$defs/kpiStripInputs"
+            }
+          },
+          "required": [
+            "id",
+            "inputs"
+          ],
+          "additionalProperties": false
+        },
+        "shell": {
+          "$ref": "#/$defs/widgetShell"
+        }
+      },
+      "required": [
+        "key",
+        "definition"
+      ],
+      "additionalProperties": false
+    },
+    "kpiCardWidget": {
+      "type": "object",
+      "properties": {
+        "key": {
+          "$ref": "#/$defs/kpiUuid"
+        },
+        "definition": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "const": "praxis-kpi-card"
+            },
+            "inputs": {
+              "$ref": "#/$defs/kpiCardInputs"
+            }
+          },
+          "required": [
+            "id",
+            "inputs"
+          ],
+          "additionalProperties": false
+        },
+        "shell": {
+          "$ref": "#/$defs/widgetShell"
+        }
+      },
+      "required": [
+        "key",
+        "definition"
+      ],
+      "additionalProperties": false
+    },
+    "kpiStripDocument": {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "const": "praxis.kpi-strip.editor"
+        },
+        "version": {
+          "const": 1
+        },
+        "config": {
+          "$ref": "#/$defs/kpiStripInputs"
+        }
+      },
+      "required": [
+        "kind",
+        "version",
+        "config"
+      ],
+      "additionalProperties": false
+    },
+    "kpiCardDocument": {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "const": "praxis.kpi-card.editor"
+        },
+        "version": {
+          "const": 1
+        },
+        "config": {
+          "$ref": "#/$defs/kpiCardInputs"
+        }
+      },
+      "required": [
+        "kind",
+        "version",
+        "config"
       ],
       "additionalProperties": false
     }

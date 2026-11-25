@@ -11,9 +11,11 @@ import java.util.HashSet;
 import java.util.Iterator;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.regex.Pattern;
 import org.praxisplatform.rules.jsonlogic.PraxisJsonLogicEngine;
 import org.praxisplatform.rules.jsonlogic.model.JsonLogicValidationOptions;
 import org.springframework.scheduling.support.CronExpression;
@@ -21,6 +23,20 @@ import org.springframework.scheduling.support.CronExpression;
 public final class AgenticAuthoringValidatorRegistry {
 
     private static final PraxisJsonLogicEngine JSON_LOGIC_ENGINE = new PraxisJsonLogicEngine();
+    private static final Pattern KPI_UUID_PATTERN = Pattern.compile(
+            "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$");
+    private static final Pattern KPI_ICON_SNAKE_CASE_PATTERN = Pattern.compile("^[a-z][a-z0-9_]{0,63}$");
+    private static final Pattern KPI_RESOURCE_PATH_PATTERN = Pattern.compile("^[a-z0-9][a-z0-9/_-]{1,120}$");
+    private static final Set<String> KPI_ALLOWED_TONES = Set.of("success", "info", "warning", "danger", "neutral");
+    private static final Map<String, Set<String>> KPI_VISUALIZATION_COMPAT = Map.of(
+            "scalar", Set.of("number-only", "bullet", "radial", "harvey-ball", "delta", "sparkline"),
+            "ratio", Set.of("number-only", "bullet", "radial", "harvey-ball", "stackedBar"),
+            "bucket-share", Set.of("number-only", "stackedBar", "bullet", "harvey-ball"),
+            "composition", Set.of("number-only", "stackedBar", "bullet", "harvey-ball"),
+            "delta", Set.of("number-only", "sparkline", "delta", "comparison"),
+            "timeseries-latest", Set.of("number-only", "sparkline", "delta"),
+            "timeseries-delta", Set.of("number-only", "sparkline", "delta"),
+            "comparison-delta", Set.of("number-only", "delta", "comparison"));
     private static final JsonLogicValidationOptions TABLE_JSON_LOGIC_VALIDATION_OPTIONS =
             new JsonLogicValidationOptions(
                     List.of("row", "computed"),
@@ -518,7 +534,22 @@ public final class AgenticAuthoringValidatorRegistry {
             "unsafe-style-rejected",
             "variant-supported",
             "visible-when-json-logic",
-            "runtime-operation-declared");
+            "runtime-operation-declared",
+            "kpi-strip-config-valid",
+            "kpi-card-spec-valid",
+            "kpi-card-exists",
+            "kpi-card-id-unique",
+            "kpi-card-limit-bounded",
+            "kpi-card-minimum-preserved",
+            "kpi-card-lock-policy-respected",
+            "kpi-resource-path-canonical",
+            "kpi-verified-recipe-valid",
+            "kpi-stats-query-valid",
+            "kpi-visualization-compatible-with-derivation",
+            "kpi-thresholds-ordered-and-bounded",
+            "kpi-icon-snake-case",
+            "kpi-interaction-valid",
+            "kpi-removal-confirmed");
 
     private final AgenticAuthoringTargetResolverRegistry targetResolverRegistry;
 
@@ -949,6 +980,24 @@ public final class AgenticAuthoringValidatorRegistry {
                     validateVisualGraphValid(operationId, config, failures);
                     validateJsonLogicLikeInput(operationId, planOperation.path("input"), failures);
                 }
+                case "kpi-strip-config-valid" -> validateKpiStripConfigValid(operationId, planOperation, config, failures);
+                case "kpi-card-spec-valid" -> validateKpiCardSpecValid(operationId, planOperation, failures);
+                case "kpi-card-exists" -> validateKpiCardExists(componentId, operationId, operation, planOperation, config, failures);
+                case "kpi-card-id-unique" -> validateKpiCardIdUnique(operationId, planOperation, config, failures);
+                case "kpi-card-limit-bounded" -> validateKpiCardLimitBounded(operationId, config, failures);
+                case "kpi-card-minimum-preserved" -> validateKpiCardMinimumPreserved(operationId, config, failures);
+                case "kpi-card-lock-policy-respected" -> validateKpiCardLockPolicyRespected(
+                        componentId, operationId, operation, planOperation, config, failures);
+                case "kpi-resource-path-canonical" -> validateKpiResourcePathCanonical(operationId, planOperation, failures);
+                case "kpi-verified-recipe-valid" -> validateKpiVerifiedRecipeValid(operationId, planOperation, failures);
+                case "kpi-stats-query-valid" -> validateKpiStatsQueryValid(operationId, planOperation, failures);
+                case "kpi-visualization-compatible-with-derivation" -> validateKpiVisualizationCompatible(
+                        componentId, operationId, operation, planOperation, config, failures);
+                case "kpi-thresholds-ordered-and-bounded" -> validateKpiThresholdsOrderedAndBounded(
+                        operationId, planOperation, failures);
+                case "kpi-icon-snake-case" -> validateKpiIconSnakeCase(operationId, planOperation, failures);
+                case "kpi-interaction-valid" -> validateKpiInteractionValid(operationId, planOperation, failures);
+                case "kpi-removal-confirmed" -> validateKpiRemovalConfirmed(operationId, planOperation, failures);
                 default -> {
                     // Validator is registered as supported and enforced by resolver, schema, compiler, or runtime contract.
                 }
@@ -7206,5 +7255,402 @@ public final class AgenticAuthoringValidatorRegistry {
 
     private String text(JsonNode node, String field) {
         return staticText(node, field);
+    }
+
+    private void validateKpiStripConfigValid(
+            String operationId,
+            JsonNode planOperation,
+            JsonNode config,
+            List<String> failures) {
+        JsonNode input = planOperation.path("input");
+        if (input.has("columns")) {
+            JsonNode colNode = input.path("columns");
+            boolean validCols = ("auto".equals(colNode.asText("")) && colNode.isTextual())
+                    || (colNode.isIntegralNumber() && Set.of(2, 3, 4).contains(colNode.asInt()));
+            if (!validCols) {
+                failures.add("validator kpi-strip-config-valid failed for " + operationId
+                        + ": columns must be 'auto', 2, 3, or 4");
+            }
+        }
+        if (input.has("density") && !Set.of("comfortable", "compact").contains(input.path("density").asText(""))) {
+            failures.add("validator kpi-strip-config-valid failed for " + operationId
+                    + ": density must be 'comfortable' or 'compact'");
+        }
+        if (input.has("minCardWidthPx")) {
+            int width = input.path("minCardWidthPx").asInt(-1);
+            if (!input.path("minCardWidthPx").isNumber() || width < 180 || width > 420) {
+                failures.add("validator kpi-strip-config-valid failed for " + operationId
+                        + ": minCardWidthPx must be between 180 and 420");
+            }
+        }
+        JsonNode cards = config.path("cards");
+        if (cards.isArray() && (cards.isEmpty() || cards.size() > 12)) {
+            failures.add("validator kpi-strip-config-valid failed for " + operationId
+                    + ": strip cards[] count must remain within [1, 12]");
+        }
+    }
+
+    private void validateKpiCardSpecValid(
+            String operationId,
+            JsonNode planOperation,
+            List<String> failures) {
+        JsonNode input = planOperation.path("input");
+        String id = firstNonBlankText(input, "id", "newCardId");
+        if (!id.isBlank() && !KPI_UUID_PATTERN.matcher(id).matches()) {
+            failures.add("validator kpi-card-spec-valid failed for " + operationId
+                    + ": card id must be a valid RFC 4122 UUID");
+        }
+        if (("kpi.addFromRecipe".equals(operationId)
+                || "kpi.addFromStatsQuery".equals(operationId)
+                || "kpi.bindVerifiedRecipe".equals(operationId)
+                || "kpi.bindStatsQuery".equals(operationId))
+                && text(input, "label").isBlank()) {
+            failures.add("validator kpi-card-spec-valid failed for " + operationId
+                    + ": label must not be blank");
+        }
+    }
+
+    private void validateKpiCardExists(
+            String componentId,
+            String operationId,
+            JsonNode operation,
+            JsonNode planOperation,
+            JsonNode config,
+            List<String> failures) {
+        if ("kpi.reorderCards".equals(operationId)) {
+            JsonNode orderedIds = planOperation.path("input").path("orderedIds");
+            JsonNode cards = config.path("cards");
+            if (!orderedIds.isArray() || !cards.isArray() || orderedIds.size() != cards.size()) {
+                failures.add("validator kpi-card-exists failed for " + operationId
+                        + ": orderedIds must contain an exact permutation of existing card UUIDs");
+                return;
+            }
+            Set<String> cardIds = new LinkedHashSet<>();
+            cards.forEach(card -> cardIds.add(text(card, "id")));
+            Set<String> orderedSet = new LinkedHashSet<>();
+            orderedIds.forEach(item -> orderedSet.add(item.asText("")));
+            if (!cardIds.equals(orderedSet)) {
+                failures.add("validator kpi-card-exists failed for " + operationId
+                        + ": orderedIds does not match strip cards[].id");
+            }
+            return;
+        }
+        if (operation.path("target").path("required").asBoolean(false)) {
+            AgenticAuthoringResolvedTarget resolved = targetResolverRegistry.resolve(
+                    componentId, operation, planOperation.path("target"), config);
+            if (!AgenticAuthoringTargetResolverRegistry.STATUS_RESOLVED.equals(resolved.status())) {
+                failures.add("validator kpi-card-exists failed for " + operationId + ": "
+                        + String.join(", ", resolved.failures()));
+            }
+        }
+    }
+
+    private void validateKpiCardIdUnique(
+            String operationId,
+            JsonNode planOperation,
+            JsonNode config,
+            List<String> failures) {
+        JsonNode input = planOperation.path("input");
+        String candidateId = firstNonBlankText(input, "newCardId", "id");
+        if (candidateId.isBlank()) {
+            return;
+        }
+        JsonNode cards = config.path("cards");
+        if (!cards.isArray()) {
+            return;
+        }
+        for (JsonNode card : cards) {
+            if (candidateId.equals(text(card, "id"))) {
+                failures.add("validator kpi-card-id-unique failed for " + operationId
+                        + ": duplicate card id '" + candidateId + "'");
+                return;
+            }
+        }
+    }
+
+    private void validateKpiCardLimitBounded(
+            String operationId,
+            JsonNode config,
+            List<String> failures) {
+        JsonNode cards = config.path("cards");
+        if (cards.isArray() && cards.size() >= 12) {
+            failures.add("validator kpi-card-limit-bounded failed for " + operationId
+                    + ": KPI strip cannot exceed 12 cards");
+        }
+    }
+
+    private void validateKpiCardMinimumPreserved(
+            String operationId,
+            JsonNode config,
+            List<String> failures) {
+        JsonNode cards = config.path("cards");
+        if (cards.isArray() && cards.size() <= 1) {
+            failures.add("validator kpi-card-minimum-preserved failed for " + operationId
+                    + ": KPI strip must retain at least 1 card");
+        }
+    }
+
+    private void validateKpiCardLockPolicyRespected(
+            String componentId,
+            String operationId,
+            JsonNode operation,
+            JsonNode planOperation,
+            JsonNode config,
+            List<String> failures) {
+        JsonNode card = resolveKpiTargetCard(componentId, operation, planOperation, config);
+        if (card == null || card.isMissingNode() || card.isNull()) {
+            return;
+        }
+        String lockLevel = card.path("governance").path("lockLevel").asText("none");
+        if ("full".equalsIgnoreCase(lockLevel)) {
+            failures.add("validator kpi-card-lock-policy-respected failed for " + operationId
+                    + ": card is governed with lockLevel=full");
+            return;
+        }
+        if ("metric-locked".equalsIgnoreCase(lockLevel)
+                && Set.of(
+                        "kpi.setTargetAndThresholds",
+                        "kpi.bindVerifiedRecipe",
+                        "kpi.bindStatsQuery",
+                        "kpi.removeCard",
+                        "kpi.addFromRecipe",
+                        "kpi.addFromStatsQuery").contains(operationId)) {
+            failures.add("validator kpi-card-lock-policy-respected failed for " + operationId
+                    + ": card is governed with lockLevel=metric-locked");
+        }
+    }
+
+    private void validateKpiResourcePathCanonical(
+            String operationId,
+            JsonNode planOperation,
+            List<String> failures) {
+        String resourcePath = text(planOperation.path("input"), "resourcePath").trim();
+        if (!isCanonicalRelativeResourcePath(resourcePath)) {
+            failures.add("validator kpi-resource-path-canonical failed for " + operationId
+                    + ": resourcePath must be a governed relative path without scheme or traversal");
+        }
+    }
+
+    private void validateKpiVerifiedRecipeValid(
+            String operationId,
+            JsonNode planOperation,
+            List<String> failures) {
+        JsonNode input = planOperation.path("input");
+        validateKpiResourcePathCanonical(operationId, planOperation, failures);
+        if (text(input, "recipeId").isBlank()) {
+            failures.add("validator kpi-verified-recipe-valid failed for " + operationId
+                    + ": recipeId is required");
+        }
+        if (input.has("parameters") && !input.path("parameters").isObject()) {
+            failures.add("validator kpi-verified-recipe-valid failed for " + operationId
+                    + ": parameters must be a structured object");
+        }
+    }
+
+    private void validateKpiStatsQueryValid(
+            String operationId,
+            JsonNode planOperation,
+            List<String> failures) {
+        JsonNode input = planOperation.path("input");
+        validateKpiResourcePathCanonical(operationId, planOperation, failures);
+        String statsOp = text(input, "operation").trim();
+        if (!Set.of("group-by", "timeseries", "distribution", "comparison").contains(statsOp)) {
+            failures.add("validator kpi-stats-query-valid failed for " + operationId
+                    + ": unsupported stats operation '" + statsOp + "'");
+        }
+        if (text(input, "field").isBlank()) {
+            failures.add("validator kpi-stats-query-valid failed for " + operationId
+                    + ": field is required");
+        }
+        JsonNode baseFilter = input.path("baseFilter");
+        if (!baseFilter.isMissingNode() && !baseFilter.isNull()) {
+            if (!baseFilter.isObject() || baseFilter.has("filterExpression") || baseFilter.has("sql")) {
+                failures.add("validator kpi-stats-query-valid failed for " + operationId
+                        + ": baseFilter must contain typed FilterDTO properties only");
+            }
+        }
+    }
+
+    private void validateKpiVisualizationCompatible(
+            String componentId,
+            String operationId,
+            JsonNode operation,
+            JsonNode planOperation,
+            JsonNode config,
+            List<String> failures) {
+        JsonNode input = planOperation.path("input");
+        String visKind = !text(input, "kind").isBlank()
+                ? text(input, "kind").trim()
+                : text(input.path("visualization"), "kind").trim();
+        if (visKind.isBlank()) {
+            return;
+        }
+        String derivKind = text(input.path("derivation"), "kind").trim();
+        if (derivKind.isBlank()) {
+            JsonNode card = resolveKpiTargetCard(componentId, operation, planOperation, config);
+            if (card != null && !card.isMissingNode()) {
+                derivKind = text(card.path("derivation"), "kind").trim();
+            }
+        }
+        if (derivKind.isBlank()) {
+            return;
+        }
+        Set<String> allowed = KPI_VISUALIZATION_COMPAT.get(derivKind);
+        if (allowed == null || !allowed.contains(visKind)) {
+            failures.add("validator kpi-visualization-compatible-with-derivation failed for " + operationId
+                    + ": visualization '" + visKind + "' is incompatible with derivation '" + derivKind + "'");
+        }
+    }
+
+    private void validateKpiThresholdsOrderedAndBounded(
+            String operationId,
+            JsonNode planOperation,
+            List<String> failures) {
+        JsonNode input = planOperation.path("input");
+        JsonNode thresholds = input.has("thresholds")
+                ? input.path("thresholds")
+                : input.path("visualization").path("thresholds");
+        if (thresholds.isMissingNode() || thresholds.isNull()) {
+            return;
+        }
+        if (!thresholds.isArray()) {
+            failures.add("validator kpi-thresholds-ordered-and-bounded failed for " + operationId
+                    + ": thresholds must be an array");
+            return;
+        }
+        double previous = Double.NEGATIVE_INFINITY;
+        for (int i = 0; i < thresholds.size(); i++) {
+            JsonNode band = thresholds.get(i);
+            if (!band.path("max").isNumber()) {
+                failures.add("validator kpi-thresholds-ordered-and-bounded failed for " + operationId
+                        + ": threshold[" + i + "].max must be numeric");
+                return;
+            }
+            double maxVal = band.path("max").asDouble();
+            if (!Double.isFinite(maxVal) || maxVal < previous) {
+                failures.add("validator kpi-thresholds-ordered-and-bounded failed for " + operationId
+                        + ": thresholds[].max must be finite and monotonically non-decreasing");
+                return;
+            }
+            String tone = text(band, "tone").trim();
+            if (!KPI_ALLOWED_TONES.contains(tone)) {
+                failures.add("validator kpi-thresholds-ordered-and-bounded failed for " + operationId
+                        + ": invalid threshold tone '" + tone + "'");
+                return;
+            }
+            previous = maxVal;
+        }
+    }
+
+    private void validateKpiIconSnakeCase(
+            String operationId,
+            JsonNode planOperation,
+            List<String> failures) {
+        String icon = text(planOperation.path("input"), "icon").trim();
+        if (!icon.isBlank() && !KPI_ICON_SNAKE_CASE_PATTERN.matcher(icon).matches()) {
+            failures.add("validator kpi-icon-snake-case failed for " + operationId
+                    + ": icon must use lowercase snake_case ligatures (e.g. 'groups', 'trending_up')");
+        }
+    }
+
+    private void validateKpiInteractionValid(
+            String operationId,
+            JsonNode planOperation,
+            List<String> failures) {
+        JsonNode input = planOperation.path("input");
+        if (input.has("filterReactionMode")) {
+            String mode = text(input, "filterReactionMode").trim();
+            if (!Set.of("all-except-own-dimension", "page-scope-only", "all-cross-filters").contains(mode)) {
+                failures.add("validator kpi-interaction-valid failed for " + operationId
+                        + ": invalid filterReactionMode '" + mode + "'");
+            }
+        }
+        JsonNode drillDown = input.path("drillDown");
+        if (drillDown.isObject()) {
+            String route = text(drillDown, "route").trim();
+            if (!route.isBlank()) {
+                String lower = route.toLowerCase(Locale.ROOT);
+                if (lower.startsWith("javascript:")
+                        || lower.startsWith("data:")
+                        || lower.startsWith("http://")
+                        || lower.startsWith("https://")
+                        || lower.startsWith("//")
+                        || lower.contains("..")) {
+                    failures.add("validator kpi-interaction-valid failed for " + operationId
+                            + ": drillDown.route must be a safe internal route");
+                }
+            }
+        }
+    }
+
+    private void validateKpiRemovalConfirmed(
+            String operationId,
+            JsonNode planOperation,
+            List<String> failures) {
+        boolean confirmed = planOperation.path("confirmed").asBoolean(false)
+                || planOperation.path("input").path("confirmRemoval").asBoolean(false);
+        if (!confirmed) {
+            failures.add("validator kpi-removal-confirmed failed for " + operationId
+                    + ": explicit confirmation (confirmed=true or confirmRemoval=true) is required");
+        }
+    }
+
+    private JsonNode resolveKpiTargetCard(
+            String componentId,
+            JsonNode operation,
+            JsonNode planOperation,
+            JsonNode config) {
+        if (config == null || config.isMissingNode() || config.isNull()) {
+            return MissingNode.getInstance();
+        }
+        if ("praxis-kpi-card".equals(componentId) || !config.has("cards")) {
+            return config.path("id").isTextual() || config.has("presentation")
+                    ? config
+                    : MissingNode.getInstance();
+        }
+        AgenticAuthoringResolvedTarget resolved = targetResolverRegistry.resolve(
+                componentId, operation, planOperation.path("target"), config);
+        if (AgenticAuthoringTargetResolverRegistry.STATUS_RESOLVED.equals(resolved.status())) {
+            return resolved.value();
+        }
+        String candidateId = text(planOperation.path("input"), "cardId").trim();
+        if (!candidateId.isBlank() && config.path("cards").isArray()) {
+            for (JsonNode card : config.path("cards")) {
+                if (candidateId.equals(text(card, "id"))) {
+                    return card;
+                }
+            }
+        }
+        return MissingNode.getInstance();
+    }
+
+    private boolean isCanonicalRelativeResourcePath(String rawPath) {
+        if (rawPath == null || rawPath.isBlank()) {
+            return false;
+        }
+        String trimmed = rawPath.trim();
+        String lower = trimmed.toLowerCase(Locale.ROOT);
+        if (lower.startsWith("http://")
+                || lower.startsWith("https://")
+                || lower.startsWith("javascript:")
+                || lower.startsWith("data:")
+                || trimmed.startsWith("//")
+                || trimmed.contains("..")
+                || trimmed.contains("?")
+                || trimmed.contains("#")) {
+            return false;
+        }
+        String noLeadingSlash = trimmed.startsWith("/") ? trimmed.substring(1) : trimmed;
+        return KPI_RESOURCE_PATH_PATTERN.matcher(noLeadingSlash).matches();
+    }
+
+    private static String firstNonBlankText(JsonNode node, String... fields) {
+        for (String field : fields) {
+            String v = staticText(node, field).trim();
+            if (!v.isBlank()) {
+                return v;
+            }
+        }
+        return "";
     }
 }

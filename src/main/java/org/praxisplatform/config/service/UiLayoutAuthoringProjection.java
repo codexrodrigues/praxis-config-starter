@@ -51,7 +51,9 @@ final class UiLayoutAuthoringProjection {
           "praxis.footer-links.editor",
           "praxis.legal-notice.editor",
           "praxis.rich-text-block.editor",
-          "praxis.user-context-summary.editor" -> UiLayoutDeclarativeWidgetRevisionReproduction.requireNative(target, descriptor, baseline, candidate, patchDescriptor);
+          "praxis.user-context-summary.editor",
+          "praxis.kpi-strip.editor",
+          "praxis.kpi-card.editor" -> UiLayoutDeclarativeWidgetRevisionReproduction.requireNative(target, descriptor, baseline, candidate, patchDescriptor);
       default -> throw unavailable();
     }
     checkpoint.run();

@@ -4,6 +4,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import java.lang.reflect.Field;
 import java.math.BigDecimal;
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
@@ -53,6 +55,23 @@ final class MetadataStarterVerifiedRecipeSupport {
             AbstractResourceQueryController<?, ?, ?> controller,
             VerifiedAnalyticalRecipeResolver resolver,
             ObjectMapper objectMapper) {
+        return extractRecipes(controller, resolver, objectMapper, null, Set.of());
+    }
+
+    static List<AgentAnalyticalRecipeSummary> extractRecipes(
+            AbstractResourceQueryController<?, ?, ?> controller,
+            VerifiedAnalyticalRecipeResolver resolver,
+            ObjectMapper objectMapper,
+            Set<String> blockedFields) {
+        return extractRecipes(controller, resolver, objectMapper, null, blockedFields);
+    }
+
+    static List<AgentAnalyticalRecipeSummary> extractRecipes(
+            AbstractResourceQueryController<?, ?, ?> controller,
+            VerifiedAnalyticalRecipeResolver resolver,
+            ObjectMapper objectMapper,
+            Class<?> filterDtoType,
+            Set<String> blockedFields) {
         if (controller == null) {
             return List.of();
         }
@@ -65,7 +84,14 @@ final class MetadataStarterVerifiedRecipeSupport {
             if (resolved == null || resolved.isEmpty()) {
                 return List.of();
             }
-            return resolved.stream().map(MetadataStarterVerifiedRecipeSupport::toSummary).toList();
+            Set<String> normalizedBlocked = normalizeFieldSet(blockedFields);
+            Set<String> blockedFilterFields = normalizedBlocked.isEmpty()
+                    ? Set.of()
+                    : expandBlockedFilterFields(filterDtoType, normalizedBlocked);
+            return resolved.stream()
+                    .filter(recipe -> !isRecipeBlockedByGovernance(recipe, normalizedBlocked, blockedFilterFields))
+                    .map(MetadataStarterVerifiedRecipeSupport::toSummary)
+                    .toList();
         } catch (Exception ex) {
             log.warn("Failed extracting verified analytical recipes from controller {}: {}",
                     controller.getClass().getSimpleName(), ex.getMessage());
@@ -143,7 +169,7 @@ final class MetadataStarterVerifiedRecipeSupport {
                                 key,
                                 label,
                                 pt.value(),
-                                pt.count(),
+                                pt.countOrZero(),
                                 pt.start() != null ? pt.start().toString() : null,
                                 pt.end() != null ? pt.end().toString() : null,
                                 null,
@@ -354,7 +380,83 @@ final class MetadataStarterVerifiedRecipeSupport {
                 recipe.provenanceDigest(),
                 recipe.endpointPath(),
                 recipe.lockedFilters(),
-                params);
+                params,
+                toKpiHintMap(recipe.kpiHint()));
+    }
+
+    private static Map<String, Object> toKpiHintMap(VerifiedAnalyticalRecipeDescriptor.KpiHint kpiHint) {
+        if (kpiHint == null) {
+            return Map.of();
+        }
+        Map<String, Object> out = new LinkedHashMap<>();
+        if (StringUtils.hasText(kpiHint.polarity())) {
+            out.put("polarity", kpiHint.polarity());
+        }
+        if (StringUtils.hasText(kpiHint.unitSingular())) {
+            out.put("unitSingular", kpiHint.unitSingular());
+        }
+        if (StringUtils.hasText(kpiHint.unitPlural())) {
+            out.put("unitPlural", kpiHint.unitPlural());
+        }
+        if (StringUtils.hasText(kpiHint.suggestedDerivationKind())) {
+            out.put("suggestedDerivationKind", kpiHint.suggestedDerivationKind());
+        }
+        if (StringUtils.hasText(kpiHint.suggestedVisualizationKind())) {
+            out.put("suggestedVisualizationKind", kpiHint.suggestedVisualizationKind());
+        }
+        if (kpiHint.referenceTarget() != null) {
+            out.put("referenceTarget", kpiHint.referenceTarget());
+        }
+        if (kpiHint.suggestedThresholds() != null && !kpiHint.suggestedThresholds().isEmpty()) {
+            out.put("suggestedThresholds", kpiHint.suggestedThresholds());
+        }
+        return out.isEmpty() ? Map.of() : Collections.unmodifiableMap(out);
+    }
+
+    private static boolean isRecipeBlockedByGovernance(
+            ResolvedVerifiedAnalyticalRecipe recipe,
+            Set<String> normalizedBlocked,
+            Set<String> blockedFilterFields) {
+        if ((normalizedBlocked == null || normalizedBlocked.isEmpty())
+                && (blockedFilterFields == null || blockedFilterFields.isEmpty())) {
+            return false;
+        }
+        if (normalizedBlocked != null && !normalizedBlocked.isEmpty()) {
+            if (isBlocked(recipe.field(), normalizedBlocked) || isBlocked(recipe.periodField(), normalizedBlocked)) {
+                return true;
+            }
+            for (VerifiedAnalyticalRecipeDescriptor.DimensionSpec dim : recipe.dimensions()) {
+                if (isBlocked(dim.field(), normalizedBlocked)) {
+                    return true;
+                }
+            }
+            for (VerifiedAnalyticalRecipeDescriptor.MetricSpec metric : recipe.metrics()) {
+                if (isBlocked(metric.field(), normalizedBlocked)) {
+                    return true;
+                }
+            }
+        }
+        Set<String> effectiveFilterBlocked = blockedFilterFields != null && !blockedFilterFields.isEmpty()
+                ? blockedFilterFields
+                : normalizedBlocked;
+        for (String lockedKey : recipe.lockedFilters().keySet()) {
+            if (isBlocked(lockedKey, effectiveFilterBlocked)) {
+                return true;
+            }
+        }
+        for (VerifiedAnalyticalRecipeDescriptor.ParameterSpec param : recipe.adjustableParams()) {
+            if (isBlocked(param.name(), effectiveFilterBlocked)
+                    || isBlocked(param.filterField(), effectiveFilterBlocked)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean isBlocked(String candidate, Set<String> blockedFields) {
+        return StringUtils.hasText(candidate)
+                && blockedFields != null
+                && blockedFields.contains(candidate.trim().toLowerCase(Locale.ROOT));
     }
 
     private static ComparisonMetricValue extractComparisonMetric(

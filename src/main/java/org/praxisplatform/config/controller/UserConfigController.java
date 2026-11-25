@@ -17,6 +17,7 @@ import org.praxisplatform.config.service.UserConfigService;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.util.StringUtils;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -104,10 +105,26 @@ public class UserConfigController {
     }
 
     UiUserConfig cfg = resolved.get().config();
-    String etag = cfg.getEtag() != null ? cfg.getEtag().toString() : null;
+    String baseEtag = cfg.getEtag() != null ? cfg.getEtag().toString() : null;
+    String effectiveEnvironment =
+        StringUtils.hasText(cfg.getEnvironment()) ? cfg.getEnvironment() : environment;
+    String effectiveEtag = resolveEffectiveEtag(baseEtag, cfg, userId, effectiveEnvironment);
 
-    if (etag != null && matches(ifNoneMatch, etag)) {
-      return ResponseEntity.status(HttpStatus.NOT_MODIFIED).eTag(formatEtag(etag)).build();
+    if (effectiveEtag != null && matches(ifNoneMatch, effectiveEtag)) {
+      return ResponseEntity.status(HttpStatus.NOT_MODIFIED).eTag(formatEtag(effectiveEtag)).build();
+    }
+
+    JsonNode resolvedPayload = readJsonPayload(cfg.getPayload());
+    JsonNode reconciledPayload =
+        service.reconcileResolvedPayload(
+            cfg.getTenantId(),
+            userId,
+            cfg.getComponentType(),
+            cfg.getComponentId(),
+            effectiveEnvironment,
+            resolvedPayload);
+    if (reconciledPayload != null) {
+      resolvedPayload = reconciledPayload;
     }
 
     UserConfigResponse body =
@@ -117,13 +134,13 @@ public class UserConfigController {
             .environment(cfg.getEnvironment())
             .scope(resolved.get().scope().name().toLowerCase())
             .version(cfg.getVersion())
-            .etag(etag)
-            .payload(readJsonPayload(cfg.getPayload()))
+            .etag(effectiveEtag)
+            .payload(resolvedPayload)
             .authoringSource(readJsonPayload(cfg.getAuthoringSource()))
             .tags(readJson(cfg.getTags()))
             .build();
 
-    return ResponseEntity.ok().eTag(formatEtag(etag)).body(body);
+    return ResponseEntity.ok().eTag(formatEtag(effectiveEtag)).body(body);
   }
 
   @PutMapping(params = {"componentType", "componentId"})
@@ -209,7 +226,10 @@ public class UserConfigController {
             ifMatch,
             updatedBy);
 
-    String etag = saved.getEtag() != null ? saved.getEtag().toString() : null;
+    String baseEtag = saved.getEtag() != null ? saved.getEtag().toString() : null;
+    String effectiveEnvironment =
+        StringUtils.hasText(saved.getEnvironment()) ? saved.getEnvironment() : environment;
+    String effectiveEtag = resolveEffectiveEtag(baseEtag, saved, userId, effectiveEnvironment);
 
     UserConfigResponse body =
         UserConfigResponse.builder()
@@ -218,13 +238,29 @@ public class UserConfigController {
             .environment(saved.getEnvironment())
             .scope(scope.name().toLowerCase())
             .version(saved.getVersion())
-            .etag(etag)
+            .etag(effectiveEtag)
             .payload(readJsonPayload(saved.getPayload()))
             .authoringSource(readJsonPayload(saved.getAuthoringSource()))
             .tags(readJson(saved.getTags()))
             .build();
 
-    return ResponseEntity.ok().eTag(formatEtag(etag)).body(body);
+    return ResponseEntity.ok().eTag(formatEtag(effectiveEtag)).body(body);
+  }
+
+  private String resolveEffectiveEtag(
+      String baseEtag, UiUserConfig cfg, String userId, String effectiveEnvironment) {
+    if (baseEtag == null || baseEtag.isBlank()) {
+      return baseEtag;
+    }
+    String computed =
+        service.computeEffectiveEtag(
+            baseEtag,
+            cfg.getTenantId(),
+            userId,
+            cfg.getComponentType(),
+            cfg.getComponentId(),
+            effectiveEnvironment);
+    return StringUtils.hasText(computed) ? computed : baseEtag;
   }
 
   @DeleteMapping(params = {"componentType", "componentId"})

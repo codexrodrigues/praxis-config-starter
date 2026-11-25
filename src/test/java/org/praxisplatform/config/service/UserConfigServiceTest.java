@@ -993,6 +993,336 @@ class UserConfigServiceTest {
     return assertThat(sqlCaptor.getValue());
   }
 
+  @Test
+  void shouldRejectKpiGovernanceLockViolationsBeforePersistenceAndAllowSafeVisualEdits()
+      throws Exception {
+    String pageId = "11111111-1111-4111-8111-111111111111";
+    String stripKey = "22222222-2222-4222-8222-222222222222";
+    String metricCardId = "33333333-3333-4333-8333-333333333331";
+    String fullCardId = "33333333-3333-4333-8333-333333333332";
+    String freeCardId = "33333333-3333-4333-8333-333333333333";
+
+    JsonNode baselinePage =
+        readJson(
+            """
+            {
+              "kind": "praxis.dynamic-page.editor",
+              "version": 1,
+              "config": {
+                "definition": {
+                  "widgets": [
+                    {
+                      "key": "%s",
+                      "definition": {
+                        "id": "praxis-kpi-strip",
+                        "inputs": {
+                          "config": {
+                            "schemaVersion": 1,
+                            "cards": [
+                              {
+                                "schemaVersion": 1,
+                                "id": "%s",
+                                "presentation": {"label": "Active Ratio", "format": "percent"},
+                                "source": {"kind": "stats-query", "resourcePath": "workforce/assignments", "operation": "group-by", "request": {"field": "status"}},
+                                "derivation": {"kind": "ratio", "numeratorKeys": ["ACTIVE"], "denominatorMode": "population-total"},
+                                "governance": {"lockLevel": "metric-locked"}
+                              },
+                              {
+                                "schemaVersion": 1,
+                                "id": "%s",
+                                "presentation": {"label": "Turnover Rate", "format": "percent"},
+                                "source": {"kind": "stats-query", "resourcePath": "workforce/assignments", "operation": "group-by", "request": {"field": "terminationReason"}},
+                                "derivation": {"kind": "ratio", "numeratorKeys": ["VOLUNTARY"], "denominatorMode": "population-total"},
+                                "governance": {"lockLevel": "full"}
+                              },
+                              {
+                                "schemaVersion": 1,
+                                "id": "%s",
+                                "presentation": {"label": "Distribution", "format": "integer"},
+                                "source": {"kind": "stats-query", "resourcePath": "workforce/assignments", "operation": "group-by", "request": {"field": "departmentCode"}},
+                                "derivation": {"kind": "scalar", "aggregation": "total"},
+                                "governance": {"lockLevel": "none"}
+                              }
+                            ]
+                          }
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+            """
+                .formatted(stripKey, metricCardId, fullCardId, freeCardId));
+
+    PublishedUiLayoutBaselineProvider baselineProvider =
+        (tenantId, userId, componentType, componentId, environment) -> Optional.of(baselinePage);
+    KpiGovernanceUserConfigGuard guard = new KpiGovernanceUserConfigGuard(baselineProvider);
+
+    var localRepo =
+        org.mockito.Mockito.mock(
+            org.praxisplatform.config.repository.UiUserConfigRepository.class);
+    var localAiProtection = org.mockito.Mockito.mock(AiApiKeyProtectionService.class);
+    var localJdbc = org.mockito.Mockito.mock(NamedParameterJdbcTemplate.class);
+    var factory = new org.springframework.beans.factory.support.StaticListableBeanFactory();
+    factory.addBean("jdbcTemplate", localJdbc);
+    factory.addBean("kpiGuard", guard);
+
+    com.fasterxml.jackson.databind.ObjectMapper mapper =
+        new ObjectMapper().findAndRegisterModules();
+    UserConfigService guardedService =
+        new UserConfigService(
+            localRepo,
+            mapper,
+            localAiProtection,
+            factory.getBeanProvider(NamedParameterJdbcTemplate.class),
+            new CanonicalJsonHashService(mapper),
+            factory.getBeanProvider(KpiGovernanceUserConfigGuard.class));
+
+    JsonNode tamperedMetricPayload =
+        readJson(
+            """
+            {
+              "widgets": [
+                {
+                  "key": "%s",
+                  "definition": {
+                    "id": "praxis-kpi-strip",
+                    "inputs": {
+                      "config": {
+                        "schemaVersion": 1,
+                        "cards": [
+                          {
+                            "schemaVersion": 1,
+                            "id": "%s",
+                            "presentation": {"label": "Custom Visual", "format": "percent"},
+                            "source": {"kind": "stats-query", "resourcePath": "workforce/assignments", "operation": "group-by", "request": {"field": "salary"}},
+                            "derivation": {"kind": "ratio", "numeratorKeys": ["ACTIVE"], "denominatorMode": "population-total"},
+                            "governance": {"lockLevel": "metric-locked"}
+                          },
+                          {
+                            "schemaVersion": 1,
+                            "id": "%s",
+                            "presentation": {"label": "Turnover Rate", "format": "percent"},
+                            "source": {"kind": "stats-query", "resourcePath": "workforce/assignments", "operation": "group-by", "request": {"field": "terminationReason"}},
+                            "derivation": {"kind": "ratio", "numeratorKeys": ["VOLUNTARY"], "denominatorMode": "population-total"},
+                            "governance": {"lockLevel": "full"}
+                          },
+                          {
+                            "schemaVersion": 1,
+                            "id": "%s",
+                            "presentation": {"label": "Distribution", "format": "integer"},
+                            "source": {"kind": "stats-query", "resourcePath": "workforce/assignments", "operation": "group-by", "request": {"field": "departmentCode"}},
+                            "derivation": {"kind": "scalar", "aggregation": "total"},
+                            "governance": {"lockLevel": "none"}
+                          }
+                        ]
+                      }
+                    }
+                  }
+                }
+              ]
+            }
+            """
+                .formatted(stripKey, metricCardId, fullCardId, freeCardId));
+
+    JsonNode tamperedFullVisualPayload = baselinePage.at("/config/definition").deepCopy();
+    ((com.fasterxml.jackson.databind.node.ObjectNode)
+            tamperedFullVisualPayload.at(
+                "/widgets/0/definition/inputs/config/cards/1/presentation"))
+        .put("label", "Tampered Full Visual");
+
+    assertThatThrownBy(
+            () ->
+                guardedService.create(
+                    UserConfigService.Scope.USER,
+                    "tenant-a",
+                    "user-1",
+                    "praxis-dynamic-page",
+                    "page:" + pageId,
+                    "prod",
+                    tamperedMetricPayload,
+                    null,
+                    "user-1"))
+        .isInstanceOf(UiConfigWriteDeniedException.class)
+        .satisfies(
+            ex -> {
+              UiConfigWriteDeniedException denied = (UiConfigWriteDeniedException) ex;
+              assertThat(denied.getStatusCode())
+                  .isEqualTo(org.springframework.http.HttpStatus.UNPROCESSABLE_ENTITY);
+              assertThat(denied.getErrorCode())
+                  .isEqualTo(KpiGovernanceUserConfigGuard.KPI_GOVERNANCE_LOCK_ERROR_CODE);
+            });
+
+    assertThatThrownBy(
+            () ->
+                guardedService.upsert(
+                    UserConfigService.Scope.USER,
+                    "tenant-a",
+                    "user-1",
+                    "praxis-dynamic-page",
+                    "page:" + pageId,
+                    "prod",
+                    tamperedFullVisualPayload,
+                    null,
+                    null,
+                    "user-1"))
+        .isInstanceOf(UiConfigWriteDeniedException.class)
+        .satisfies(
+            ex ->
+                assertThat(((UiConfigWriteDeniedException) ex).getErrorCode())
+                    .isEqualTo(KpiGovernanceUserConfigGuard.KPI_GOVERNANCE_LOCK_ERROR_CODE));
+
+    assertThatThrownBy(
+            () ->
+                guardedService.upsert(
+                    UserConfigService.Scope.TENANT,
+                    "tenant-a",
+                    null,
+                    "praxis-dynamic-page",
+                    "page:" + pageId,
+                    "prod",
+                    tamperedMetricPayload,
+                    null,
+                    null,
+                    "tenant-admin"))
+        .isInstanceOf(UiConfigWriteDeniedException.class)
+        .satisfies(
+            ex ->
+                assertThat(((UiConfigWriteDeniedException) ex).getErrorCode())
+                    .isEqualTo(KpiGovernanceUserConfigGuard.KPI_GOVERNANCE_LOCK_ERROR_CODE));
+
+    verify(localRepo, never()).saveAndFlush(any(UiUserConfig.class));
+    verifyNoInteractions(localJdbc);
+
+    var localJdbcAllowed = org.mockito.Mockito.mock(NamedParameterJdbcTemplate.class);
+    var allowedFactory = new org.springframework.beans.factory.support.StaticListableBeanFactory();
+    allowedFactory.addBean("jdbcTemplate", localJdbcAllowed);
+    allowedFactory.addBean("kpiGuard", guard);
+    UserConfigService allowedGuardedService =
+        new UserConfigService(
+            localRepo,
+            mapper,
+            localAiProtection,
+            allowedFactory.getBeanProvider(NamedParameterJdbcTemplate.class),
+            new CanonicalJsonHashService(mapper),
+            allowedFactory.getBeanProvider(KpiGovernanceUserConfigGuard.class));
+
+    JsonNode safeVisualAndFreeEdit = baselinePage.at("/config/definition").deepCopy();
+    ((com.fasterxml.jackson.databind.node.ObjectNode)
+            safeVisualAndFreeEdit.at("/widgets/0/definition/inputs/config/cards/0/presentation"))
+        .put("label", "Approved Visual Rename")
+        .put("tone", "success");
+    ((com.fasterxml.jackson.databind.node.ObjectNode)
+            safeVisualAndFreeEdit.at("/widgets/0/definition/inputs/config/cards/2/source/request"))
+        .put("field", "contractType");
+
+    when(localAiProtection.sanitizeForStorage(any(JsonNode.class), any()))
+        .thenAnswer(inv -> inv.getArgument(0));
+    when(localJdbcAllowed.queryForObject(
+            anyString(),
+            any(MapSqlParameterSource.class),
+            ArgumentMatchers.<RowMapper<UiUserConfig>>any()))
+        .thenAnswer(
+            inv -> {
+              MapSqlParameterSource params = inv.getArgument(1, MapSqlParameterSource.class);
+              return UiUserConfig.builder()
+                  .id(UUID.randomUUID())
+                  .tenantId("tenant-a")
+                  .userId("user-1")
+                  .componentType("praxis-dynamic-page")
+                  .componentId("page:" + pageId)
+                  .environment("prod")
+                  .payload((String) params.getValue("payload"))
+                  .version(1L)
+                  .etag(UUID.randomUUID())
+                  .build();
+            });
+
+    UiUserConfig saved =
+        allowedGuardedService.upsert(
+            UserConfigService.Scope.USER,
+            "tenant-a",
+            "user-1",
+            "praxis-dynamic-page",
+            "page:" + pageId,
+            "prod",
+            safeVisualAndFreeEdit,
+            null,
+            null,
+            "user-1");
+    assertThat(readJson(saved.getPayload())
+            .at("/widgets/0/definition/inputs/config/cards/0/presentation/label")
+            .asText())
+        .isEqualTo("Approved Visual Rename");
+    assertThat(readJson(saved.getPayload())
+            .at("/widgets/0/definition/inputs/config/cards/2/source/request/field")
+            .asText())
+        .isEqualTo("contractType");
+
+    // Composite ETag validation: rejects raw UUID when KPI governance baseline exists, accepts composite ETag
+    UUID currentRowEtag = UUID.fromString("123e4567-e89b-12d3-a456-426614174099");
+    UiUserConfig existingLocked =
+        UiUserConfig.builder()
+            .id(UUID.randomUUID())
+            .tenantId("tenant-a")
+            .userId("user-1")
+            .componentType("praxis-dynamic-page")
+            .componentId("page:" + pageId)
+            .environment("prod")
+            .payload(safeVisualAndFreeEdit.toString())
+            .version(2L)
+            .etag(currentRowEtag)
+            .build();
+    when(localRepo
+            .findTopByTenantIdAndComponentTypeAndComponentIdAndEnvironmentAndUserIdOrderByUpdatedAtDesc(
+                "tenant-a", "praxis-dynamic-page", "page:" + pageId, "prod", "user-1"))
+        .thenReturn(Optional.of(existingLocked));
+
+    String expectedComposite =
+        allowedGuardedService.computeEffectiveEtag(
+            currentRowEtag.toString(),
+            "tenant-a",
+            "user-1",
+            "praxis-dynamic-page",
+            "page:" + pageId,
+            "prod");
+    assertThat(expectedComposite).startsWith(currentRowEtag + "-kpi-");
+
+    assertThatThrownBy(
+            () ->
+                allowedGuardedService.upsert(
+                    UserConfigService.Scope.USER,
+                    "tenant-a",
+                    "user-1",
+                    "praxis-dynamic-page",
+                    "page:" + pageId,
+                    "prod",
+                    safeVisualAndFreeEdit,
+                    null,
+                    "\"" + currentRowEtag + "\"",
+                    "user-1"))
+        .isInstanceOf(UserConfigService.PreconditionFailedException.class);
+
+    when(localRepo.updateIfCurrent(
+            any(UUID.class), anyString(), any(), any(), anyLong(), any(UUID.class),
+            any(UUID.class), any(), anyString()))
+        .thenReturn(1);
+    UiUserConfig updated =
+        allowedGuardedService.upsert(
+            UserConfigService.Scope.USER,
+            "tenant-a",
+            "user-1",
+            "praxis-dynamic-page",
+            "page:" + pageId,
+            "prod",
+            safeVisualAndFreeEdit,
+            null,
+            "\"" + expectedComposite + "\"",
+            "user-1");
+    assertThat(updated.getVersion()).isEqualTo(3L);
+  }
+
   private JsonNode readJson(String raw) throws Exception {
     return new ObjectMapper().readTree(raw);
   }

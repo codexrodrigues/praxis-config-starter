@@ -208,6 +208,256 @@ class CorporateMultiWidgetPageLifecycleTest {
                 .isEqualTo(UiLayoutLifecycleException.Code.VALIDATION_FAILED);
     }
 
+    @Test
+    void admitsHistoricalBaselineAndComposedChildrenAcrossDifferentActorUnitAndContextVersion() {
+        CorporatePageRuntimeSupport support =
+                createSupport(
+                        baseContributor(
+                                Set.of("praxis-table", "praxis-chart", "praxis-analytics-presentation"),
+                                false));
+        CapturesFixture fixture = createInitialFixture(support);
+        UiLayoutDraftWorkspaceSource workspaceSource = support.draftWorkspaceSource();
+
+        ObjectNode candidate = multiWidgetCandidate(false);
+        List<UiLayoutPageChildSource> childSources = List.of(
+                composedSource(CHART_WIDGET_KEY, "praxis-chart"),
+                composedSource(ANALYTICS_WIDGET_KEY, "praxis-analytics-presentation"));
+
+        List<UiLayoutPageChildEvidence> updatedEvidence =
+                fixture.captures()
+                        .revision(
+                                INVOCATION,
+                                fixture.draftId(),
+                                fixture.state(),
+                                candidate,
+                                childSources,
+                                workspaceSource,
+                                validation(UiLayoutLifecycleOperation.EDIT_DRAFT));
+
+        UiLayoutBaselineMetadataAdmission metadataAdmission = support.baselineMetadataAdmission();
+        UiLayoutTarget groupsRoot =
+                new UiLayoutTarget(
+                        UiLayoutNavigationGroupsRevisionReproduction.TYPE,
+                        baseContributor(Set.of(), false)
+                                .navigationGroupsRootId("default", "prod")
+                                .toString());
+        UiLayoutLifecycleInvocation managerGroupsInvocation =
+                new UiLayoutLifecycleInvocation(
+                        "hr.director",
+                        "default",
+                        "org-1",
+                        "prod",
+                        "ctx-v1",
+                        new UiLayoutCompositionRegistration(groupsRoot, List.of(groupsRoot)));
+        UiLayoutDraftWorkspaceSeed groupsSeed =
+                workspaceSource.capture(
+                        managerGroupsInvocation,
+                        validationFor(managerGroupsInvocation, UiLayoutLifecycleOperation.CREATE_DRAFT));
+        UiLayoutDraftWorkspaceSeed.TargetSeed groupsTargetSeed = groupsSeed.targets().getFirst();
+
+        // 1. Dual-control approver on a new contextVersion approves/publishes the release
+        UiLayoutLifecycleInvocation approverInvocation = invocationFor("hr.approver", "org-1", "ctx-v2");
+        metadataAdmission.require(
+                approverInvocation,
+                PAGE_TARGET,
+                fixture.seed().authoring(),
+                fixture.seed().sourceRef(),
+                fixture.seed().document(),
+                fixture.seed().metadata());
+        fixture.captures()
+                .verify(
+                        approverInvocation,
+                        fixture.draftId(),
+                        PAGE_TARGET,
+                        fixture.seed().document(),
+                        candidate,
+                        updatedEvidence,
+                        workspaceSource,
+                        validationFor(approverInvocation, UiLayoutLifecycleOperation.PUBLISH_RELEASE));
+
+        // 2. Original manager rotates organization/contextVersion and reads published page
+        UiLayoutLifecycleInvocation managerRotatedInvocation = invocationFor("hr.director", "org-2", "ctx-v3");
+        metadataAdmission.require(
+                managerRotatedInvocation,
+                PAGE_TARGET,
+                fixture.seed().authoring(),
+                fixture.seed().sourceRef(),
+                fixture.seed().document(),
+                fixture.seed().metadata());
+        fixture.captures()
+                .verify(
+                        managerRotatedInvocation,
+                        fixture.draftId(),
+                        PAGE_TARGET,
+                        fixture.seed().document(),
+                        candidate,
+                        updatedEvidence,
+                        workspaceSource,
+                        validationFor(managerRotatedInvocation, UiLayoutLifecycleOperation.READ_HEAD));
+
+        // 3. Different reader user with its own contextVersion reads published page and groups
+        UiLayoutLifecycleInvocation readerInvocation = invocationFor("hr.reader", "org-1", "ctx-v4");
+        metadataAdmission.require(
+                readerInvocation,
+                PAGE_TARGET,
+                fixture.seed().authoring(),
+                fixture.seed().sourceRef(),
+                fixture.seed().document(),
+                fixture.seed().metadata());
+        fixture.captures()
+                .verify(
+                        readerInvocation,
+                        fixture.draftId(),
+                        PAGE_TARGET,
+                        fixture.seed().document(),
+                        candidate,
+                        updatedEvidence,
+                        workspaceSource,
+                        validationFor(readerInvocation, UiLayoutLifecycleOperation.READ_HEAD));
+
+        UiLayoutLifecycleInvocation readerGroupsInvocation =
+                new UiLayoutLifecycleInvocation(
+                        "hr.reader",
+                        "default",
+                        "org-1",
+                        "prod",
+                        "ctx-v4",
+                        new UiLayoutCompositionRegistration(groupsRoot, List.of(groupsRoot)));
+        metadataAdmission.require(
+                readerGroupsInvocation,
+                groupsRoot,
+                groupsTargetSeed.authoring(),
+                groupsTargetSeed.sourceRef(),
+                groupsTargetSeed.document(),
+                groupsTargetSeed.metadata());
+    }
+
+    @Test
+    void rejectsTamperedHistoricalMetadataProvenanceAndChildSourceMismatch() {
+        CorporatePageRuntimeSupport support =
+                createSupport(
+                        baseContributor(
+                                Set.of("praxis-table", "praxis-chart", "praxis-analytics-presentation"),
+                                false));
+        CapturesFixture fixture = createInitialFixture(support);
+        UiLayoutBaselineMetadataSeed originalSeed = fixture.seed().metadata();
+        UiLayoutBaselineMetadataSeed.NativeDocumentSource originalSource =
+                (UiLayoutBaselineMetadataSeed.NativeDocumentSource) originalSeed.source();
+        UiLayoutBaselineMetadataSeed.Observation originalObs = originalSeed.observation();
+        UiLayoutLifecycleInvocation readerInvocation = invocationFor("hr.reader", "org-2", "ctx-v9");
+
+        List<UiLayoutBaselineMetadataSeed> tamperedSeeds = List.of(
+                new UiLayoutBaselineMetadataSeed(
+                        new UiLayoutBaselineMetadataSeed.NativeDocumentSource(
+                                "untrusted-service",
+                                originalSource.documentRef(),
+                                originalSource.documentRevision(),
+                                originalSource.producerRef(),
+                                originalSource.publicationRef()),
+                        new UiLayoutBaselineMetadataSeed.NativeIdentity(),
+                        originalObs,
+                        originalSeed.rawInputText()),
+                new UiLayoutBaselineMetadataSeed(
+                        new UiLayoutBaselineMetadataSeed.NativeDocumentSource(
+                                originalSource.serviceKey(),
+                                originalSource.documentRef(),
+                                originalSource.documentRevision(),
+                                "tampered-producer",
+                                originalSource.publicationRef()),
+                        new UiLayoutBaselineMetadataSeed.NativeIdentity(),
+                        originalObs,
+                        originalSeed.rawInputText()),
+                new UiLayoutBaselineMetadataSeed(
+                        new UiLayoutBaselineMetadataSeed.NativeDocumentSource(
+                                originalSource.serviceKey(),
+                                originalSource.documentRef(),
+                                originalSource.documentRevision(),
+                                originalSource.producerRef(),
+                                "tampered-publication"),
+                        new UiLayoutBaselineMetadataSeed.NativeIdentity(),
+                        originalObs,
+                        originalSeed.rawInputText()),
+                new UiLayoutBaselineMetadataSeed(
+                        originalSource,
+                        new UiLayoutBaselineMetadataSeed.NativeIdentity(),
+                        new UiLayoutBaselineMetadataSeed.Observation(
+                                originalObs.actorRef(),
+                                originalObs.administrativeUnit(),
+                                originalObs.contextVersion(),
+                                "tampered:policy",
+                                originalObs.policyRevision(),
+                                originalObs.capturedAt()),
+                        originalSeed.rawInputText()),
+                new UiLayoutBaselineMetadataSeed(
+                        originalSource,
+                        new UiLayoutBaselineMetadataSeed.NativeIdentity(),
+                        new UiLayoutBaselineMetadataSeed.Observation(
+                                originalObs.actorRef(),
+                                originalObs.administrativeUnit(),
+                                originalObs.contextVersion(),
+                                originalObs.policyRef(),
+                                "999",
+                                originalObs.capturedAt()),
+                        originalSeed.rawInputText()),
+                new UiLayoutBaselineMetadataSeed(
+                        new UiLayoutBaselineMetadataSeed.OperationSource(
+                                originalSource.serviceKey(),
+                                "workforce.employees",
+                                "/api/workforce/employees",
+                                "GET",
+                                "response",
+                                "schema-ref-1",
+                                originalSource.producerRef(),
+                                originalSource.publicationRef()),
+                        new UiLayoutBaselineMetadataSeed.SchemaProjection(
+                                "norm-1",
+                                "proj-1",
+                                new UiLayoutBaselineMetadataSeed.DocumentAssembly(1, "asm-1", "{}")),
+                        originalObs,
+                        originalSeed.rawInputText()));
+
+        for (UiLayoutBaselineMetadataSeed tampered : tamperedSeeds) {
+            assertThatThrownBy(
+                            () ->
+                                    support.baselineMetadataAdmission()
+                                            .require(
+                                                    readerInvocation,
+                                                    PAGE_TARGET,
+                                                    fixture.seed().authoring(),
+                                                    fixture.seed().sourceRef(),
+                                                    fixture.seed().document(),
+                                                    tampered))
+                    .isInstanceOf(UiLayoutLifecycleException.class)
+                    .extracting(ex -> ((UiLayoutLifecycleException) ex).getCode())
+                    .isEqualTo(UiLayoutLifecycleException.Code.DENIED);
+        }
+
+        // Declared child request source must stay bound to stored metadata documentRef/documentRevision
+        UiLayoutPageChildSeed originalChild = fixture.seed().pageChildren().getFirst();
+        UiLayoutPageChildSource mismatchedRequest = new UiLayoutPageChildSource(
+                originalChild.request().widgetKey(),
+                new UiLayoutPageChildSource.NativeSource("registered-native", "other-page-source", "1"));
+        UiLayoutPageChildSeed mismatchedChildSeed = new UiLayoutPageChildSeed(
+                mismatchedRequest,
+                originalChild.authoring(),
+                originalChild.patch(),
+                originalChild.sourceRef(),
+                originalChild.document(),
+                originalChild.metadata());
+
+        assertThatThrownBy(
+                        () ->
+                                support.draftWorkspaceSource()
+                                        .requirePageChildEvidence(
+                                                readerInvocation,
+                                                PAGE_TARGET,
+                                                mismatchedChildSeed,
+                                                validationFor(readerInvocation, UiLayoutLifecycleOperation.READ_HEAD)))
+                .isInstanceOf(UiLayoutLifecycleException.class)
+                .extracting(ex -> ((UiLayoutLifecycleException) ex).getCode())
+                .isEqualTo(UiLayoutLifecycleException.Code.VALIDATION_FAILED);
+    }
+
     private CorporatePageRuntimeSupport createSupport(CorporatePageCatalogContributor contributor) {
         ObjectProvider<PageRuntimeReadService> provider =
                 new StaticListableBeanFactory().getBeanProvider(PageRuntimeReadService.class);
@@ -427,9 +677,24 @@ class CorporateMultiWidgetPageLifecycleTest {
                         CorporatePageRuntimeSupport.COMPOSED_WIDGET_SOURCE_REVISION));
     }
 
+    private UiLayoutLifecycleInvocation invocationFor(String actor, String unit, String contextVersion) {
+        return new UiLayoutLifecycleInvocation(
+                actor,
+                "default",
+                unit,
+                "prod",
+                contextVersion,
+                new UiLayoutCompositionRegistration(PAGE_TARGET, List.of(PAGE_TARGET)));
+    }
+
     private UiLayoutValidationContext validation(UiLayoutLifecycleOperation operation) {
+        return validationFor(INVOCATION, operation);
+    }
+
+    private UiLayoutValidationContext validationFor(
+            UiLayoutLifecycleInvocation invocation, UiLayoutLifecycleOperation operation) {
         return new UiLayoutValidationContext(
-                UiLayoutValidationAttempt.start(INVOCATION, operation, Duration.ofSeconds(30)),
+                UiLayoutValidationAttempt.start(invocation, operation, Duration.ofSeconds(30)),
                 UiLayoutValidationPurpose.AUTHORING);
     }
 

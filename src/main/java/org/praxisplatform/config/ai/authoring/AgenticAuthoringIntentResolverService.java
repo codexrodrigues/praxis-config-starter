@@ -1863,7 +1863,7 @@ public class AgenticAuthoringIntentResolverService {
                 List.of(axis),
                 false,
                 true,
-                List.of("praxis-rich-content", "praxis-kpi"),
+                List.of("praxis-rich-content", "praxis-kpi-strip", "praxis-kpi-card"),
                 includeFilters,
                 false,
                 "current-page-governed-refinement");

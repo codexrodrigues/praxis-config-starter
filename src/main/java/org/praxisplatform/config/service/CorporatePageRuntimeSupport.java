@@ -45,6 +45,7 @@ public final class CorporatePageRuntimeSupport {
     private static final String DEFAULT_UNIT = "corporate";
     private static final String PRODUCER_REF = "praxis-config-starter:corporate-pages";
     private static final String PUBLICATION_REF = "corporate-pages:v1";
+    private static final String POLICY_REVISION = "1";
 
     private static final Set<String> CANONICAL_ICONS = Set.of(
             "home", "dashboard", "analytics", "insights", "monitoring", "query_stats",
@@ -63,6 +64,7 @@ public final class CorporatePageRuntimeSupport {
     private final ObjectMapper mapper;
     private final Clock clock;
     private final ObjectProvider<PageRuntimeReadService> pageRuntimeReadServiceProvider;
+    private final ObjectProvider<UiLayoutKpiCatalogOracle> kpiCatalogOracleProvider;
     private final Set<String> allowedIcons;
     private final Set<String> admittedComposedWidgetTypes;
     private final Map<String, NativePageSeed> nativeBySourceRevision = new ConcurrentHashMap<>();
@@ -73,10 +75,20 @@ public final class CorporatePageRuntimeSupport {
             ObjectMapper mapper,
             Clock clock,
             ObjectProvider<PageRuntimeReadService> pageRuntimeReadServiceProvider) {
+        this(contributor, mapper, clock, pageRuntimeReadServiceProvider, null);
+    }
+
+    public CorporatePageRuntimeSupport(
+            CorporatePageCatalogContributor contributor,
+            ObjectMapper mapper,
+            Clock clock,
+            ObjectProvider<PageRuntimeReadService> pageRuntimeReadServiceProvider,
+            ObjectProvider<UiLayoutKpiCatalogOracle> kpiCatalogOracleProvider) {
         this.contributor = Objects.requireNonNull(contributor, "contributor is required");
         this.mapper = Objects.requireNonNull(mapper, "mapper is required");
         this.clock = clock == null ? Clock.systemUTC() : clock;
         this.pageRuntimeReadServiceProvider = pageRuntimeReadServiceProvider;
+        this.kpiCatalogOracleProvider = kpiCatalogOracleProvider;
 
         Set<String> icons = new LinkedHashSet<>(CANONICAL_ICONS);
         if (contributor.additionalAllowedIcons() != null) {
@@ -321,11 +333,20 @@ public final class CorporatePageRuntimeSupport {
                     UiLayoutValidationContext validation) {
                 validation.require(invocation);
                 requireValidInvocation(invocation);
-                requireNativeSeedObservation(invocation, seed.metadata());
-                if (!(seed.request().source() instanceof UiLayoutPageChildSource.NativeSource nativeSrc)) {
+                if (seed == null
+                        || seed.request() == null
+                        || !(seed.request().source() instanceof UiLayoutPageChildSource.NativeSource nativeSrc)) {
                     throw new UiLayoutLifecycleException(
                             UiLayoutLifecycleException.Code.DENIED,
                             "Unsupported page child source.");
+                }
+                UiLayoutBaselineMetadataSeed.NativeDocumentSource metadataSource =
+                        requireAdmittedNativeMetadata(seed.metadata());
+                if (!nativeSrc.sourceId().equals(metadataSource.documentRef())
+                        || !nativeSrc.revision().equals(metadataSource.documentRevision())) {
+                    throw new UiLayoutLifecycleException(
+                            UiLayoutLifecycleException.Code.VALIDATION_FAILED,
+                            "Page child metadata source does not match declared child request.");
                 }
                 if (isComposedWidgetSource(nativeSrc)) {
                     validateComposedWidgetCandidate(
@@ -414,12 +435,7 @@ public final class CorporatePageRuntimeSupport {
     public UiLayoutBaselineMetadataAdmission baselineMetadataAdmission() {
         return (invocation, target, authoring, baselineSourceRef, baselineDocument, metadata) -> {
             requireValidInvocation(invocation);
-            requireNativeSeedObservation(invocation, metadata);
-            if (!contributor.serviceKey().equals(metadata.source().serviceKey())) {
-                throw new UiLayoutLifecycleException(
-                        UiLayoutLifecycleException.Code.DENIED,
-                        "Baseline metadata service identity is not admitted by this host.");
-            }
+            requireAdmittedNativeMetadata(metadata);
         };
     }
 
@@ -473,6 +489,10 @@ public final class CorporatePageRuntimeSupport {
                     UiLayoutValidationContext validation) {
                 UiLayoutNativeStructureChecks.requireBaseline(
                         invocation, target, descriptor, baselineDocument, CANONICAL_PATCH_DESCRIPTOR, validation);
+                UiLayoutKpiStructureValidator.validate(
+                        descriptor.documentType(),
+                        baselineDocument,
+                        kpiCatalogOracleProvider == null ? null : kpiCatalogOracleProvider.getIfAvailable());
                 validateIcons(descriptor.documentType(), baselineDocument);
             }
 
@@ -497,6 +517,10 @@ public final class CorporatePageRuntimeSupport {
                         patchDescriptor,
                         patchDocument,
                         validation);
+                UiLayoutKpiStructureValidator.validate(
+                        candidateDescriptor.documentType(),
+                        candidateDocument,
+                        kpiCatalogOracleProvider == null ? null : kpiCatalogOracleProvider.getIfAvailable());
                 validateIcons(candidateDescriptor.documentType(), candidateDocument);
             }
 
@@ -727,21 +751,53 @@ public final class CorporatePageRuntimeSupport {
         }
     }
 
-    private void requireNativeSeedObservation(
-            UiLayoutLifecycleInvocation invocation, UiLayoutBaselineMetadataSeed metadata) {
-        if (metadata == null || metadata.observation() == null) {
+    private UiLayoutBaselineMetadataSeed.NativeDocumentSource requireAdmittedNativeMetadata(
+            UiLayoutBaselineMetadataSeed metadata) {
+        if (metadata == null
+                || metadata.source() == null
+                || metadata.reproduction() == null
+                || metadata.observation() == null) {
             throw new UiLayoutLifecycleException(
                     UiLayoutLifecycleException.Code.VALIDATION_FAILED,
-                    "Baseline observation evidence is required.");
+                    "Baseline metadata evidence is required.");
+        }
+        if (!(metadata.source() instanceof UiLayoutBaselineMetadataSeed.NativeDocumentSource nativeSource)
+                || !(metadata.reproduction() instanceof UiLayoutBaselineMetadataSeed.NativeIdentity)) {
+            throw new UiLayoutLifecycleException(
+                    UiLayoutLifecycleException.Code.DENIED,
+                    "Baseline metadata origin mode is not admitted by this host.");
+        }
+        if (!contributor.serviceKey().equals(nativeSource.serviceKey())) {
+            throw new UiLayoutLifecycleException(
+                    UiLayoutLifecycleException.Code.DENIED,
+                    "Baseline metadata service identity is not admitted by this host.");
+        }
+        if (!PRODUCER_REF.equals(nativeSource.producerRef())
+                || !PUBLICATION_REF.equals(nativeSource.publicationRef())) {
+            throw new UiLayoutLifecycleException(
+                    UiLayoutLifecycleException.Code.DENIED,
+                    "Baseline metadata producer or publication identity is not admitted by this host.");
         }
         UiLayoutBaselineMetadataSeed.Observation obs = metadata.observation();
-        if (!invocation.actorRef().equals(obs.actorRef())
-                || !invocation.administrativeUnit().equals(obs.administrativeUnit())
-                || !invocation.contextVersion().equals(obs.contextVersion())) {
+        if (!StringUtils.hasText(obs.actorRef())
+                || !StringUtils.hasText(obs.administrativeUnit())
+                || !StringUtils.hasText(obs.contextVersion())
+                || obs.capturedAt() == null) {
             throw new UiLayoutLifecycleException(
-                    UiLayoutLifecycleException.Code.CONTEXT_STALE,
-                    "Baseline observation does not match current invocation context.");
+                    UiLayoutLifecycleException.Code.VALIDATION_FAILED,
+                    "Baseline observation evidence is incomplete.");
         }
+        if (!expectedPolicyRef().equals(obs.policyRef())
+                || !POLICY_REVISION.equals(obs.policyRevision())) {
+            throw new UiLayoutLifecycleException(
+                    UiLayoutLifecycleException.Code.DENIED,
+                    "Baseline observation policy identity is not admitted by this host.");
+        }
+        return nativeSource;
+    }
+
+    private String expectedPolicyRef() {
+        return contributor.applicationId() + ":policy";
     }
 
     private UiLayoutDraftWorkspaceSeed.TargetSeed buildPageTargetSeed(
@@ -806,8 +862,8 @@ public final class CorporatePageRuntimeSupport {
                         invocation.actorRef(),
                         invocation.administrativeUnit(),
                         invocation.contextVersion(),
-                        contributor.applicationId() + ":policy",
-                        "1",
+                        expectedPolicyRef(),
+                        POLICY_REVISION,
                         Instant.now(clock)),
                 doc.toString());
     }

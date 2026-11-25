@@ -21,8 +21,11 @@ public final class UiLayoutNativeStructureChecks {
         Objects.requireNonNull(validation, "validation context is required");
         validation.requirePurpose(UiLayoutValidationPurpose.AUTHORING, UiLayoutValidationPurpose.FROZEN_RELEASE,
                 UiLayoutValidationPurpose.EVOLUTION_CURRENT_READ);
-        validation.run(invocation, () -> UiLayoutAuthoringProjection.project(target, descriptor, baseline, baseline,
-                patchDescriptor, () -> validation.require(invocation)));
+        validation.run(invocation, () -> {
+            UiLayoutKpiStructureValidator.validateStructureOnly(descriptor.documentType(), baseline);
+            UiLayoutAuthoringProjection.project(target, descriptor, baseline, baseline,
+                    patchDescriptor, () -> validation.require(invocation));
+        });
     }
 
     /**
@@ -39,6 +42,8 @@ public final class UiLayoutNativeStructureChecks {
             if (!Objects.equals(baselineDescriptor, candidateDescriptor)) {
                 throw new UiLayoutLifecycleException(Code.VALIDATION_FAILED, "Native revision descriptors differ.");
             }
+            UiLayoutKpiStructureValidator.validateStructureOnly(baselineDescriptor.documentType(), baseline);
+            UiLayoutKpiStructureValidator.validateStructureOnly(candidateDescriptor.documentType(), candidate);
             var checkpoint = (Runnable) () -> validation.require(invocation);
             var projection = UiLayoutAuthoringProjection.project(target, baselineDescriptor, baseline, candidate,
                     patchDescriptor, checkpoint);

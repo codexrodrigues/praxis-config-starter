@@ -278,4 +278,143 @@ class UiLayoutPageRevisionReproductionTest {
     ((ObjectNode) badShell.at("/config/definition/widgets/0/shell")).putObject("appearance");
     assertThrows(UiLayoutLifecycleException.class, () -> UiLayoutPageRevisionReproduction.children(badShell));
   }
+
+  @Test
+  void admitsKpiStripWithShellAndKpiCardAndPreservesAcrossReproduceAndPageCopy() throws Exception {
+    ObjectNode kpiPage =
+        (ObjectNode)
+            JSON.readTree(
+                """
+                {
+                  "kind": "praxis.dynamic-page.editor",
+                  "version": 1,
+                  "config": {
+                    "definition": {
+                      "widgets": [
+                        {
+                          "key": "11111111-1111-4111-8111-111111111111",
+                          "shell": {
+                            "kind": "dashboard-card",
+                            "title": "Indicadores Executivos",
+                            "icon": "analytics",
+                            "showHeader": true
+                          },
+                          "definition": {
+                            "id": "praxis-kpi-strip",
+                            "inputs": {
+                              "config": {
+                                "schemaVersion": 1,
+                                "density": "comfortable",
+                                "columns": "auto",
+                                "cards": [
+                                  {
+                                    "schemaVersion": 1,
+                                    "id": "33333333-3333-4333-8333-333333333331",
+                                    "presentation": {
+                                      "label": "Taxa de Ativos",
+                                      "format": "percent",
+                                      "tone": "success"
+                                    },
+                                    "source": {
+                                      "kind": "stats-query",
+                                      "resourcePath": "workforce/assignments",
+                                      "operation": "group-by",
+                                      "request": {
+                                        "field": "status",
+                                        "metric": {"operation": "COUNT", "alias": "total"}
+                                      }
+                                    },
+                                    "derivation": {
+                                      "kind": "ratio",
+                                      "numeratorKeys": ["ACTIVE"],
+                                      "denominatorMode": "population-total"
+                                    },
+                                    "governance": {"lockLevel": "metric-locked"}
+                                  }
+                                ]
+                              }
+                            }
+                          }
+                        },
+                        {
+                          "key": "22222222-2222-4222-8222-222222222222",
+                          "definition": {
+                            "id": "praxis-kpi-card",
+                            "inputs": {
+                              "density": "compact",
+                              "config": {
+                                "schemaVersion": 1,
+                                "id": "33333333-3333-4333-8333-333333333332",
+                                "presentation": {
+                                  "label": "Admissoes Recentes",
+                                  "format": "integer"
+                                },
+                                "source": {
+                                  "kind": "verified-recipe",
+                                  "resourcePath": "workforce/assignments",
+                                  "recipeId": "recent-hires",
+                                  "parameters": {"limit": 12}
+                                },
+                                "derivation": {
+                                  "kind": "scalar",
+                                  "aggregation": "total"
+                                },
+                                "governance": {"lockLevel": "full"}
+                              }
+                            }
+                          }
+                        }
+                      ]
+                    },
+                    "presentation": {"title": "Executive KPIs", "icon": "analytics"},
+                    "navigation": []
+                  }
+                }
+                """);
+
+    var updatedKpiPage = kpiPage.deepCopy();
+    ((ObjectNode) input(updatedKpiPage, 0).at("/config/cards/0/presentation"))
+        .put("label", "Taxa de Ativos Ajustada")
+        .put("tone", "info");
+    reproduce(kpiPage, updatedKpiPage);
+    UiLayoutKpiStructureValidator.validateStructureOnly("praxis.dynamic-page.editor", updatedKpiPage);
+
+    // Rejects anti-SSRF resourcePath
+    var badSsrf = kpiPage.deepCopy();
+    ((ObjectNode) input(badSsrf, 1).at("/config/source"))
+        .put("resourcePath", "https://evil.example/api");
+    assertThrows(
+        UiLayoutLifecycleException.class, () -> UiLayoutPageRevisionReproduction.children(badSsrf));
+    assertThrows(
+        UiLayoutLifecycleException.class,
+        () -> UiLayoutKpiStructureValidator.validateStructureOnly("praxis.dynamic-page.editor", badSsrf));
+
+    // Rejects unknown property under closed KPI schema
+    var extraProp = kpiPage.deepCopy();
+    ((ObjectNode) input(extraProp, 0).at("/config/cards/0/presentation"))
+        .put("arbitraryExtraField", "nope");
+    assertThrows(
+        UiLayoutLifecycleException.class,
+        () -> UiLayoutPageRevisionReproduction.children(extraProp));
+
+    // PageCopyTransformation allocates fresh UUIDs and preserves KPI card specs and lockLevels
+    var copied =
+        new PageCopyTransformation(new CanonicalJsonHashService(JSON))
+            .allocate(
+                updatedKpiPage,
+                java.util.UUID.fromString(PAGE.componentId()),
+                java.util.UUID.randomUUID(),
+                "Copia KPIs Executivos");
+    assertEquals(2, copied.identityMap().size());
+    reproduce(copied.document(), copied.document());
+    JsonNode copiedWidgets = copied.document().at("/config/definition/widgets");
+    assertEquals(
+        "metric-locked",
+        copiedWidgets
+            .at("/0/definition/inputs/config/cards/0/governance/lockLevel")
+            .asText());
+    assertEquals(
+        "full",
+        copiedWidgets.at("/1/definition/inputs/config/governance/lockLevel").asText());
+  }
 }
