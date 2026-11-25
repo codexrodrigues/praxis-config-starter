@@ -16,10 +16,10 @@ O `PraxisOperationalAgentLoop` executa por padrão um `DefaultDeterministicAgent
 
 | Estágio | Método em `AgentSecurityGuard` | Comportamento canônico |
 | --- | --- | --- |
-| **Entrada e histórico** | `guardInboundUserInput(...)` e `guardHistoryEntry(...)` | Extrai identificadores grounded de entradas limpas; isola ou bloqueia padrões de override de sistema (`prompt-injection-user-message`, `prompt-injection-in-selection-hint`, `prompt-injection-in-history`), marcando o turno como `tainted`. |
+| **Entrada e histórico** | `guardInboundUserInput(...)` e `guardHistoryEntry(...)` | Extrai identificadores grounded de entradas limpas (`guardHistoryEntry` aplica grounding exclusivamente quando `role="user"`); isola ou bloqueia padrões de override de sistema (`prompt-injection-user-message`, `prompt-injection-in-selection-hint`, `prompt-injection-in-history`), marcando o turno como `tainted`. |
 | **Pré-ferramenta** | `guardBeforeToolExecution(...)` | Aplica o gate sobre ferramentas da classe `AgentToolSafetyClass.PROPOSAL_MUTATION`: se o turno estiver contaminado (`tainted-turn-mutation-blocked`), bloqueia propostas/mutações (*fail-closed*); também bloqueia alvos não confirmados (`ungrounded-mutation-target`) e escopos `QUERY` em lote sem filtros ou leitura prévia (`ungrounded-bulk-query-scope`). |
 | **Pós-ferramenta** | `guardToolOutput(...)` | Coleta IDs retornados pelas ferramentas de leitura elegíveis (`query_resource_records`, `search_and_resolve_entities`, `get_entity_360_dossier`) para grounding e envolve campos textuais livres em tags `<untrusted_context_data field="...">...</untrusted_context_data>`, marcando o turno como `tainted` em caso de instrução suspeita embutida (`indirect-prompt-injection-in-tool-output`). |
-| **Saída final** | `guardOutboundResponse(...)` | Remove delimitadores internos residuais (`<untrusted_context_data>`) antes de devolver a narrativa final ao usuário (`fencing-tag-stripped`). |
+| **Saída final** | `guardOutboundResponse(...)` | Remove delimitadores internos residuais (`<untrusted_context_data>`) de forma *case-insensitive* (`fencing-tag-stripped`) e, quando o turno estiver `tainted`, remove imagens Markdown externas `http(s)://` (`external-markdown-image-stripped`). |
 
 ### Isolamento de Contexto para o Modelo (`modelSafeContext`) e Cofre de PII
 
@@ -44,7 +44,7 @@ Uma requisição ou turno é marcado como restrito quando qualquer uma das condi
 
 - Durante a execução de ferramentas no loop ReAct, sempre que argumentos ou saídas de ferramenta contêm `resourcePath`, `topicKey`/`activeTopicKey` ou `sovereignOnly=true`, o loop registra o acesso em `TurnSecurityState` e chama `TurnSecurityState.escalateToSovereign()` quando aplicável. Nas rodadas seguintes de LLM e na síntese final (`enrichModelContextForTurn`), o contexto enriquecido restringe o roteador aos provedores listados em `praxis.ai.agent.sovereignty.sovereign-providers`.
 - **`AiCallConfig.baseUrl`:** permite direcionar chamadas compatíveis ao endpoint soberano/dedicado configurado na chamada (observado por gateways compatíveis), sem alterar configuração global.
-- **Isolamento de credencial em failover (`RoutingAiToolCallingProvider` / `AiProviderManagementService`):** quando ocorre failover para um provedor alternativo de outro vendor, o roteador nunca reaproveita a `apiKey` explícita do provedor primário; limpa a credencial anterior e resolve apenas a credencial pertencente ao provedor candidato de fallback.
+- **Isolamento de credencial em failover (`RoutingAiToolCallingProvider` / `AiProviderManagementService`):** quando ocorre failover para um provedor alternativo, o roteador nunca reaproveita credenciais nem contexto de endpoint/cache do provedor primário (`fallbackSeed` zera `apiKey`, `baseUrl`, `cachedContentName` e `promptCacheKey` antes de resolver o provedor de fallback) e ignora o candidato primário sem credenciais configuradas quando existir fallback elegível com credenciais.
 
 | Propriedade | Padrão | Descrição |
 | --- | --- | --- |
@@ -67,7 +67,7 @@ O prompt de sistema do agente é composto pelo `AgentSystemInstructionComposer` 
 3. `VOLATILE_TURN_CONTEXT`: foco atual da tela do host e bloco `<untrusted_context_data>` sempre ao final (`HostContextSystemInstructionContributor`).
 
 Para otimização de latência e custo:
-- **Cache de prompt:** `OperationalAgentTurnStreamService` preenche `AiCallConfig.promptCacheKey` (`praxis-op-agent:<tenant>:<env>`) e os gateways aplicam `promptCacheKey` (OpenAI Responses via `OpenAiResponsesAgentToolGateway`) ou `cachedContentName` (Google GenAI via `GoogleGenAiAgentToolGateway`).
+- **Cache de prompt:** `OperationalAgentTurnStreamService` preenche `AiCallConfig.promptCacheKey` (`praxis-op-agent:<tenant>:<env>`), aplicado em `OpenAiResponsesAgentToolGateway` exclusivamente quando o destino é endpoint nativo OpenAI (`isNativeOpenAiEndpoint`), ou `cachedContentName` no `GoogleGenAiAgentToolGateway`.
 - **`AiThinkingProfile`:** perfis neutros de esforço/orçamento de raciocínio aplicados pelos gateways de modelo: `OFF`, `FAST_LOOKUP`, `OPERATIONAL_AUDIT` (padrão no stream operacional) e `DEEP_ANALYSIS`, além do campo opcional `thinkingBudgetTokens` em `AiCallConfig`.
 
 ---
@@ -82,8 +82,8 @@ Resultados quantitativos carregam metadados estruturados separados da narrativa 
   - Política configurável via `praxis.ai.agent.analytics.policy` (`ALLOW_EXPLORATORY`, `PREFER_VERIFIED_WHEN_AVAILABLE`, `STRICT_VERIFIED_ONLY`) ou `praxis.ai.agent.analytics.require-verified-recipes`.
 - **Envelope epistêmico (`AgentEpistemicEnvelope`):** vincula descobertas estatísticas aos tipos epistêmicos canônicos (`DETERMINISTIC_LAW`, `CALIBRATED_PROBABILITY`, `STOCHASTIC_SIMULATION`, `CAUSAL_HYPOTHESIS`, `OPTIMIZATION_RESULT`) e estados de disponibilidade fail-closed (`AVAILABLE`, `INSUFFICIENT_SAMPLE`, `K_ANONYMITY_SUPPRESSED`, `ENGINE_UNAVAILABLE`, `DEGRADED`), junto com `statisticallySignificant`, `qValueFdr`, `sampleSize`, `suppressedCellCount`, `provenanceHash`, `modelCardId` e `datasetKey`.
 - **Blocos emitidos pelo `StatisticalIntelligenceBlockContributor`:**
-  - `epistemic-badge`: selo epistêmico com métricas de significância, exposição, conformidade Nigrini-Benford, `suppressedCellCount`, `failClosedNote`, `errorCode` e `provenanceHash`.
-  - `widget-block` (`praxis-chart`): gráfico `boxplot` em escala robusta (`boxplot.scaleMethod = "mad"`, com campos `min`, `q1`, `median`, `q3`, `max`, `outliers`, `sampleSize` e `epistemicMeta`) e gráfico `combo` forense Nigrini-Benford (frequência observada vs. esperada para dígitos 1–9), omitindo estritamente qualquer grupo cuja `suppressionStatus != EXACT_RELEASE`.
+  - `epistemic-badge`: selo epistêmico com métricas de significância, exposição, conformidade Nigrini-Benford (derivada de `nigrini_mad`/MAD, nunca da frequência de dígito em `observedValue`), `suppressedCellCount`, `failClosedNote`, `errorCode` e `provenanceHash`.
+  - `widget-block` (`widgetType = "praxis-chart"`): gráfico `boxplot` em escala robusta (`boxplot.scaleMethod = "mad"` emitido tanto em `chartDocument` quanto em `config` runtime, agrupado por `(method, cohortKey)` com consolidação de `outliers[]` e exigindo os 5 quartis reais `min`, `q1`, `median`, `q3`, `max` sem fabricação sintética, mais `sampleSize` e `epistemicMeta`) e gráfico `combo` forense Nigrini-Benford (séries `type = "bar"` observada vs. `type = "line"` esperada para dígitos 1–9), omitindo estritamente qualquer grupo cuja `suppressionStatus != EXACT_RELEASE`.
 
 ---
 

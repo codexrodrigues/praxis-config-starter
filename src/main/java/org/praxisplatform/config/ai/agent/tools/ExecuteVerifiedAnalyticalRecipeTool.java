@@ -123,6 +123,9 @@ public class ExecuteVerifiedAnalyticalRecipeTool implements OperationalAgentTool
         Map<String, Object> out = new LinkedHashMap<>();
         out.put("entityKey", result.entityKey());
         out.put("resourceKey", result.resourceKey());
+        if (result.resourcePath() != null && !result.resourcePath().isBlank()) {
+            out.put("resourcePath", result.resourcePath());
+        }
         out.put("title", result.title());
         out.put("operationKind", result.operationKind());
         out.put("field", result.field());

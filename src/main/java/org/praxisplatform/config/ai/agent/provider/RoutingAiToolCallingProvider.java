@@ -175,6 +175,7 @@ public class RoutingAiToolCallingProvider implements AiToolCallingProvider {
 
         List<CandidateAttempt> healthy = new ArrayList<>();
         List<CandidateAttempt> coolingDown = new ArrayList<>();
+        CandidateAttempt unconfiguredPrimaryFallback = null;
         String firstDenialReason = null;
         Instant now = Instant.now();
 
@@ -186,9 +187,6 @@ public class RoutingAiToolCallingProvider implements AiToolCallingProvider {
             AiCallConfig candidateConfig = candidateId.equals(primaryProvider)
                     ? effective
                     : resolveFallbackConfig(requested, effective, candidateId);
-            if (!candidateId.equals(primaryProvider) && !delegate.hasConfiguredCredentials(candidateConfig)) {
-                continue;
-            }
             String candidateModel = candidateConfig != null ? candidateConfig.getModel() : null;
             String denial = evaluateEligibility(candidateId, candidateModel, eligibilityContext);
             if (denial != null) {
@@ -198,6 +196,12 @@ public class RoutingAiToolCallingProvider implements AiToolCallingProvider {
                 continue;
             }
             CandidateAttempt attempt = new CandidateAttempt(candidateId, delegate, candidateConfig);
+            if (!delegate.hasConfiguredCredentials(candidateConfig)) {
+                if (candidateId.equals(primaryProvider) && unconfiguredPrimaryFallback == null) {
+                    unconfiguredPrimaryFallback = attempt;
+                }
+                continue;
+            }
             if (rateLimitStore != null && rateLimitStore.isInCooldown(candidateId, candidateModel, now)) {
                 coolingDown.add(attempt);
             } else {
@@ -206,6 +210,9 @@ public class RoutingAiToolCallingProvider implements AiToolCallingProvider {
         }
 
         if (healthy.isEmpty() && coolingDown.isEmpty()) {
+            if (firstDenialReason == null && unconfiguredPrimaryFallback != null) {
+                return List.of(unconfiguredPrimaryFallback);
+            }
             throw new IllegalStateException(firstDenialReason != null
                     ? firstDenialReason
                     : "AI provider rejected by eligibility policy: " + primaryProvider);
@@ -242,6 +249,9 @@ public class RoutingAiToolCallingProvider implements AiToolCallingProvider {
                 .provider(fallbackProvider)
                 .model(overrideModel)
                 .apiKey(null)
+                .baseUrl(null)
+                .cachedContentName(null)
+                .promptCacheKey(null)
                 .build();
         String normalizedFallback = normalize(fallbackProvider);
         if (providerManagementService != null) {

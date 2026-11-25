@@ -40,7 +40,11 @@ class StatisticalIntelligenceBlockContributorTest {
                 Map.entry("scope", "INDIVIDUAL_ENTITY"),
                 Map.entry("cohortKey", "dept_ops|grade_b (contact 11144477735)"),
                 Map.entry("label", "dept_ops|grade_b (contact 11144477735)"),
+                Map.entry("min", new BigDecimal("80.00")),
+                Map.entry("q1", new BigDecimal("100.00")),
                 Map.entry("median", new BigDecimal("120.00")),
+                Map.entry("q3", new BigDecimal("140.00")),
+                Map.entry("max", new BigDecimal("180.00")),
                 Map.entry("mad", new BigDecimal("15.00")),
                 Map.entry("observedValue", new BigDecimal("5400.00")),
                 Map.entry("expectedValue", new BigDecimal("1500.00")),
@@ -65,8 +69,9 @@ class StatisticalIntelligenceBlockContributorTest {
                 Map.entry("method", "NIGRINI_BENFORD"),
                 Map.entry("scope", "DISTRIBUTION_FORENSIC"),
                 Map.entry("cohortKey", "manual_retroactive_entries"),
-                Map.entry("observedValue", new BigDecimal("0.021")),
-                Map.entry("expectedValue", new BigDecimal("0.006")),
+                Map.entry("nigriniMad", new BigDecimal("0.021")),
+                Map.entry("observedValue", new BigDecimal("0.301")),
+                Map.entry("expectedValue", new BigDecimal("0.301")),
                 Map.entry("qValueFdr", 0.004d),
                 Map.entry("severity", "WARNING"),
                 Map.entry("suppressionStatus", "EXACT_RELEASE"),
@@ -120,8 +125,11 @@ class StatisticalIntelligenceBlockContributorTest {
 
         JsonNode boxplot = blocks.get(2);
         assertThat(boxplot.path("type").asText()).isEqualTo("widget-block");
-        assertThat(boxplot.path("widgetType").asText()).isEqualTo("chart");
+        assertThat(boxplot.path("widgetType").asText()).isEqualTo("praxis-chart");
         assertThat(boxplot.path("widget").path("id").asText()).isEqualTo("praxis-chart");
+        JsonNode boxplotCfg = boxplot.path("widget").path("inputs").path("config");
+        assertThat(boxplotCfg.path("boxplot").path("scaleMethod").asText()).isEqualTo("mad");
+        assertThat(boxplotCfg.path("boxplot").path("quartileFields").path("outliers").asText()).isEqualTo("outliers");
         JsonNode boxplotDoc = boxplot.path("widget").path("inputs").path("chartDocument");
         assertThat(boxplotDoc.path("kind").asText()).isEqualTo("boxplot");
         assertThat(boxplotDoc.path("dimensions")).hasSize(1);
@@ -205,6 +213,7 @@ class StatisticalIntelligenceBlockContributorTest {
                 Map.entry("suppressionStatus", "EXACT_RELEASE"));
 
         List<Map<String, Object>> benfordSteps = new java.util.ArrayList<>();
+        benfordSteps.add(Map.of("stepKey", "nigrini_mad", "value", 0.0045d));
         for (int d = 1; d <= 9; d++) {
             double exp = Math.log10(1.0d + 1.0d / d);
             double obs = d == 1 ? 0.310d : exp;
@@ -214,8 +223,8 @@ class StatisticalIntelligenceBlockContributorTest {
         Map<String, Object> benfordFinding = Map.of(
                 "findingId", "f-benford-9",
                 "method", "NIGRINI_BENFORD",
-                "observedValue", 0.0045d,
-                "expectedValue", 0.006d,
+                "observedValue", 0.310d,
+                "expectedValue", 0.301d,
                 "decompositionSteps", benfordSteps,
                 "suppressionStatus", "EXACT_RELEASE");
 
@@ -252,11 +261,88 @@ class StatisticalIntelligenceBlockContributorTest {
         JsonNode benfordCfg = benfordBlock.path("widget").path("inputs").path("config");
         assertThat(benfordCfg.path("axes").path("x").path("label").asText()).isEqualTo("Dígito inicial (1-9)");
         assertThat(benfordCfg.path("axes").path("y").path("label").asText()).isEqualTo("Proporção de frequência");
-        assertThat(benfordCfg.path("series").get(0).path("seriesKind").asText()).isEqualTo("bar");
-        assertThat(benfordCfg.path("series").get(1).path("seriesKind").asText()).isEqualTo("line");
+        assertThat(benfordCfg.path("series").get(0).path("type").asText()).isEqualTo("bar");
+        assertThat(benfordCfg.path("series").get(1).path("type").asText()).isEqualTo("line");
         JsonNode benfordData = benfordBlock.path("widget").path("inputs").path("data");
         assertThat(benfordData).hasSize(9);
         assertThat(benfordData.get(0).path("digit").asText()).isEqualTo("1");
         assertThat(benfordData.get(8).path("digit").asText()).isEqualTo("9");
+    }
+
+    @Test
+    void deduplicatesCohortOutliersRejectsMissingQuartilesFallsBackToTopLevelGroupsAndNeverUsesObservedValueAsMad() {
+        AgentTurnArtifactStore artifacts = new AgentTurnArtifactStore();
+        AgentEpistemicEnvelope envelope = new AgentEpistemicEnvelope(
+                AgentEpistemicEnvelope.KIND_CALIBRATED_PROBABILITY,
+                AgentEpistemicEnvelope.AVAILABILITY_AVAILABLE,
+                true,
+                0.001d,
+                80L,
+                0,
+                "c".repeat(64),
+                "WF-STAT-CARD-03",
+                "workforce.payroll.items",
+                "Consolidacao por coorte.");
+
+        Map<String, Object> outlierOne = Map.ofEntries(
+                Map.entry("findingId", "f-1"),
+                Map.entry("method", "ROBUST_MAD_ZSCORE"),
+                Map.entry("cohortKey", "eng_mid"),
+                Map.entry("min", 100.0d),
+                Map.entry("q1", 120.0d),
+                Map.entry("median", 150.0d),
+                Map.entry("q3", 180.0d),
+                Map.entry("max", 220.0d),
+                Map.entry("residualValue", 320.0d),
+                Map.entry("suppressionStatus", "EXACT_RELEASE"));
+        Map<String, Object> outlierTwo = Map.ofEntries(
+                Map.entry("findingId", "f-2"),
+                Map.entry("method", "ROBUST_MAD_ZSCORE"),
+                Map.entry("cohortKey", "eng_mid"),
+                Map.entry("min", 100.0d),
+                Map.entry("q1", 120.0d),
+                Map.entry("median", 150.0d),
+                Map.entry("q3", 180.0d),
+                Map.entry("max", 220.0d),
+                Map.entry("residualValue", 440.0d),
+                Map.entry("suppressionStatus", "EXACT_RELEASE"));
+        Map<String, Object> incompleteCohort = Map.of(
+                "findingId", "f-inc",
+                "method", "ROBUST_MAD_ZSCORE",
+                "cohortKey", "incomplete_box",
+                "median", 200.0d,
+                "mad", 25.0d,
+                "residualValue", 999.0d,
+                "suppressionStatus", "EXACT_RELEASE");
+        Map<String, Object> benfordWithoutMad = Map.of(
+                "findingId", "f-benford-nomad",
+                "method", "NIGRINI_BENFORD",
+                "observedValue", 0.301d,
+                "expectedValue", 0.301d,
+                "suppressionStatus", "EXACT_RELEASE");
+
+        artifacts.recordExtensionArtifact(new AgentExtensionArtifact(
+                AgentExtensionArtifact.KIND_ANOMALY_SCAN,
+                "scan_resource_anomalies",
+                Map.of(
+                        "entityKey", "workforce.payroll.items",
+                        "groupsEvaluated", 7,
+                        "findings", List.of(outlierOne, outlierTwo, incompleteCohort, benfordWithoutMad)),
+                envelope));
+
+        OperationalAssistantBlockComposer composer = new OperationalAssistantBlockComposer(
+                objectMapper, List.of(new StatisticalIntelligenceBlockContributor()));
+        JsonNode blocks = composer.compose("Resumo.", artifacts).assistantContent().path("blocks");
+
+        JsonNode badge = blocks.get(1);
+        assertThat(badge.path("groupsEvaluated").asInt()).isEqualTo(7);
+        assertThat(badge.has("nigriniMad")).isFalse();
+
+        JsonNode boxData = blocks.get(2).path("widget").path("inputs").path("data");
+        assertThat(boxData).hasSize(1);
+        assertThat(boxData.get(0).path("cohortKey").asText()).isEqualTo("eng_mid");
+        assertThat(boxData.get(0).path("outliers")).hasSize(2);
+        assertThat(boxData.get(0).path("outliers").get(0).asDouble()).isEqualTo(320.0d);
+        assertThat(boxData.get(0).path("outliers").get(1).asDouble()).isEqualTo(440.0d);
     }
 }

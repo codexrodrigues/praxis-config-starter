@@ -174,4 +174,16 @@ class AiSensitiveDataRedactorTest {
         assertThat(sanitized.path("outputTokensText").asText()).isEqualTo("[REDACTED]");
         assertThat(sanitized.path("totalTokensInvalid").asText()).isEqualTo("[REDACTED]");
     }
+
+    @Test
+    void shouldPreserveAssistantNarrativeFieldsWhileRedactingEmbeddedSecrets() {
+        ObjectNode payload = objectMapper.createObjectNode();
+        payload.put("assistantMessage", "Resumo token=secret-123");
+        payload.put("text", "Analise concluida sem segredos.");
+
+        JsonNode sanitized = redactor.sanitizeEventPayload(payload);
+
+        assertThat(sanitized.path("assistantMessage").asText()).isEqualTo("Resumo token=[REDACTED]");
+        assertThat(sanitized.path("text").asText()).isEqualTo("Analise concluida sem segredos.");
+    }
 }

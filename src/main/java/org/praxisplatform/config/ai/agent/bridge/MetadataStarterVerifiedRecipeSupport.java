@@ -1,8 +1,10 @@
 package org.praxisplatform.config.ai.agent.bridge;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import java.lang.reflect.Field;
 import java.math.BigDecimal;
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -18,6 +20,7 @@ import org.praxisplatform.uischema.analytics.VerifiedAnalyticalRecipeResolver;
 import org.praxisplatform.uischema.analytics.VerifiedAnalyticalRecipeResolver.CompiledRecipeExecution;
 import org.praxisplatform.uischema.annotation.AnalyticsOperation;
 import org.praxisplatform.uischema.controller.base.AbstractResourceQueryController;
+import org.praxisplatform.uischema.filter.annotation.Filterable;
 import org.praxisplatform.uischema.filter.dto.GenericFilterDTO;
 import org.praxisplatform.uischema.service.base.BaseResourceQueryService;
 import org.praxisplatform.uischema.stats.StatsFieldRegistry;
@@ -33,6 +36,7 @@ import org.praxisplatform.uischema.stats.dto.TimeSeriesPoint;
 import org.praxisplatform.uischema.stats.dto.TimeSeriesStatsResponse;
 import org.praxisplatform.uischema.stats.dto.VerifiedRecipeExecutionRequest;
 import org.praxisplatform.uischema.stats.dto.VerifiedRecipeProvenance;
+import org.springframework.core.annotation.AnnotatedElementUtils;
 import org.springframework.util.StringUtils;
 
 /**
@@ -90,7 +94,8 @@ final class MetadataStarterVerifiedRecipeSupport {
                 .orElseThrow(() -> new IllegalArgumentException(
                         "Receita analitica verificada nao encontrada para este recurso: " + request.recipeId()));
 
-        enforceGovernanceFields(recipe, blockedFields);
+        Set<String> blockedFilterFields = expandBlockedFilterFields(filterDtoType, blockedFields);
+        enforceGovernanceFields(recipe, blockedFields, blockedFilterFields, request.parameters());
 
         Class<? extends GenericFilterDTO> typedFilterDto = filterDtoType != null
                 && GenericFilterDTO.class.isAssignableFrom(filterDtoType)
@@ -215,25 +220,106 @@ final class MetadataStarterVerifiedRecipeSupport {
                 List.copyOf(rawBuckets));
     }
 
-    private static void enforceGovernanceFields(ResolvedVerifiedAnalyticalRecipe recipe, Set<String> blockedFields) {
-        if (blockedFields == null || blockedFields.isEmpty()) {
+    private static void enforceGovernanceFields(
+            ResolvedVerifiedAnalyticalRecipe recipe,
+            Set<String> blockedFields,
+            Set<String> blockedFilterFields,
+            Map<String, Object> requestParameters) {
+        Set<String> normalizedBlocked = normalizeFieldSet(blockedFields);
+        Set<String> effectiveFilterBlocked = blockedFilterFields != null && !blockedFilterFields.isEmpty()
+                ? blockedFilterFields
+                : normalizedBlocked;
+        if (normalizedBlocked.isEmpty() && effectiveFilterBlocked.isEmpty()) {
             return;
         }
-        checkBlockedField("Stats field", recipe.field(), blockedFields);
-        checkBlockedField("Stats periodField", recipe.periodField(), blockedFields);
-        for (VerifiedAnalyticalRecipeDescriptor.DimensionSpec dim : recipe.dimensions()) {
-            checkBlockedField("Stats dimension", dim.field(), blockedFields);
-        }
-        for (VerifiedAnalyticalRecipeDescriptor.MetricSpec metric : recipe.metrics()) {
-            checkBlockedField("Stats metricField", metric.field(), blockedFields);
+        if (!normalizedBlocked.isEmpty()) {
+            checkBlockedField("Stats field", recipe.field(), normalizedBlocked);
+            checkBlockedField("Stats periodField", recipe.periodField(), normalizedBlocked);
+            for (VerifiedAnalyticalRecipeDescriptor.DimensionSpec dim : recipe.dimensions()) {
+                checkBlockedField("Stats dimension", dim.field(), normalizedBlocked);
+            }
+            for (VerifiedAnalyticalRecipeDescriptor.MetricSpec metric : recipe.metrics()) {
+                checkBlockedField("Stats metricField", metric.field(), normalizedBlocked);
+            }
         }
         for (String lockedKey : recipe.lockedFilters().keySet()) {
-            checkBlockedField("Recipe lockedFilter", lockedKey, blockedFields);
+            checkBlockedField("Recipe lockedFilter", lockedKey, effectiveFilterBlocked);
         }
         for (VerifiedAnalyticalRecipeDescriptor.ParameterSpec param : recipe.adjustableParams()) {
-            String target = StringUtils.hasText(param.filterField()) ? param.filterField() : param.name();
-            checkBlockedField("Recipe adjustableParam", target, blockedFields);
+            checkBlockedField("Recipe adjustableParam", param.name(), effectiveFilterBlocked);
+            if (StringUtils.hasText(param.filterField())) {
+                checkBlockedField("Recipe adjustableParam.filterField", param.filterField(), effectiveFilterBlocked);
+            }
         }
+        if (requestParameters != null) {
+            for (String paramKey : requestParameters.keySet()) {
+                checkBlockedField("Recipe parameter", paramKey, effectiveFilterBlocked);
+            }
+        }
+    }
+
+    private static Set<String> expandBlockedFilterFields(Class<?> filterDtoType, Set<String> blockedFields) {
+        Set<String> normalizedBlocked = normalizeFieldSet(blockedFields);
+        if (normalizedBlocked.isEmpty()) {
+            return Set.of();
+        }
+        Set<String> blockedFilterKeys = new LinkedHashSet<>(normalizedBlocked);
+        Class<?> current = filterDtoType;
+        while (current != null && !Object.class.equals(current)) {
+            for (Field field : current.getDeclaredFields()) {
+                String lowerName = field.getName().trim().toLowerCase(Locale.ROOT);
+                if (normalizedBlocked.contains(lowerName)) {
+                    blockedFilterKeys.add(lowerName);
+                    continue;
+                }
+                Filterable filterable = AnnotatedElementUtils.findMergedAnnotation(field, Filterable.class);
+                if (filterable != null) {
+                    if (matchesAnyBlockedRelation(filterable.relation(), normalizedBlocked)) {
+                        blockedFilterKeys.add(lowerName);
+                        continue;
+                    }
+                    for (String rel : filterable.relations()) {
+                        if (matchesAnyBlockedRelation(rel, normalizedBlocked)) {
+                            blockedFilterKeys.add(lowerName);
+                            break;
+                        }
+                    }
+                }
+            }
+            current = current.getSuperclass();
+        }
+        return Set.copyOf(blockedFilterKeys);
+    }
+
+    private static Set<String> normalizeFieldSet(Set<String> rawFields) {
+        if (rawFields == null || rawFields.isEmpty()) {
+            return Set.of();
+        }
+        Set<String> normalized = new LinkedHashSet<>(rawFields.size());
+        for (String item : rawFields) {
+            if (StringUtils.hasText(item)) {
+                normalized.add(item.trim().toLowerCase(Locale.ROOT));
+            }
+        }
+        return normalized.isEmpty() ? Set.of() : Set.copyOf(normalized);
+    }
+
+    private static boolean matchesAnyBlockedRelation(String relation, Set<String> blockedFields) {
+        if (!StringUtils.hasText(relation)) {
+            return false;
+        }
+        String normalized = relation.trim().toLowerCase(Locale.ROOT);
+        if (blockedFields.contains(normalized)) {
+            return true;
+        }
+        int dotIdx = normalized.indexOf('.');
+        if (dotIdx > 0 && blockedFields.contains(normalized.substring(0, dotIdx))) {
+            return true;
+        }
+        int lastDotIdx = normalized.lastIndexOf('.');
+        return lastDotIdx >= 0
+                && lastDotIdx + 1 < normalized.length()
+                && blockedFields.contains(normalized.substring(lastDotIdx + 1));
     }
 
     private static void checkBlockedField(String role, String candidate, Set<String> blockedFields) {

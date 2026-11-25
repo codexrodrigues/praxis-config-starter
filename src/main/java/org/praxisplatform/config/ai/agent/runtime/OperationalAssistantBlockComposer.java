@@ -530,10 +530,26 @@ public class OperationalAssistantBlockComposer {
             }
             return out;
         }
-        if (value instanceof List<?> list) {
-            List<Object> out = new ArrayList<>(list.size());
-            for (Object item : list) {
+        if (value instanceof java.util.Collection<?> collection) {
+            java.util.Collection<Object> out = value instanceof java.util.Set<?>
+                    ? new java.util.LinkedHashSet<>(collection.size())
+                    : new ArrayList<>(collection.size());
+            for (Object item : collection) {
                 out.add(maskMod11Value(item));
+            }
+            return out;
+        }
+        if (value instanceof String[] arr) {
+            String[] out = new String[arr.length];
+            for (int i = 0; i < arr.length; i++) {
+                out[i] = maskMod11TaxIds(arr[i]);
+            }
+            return out;
+        }
+        if (value instanceof Object[] arr) {
+            Object[] out = new Object[arr.length];
+            for (int i = 0; i < arr.length; i++) {
+                out[i] = maskMod11Value(arr[i]);
             }
             return out;
         }
@@ -1161,10 +1177,26 @@ public class OperationalAssistantBlockComposer {
             }
             return out;
         }
-        if (value instanceof List<?> list) {
-            List<Object> out = new ArrayList<>(list.size());
-            for (Object item : list) {
+        if (value instanceof java.util.Collection<?> collection) {
+            java.util.Collection<Object> out = value instanceof java.util.Set<?>
+                    ? new java.util.LinkedHashSet<>(collection.size())
+                    : new ArrayList<>(collection.size());
+            for (Object item : collection) {
                 out.add(maskPiiValue(item));
+            }
+            return out;
+        }
+        if (value instanceof String[] arr) {
+            String[] out = new String[arr.length];
+            for (int i = 0; i < arr.length; i++) {
+                out[i] = maskPiiText(arr[i]);
+            }
+            return out;
+        }
+        if (value instanceof Object[] arr) {
+            Object[] out = new Object[arr.length];
+            for (int i = 0; i < arr.length; i++) {
+                out[i] = maskPiiValue(arr[i]);
             }
             return out;
         }

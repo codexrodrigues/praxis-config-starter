@@ -331,6 +331,10 @@ class StatisticalIntelligenceToolsAndBridgeTest {
         assertThat(suppressedGroup).containsEntry("suppressed", Boolean.TRUE);
         assertThat(suppressedGroup).doesNotContainKeys("sampleSizeA", "sampleSizeB", "aggregateImpact", "statistic");
         assertThat(artifacts.extensionArtifacts()).hasSize(1);
+        @SuppressWarnings("unchecked")
+        Map<String, Object> inferenceCounters = (Map<String, Object>)
+                artifacts.extensionArtifacts().get(0).uiPayload().get("scanCounters");
+        assertThat(inferenceCounters).containsEntry("groupsEvaluated", 2);
 
         // 2. Anomaly scan with one exact finding and one k-anonymity suppressed finding
         AnomalyFinding exactFinding = new AnomalyFinding(
@@ -602,14 +606,23 @@ class StatisticalIntelligenceToolsAndBridgeTest {
                                 new BigDecimal("5400.00"), new BigDecimal("1200.00"), new BigDecimal("4200.00"),
                                 new BigDecimal("1100.00"), new BigDecimal("50.00"), 6.2d, 0.0001d, 0.0005d, 0.72d,
                                 AnomalySeverity.CRITICAL, new BigDecimal("4200.00"), 30,
-                                SuppressionStatus.EXACT_RELEASE, List.of()),
+                                SuppressionStatus.EXACT_RELEASE, List.of(
+                                        new AnomalyDecompositionStep("cohort_min", "Min", new BigDecimal("900.00"), null, DecompositionStepRole.BASE),
+                                        new AnomalyDecompositionStep("cohort_q1", "Q1", new BigDecimal("1020.00"), null, DecompositionStepRole.BASE),
+                                        new AnomalyDecompositionStep("cohort_median", "Mediana", new BigDecimal("1100.00"), null, DecompositionStepRole.BASE),
+                                        new AnomalyDecompositionStep("cohort_q3", "Q3", new BigDecimal("1220.00"), null, DecompositionStepRole.BASE),
+                                        new AnomalyDecompositionStep("cohort_max", "Max", new BigDecimal("1400.00"), null, DecompositionStepRole.CAP),
+                                        new AnomalyDecompositionStep("cohort_sample_size", "Amostra", new BigDecimal("30"), null, DecompositionStepRole.RESULT))),
                         new AnomalyFinding(
                                 "f-2", AnomalyMethod.NIGRINI_BENFORD, AnomalyScope.DISTRIBUTION_FORENSIC,
                                 null, "retro_entries", "observedValue",
-                                new BigDecimal("0.018"), new BigDecimal("0.006"), new BigDecimal("0.012"),
+                                new BigDecimal("0.320"), new BigDecimal("0.301"), new BigDecimal("0.019"),
                                 null, null, 2.8d, 0.003d, 0.006d, 0.30d,
                                 AnomalySeverity.WARNING, new BigDecimal("900.00"), 40,
-                                SuppressionStatus.EXACT_RELEASE, List.of())),
+                                SuppressionStatus.EXACT_RELEASE, List.of(
+                                        new AnomalyDecompositionStep("nigrini_mad", "Nigrini MAD", new BigDecimal("0.018"), null, DecompositionStepRole.RESULT),
+                                        new AnomalyDecompositionStep("benford_digit_1_observed", "Digit 1 Obs", new BigDecimal("0.320"), null, DecompositionStepRole.BASE),
+                                        new AnomalyDecompositionStep("benford_digit_1_expected", "Digit 1 Exp", new BigDecimal("0.301"), null, DecompositionStepRole.THRESHOLD)))),
                 new AnomalyScanSummary(220L, 4, 2, 1, 1, 0, new BigDecimal("5100.00"), false));
 
         MetadataStarterInProcessAgentBridge bridge = new MetadataStarterInProcessAgentBridge(
@@ -731,5 +744,146 @@ class StatisticalIntelligenceToolsAndBridgeTest {
         @Override public TimeSeriesStatsResponse timeSeriesStats(TimeSeriesStatsRequest<PayrollSlipFilterDto> request) { return null; }
         @Override public DistributionStatsResponse distributionStats(DistributionStatsRequest<PayrollSlipFilterDto> request) { return null; }
         @Override public ComparisonStatsResponse comparisonStats(ComparisonStatsRequest<PayrollSlipFilterDto> request) { return null; }
+    }
+
+    public static class PluralBlockedFilterDto extends PayrollSlipFilterDto {
+        @Filterable(operation = Filterable.FilterOperation.LIKE, relations = {"confidentialBonus", "cohortKey"})
+        private String broadRestrictedFilter;
+
+        public String getBroadRestrictedFilter() {
+            return broadRestrictedFilter;
+        }
+
+        public void setBroadRestrictedFilter(String broadRestrictedFilter) {
+            this.broadRestrictedFilter = broadRestrictedFilter;
+        }
+    }
+
+    @ApiResource(
+            value = "/api/workforce/plural-recipe",
+            resourceKey = "workforce.plural-recipe",
+            title = "Plural Recipe",
+            identity = @ResourceIdentity(keyField = "id", titleField = "cohortKey"))
+    public static class StubPluralRecipeController
+            extends AbstractResourceQueryController<PayrollSlipDto, Long, PluralBlockedFilterDto> {
+        @Override
+        protected BaseResourceQueryService<PayrollSlipDto, Long, PluralBlockedFilterDto> getService() {
+            return null;
+        }
+
+        @Override
+        protected Long getResponseId(PayrollSlipDto dto) {
+            return dto.getId();
+        }
+
+        @Override
+        protected List<org.praxisplatform.uischema.analytics.VerifiedAnalyticalRecipeDescriptor<PluralBlockedFilterDto>>
+                defineAnalyticalRecipes() {
+            return List.of(
+                    org.praxisplatform.uischema.analytics.VerifiedAnalyticalRecipeDescriptor
+                            .<PluralBlockedFilterDto>builder("restricted-rel-recipe", "Restricted Relation Recipe")
+                            .operation(org.praxisplatform.uischema.annotation.AnalyticsOperation.GROUP_BY)
+                            .field("cohortKey")
+                            .metric(StatsMetric.COUNT, null)
+                            .adjustableParam(new org.praxisplatform.uischema.analytics.VerifiedAnalyticalRecipeDescriptor
+                                    .ParameterSpec("broadRestrictedFilter", "broadRestrictedFilter",
+                                    "Filter", "string", false, null, List.of(), null, null))
+                            .build()
+            );
+        }
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void enforcesNigriniMadPriorityRecipeResourcePathAndPluralRelationGovernance() {
+        StubPayrollService service = new StubPayrollService();
+        AnalyticalProvenance provenance = new AnalyticalProvenance(
+                IntelligenceContractVersion.V1, "praxis-intelligence-python", "0.1.0", "3.12",
+                SHA_LOCK, "WF-CARD-NIGRINI", "1.0.0", 50L, LocalDate.of(2026, 11, 1),
+                SHA_SNAPSHOT, SHA_ASSUMPTIONS, EpistemicKind.CALIBRATED_PROBABILITY,
+                150L, 0, "corr-nig", "job-nig", Instant.parse("2026-11-24T00:00:00Z"));
+        ModelCardDescriptor card = new ModelCardDescriptor(
+                "WF-CARD-NIGRINI", "1.0.0", "Benford Card", "workforce.payroll-slips",
+                "NIGRINI_BENFORD", EpistemicKind.CALIBRATED_PROBABILITY,
+                "Benford audit", List.of(), 15, List.of(), "Human review");
+        service.anomalyHandler = req -> new AnomalyScanResponse(
+                IntelligenceContractVersion.V1,
+                provenance,
+                card,
+                List.of(new AnomalyFinding(
+                        "f-ben", AnomalyMethod.NIGRINI_BENFORD, AnomalyScope.DISTRIBUTION_FORENSIC,
+                        null, "retro_entries", "observedValue",
+                        new BigDecimal("0.3010"), new BigDecimal("0.3010"), new BigDecimal("0.0000"),
+                        null, null, 2.1d, 0.01d, 0.02d, 0.40d,
+                        AnomalySeverity.INFO, BigDecimal.ZERO, 150, SuppressionStatus.EXACT_RELEASE,
+                        List.of(new AnomalyDecompositionStep(
+                                "nigrini_mad", "MAD global", new BigDecimal("0.0042"),
+                                null, DecompositionStepRole.RESULT)))),
+                new AnomalyScanSummary(150L, 1, 1, 0, 0, 0, BigDecimal.ZERO, false));
+
+        var analysisResult = MetadataStarterStatisticalIntelligenceSupport.scanAnomalies(
+                service,
+                new PayrollSlipFilterDto(),
+                "workforce.payroll-slips",
+                "workforce.payroll-slips",
+                "/api/workforce/payroll-slips",
+                "Payroll Slips",
+                Set.of(),
+                new org.praxisplatform.config.ai.agent.spi.AgentAnomalyScanRequest(
+                        "workforce.payroll-slips", List.of("NIGRINI_BENFORD"),
+                        Map.of(), 0.05d, null, null, null, null, true, null, null, null, null, null, Map.of()));
+        List<Map<String, Object>> benfordRows =
+                (List<Map<String, Object>>) analysisResult.uiPayload().get("benfordFindings");
+        assertThat(benfordRows).hasSize(1);
+        assertThat(new BigDecimal(benfordRows.get(0).get("nigriniMad").toString()))
+                .isEqualByComparingTo("0.0042");
+        assertThat(benfordRows.get(0)).containsEntry("nigriniConformity", "CONFORMIDADE_ESTREITA");
+
+        AgentResourceExecutionBridge recipeBridge = mock(AgentResourceExecutionBridge.class);
+        org.mockito.Mockito.when(recipeBridge.executeVerifiedAnalyticalRecipe(
+                org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.any()))
+                .thenReturn(new org.praxisplatform.config.ai.agent.spi.AgentStatsResult(
+                        "workforce.payroll-slips",
+                        "workforce.payroll-slips",
+                        "/api/workforce/payroll-slips",
+                        "Payroll Recipe",
+                        "Subtitulo",
+                        "GROUP_BY",
+                        "bar",
+                        "cohortKey",
+                        "Coorte",
+                        "COUNT",
+                        null,
+                        null,
+                        10L,
+                        List.of(),
+                        null));
+        org.praxisplatform.config.ai.agent.tools.ExecuteVerifiedAnalyticalRecipeTool recipeTool =
+                new org.praxisplatform.config.ai.agent.tools.ExecuteVerifiedAnalyticalRecipeTool(recipeBridge);
+        Map<String, Object> toolOut = recipeTool.execute(
+                new AgentExecutionContext(null, null, null, "t1", "u1", "prod", "ana",
+                        Set.of(), null, null, Map.of(), Map.of()),
+                TurnScopedPiiVault.tokenize("executar"),
+                new AgentTurnArtifactStore(),
+                Map.of("entityKey", "workforce.payroll-slips", "recipeId", "r1"));
+        assertThat(toolOut).containsEntry("resourcePath", "/api/workforce/payroll-slips");
+
+        StubPluralRecipeController pluralCtrl = new StubPluralRecipeController();
+        StatsFieldRegistry registry = StatsFieldRegistry.builder()
+                .add(StatsFieldDescriptor.groupByBucket("cohortKey", "Coorte", Set.of(StatsMetric.COUNT)))
+                .build();
+        assertThatThrownBy(() -> MetadataStarterVerifiedRecipeSupport.executeRecipe(
+                pluralCtrl,
+                service,
+                PluralBlockedFilterDto.class,
+                registry,
+                Set.of("confidentialBonus"),
+                null,
+                new ObjectMapper().findAndRegisterModules(),
+                new org.praxisplatform.config.ai.agent.spi.AgentVerifiedRecipeExecutionRequest(
+                        "workforce.plural-recipe", "restricted-rel-recipe", Map.of(), null, null, null)))
+                .isInstanceOf(SecurityException.class)
+                .hasMessageContaining("broadRestrictedFilter");
     }
 }

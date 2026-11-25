@@ -24,6 +24,16 @@ import java.util.regex.Pattern;
  */
 public final class DefaultDeterministicAgentSecurityGuard implements AgentSecurityGuard {
 
+    private static final Pattern UNTRUSTED_FENCING_TAG = Pattern.compile(
+            "</?untrusted_context_data\\b[^>]*>",
+            Pattern.CASE_INSENSITIVE
+    );
+
+    private static final Pattern EXTERNAL_MARKDOWN_IMAGE = Pattern.compile(
+            "!\\[[^\\]]*\\]\\(\\s*https?://[^)\\s]+(?:\\s+\"[^\"]*\")?\\s*\\)",
+            Pattern.CASE_INSENSITIVE
+    );
+
     private static final Pattern ROLE_OR_DELIMITER_INJECTION = Pattern.compile(
             "(?is)(</?untrusted_context_data\\b[^>]*>|<\\|im_(start|end)\\|>|<\\|endoftext\\|>|\\[/?INST\\]|^\\s*#{2,}\\s*(system|developer|instruction)\\b|<system>\\s*|[\\r\\n]+\\s*system\\s*:\\s*(you must|ignore|override|call ))"
     );
@@ -189,7 +199,7 @@ public final class DefaultDeterministicAgentSecurityGuard implements AgentSecuri
                     text
             );
         }
-        if (state != null) {
+        if (state != null && role != null && "user".equalsIgnoreCase(role.trim())) {
             state.groundFromTrustedHistoryText(text);
         }
         return new HistoryCheckResult(AgentSecurityVerdict.allow(), text);
@@ -337,12 +347,13 @@ public final class DefaultDeterministicAgentSecurityGuard implements AgentSecuri
         if (narrative == null || narrative.isBlank()) {
             return new OutboundCheckResult(AgentSecurityVerdict.allow(), narrative);
         }
-        if (isEnforce(state) && (narrative.contains("<untrusted_context_data")
-                || narrative.contains("</untrusted_context_data>"))) {
-            String cleaned = narrative
-                    .replace("</untrusted_context_data>", "")
-                    .replaceAll("<untrusted_context_data[^>]*>", "")
-                    .trim();
+        if (!isEnforce(state)) {
+            return new OutboundCheckResult(AgentSecurityVerdict.allow(), narrative);
+        }
+        String cleaned = narrative;
+        List<String> warningCodes = new ArrayList<>();
+        if (UNTRUSTED_FENCING_TAG.matcher(cleaned).find()) {
+            cleaned = UNTRUSTED_FENCING_TAG.matcher(cleaned).replaceAll("").trim();
             if (state != null) {
                 state.addFinding(new AgentSecurityFinding(
                         "outbound",
@@ -352,8 +363,25 @@ public final class DefaultDeterministicAgentSecurityGuard implements AgentSecuri
                         "Removed internal context fencing tag from outbound narrative"
                 ));
             }
+            warningCodes.add("fencing-tag-stripped");
+        }
+        if (state != null && state.isTainted() && EXTERNAL_MARKDOWN_IMAGE.matcher(cleaned).find()) {
+            cleaned = EXTERNAL_MARKDOWN_IMAGE.matcher(cleaned).replaceAll("").trim();
+            state.addFinding(new AgentSecurityFinding(
+                    "outbound",
+                    "external-markdown-image-stripped",
+                    AgentSecurityVerdict.Decision.WARN,
+                    "narrative",
+                    "Removed external Markdown image from tainted outbound narrative"
+            ));
+            warningCodes.add("external-markdown-image-stripped");
+        }
+        if (!warningCodes.isEmpty()) {
+            String primaryCode = warningCodes.size() == 1
+                    ? warningCodes.get(0)
+                    : "fencing-tag-stripped";
             return new OutboundCheckResult(
-                    AgentSecurityVerdict.warn("fencing-tag-stripped", "Internal delimiter stripped"),
+                    AgentSecurityVerdict.warn(primaryCode, String.join(",", warningCodes)),
                     cleaned
             );
         }

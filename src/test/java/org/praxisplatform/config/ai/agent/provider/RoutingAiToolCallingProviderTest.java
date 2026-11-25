@@ -206,6 +206,89 @@ class RoutingAiToolCallingProviderTest {
         assertThat(fallbackConfigCaptured.get().getApiKey()).isEqualTo("openai-fallback-secret");
     }
 
+    @Test
+    void clearsPrimaryEndpointAndCacheMetadataOnFailoverAndSkipsUnconfiguredPrimary() {
+        org.praxisplatform.config.service.AiProviderManagementService mgmt =
+                org.mockito.Mockito.mock(org.praxisplatform.config.service.AiProviderManagementService.class);
+        AtomicReference<AiCallConfig> seedCaptured = new AtomicReference<>();
+        org.mockito.Mockito.when(mgmt.resolveEffectiveCallConfig(
+                org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.any()))
+                .thenAnswer(inv -> {
+                    AiCallConfig seed = inv.getArgument(0);
+                    if ("openai".equals(seed.getProvider())) {
+                        seedCaptured.set(seed);
+                        return seed.toBuilder().apiKey("openai-secret").build();
+                    }
+                    return seed.toBuilder().apiKey("gemini-secret").build();
+                });
+
+        AiToolCallingProvider gemini = stubProvider("gemini", req -> {
+            throw AiProviderCallException.fromHttpStatus("gemini", 429, "rate limited");
+        });
+        AiToolCallingProvider openai = stubProvider("openai", req ->
+                new AgentModelTurnResponse("openai", "gpt-4o-mini", "ok", List.of(), AgentTokenUsage.ZERO, "stop", "id2", Map.of()));
+
+        RoutingAiToolCallingProvider router = new RoutingAiToolCallingProvider(
+                mgmt, List.of(gemini, openai), null, List.of());
+
+        router.generateTurn(
+                new AgentModelTurnRequest(
+                        "sys",
+                        List.of(AgentConversationItem.userText("hi")),
+                        List.of(),
+                        AiCallConfig.builder()
+                                .provider("gemini")
+                                .baseUrl("https://sovereign.gemini.local")
+                                .cachedContentName("cachedContents/123")
+                                .promptCacheKey("pk-gemini")
+                                .apiKey("gemini-explicit")
+                                .tenantId("t1")
+                                .environment("prod")
+                                .build()),
+                AgentModelStreamListener.NOOP);
+
+        assertThat(seedCaptured.get()).isNotNull();
+        assertThat(seedCaptured.get().getApiKey()).isNull();
+        assertThat(seedCaptured.get().getBaseUrl()).isNull();
+        assertThat(seedCaptured.get().getCachedContentName()).isNull();
+        assertThat(seedCaptured.get().getPromptCacheKey()).isNull();
+
+        AiToolCallingProvider unconfiguredPrimary = new AiToolCallingProvider() {
+            @Override
+            public String providerId() {
+                return "gemini";
+            }
+
+            @Override
+            public boolean hasConfiguredCredentials(AiCallConfig config) {
+                return false;
+            }
+
+            @Override
+            public AgentModelTurnResponse generateTurn(
+                    AgentModelTurnRequest request,
+                    AgentModelStreamListener listener) {
+                throw new AssertionError("Unconfigured primary should not be called when fallback has credentials");
+            }
+        };
+        AiToolCallingProvider configuredFallback = stubProvider("openai", req ->
+                new AgentModelTurnResponse("openai", "gpt-4o-mini", "fallback-ok", List.of(), AgentTokenUsage.ZERO, "stop", "id3", Map.of()));
+        RoutingAiToolCallingProvider failoverRouter = new RoutingAiToolCallingProvider(
+                null, List.of(unconfiguredPrimary, configuredFallback), null, List.of());
+        AgentModelTurnResponse out = failoverRouter.generateTurn(
+                new AgentModelTurnRequest(
+                        "sys",
+                        List.of(AgentConversationItem.userText("hi")),
+                        List.of(),
+                        AiCallConfig.builder().provider("gemini").build()),
+                AgentModelStreamListener.NOOP);
+        assertThat(out.provider()).isEqualTo("openai");
+        assertThat(out.text()).isEqualTo("fallback-ok");
+    }
+
     private static AiToolCallingProvider stubProvider(
             String id,
             java.util.function.Function<AgentModelTurnRequest, AgentModelTurnResponse> fn) {

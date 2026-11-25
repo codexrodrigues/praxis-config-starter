@@ -52,6 +52,8 @@ public class AiSensitiveDataRedactor {
             "summary");
     private static final Set<String> EVENT_FREE_TEXT_FIELDS = Set.of(
             "message",
+            "assistantmessage",
+            "text",
             "explanation",
             "reason",
             "details",

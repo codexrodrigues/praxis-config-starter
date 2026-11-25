@@ -280,6 +280,16 @@ final class MetadataStarterStatisticalIntelligenceSupport {
 
         Map<String, Object> uiPayload = new LinkedHashMap<>(modelPayload);
         uiPayload.put("groupsEvaluated", response.results().size());
+        Map<String, Object> scanCounters = new LinkedHashMap<>();
+        if (uiPayload.get("scanCounters") instanceof Map<?, ?> existingCounters) {
+            existingCounters.forEach((k, v) -> {
+                if (k != null && v != null) {
+                    scanCounters.put(String.valueOf(k), v);
+                }
+            });
+        }
+        scanCounters.putIfAbsent("groupsEvaluated", response.results().size());
+        uiPayload.put("scanCounters", Map.copyOf(scanCounters));
         return new AgentStatisticalAnalysisResult(
                 entityKey, resourceKey, resourcePath, title, "inference", envelope, modelPayload, uiPayload);
     }
@@ -394,11 +404,6 @@ final class MetadataStarterStatisticalIntelligenceSupport {
                     }
                 }
             }
-            if (f.method() == AnomalyMethod.NIGRINI_BENFORD && f.observedValue() != null) {
-                double madValue = f.observedValue().doubleValue();
-                entry.put("nigriniMad", f.observedValue());
-                entry.put("nigriniConformity", classifyNigriniConformity(madValue));
-            }
             boolean nonSignificant = f.qValueFdr() != null
                     ? f.qValueFdr() > effectiveAlpha
                     : f.severity() == AnomalySeverity.INFO;
@@ -457,6 +462,12 @@ final class MetadataStarterStatisticalIntelligenceSupport {
             case "cohort_q3" -> entry.putIfAbsent("q3", step.value());
             case "cohort_max" -> entry.putIfAbsent("max", step.value());
             case "cohort_sample_size" -> entry.putIfAbsent("sampleSize", step.value().longValue());
+            case "nigrini_mad" -> {
+                if (step.value() != null) {
+                    entry.put("nigriniMad", step.value());
+                    entry.put("nigriniConformity", classifyNigriniConformity(step.value().doubleValue()));
+                }
+            }
             default -> {
                 if (key.startsWith("benford_digit_") && key.length() >= 16) {
                     char digitChar = key.charAt("benford_digit_".length());

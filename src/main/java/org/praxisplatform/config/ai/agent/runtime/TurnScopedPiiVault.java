@@ -193,10 +193,26 @@ public final class TurnScopedPiiVault {
             }
             return out;
         }
-        if (value instanceof List<?> list) {
-            List<Object> out = new ArrayList<>(list.size());
-            for (Object item : list) {
+        if (value instanceof java.util.Collection<?> collection) {
+            java.util.Collection<Object> out = value instanceof java.util.Set<?>
+                    ? new java.util.LinkedHashSet<>(collection.size())
+                    : new ArrayList<>(collection.size());
+            for (Object item : collection) {
                 out.add(rehydrateValue(item));
+            }
+            return out;
+        }
+        if (value instanceof String[] arr) {
+            String[] out = new String[arr.length];
+            for (int i = 0; i < arr.length; i++) {
+                out[i] = rehydrateText(arr[i]);
+            }
+            return out;
+        }
+        if (value instanceof Object[] arr) {
+            Object[] out = new Object[arr.length];
+            for (int i = 0; i < arr.length; i++) {
+                out[i] = rehydrateValue(arr[i]);
             }
             return out;
         }
@@ -234,10 +250,26 @@ public final class TurnScopedPiiVault {
             }
             return out;
         }
-        if (value instanceof List<?> list) {
-            List<Object> out = new ArrayList<>(list.size());
-            for (Object item : list) {
+        if (value instanceof java.util.Collection<?> collection) {
+            java.util.Collection<Object> out = value instanceof java.util.Set<?>
+                    ? new java.util.LinkedHashSet<>(collection.size())
+                    : new ArrayList<>(collection.size());
+            for (Object item : collection) {
                 out.add(scrubValue(item));
+            }
+            return out;
+        }
+        if (value instanceof String[] arr) {
+            String[] out = new String[arr.length];
+            for (int i = 0; i < arr.length; i++) {
+                out[i] = scrubString(arr[i]);
+            }
+            return out;
+        }
+        if (value instanceof Object[] arr) {
+            Object[] out = new Object[arr.length];
+            for (int i = 0; i < arr.length; i++) {
+                out[i] = scrubValue(arr[i]);
             }
             return out;
         }
