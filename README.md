@@ -338,6 +338,7 @@ A ingestão (`POST /api/praxis/config/api-catalog/ingest`) persiste as linhas ca
 
 Documentos essenciais neste repositório:
 - [Contratos de IA](docs/ai/contracts/README.md)
+- [Segurança, soberania, proveniência epistêmica e telemetria do agente operacional](docs/ai/operational-agent-security-sovereignty-and-intelligence.md)
 - [Streaming de autoria agêntica](docs/ai/agentic-authoring-streaming.md)
 - [Guia de memória e PII](docs/ai/memory-and-pii.md)
 - [Plano de controle de snapshots de regras v1](docs/domain-rules/snapshot-control-plane-v1.md)
