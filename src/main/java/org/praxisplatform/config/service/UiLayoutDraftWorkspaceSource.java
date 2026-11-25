@@ -15,6 +15,16 @@ public interface UiLayoutDraftWorkspaceSource {
     throw new UiLayoutLifecycleException(UiLayoutLifecycleException.Code.SOURCE_UNAVAILABLE, "Page child source is unavailable.");
   }
 
+  /** Capture a page child using the validated candidate child document when opt-in composed admission applies. */
+  default UiLayoutPageChildSeed capturePageChild(
+      UiLayoutLifecycleInvocation invocation,
+      org.praxisplatform.config.dto.UiLayoutTarget page,
+      org.praxisplatform.config.dto.UiLayoutPageChildSource request,
+      com.fasterxml.jackson.databind.JsonNode candidateChildDocument,
+      UiLayoutValidationContext validation) {
+    return capturePageChild(invocation, page, request, validation);
+  }
+
   /** Jointly re-admit the exact registered child source, document, reproduction and complete metadata
    * under one current-authority decision window, including restored/frozen children. No latest lookup.
    * The host must bind seed.request() (kind/sourceId/revision) to the exact admitted source, document and

@@ -38,6 +38,8 @@ public final class CorporatePageRuntimeSupport {
 
     static final UiLayoutPatchDocumentDescriptor CANONICAL_PATCH_DESCRIPTOR =
             new UiLayoutPatchDocumentDescriptor("praxis:corporate-page:patch", "praxis.ui-layout/v1");
+    public static final String COMPOSED_WIDGET_SOURCE_PREFIX = "composed-widget:";
+    public static final String COMPOSED_WIDGET_SOURCE_REVISION = "1";
     private static final String DEFAULT_TENANT = "default";
     private static final String DEFAULT_ENV = "prod";
     private static final String DEFAULT_UNIT = "corporate";
@@ -62,6 +64,7 @@ public final class CorporatePageRuntimeSupport {
     private final Clock clock;
     private final ObjectProvider<PageRuntimeReadService> pageRuntimeReadServiceProvider;
     private final Set<String> allowedIcons;
+    private final Set<String> admittedComposedWidgetTypes;
     private final Map<String, NativePageSeed> nativeBySourceRevision = new ConcurrentHashMap<>();
     private final Map<UUID, NativePageSeed> nativeByPageId = new ConcurrentHashMap<>();
 
@@ -84,6 +87,16 @@ public final class CorporatePageRuntimeSupport {
             }
         }
         this.allowedIcons = Set.copyOf(icons);
+
+        Set<String> composedTypes = new LinkedHashSet<>();
+        if (contributor.admittedComposedWidgetTypes() != null) {
+            for (String type : contributor.admittedComposedWidgetTypes()) {
+                if (StringUtils.hasText(type)) {
+                    composedTypes.add(type.trim());
+                }
+            }
+        }
+        this.admittedComposedWidgetTypes = Set.copyOf(composedTypes);
 
         for (NativePageSeed seed : contributor.nativePages()) {
             if (seed == null || !StringUtils.hasText(seed.sourceId()) || !StringUtils.hasText(seed.revision())) {
@@ -234,6 +247,11 @@ public final class CorporatePageRuntimeSupport {
                             UiLayoutLifecycleException.Code.SOURCE_UNAVAILABLE,
                             "Only registered-native corporate page child sources are supported.");
                 }
+                if (isComposedWidgetSource(nativeSrc)) {
+                    throw new UiLayoutLifecycleException(
+                            UiLayoutLifecycleException.Code.SOURCE_UNAVAILABLE,
+                            "Composed page child capture requires a validated candidate document.");
+                }
                 NativePageSeed parent = findNativePageForChild(page, nativeSrc);
                 if (parent == null) {
                     throw new UiLayoutLifecycleException(
@@ -260,6 +278,42 @@ public final class CorporatePageRuntimeSupport {
             }
 
             @Override
+            public UiLayoutPageChildSeed capturePageChild(
+                    UiLayoutLifecycleInvocation invocation,
+                    UiLayoutTarget page,
+                    UiLayoutPageChildSource request,
+                    JsonNode candidateChildDocument,
+                    UiLayoutValidationContext validation) {
+                validation.require(invocation);
+                requireValidInvocation(invocation);
+                if (request == null || !(request.source() instanceof UiLayoutPageChildSource.NativeSource nativeSrc)) {
+                    throw new UiLayoutLifecycleException(
+                            UiLayoutLifecycleException.Code.SOURCE_UNAVAILABLE,
+                            "Only registered-native corporate page child sources are supported.");
+                }
+                if (isComposedWidgetSource(nativeSrc)) {
+                    String childKind = validateComposedWidgetCandidate(
+                            invocation, page, request.widgetKey(), nativeSrc, candidateChildDocument);
+                    ObjectNode normalizedDoc = candidateChildDocument.deepCopy();
+                    return new UiLayoutPageChildSeed(
+                            request,
+                            new UiLayoutAuthoringDocumentDescriptor(
+                                    childKind,
+                                    contributor.serviceKey() + ":page-child",
+                                    "1"),
+                            CANONICAL_PATCH_DESCRIPTOR,
+                            "corporate-child:" + request.widgetKey(),
+                            normalizedDoc,
+                            nativeMetadata(
+                                    invocation,
+                                    nativeSrc.sourceId(),
+                                    COMPOSED_WIDGET_SOURCE_REVISION,
+                                    normalizedDoc));
+                }
+                return capturePageChild(invocation, page, request, validation);
+            }
+
+            @Override
             public void requirePageChildEvidence(
                     UiLayoutLifecycleInvocation invocation,
                     UiLayoutTarget page,
@@ -272,6 +326,11 @@ public final class CorporatePageRuntimeSupport {
                     throw new UiLayoutLifecycleException(
                             UiLayoutLifecycleException.Code.DENIED,
                             "Unsupported page child source.");
+                }
+                if (isComposedWidgetSource(nativeSrc)) {
+                    validateComposedWidgetCandidate(
+                            invocation, page, seed.request().widgetKey(), nativeSrc, seed.document());
+                    return;
                 }
                 NativePageSeed parent = findNativePageForChild(page, nativeSrc);
                 if (parent == null) {
@@ -289,6 +348,67 @@ public final class CorporatePageRuntimeSupport {
                 }
             }
         };
+    }
+
+    private static boolean isComposedWidgetSource(UiLayoutPageChildSource.NativeSource nativeSrc) {
+        return nativeSrc != null
+                && StringUtils.hasText(nativeSrc.sourceId())
+                && nativeSrc.sourceId().startsWith(COMPOSED_WIDGET_SOURCE_PREFIX);
+    }
+
+    private String validateComposedWidgetCandidate(
+            UiLayoutLifecycleInvocation invocation,
+            UiLayoutTarget page,
+            String widgetKey,
+            UiLayoutPageChildSource.NativeSource nativeSrc,
+            JsonNode childDocument) {
+        if (!"registered-native".equals(nativeSrc.kind())
+                || !COMPOSED_WIDGET_SOURCE_REVISION.equals(nativeSrc.revision())) {
+            throw new UiLayoutLifecycleException(
+                    UiLayoutLifecycleException.Code.SOURCE_UNAVAILABLE,
+                    "Composed page child source revision is unsupported.");
+        }
+        String widgetType = nativeSrc.sourceId().substring(COMPOSED_WIDGET_SOURCE_PREFIX.length());
+        if (!StringUtils.hasText(widgetType) || !admittedComposedWidgetTypes.contains(widgetType)) {
+            throw new UiLayoutLifecycleException(
+                    UiLayoutLifecycleException.Code.DENIED,
+                    "Composed widget type is not admitted for corporate multi-widget lifecycle: " + widgetType);
+        }
+        if (childDocument == null || !childDocument.isObject()) {
+            throw new UiLayoutLifecycleException(
+                    UiLayoutLifecycleException.Code.SOURCE_UNAVAILABLE,
+                    "Composed page child document is unavailable.");
+        }
+        String childKind = childDocument.path("kind").asText("");
+        String resolvedComponentType;
+        try {
+            resolvedComponentType =
+                    UiLayoutDeclarativeWidgetRevisionReproduction.resolveComponentTypeForDocumentType(childKind);
+        } catch (UiLayoutLifecycleException unsupportedKind) {
+            throw new UiLayoutLifecycleException(
+                    UiLayoutLifecycleException.Code.VALIDATION_FAILED,
+                    "Unsupported composed widget authoring document kind: " + childKind);
+        }
+        if (!widgetType.equals(resolvedComponentType)) {
+            throw new UiLayoutLifecycleException(
+                    UiLayoutLifecycleException.Code.VALIDATION_FAILED,
+                    "Composed widget document kind does not match declared source type: " + widgetType);
+        }
+        UiLayoutPageRevisionReproduction.requireChild(childDocument, childDocument, widgetKey);
+        try {
+            contributor.checkComposedWidgetAdmission(invocation, page, widgetType, childDocument);
+        } catch (ResponseStatusException statusEx) {
+            UiLayoutLifecycleException.Code mapped =
+                    statusEx.getStatusCode().value() == 401 || statusEx.getStatusCode().value() == 403
+                            ? UiLayoutLifecycleException.Code.DENIED
+                            : UiLayoutLifecycleException.Code.VALIDATION_FAILED;
+            throw new UiLayoutLifecycleException(
+                    mapped,
+                    statusEx.getReason() != null
+                            ? statusEx.getReason()
+                            : "Composed widget admission denied.");
+        }
+        return childKind;
     }
 
     public UiLayoutBaselineMetadataAdmission baselineMetadataAdmission() {
@@ -720,6 +840,12 @@ public final class CorporatePageRuntimeSupport {
             checkIconValue(document.at("/config/presentation/icon").textValue());
             for (JsonNode nav : document.at("/config/navigation")) {
                 checkIconValue(nav.path("icon").textValue());
+            }
+            for (JsonNode widget : document.at("/config/definition/widgets")) {
+                JsonNode shellIcon = widget.at("/shell/icon");
+                if (shellIcon.isTextual()) {
+                    checkIconValue(shellIcon.textValue());
+                }
             }
         } else if (UiLayoutNavigationGroupsRevisionReproduction.KIND.equals(documentType)) {
             for (JsonNode group : document.at("/config/groups")) {

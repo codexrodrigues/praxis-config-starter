@@ -171,6 +171,17 @@ final class PageCatalogLifecycleBridge {
         return nativeSource.capturePageChild(invocation, page, request, validation);
       }
 
+      @Override
+      public UiLayoutPageChildSeed capturePageChild(
+          UiLayoutLifecycleInvocation invocation,
+          UiLayoutTarget page,
+          UiLayoutPageChildSource request,
+          JsonNode candidateChildDocument,
+          UiLayoutValidationContext validation) {
+        return nativeSource.capturePageChild(
+            invocation, page, request, candidateChildDocument, validation);
+      }
+
       public void requirePageChildEvidence(
           UiLayoutLifecycleInvocation invocation,
           UiLayoutTarget page,

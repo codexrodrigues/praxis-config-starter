@@ -68,6 +68,21 @@ final class UiLayoutPageRevisionReproduction {
       if (!result.containsKey(link.at("/from/ref/widget").asText())
           || !result.containsKey(link.at("/to/ref/widget").asText())) throw invalid();
     }
+    JsonNode canvas = page.at("/config/definition/canvas");
+    if (canvas.isObject()) {
+      int columns = canvas.path("columns").asInt(0);
+      var fields = canvas.path("items").fields();
+      while (fields.hasNext()) {
+        var entry = fields.next();
+        String itemKey = entry.getKey();
+        JsonNode item = entry.getValue();
+        if (!result.containsKey(itemKey)) throw invalid();
+        if (item.has("widgetKey") && !itemKey.equals(item.path("widgetKey").asText())) throw invalid();
+        int col = item.path("col").asInt(0);
+        int colSpan = item.path("colSpan").asInt(0);
+        if (col < 1 || colSpan < 1 || col + colSpan - 1 > columns) throw invalid();
+      }
+    }
     return result;
   }
 

@@ -8,6 +8,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import org.praxisplatform.config.dto.PageSourceReference;
+import org.praxisplatform.config.dto.UiLayoutTarget;
 
 /**
  * SPI de bean único para hosts que publicam páginas dinâmicas corporativas e grupos de navegação
@@ -99,6 +100,21 @@ public interface CorporatePageCatalogContributor {
             PageCreationOperation operation,
             PageCreationContext context,
             PageSourceReference source) {}
+
+    /**
+     * Tipos de widget admitidos para captura dinâmica composta via
+     * {@code composed-widget:<widgetType>} em revisões multi-widget. Por padrão, vazio (fail-closed).
+     */
+    default Set<String> admittedComposedWidgetTypes() {
+        return Set.of();
+    }
+
+    /** Hook opcional executado na admissão de um widget filho composto em revisão/verificação. */
+    default void checkComposedWidgetAdmission(
+            UiLayoutLifecycleInvocation invocation,
+            UiLayoutTarget page,
+            String widgetType,
+            JsonNode childDocument) {}
 
     /** Contexto autenticado e delimitado do ator para resolução e ciclo de vida de páginas. */
     record ResolvedActorContext(

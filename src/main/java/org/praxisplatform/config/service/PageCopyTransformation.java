@@ -68,6 +68,22 @@ final class PageCopyTransformation {
         ref.put("widget", mapped.get(new Key("widget", ref.path("widget").asText())));
       }
     }
+    JsonNode canvasItems = output.at("/config/definition/canvas/items");
+    if (canvasItems.isObject()) {
+      ObjectNode canvasNode = (ObjectNode) output.at("/config/definition/canvas");
+      ObjectNode remappedItems = canvasNode.objectNode();
+      var fields = canvasItems.fields();
+      while (fields.hasNext()) {
+        var entry = fields.next();
+        String nextKey = mapped.get(new Key("widget", entry.getKey()));
+        ObjectNode copiedItem = (ObjectNode) entry.getValue();
+        if (copiedItem.has("widgetKey")) {
+          copiedItem.put("widgetKey", nextKey);
+        }
+        remappedItems.set(nextKey, copiedItem);
+      }
+      canvasNode.set("items", remappedItems);
+    }
     ((ObjectNode) output.at("/config/presentation")).put("title", title);
     ((ObjectNode) output.path("config")).putArray("navigation");
     UiLayoutPageRevisionReproduction.children(output);

@@ -206,4 +206,76 @@ class UiLayoutPageRevisionReproductionTest {
     assertEquals(8, copied.identityMap().size());
     reproduce(copied.document(), copied.document());
   }
+
+  @Test void admitsSafeCanvasSafeShellAndExtendedAnalyticsPresentation() throws Exception {
+    ObjectNode pageWithCanvasAndShell = (ObjectNode) JSON.readTree("""
+      {"kind":"praxis.dynamic-page.editor","version":1,"config":{
+        "definition":{
+          "widgets":[
+            {"key":"22222222-2222-4222-8222-222222222222",
+             "shell":{"kind":"dashboard-card","title":"Indicador Analítico","subtitle":"Por lotação","icon":"analytics","showHeader":true},
+             "definition":{"id":"praxis-analytics-presentation","inputs":{
+               "resourcePath":"/api/workforce/employees",
+               "projectionId":"headcount-by-unit",
+               "availableFamilies":["chart","analytic-table","kpi","summary-list"],
+               "preferredFamily":"chart",
+               "surfaceMode":"embedded",
+               "controlsPlacement":"shell-header",
+               "controlsDisplay":"icon-only",
+               "coerceCrossFilters":true,
+               "title":"Efetivo",
+               "height":320}}},
+            {"key":"33333333-3333-4333-8333-333333333333",
+             "shell":{"kind":"none","showHeader":false},
+             "definition":{"id":"praxis-table","inputs":{"config":{"columns":[],"columnProjection":{"source":"schema"}}}}}
+          ],
+          "canvas":{
+            "mode":"grid",
+            "columns":12,
+            "rowUnit":"8px",
+            "gap":"16px",
+            "autoRows":"content",
+            "collisionPolicy":"push-down",
+            "items":{
+              "22222222-2222-4222-8222-222222222222":{"widgetKey":"22222222-2222-4222-8222-222222222222","col":1,"row":1,"colSpan":6,"rowSpan":4,"zIndex":1},
+              "33333333-3333-4333-8333-333333333333":{"col":7,"row":1,"colSpan":6,"rowSpan":4}
+            }
+          }
+        },
+        "presentation":{"title":"Painel com Grade","icon":"dashboard"},
+        "navigation":[]
+      }}
+      """);
+
+    var children = UiLayoutPageRevisionReproduction.children(pageWithCanvasAndShell);
+    assertEquals(2, children.size());
+    reproduce(pageWithCanvasAndShell, pageWithCanvasAndShell);
+
+    var editedShellAndCanvas = pageWithCanvasAndShell.deepCopy();
+    ((ObjectNode) editedShellAndCanvas.at("/config/definition/widgets/0/shell")).put("title", "Indicador Atualizado");
+    ((ObjectNode) editedShellAndCanvas.at("/config/definition/canvas/items/22222222-2222-4222-8222-222222222222")).put("colSpan", 8);
+    ((ObjectNode) editedShellAndCanvas.at("/config/definition/canvas/items/33333333-3333-4333-8333-333333333333")).put("col", 9).put("colSpan", 4);
+    reproduce(pageWithCanvasAndShell, editedShellAndCanvas);
+
+    // Rejects orphan canvas item
+    var orphanCanvas = pageWithCanvasAndShell.deepCopy();
+    ((ObjectNode) orphanCanvas.at("/config/definition/canvas/items"))
+        .set("99999999-9999-4999-8999-999999999999", JSON.readTree("{\"col\":1,\"row\":5,\"colSpan\":6,\"rowSpan\":2}"));
+    assertThrows(UiLayoutLifecycleException.class, () -> UiLayoutPageRevisionReproduction.children(orphanCanvas));
+
+    // Rejects grid col + colSpan overflow
+    var overflowCanvas = pageWithCanvasAndShell.deepCopy();
+    ((ObjectNode) overflowCanvas.at("/config/definition/canvas/items/33333333-3333-4333-8333-333333333333")).put("col", 8).put("colSpan", 6);
+    assertThrows(UiLayoutLifecycleException.class, () -> UiLayoutPageRevisionReproduction.children(overflowCanvas));
+
+    // Rejects widgetKey mismatch inside canvas item
+    var mismatchCanvas = pageWithCanvasAndShell.deepCopy();
+    ((ObjectNode) mismatchCanvas.at("/config/definition/canvas/items/22222222-2222-4222-8222-222222222222")).put("widgetKey", "33333333-3333-4333-8333-333333333333");
+    assertThrows(UiLayoutLifecycleException.class, () -> UiLayoutPageRevisionReproduction.children(mismatchCanvas));
+
+    // Rejects arbitrary shell visual/action overrides
+    var badShell = pageWithCanvasAndShell.deepCopy();
+    ((ObjectNode) badShell.at("/config/definition/widgets/0/shell")).putObject("appearance");
+    assertThrows(UiLayoutLifecycleException.class, () -> UiLayoutPageRevisionReproduction.children(badShell));
+  }
 }

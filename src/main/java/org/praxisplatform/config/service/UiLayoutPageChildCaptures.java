@@ -76,7 +76,7 @@ final class UiLayoutPageChildCaptures {
     // Existing evidence is preserved even while its child is removed. It cannot be replaced by a new declaration.
     for (var request : declared.values()) {
       UiLayoutPageChildSeed seed;
-      try { seed = validation.call(invocation, () -> source.capturePageChild(invocation, state.target(), request, validation)); }
+      try { seed = validation.call(invocation, () -> source.capturePageChild(invocation, state.target(), request, children.get(request.widgetKey()), validation)); }
       catch (RuntimeException exception) { throw UiLayoutMetadataAdmissionFailure.sanitized(exception, "Page child source is unavailable."); }
       if (seed == null || !request.equals(seed.request())) throw invalid();
       evidence.put(request.widgetKey(), seal(invocation, draftId, state.target(), seed, source, validation));

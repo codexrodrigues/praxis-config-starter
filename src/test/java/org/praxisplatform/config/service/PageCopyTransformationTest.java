@@ -70,6 +70,54 @@ class PageCopyTransformationTest {
   }
 
   @Test
+  void remapsCanvasItemsAndPreservesSafeShellWithoutRemappingLiteralKeys() throws Exception {
+    var source = UiLayoutPageRevisionReproductionTest.page();
+    ((ObjectNode) source.at("/config/definition/widgets/0"))
+        .set(
+            "shell",
+            UiLayoutPageRevisionReproductionTest.JSON.readTree(
+                """
+                {"kind":"dashboard-card","title":"Cadastro Principal","icon":"badge","showHeader":true}
+                """));
+    ((ObjectNode) source.at("/config/definition"))
+        .set(
+            "canvas",
+            UiLayoutPageRevisionReproductionTest.JSON.readTree(
+                """
+                {"mode":"grid","columns":12,"items":{
+                  "22222222-2222-4222-8222-222222222222":{"widgetKey":"22222222-2222-4222-8222-222222222222","col":1,"row":1,"colSpan":6,"rowSpan":4},
+                  "33333333-3333-4333-8333-333333333333":{"col":7,"row":1,"colSpan":6,"rowSpan":4}
+                }}
+                """));
+    var result =
+        copy.reproduce(
+            source,
+            SOURCE,
+            TARGET,
+            "CopiedWithCanvas",
+            List.of(
+                new PageCopyTransformation.Identity("widget", FIRST, NEXT_FIRST),
+                new PageCopyTransformation.Identity("widget", SECOND, NEXT_SECOND)));
+
+    assertEquals(
+        "Cadastro Principal",
+        result.document().at("/config/definition/widgets/0/shell/title").asText());
+    assertTrue(result.document().at("/config/definition/canvas/items/" + FIRST).isMissingNode());
+    assertEquals(
+        NEXT_FIRST,
+        result
+            .document()
+            .at("/config/definition/canvas/items/" + NEXT_FIRST + "/widgetKey")
+            .asText());
+    assertEquals(
+        6,
+        result
+            .document()
+            .at("/config/definition/canvas/items/" + NEXT_SECOND + "/colSpan")
+            .asInt());
+  }
+
+  @Test
   void rejectsMissingExtraRepeatedOrIntersectingMappingsAndInvalidTitle() throws Exception {
     var source = UiLayoutPageRevisionReproductionTest.page();
     var valid =
