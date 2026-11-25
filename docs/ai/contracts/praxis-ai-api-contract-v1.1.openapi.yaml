@@ -5017,8 +5017,16 @@ components:
             - definition.created
             - definition.approved
             - definition.activated
+            - approval.requested
+            - approval.completed
+            - intake.received
+            - simulation.requested
+            - simulation.completed
+            - publication.requested
+            - publication.completed
             - materialization.created
             - materialization.applied
+            - materialization.superseded
         occurredAt:
           type: string
           format: date-time
@@ -5030,6 +5038,15 @@ components:
           nullable: true
         summary:
           type: string
+        summaryCode:
+          type: string
+          nullable: true
+          description: Codigo semantico estruturado do evento para localizacao deterministica sem heuristica textual.
+        summaryArgs:
+          type: object
+          nullable: true
+          additionalProperties: true
+          description: Parametros escalares seguros associados ao summaryCode.
         status:
           type: string
           nullable: true

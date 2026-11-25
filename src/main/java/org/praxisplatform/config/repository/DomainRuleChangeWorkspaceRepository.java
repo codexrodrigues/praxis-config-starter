@@ -19,4 +19,14 @@ public interface DomainRuleChangeWorkspaceRepository extends JpaRepository<Domai
   @Lock(LockModeType.PESSIMISTIC_WRITE)
   @Query("select workspace from DomainRuleChangeWorkspace workspace where workspace.id = :id")
   Optional<DomainRuleChangeWorkspace> findByIdForUpdate(@Param("id") UUID id);
+
+  @Query("""
+      select workspace.status, count(workspace) from DomainRuleChangeWorkspace workspace
+      where workspace.tenantId = :tenantId
+        and workspace.environment = :environment
+      group by workspace.status
+      """)
+  List<Object[]> countByStatus(
+      @Param("tenantId") String tenantId,
+      @Param("environment") String environment);
 }

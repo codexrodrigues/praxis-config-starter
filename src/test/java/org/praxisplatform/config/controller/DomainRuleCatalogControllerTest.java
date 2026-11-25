@@ -10,6 +10,7 @@ import java.util.List;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.praxisplatform.config.dto.DomainRuleCatalogResponse;
+import org.praxisplatform.config.dto.DomainRuleCatalogSummaryResponse;
 import org.praxisplatform.config.service.DomainRuleCatalogQueryService;
 import org.praxisplatform.config.service.DomainRuleGovernancePrincipal;
 import org.praxisplatform.config.service.DomainRuleGovernancePrincipalResolver;
@@ -37,5 +38,41 @@ class DomainRuleCatalogControllerTest {
         assertThat(entity.getBody()).isSameAs(response);
         verify(resolver).resolve(request, "caller-tenant", "caller-env", "RULE_DEFINITION_READER");
         verify(catalog).search("payroll", "calculation", "approved", "payroll", 2, 10, principal);
+    }
+
+    @Test
+    void routesWorkstationLimitsAndContextFiltersToBrowseAndServesScopedSummary() {
+        DomainRuleCatalogQueryService catalog = mock(DomainRuleCatalogQueryService.class);
+        DomainRuleGovernancePrincipalResolver resolver = mock(DomainRuleGovernancePrincipalResolver.class);
+        HttpServletRequest request = mock(HttpServletRequest.class);
+        DomainRuleGovernancePrincipal principal =
+                new DomainRuleGovernancePrincipal("trusted-tenant", "reader", "prod");
+        DomainRuleCatalogResponse browseResponse = new DomainRuleCatalogResponse(
+                DomainRuleCatalogResponse.SCHEMA_VERSION, List.of(), 0, 100, true, 250L, 3, false);
+        DomainRuleCatalogSummaryResponse summaryResponse = new DomainRuleCatalogSummaryResponse(
+                DomainRuleCatalogSummaryResponse.SCHEMA_VERSION,
+                250L,
+                245L,
+                5L,
+                List.of(),
+                List.of(),
+                List.of(),
+                List.of(),
+                DomainRuleCatalogSummaryResponse.WorkspaceQueueSummary.empty());
+        when(resolver.resolve(request, "caller-tenant", "caller-env", "RULE_DEFINITION_READER"))
+                .thenReturn(principal);
+        when(catalog.browse(null, null, null, null, "workforce.payroll", 0, 100, principal))
+                .thenReturn(browseResponse);
+        when(catalog.summarize(principal)).thenReturn(summaryResponse);
+
+        DomainRuleCatalogController controller = new DomainRuleCatalogController(catalog, resolver);
+        var catalogEntity = controller.catalog(
+                "caller-tenant", "caller-env", null, null, null, null, "workforce.payroll", 0, 100, request);
+        var summaryEntity = controller.summary("caller-tenant", "caller-env", request);
+
+        assertThat(catalogEntity.getBody()).isSameAs(browseResponse);
+        assertThat(summaryEntity.getBody()).isSameAs(summaryResponse);
+        verify(catalog).browse(null, null, null, null, "workforce.payroll", 0, 100, principal);
+        verify(catalog).summarize(principal);
     }
 }

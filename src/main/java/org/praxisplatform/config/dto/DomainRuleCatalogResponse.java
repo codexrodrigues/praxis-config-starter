@@ -10,7 +10,10 @@ public record DomainRuleCatalogResponse(
         List<Candidate> candidates,
         int page,
         int limit,
-        boolean hasMore) {
+        boolean hasMore,
+        Long totalElements,
+        Integer totalPages,
+        Boolean truncated) {
 
     public static final String SCHEMA_VERSION = "praxis-domain-rule-catalog.v1";
 
@@ -19,6 +22,15 @@ public record DomainRuleCatalogResponse(
                 ? SCHEMA_VERSION
                 : schemaVersion.trim();
         candidates = candidates == null ? List.of() : List.copyOf(candidates);
+    }
+
+    public DomainRuleCatalogResponse(
+            String schemaVersion,
+            List<Candidate> candidates,
+            int page,
+            int limit,
+            boolean hasMore) {
+        this(schemaVersion, candidates, page, limit, hasMore, null, null, null);
     }
 
     public record Candidate(
@@ -31,5 +43,36 @@ public record DomainRuleCatalogResponse(
             String resourceKey,
             String serviceKey,
             String semanticOwner,
-            Instant updatedAt) {}
+            Instant updatedAt,
+            String displayName,
+            String domainLabel,
+            String ruleSetLabel) {
+
+        public Candidate(
+                UUID definitionId,
+                String ruleKey,
+                Integer version,
+                String ruleType,
+                String status,
+                String contextKey,
+                String resourceKey,
+                String serviceKey,
+                String semanticOwner,
+                Instant updatedAt) {
+            this(
+                    definitionId,
+                    ruleKey,
+                    version,
+                    ruleType,
+                    status,
+                    contextKey,
+                    resourceKey,
+                    serviceKey,
+                    semanticOwner,
+                    updatedAt,
+                    null,
+                    null,
+                    null);
+        }
+    }
 }

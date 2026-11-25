@@ -525,12 +525,18 @@ class DomainRuleServiceTest {
 
         assertThat(timeline.events()).extracting("eventType")
                 .containsExactly("definition.created", "materialization.applied");
+        assertThat(timeline.events()).extracting("summaryCode")
+                .containsExactly("domain_rule.event.definition_created", "domain_rule.event.materialization_applied");
         assertThat(timeline.events()).allSatisfy(event -> assertThat(event.visibility()).isEqualTo("safe"));
         assertThat(timeline.events()).last().satisfies(event -> {
             assertThat(event.materializationId()).isEqualTo(materializationId);
             assertThat(event.materializationKey()).isEqualTo("operations.missoes.rule.pause:workflow_action:operations.missoes:pause");
             assertThat(event.targetLayer()).isEqualTo("workflow_action");
             assertThat(event.sourceHash()).isEqualTo("derived:sha256:abc");
+            assertThat(event.summaryArgs())
+                    .containsEntry("targetLayer", "workflow_action")
+                    .containsEntry("targetArtifactType", "resource-workflow-action")
+                    .doesNotContainKey("eventSource");
         });
         String safeTimelineSurface = timeline.events().stream()
                 .map(Object::toString)

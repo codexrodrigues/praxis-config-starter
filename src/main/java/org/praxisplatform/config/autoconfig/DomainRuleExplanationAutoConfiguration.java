@@ -2,12 +2,14 @@ package org.praxisplatform.config.autoconfig;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.praxisplatform.config.controller.DomainRuleCatalogController;
-import org.praxisplatform.config.service.DomainRuleDefinitionFingerprint;
+import org.praxisplatform.config.repository.DomainRuleChangeWorkspaceRepository;
+import org.praxisplatform.config.repository.DomainRuleDefinitionRepository;
 import org.praxisplatform.config.service.DomainRuleCatalogQueryService;
+import org.praxisplatform.config.service.DomainRuleDefinitionFingerprint;
 import org.praxisplatform.config.service.DomainRuleExplanationProjectionService;
 import org.praxisplatform.config.service.DomainRuleGovernancePrincipalResolver;
 import org.praxisplatform.config.service.DomainRuleService;
-import org.praxisplatform.config.repository.DomainRuleDefinitionRepository;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
@@ -23,8 +25,13 @@ public class DomainRuleExplanationAutoConfiguration {
     @Bean
     @ConditionalOnMissingBean
     DomainRuleCatalogQueryService domainRuleCatalogQueryService(
-            DomainRuleDefinitionRepository definitionRepository) {
-        return new DomainRuleCatalogQueryService(definitionRepository);
+            DomainRuleDefinitionRepository definitionRepository,
+            ObjectProvider<DomainRuleChangeWorkspaceRepository> workspaceRepository,
+            ObjectProvider<ObjectMapper> objectMapper) {
+        return new DomainRuleCatalogQueryService(
+                definitionRepository,
+                workspaceRepository.getIfAvailable(),
+                objectMapper.getIfAvailable(ObjectMapper::new));
     }
 
     @Bean

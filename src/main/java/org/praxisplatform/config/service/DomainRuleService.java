@@ -3569,10 +3569,24 @@ public class DomainRuleService {
                 List.copyOf(events));
     }
 
+    private static final Set<String> SAFE_TIMELINE_ARG_KEYS = Set.of(
+            "requiredApprovalCount",
+            "materializationCount",
+            "publicationReadiness",
+            "publicationId",
+            "targetLayer",
+            "targetArtifactType",
+            "status",
+            "version",
+            "existingCoverageCount",
+            "predictedMaterializationCount",
+            "warningCount");
+
     private DomainRuleTimelineEventResponse toTimelineEvent(DomainRuleEvent event) {
         DomainRuleMaterialization materialization = event.getMaterialization();
+        String eventType = event.getEventType();
         return new DomainRuleTimelineEventResponse(
-                event.getEventType(),
+                eventType,
                 event.getOccurredAt(),
                 normalize(event.getActorType()),
                 normalize(event.getActor()),
@@ -3584,7 +3598,9 @@ public class DomainRuleService {
                 materialization != null ? materialization.getId() : null,
                 normalize(event.getMaterializationKey()),
                 normalize(event.getSourceHash()),
-                normalizeOrDefault(event.getVisibility(), "safe"));
+                normalizeOrDefault(event.getVisibility(), "safe"),
+                deriveTimelineSummaryCode(eventType),
+                extractSafeSummaryArgs(event.getSafeMetadata(), materialization));
     }
 
     @Transactional(transactionManager = ConfigTransactionManagerNames.CONFIG)
@@ -3955,7 +3971,62 @@ public class DomainRuleService {
                 materialization != null ? materialization.getId() : null,
                 materialization != null ? materialization.getMaterializationKey() : null,
                 materialization != null ? materialization.getSourceHash() : null,
-                "safe"));
+                "safe",
+                deriveTimelineSummaryCode(eventType),
+                extractSafeSummaryArgs(null, materialization)));
+    }
+
+    private String deriveTimelineSummaryCode(String eventType) {
+        if (!StringUtils.hasText(eventType)) {
+            return null;
+        }
+        String normalized = eventType.trim()
+                .toLowerCase(Locale.ROOT)
+                .replaceAll("[^a-z0-9]+", "_")
+                .replaceAll("^_+|_+$", "");
+        return normalized.isEmpty() ? null : "domain_rule.event." + normalized;
+    }
+
+    private Map<String, Object> extractSafeSummaryArgs(
+            String safeMetadataJson,
+            DomainRuleMaterialization materialization) {
+        Map<String, Object> args = new LinkedHashMap<>();
+        if (StringUtils.hasText(safeMetadataJson)) {
+            try {
+                JsonNode metadataNode = objectMapper.readTree(safeMetadataJson);
+                if (metadataNode != null && metadataNode.isObject()) {
+                    for (String key : SAFE_TIMELINE_ARG_KEYS) {
+                        JsonNode field = metadataNode.get(key);
+                        if (field == null || field.isNull() || field.isContainerNode()) {
+                            continue;
+                        }
+                        if (field.isIntegralNumber()) {
+                            args.put(key, field.longValue());
+                        } else if (field.isFloatingPointNumber()) {
+                            args.put(key, field.doubleValue());
+                        } else if (field.isBoolean()) {
+                            args.put(key, field.booleanValue());
+                        } else if (field.isTextual()) {
+                            String value = field.asText().trim();
+                            if (!value.isEmpty()) {
+                                args.put(key, value.length() > 128 ? value.substring(0, 128) : value);
+                            }
+                        }
+                    }
+                }
+            } catch (Exception ignored) {
+                // Safe summary args are additive; malformed historical metadata must not break timelines.
+            }
+        }
+        if (materialization != null) {
+            if (StringUtils.hasText(materialization.getTargetLayer())) {
+                args.putIfAbsent("targetLayer", materialization.getTargetLayer().trim());
+            }
+            if (StringUtils.hasText(materialization.getTargetArtifactType())) {
+                args.putIfAbsent("targetArtifactType", materialization.getTargetArtifactType().trim());
+            }
+        }
+        return args.isEmpty() ? Map.of() : Map.copyOf(args);
     }
 
     private boolean hasActiveDefinition(DomainRuleMaterialization materialization) {
