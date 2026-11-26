@@ -197,6 +197,49 @@ class DomainRuleHostStatusServiceTest {
         .hasMessageContaining("RuleSet head was not found");
   }
 
+  @Test
+  void alignsOnePointEightHostWithOnePointSevenSnapshotWhileFlaggingLegacyHostOnOnePointEightSnapshot() {
+    assertThat(DomainRuleHostStatusService.isEngineContractCompatible("1.7", "1.8")).isTrue();
+    assertThat(DomainRuleHostStatusService.isEngineContractCompatible("1.8", "1.8")).isTrue();
+    assertThat(DomainRuleHostStatusService.isEngineContractCompatible("1.8", "1.7")).isFalse();
+    assertThat(DomainRuleHostStatusService.isEngineContractCompatible("1.4", "1.8")).isFalse();
+
+    UUID snapshotId = UUID.randomUUID();
+    DomainRuleSnapshotHead head = DomainRuleSnapshotHead.builder().operationKey("evaluate")
+        .id(UUID.randomUUID()).tenantId("tenant-a").environment("dev")
+        .ruleSetKey("benefit.eligibility").activeSnapshotId(snapshotId)
+        .activationRevision(7L).headEtag(UUID.randomUUID()).updatedAt(NOW).rowVersion(0L).build();
+    DomainRuleSnapshot snapshot = DomainRuleSnapshot.builder().operationKey("evaluate")
+        .id(snapshotId).tenantId("tenant-a").environment("dev")
+        .ruleSetKey("benefit.eligibility").snapshotKey("snap-2").contentHash(HASH)
+        .compositionManifest("{\"implementationCatalogDigest\":\"" + "B".repeat(64) + "\"}").build();
+    PublishedRuleSnapshot baseEnvelope = publishedSnapshot();
+    RuleRuntimeCompatibility compat17 = new RuleRuntimeCompatibility(
+        "1.7", COMPATIBILITY.jsonLogicDialectVersion(), COMPATIBILITY.jsonLogicCorpusSha256());
+    RuleSetDefinition ruleSet17 = new RuleSetDefinition(
+        baseEnvelope.ruleSet().ref(), baseEnvelope.ruleSet().availableRoots(),
+        baseEnvelope.ruleSet().slots(), baseEnvelope.ruleSet().bindings(),
+        compat17, baseEnvelope.ruleSet().failPolicy(), baseEnvelope.ruleSet().errorDescriptors());
+    PublishedRuleSnapshot envelope17 = new PublishedRuleSnapshot(
+        baseEnvelope.snapshotContractVersion(), baseEnvelope.snapshotKey(),
+        baseEnvelope.tenantId(), baseEnvelope.environment(), baseEnvelope.ownerServiceKey(),
+        baseEnvelope.publicationRevision(), baseEnvelope.publishedAtUtc(), baseEnvelope.supersedesSnapshotKey(),
+        baseEnvelope.requiredHostContractVersion(), baseEnvelope.validFromUtc(), baseEnvelope.validUntilUtc(),
+        baseEnvelope.sources(), baseEnvelope.approvals(), ruleSet17);
+    when(headRepository.findByTenantIdAndEnvironmentAndRuleSetKeyAndOperationKey("tenant-a", "dev", "benefit.eligibility", "evaluate"))
+        .thenReturn(Optional.of(head));
+    when(snapshotRepository.findByIdAndTenantIdAndEnvironmentAndRuleSetKeyAndOperationKey(snapshotId, "tenant-a", "dev", "benefit.eligibility", "evaluate"))
+        .thenReturn(Optional.of(snapshot));
+    when(snapshotService.findSnapshot("tenant-a", "dev", "snap-2"))
+        .thenReturn(Optional.of(new DomainRuleSnapshotStoredResponse(envelope17, HASH)));
+    when(statusRepository.findByTenantIdAndEnvironmentAndRuleSetKeyAndOperationKey("tenant-a", "dev", "benefit.eligibility", "evaluate"))
+        .thenReturn(List.of(status(true, "snap-2", HASH, 7L, true, NOW.minusSeconds(10))));
+
+    var summary = service.summarizeHead("benefit.eligibility", "evaluate", principal);
+    assertThat(summary.alignedHosts()).isEqualTo(1);
+    assertThat(summary.incompatibleHosts()).isEqualTo(0);
+  }
+
   private DomainRuleHostStatus status(
       boolean ready, String snapshotKey, String hash, Long revision,
       boolean compatible, Instant observedAt) {

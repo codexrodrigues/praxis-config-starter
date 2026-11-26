@@ -98,6 +98,53 @@ class DomainRuleParametersTest {
     assertThatThrownBy(() -> DomainRuleParameters.composition(mapper, set, List.of(source)))
         .hasMessageContaining("approved source template and values");
   }
+
+  @Test void projectsContract18MetadataAndInvariantsIntoParameterCatalogAndOmitsWhenAbsent() throws Exception {
+    var emptyCatalog = DomainRuleParameters.catalog(mapper, response(mapper.createObjectNode()));
+    assertThat(emptyCatalog.invariants()).isEmpty();
+    assertThat(emptyCatalog.parameters().getFirst().metadata()).isNull();
+    var serializedEmpty = mapper.valueToTree(emptyCatalog);
+    assertThat(serializedEmpty.has("invariants")).isFalse();
+    assertThat(serializedEmpty.at("/parameters/0").has("metadata")).isFalse();
+
+    RuleParameterTemplate richTemplate = new RuleParameterTemplate(
+        "test:bounded-range",
+        "1.0",
+        RuleExecutorRef.jsonLogic(mapper.readTree(
+            "{\"and\":[{\"<=\":[{\"var\":\"request.days\"},60]},{\">=\":[{\"var\":\"request.days\"},1]}]}")),
+        RuleDecision.DENY,
+        "LIMIT",
+        List.of("request.days"),
+        List.of(
+            new RuleParameterDefinition(
+                "minDays", RuleParameterType.INTEGER, true, false, false, "days",
+                IntNode.valueOf(1), BigDecimal.ZERO, BigDecimal.valueOf(100), List.of(),
+                List.of("/and/1/>=/1"),
+                new RuleParameterMetadata("Mínimo", "Dias mínimos", "Lei 8.112", "limites", 1)),
+            new RuleParameterDefinition(
+                "maxDays", RuleParameterType.INTEGER, true, false, false, "days",
+                IntNode.valueOf(60), BigDecimal.ONE, BigDecimal.valueOf(365), List.of(),
+                List.of("/and/0/<=/1"),
+                new RuleParameterMetadata("Máximo", "Dias máximos", "Lei 8.112", "limites", 2))),
+        List.of(RuleParameterInvariant.lte("MIN_LTE_MAX", "minDays <= maxDays", "minDays", "maxDays")));
+    ObjectNode richDefinition = mapper.createObjectNode().set("parameterTemplate", mapper.valueToTree(richTemplate));
+    var richResponse = new DomainRuleDefinitionResponse(UUID.randomUUID(), "tenant", "dev", "limit", 1,
+        "business", "draft", null, null, null, null, null, null, null, richDefinition,
+        mapper.createObjectNode().set("parameterValues", mapper.createObjectNode()),
+        null, null, null, "authenticated", "author", null, null, null, null, null);
+
+    var richCatalog = DomainRuleParameters.catalog(mapper, richResponse);
+    assertThat(richCatalog.invariants()).hasSize(1);
+    assertThat(richCatalog.invariants().getFirst().code()).isEqualTo("MIN_LTE_MAX");
+    assertThat(richCatalog.parameters().get(0).metadata()).isNotNull();
+    assertThat(richCatalog.parameters().get(0).metadata().legalBasis()).isEqualTo("Lei 8.112");
+    assertThat(richCatalog.parameters().get(0).metadata().group()).isEqualTo("limites");
+    var serializedRich = mapper.valueToTree(richCatalog);
+    assertThat(serializedRich.at("/invariants/0/code").asText()).isEqualTo("MIN_LTE_MAX");
+    assertThat(serializedRich.at("/parameters/0/metadata/label").asText()).isEqualTo("Mínimo");
+    assertThat(serializedRich.at("/parameters/0/metadata").has("empty")).isFalse();
+  }
+
   private DomainRuleDefinitionResponse response(JsonNode parameters) throws Exception {
     return new DomainRuleDefinitionResponse(UUID.randomUUID(), "tenant", "dev", "limit", 1,
         "business", "draft", null, null, null, null, null, null, null, definition(mapper),

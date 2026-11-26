@@ -83,11 +83,12 @@ final class DomainRuleParameters {
           parameter.name(), parameter.type(), parameter.required(), parameter.nullable(), parameter.readOnly(),
           parameter.unit(), parameter.defaultValue(), parameter.minimum(), parameter.maximum(),
           parameter.allowedValues(), declared.get(parameter.name()), resolved.effectiveValues().get(parameter.name()),
-          resolved.origins().get(parameter.name()))).toList();
+          resolved.origins().get(parameter.name()), parameter.metadata())).toList();
     }
     return new DomainRuleParameterCatalogResponse(definition.id(), definition.ruleKey(), definition.version(),
         "praxis.domain-rule-parameter-catalog.v1", template == null ? null : template.templateKey(),
-        template == null ? null : template.templateVersion(), descriptors);
+        template == null ? null : template.templateVersion(), descriptors,
+        template == null ? List.of() : template.invariants());
   }
 
   static void composition(ObjectMapper mapper, RuleSetDefinition ruleSet,

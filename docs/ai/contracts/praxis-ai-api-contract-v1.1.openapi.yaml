@@ -4496,6 +4496,25 @@ components:
           type: array
           maxItems: 128
           items: {$ref: '#/components/schemas/DomainRuleParameterDescriptor'}
+        invariants:
+          type: array
+          maxItems: 64
+          items:
+            type: object
+            required: [code, message, condition]
+            additionalProperties: false
+            properties:
+              code: {type: string}
+              message: {type: string}
+              condition:
+                type: object
+                required: [type, expression]
+                additionalProperties: false
+                properties:
+                  type: {type: string, enum: [JSON_LOGIC]}
+                  implementationKey: {type: string, nullable: true}
+                  implementationVersion: {type: string}
+                  expression: {type: object, additionalProperties: true}
 
     DomainRuleParameterDescriptor:
       type: object
@@ -4523,6 +4542,16 @@ components:
           description: Native scalar resolved by the Engine; validated against type and nullable.
           nullable: true
         origin: {type: string, enum: [DECLARED, DEFAULT]}
+        metadata:
+          type: object
+          nullable: true
+          additionalProperties: false
+          properties:
+            label: {type: string, nullable: true}
+            description: {type: string, nullable: true}
+            legalBasis: {type: string, nullable: true}
+            group: {type: string, nullable: true}
+            displayOrder: {type: integer, nullable: true}
 
     DomainRuleFactCatalogResponse:
       type: object
