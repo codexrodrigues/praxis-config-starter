@@ -4586,6 +4586,89 @@ class AgenticAuthoringEffectCompilerRegistryTest {
         assertThat(registry.nodeAtResolvedPath(dollarDotConfig, "$.meta.title").asText()).isEqualTo("Old");
     }
 
+    @Test
+    void shouldPreservePacote1UncertaintyPrimitivesAndInferenceOptionsInChartCompilers() throws Exception {
+        ObjectNode proposedConfig = (ObjectNode) objectMapper.readTree("""
+                {
+                  "chartDocument": {
+                    "version": "0.1.0",
+                    "kind": "line",
+                    "source": { "kind": "derived" },
+                    "dimensions": [{ "field": "groupKey" }],
+                    "metrics": []
+                  }
+                }
+                """);
+        ArrayNode patchOperations = objectMapper.createArrayNode();
+        List<String> failures = new ArrayList<>();
+
+        registry.appendCompiledEffects(
+                "praxis-chart",
+                operationWithHandler("data.resource.bind", "dataBinding", "x-ui-chart-source-and-field-catalog", false,
+                        "compile-domain-patch", "chart-data-resource-bind",
+                        "chartDocument.source", "chartDocument.source.options",
+                        "chartDocument.dimensions[]", "chartDocument.metrics[]"),
+                plan("{}", """
+                        {
+                          "sourceKind": "praxis.stats",
+                          "resource": "/api/workforce/assignments",
+                          "operation": "inference",
+                          "options": {
+                            "tests": ["WILCOXON_SIGNED_RANK"],
+                            "groupByField": "unitName",
+                            "alpha": 0.05,
+                            "materialityThreshold": 0.1
+                          },
+                          "dimensions": [{ "field": "groupKey" }]
+                        }
+                        """),
+                proposedConfig,
+                patchOperations,
+                failures,
+                new ArrayList<>());
+
+        registry.appendCompiledEffects(
+                "praxis-chart",
+                operationWithHandler("series.add", "series", "x-ui-chart-metric-by-field", false,
+                        "compile-domain-patch", "chart-series-add", "chartDocument.metrics[]"),
+                plan("{}", """
+                        {
+                          "field": "effectSize",
+                          "sourceField": "salary",
+                          "aggregation": "avg",
+                          "lineStyle": "dashed",
+                          "step": "end",
+                          "connectNulls": false,
+                          "confidenceBands": [
+                            { "lowerField": "p10", "upperField": "p90", "level": 0.8, "tone": "info", "opacity": 0.16 }
+                          ],
+                          "errorBar": { "lowField": "ciLow", "highField": "ciHigh", "level": 0.95, "capWidth": 10, "lineWidth": 1.5, "tone": "info" }
+                        }
+                        """),
+                proposedConfig,
+                patchOperations,
+                failures,
+                new ArrayList<>());
+
+        assertThat(failures).isEmpty();
+        assertThat(patchOperations).hasSize(2);
+        JsonNode options = proposedConfig.path("chartDocument").path("source").path("options");
+        assertThat(options.path("tests").get(0).asText()).isEqualTo("WILCOXON_SIGNED_RANK");
+        assertThat(options.path("groupByField").asText()).isEqualTo("unitName");
+        assertThat(options.path("alpha").asDouble()).isEqualTo(0.05d);
+        assertThat(options.path("materialityThreshold").asDouble()).isEqualTo(0.1d);
+
+        JsonNode addedMetric = proposedConfig.path("chartDocument").path("metrics").get(0);
+        assertThat(addedMetric.path("sourceField").asText()).isEqualTo("salary");
+        assertThat(addedMetric.path("lineStyle").asText()).isEqualTo("dashed");
+        assertThat(addedMetric.path("step").asText()).isEqualTo("end");
+        assertThat(addedMetric.path("connectNulls").asBoolean()).isFalse();
+        assertThat(addedMetric.path("confidenceBands").get(0).path("lowerField").asText()).isEqualTo("p10");
+        assertThat(addedMetric.path("confidenceBands").get(0).path("upperField").asText()).isEqualTo("p90");
+        assertThat(addedMetric.path("errorBar").path("lowField").asText()).isEqualTo("ciLow");
+        assertThat(addedMetric.path("errorBar").path("highField").asText()).isEqualTo("ciHigh");
+    }
+
     private JsonNode operation(
             String operationId,
             String targetKind,

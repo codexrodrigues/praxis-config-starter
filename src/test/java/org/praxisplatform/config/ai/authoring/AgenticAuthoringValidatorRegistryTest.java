@@ -2732,6 +2732,115 @@ class AgenticAuthoringValidatorRegistryTest {
                 "validator calendar-range-valid failed for calendar.range.set: calendar.range must be a 'YYYY' | 'YYYY-MM' | 'YYYY-S1' | 'YYYY-S2' | 'YYYY-H1' | 'YYYY-H2' string or [start, end] tuple");
     }
 
+    @Test
+    void shouldValidateInferenceAnomaliesOperationsAndPacote1UncertaintyConstraints() throws Exception {
+        JsonNode inferenceConfig = objectMapper.readTree("""
+                {
+                  "apiMetadata": {
+                    "resources": [
+                      {
+                        "path": "/api/workforce/assignments",
+                        "canonicalOperations": {
+                          "groupBy": true,
+                          "inference": true,
+                          "anomalies": true
+                        }
+                      }
+                    ]
+                  },
+                  "availableFields": [
+                    { "field": "unitName", "roles": ["dimension"] },
+                    { "field": "salary", "roles": ["metric"], "aggregations": ["avg", "sum"] }
+                  ],
+                  "chartDocument": {
+                    "version": "0.1.0",
+                    "kind": "line",
+                    "source": { "kind": "praxis.stats", "resource": "/api/workforce/assignments", "operation": "inference" },
+                    "dimensions": [{ "field": "groupKey" }],
+                    "metrics": []
+                  }
+                }
+                """);
+
+        List<String> validFailures = new ArrayList<>();
+        registry.executeOperationValidators(
+                "praxis-chart",
+                operation("data.resource.bind", "dataBinding", "x-ui-chart-source-and-field-catalog", false,
+                        "remote-resource-in-api-metadata,stats-operation-supported,bound-fields-exist"),
+                plan("{}", """
+                        {
+                          "sourceKind": "praxis.stats",
+                          "resource": "/api/workforce/assignments",
+                          "operation": "inference",
+                          "dimensions": [{ "field": "groupKey" }],
+                          "metrics": [{ "field": "effectSize", "aggregation": "avg" }]
+                        }
+                        """),
+                inferenceConfig,
+                validFailures,
+                new ArrayList<>());
+        registry.executeOperationValidators(
+                "praxis-chart",
+                operation("series.add", "series", "x-ui-chart-metric-by-field", false,
+                        "series-field-exists,series-field-aggregable,chart-type-series-axis-compatible"),
+                plan("{}", """
+                        {
+                          "field": "effectSize",
+                          "aggregation": "avg",
+                          "lineStyle": "dashed",
+                          "step": "end",
+                          "confidenceBands": [{ "lowerField": "ciLow", "upperField": "ciHigh", "level": 0.95, "opacity": 0.2, "tone": "info" }],
+                          "errorBar": { "lowField": "ciLow", "highField": "ciHigh", "level": 0.95, "capWidth": 10, "lineWidth": 1.5, "tone": "info" }
+                        }
+                        """),
+                inferenceConfig,
+                validFailures,
+                new ArrayList<>());
+        assertThat(validFailures).isEmpty();
+
+        JsonNode stackedAreaConfig = objectMapper.readTree("""
+                {
+                  "chartDocument": {
+                    "version": "0.1.0",
+                    "kind": "stacked-area",
+                    "source": { "kind": "derived" },
+                    "dimensions": [{ "field": "month" }],
+                    "metrics": [{ "field": "cost" }]
+                  }
+                }
+                """);
+        List<String> stackedFailures = new ArrayList<>();
+        registry.executeOperationValidators(
+                "praxis-chart",
+                operation("series.add", "series", "x-ui-chart-metric-by-field", false,
+                        "chart-type-series-axis-compatible"),
+                plan("{}", """
+                        {
+                          "field": "projectedCost",
+                          "confidenceBands": [
+                            { "lowerField": "a", "upperField": "a", "level": 1.0, "opacity": 0.9, "tone": "bogus" },
+                            { "lowerField": "b1", "upperField": "u1" },
+                            { "lowerField": "b2", "upperField": "u2" },
+                            { "lowerField": "b3", "upperField": "u3" }
+                          ],
+                          "errorBar": { "lowField": "ciLow", "highField": "ciLow", "capWidth": 2, "lineWidth": 8 }
+                        }
+                        """),
+                stackedAreaConfig,
+                stackedFailures,
+                new ArrayList<>());
+        assertThat(stackedFailures).anyMatch(msg -> msg.contains("confidenceBands is only supported on line, area"));
+        assertThat(stackedFailures).anyMatch(msg -> msg.contains("supports at most 3 bands"));
+        assertThat(stackedFailures).anyMatch(msg -> msg.contains("lowerField and upperField must be distinct"));
+        assertThat(stackedFailures).anyMatch(msg -> msg.contains("level must be strictly between 0 and 1"));
+        assertThat(stackedFailures).anyMatch(msg -> msg.contains("opacity must be between 0.05 and 0.6"));
+        assertThat(stackedFailures).anyMatch(msg -> msg.contains("tone unsupported value bogus"));
+        assertThat(stackedFailures).anyMatch(msg -> msg.contains("errorBar is only supported on bar, horizontal-bar, line, scatter"));
+        assertThat(stackedFailures).anyMatch(msg -> msg.contains("lowField and highField must be distinct"));
+        assertThat(stackedFailures).anyMatch(msg -> msg.contains("capWidth must be between 4 and 24"));
+        assertThat(stackedFailures).anyMatch(msg -> msg.contains("lineWidth must be between 1 and 4"));
+    }
+
     private JsonNode operationWithSchema(String inputSchemaJson) throws Exception {
         return objectMapper.readTree("""
                 {

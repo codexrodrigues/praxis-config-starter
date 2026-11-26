@@ -22,6 +22,33 @@ import org.springframework.scheduling.support.CronExpression;
 
 public final class AgenticAuthoringEffectCompilerRegistry {
 
+    private static final List<String> CHART_SOURCE_OPTION_KEYS = List.of(
+            "limit",
+            "comparisonPeriod",
+            "timezone",
+            "periodField",
+            "periodPreset",
+            "fillGaps",
+            "granularity",
+            "from",
+            "to",
+            "tests",
+            "groupByField",
+            "expectedField",
+            "observedField",
+            "residualField",
+            "variableOrRetroactiveEligible",
+            "methods",
+            "alpha",
+            "materialityThreshold",
+            "madThreshold",
+            "minCohortSize",
+            "minGroupSize",
+            "enableBenford",
+            "minBenfordSamples",
+            "minBucketCount",
+            "maxFindings");
+
     private final ObjectMapper objectMapper;
     private final AgenticAuthoringTargetResolverRegistry targetResolverRegistry;
     private final AgenticAuthoringUiCompositionPlanCompiler uiCompositionPlanCompiler;
@@ -6058,12 +6085,18 @@ public final class AgenticAuthoringEffectCompilerRegistry {
 
         ObjectNode metric = objectMapper.createObjectNode();
         metric.put("field", field);
-        copyIfPresent(input, metric, "label");
-        copyIfPresent(input, metric, "aggregation");
-        copyIfPresent(input, metric, "seriesKind");
-        copyIfPresent(input, metric, "axis");
-        copyIfPresent(input, metric, "color");
-        copyIfPresent(input, metric, "format");
+        copyIfPresent(input, metric, "sourceField", "sourceField");
+        copyIfPresent(input, metric, "label", "label");
+        copyIfPresent(input, metric, "aggregation", "aggregation");
+        copyIfPresent(input, metric, "seriesKind", "seriesKind");
+        copyIfPresent(input, metric, "axis", "axis");
+        copyIfPresent(input, metric, "color", "color");
+        copyIfPresent(input, metric, "format", "format");
+        copyIfPresent(input, metric, "lineStyle", "lineStyle");
+        copyIfPresent(input, metric, "step", "step");
+        copyIfPresent(input, metric, "connectNulls", "connectNulls");
+        copyIfPresent(input, metric, "confidenceBands", "confidenceBands");
+        copyIfPresent(input, metric, "errorBar", "errorBar");
 
         int insertedIndex = metrics.size();
         String afterField = text(input, "afterField");
@@ -6185,28 +6218,30 @@ public final class AgenticAuthoringEffectCompilerRegistry {
         source.put("kind", sourceKind);
         copyIfPresent(input, source, "resource");
         copyIfPresent(input, source, "operation");
-        ObjectNode sourceOptions = null;
-        if (input.has("limit")) {
-            sourceOptions = source.putObject("options");
-            sourceOptions.set("limit", input.path("limit").deepCopy());
-        }
-        if (input.has("comparisonPeriod")) {
-            if (sourceOptions == null) {
-                sourceOptions = source.putObject("options");
+        ObjectNode sourceOptions = objectMapper.createObjectNode();
+        JsonNode nestedOptions = input.path("options");
+        if (nestedOptions.isObject()) {
+            for (String optionKey : CHART_SOURCE_OPTION_KEYS) {
+                if (nestedOptions.has(optionKey) && !nestedOptions.path(optionKey).isNull()) {
+                    sourceOptions.set(optionKey, nestedOptions.path(optionKey).deepCopy());
+                }
             }
-            sourceOptions.set("comparisonPeriod", input.path("comparisonPeriod").deepCopy());
+        }
+        for (String optionKey : CHART_SOURCE_OPTION_KEYS) {
+            if (input.has(optionKey) && !input.path(optionKey).isNull()) {
+                sourceOptions.set(optionKey, input.path(optionKey).deepCopy());
+            }
+        }
+        if (!sourceOptions.isEmpty()) {
+            source.set("options", sourceOptions);
         }
 
         ObjectNode compiled = baseDomainPatch(componentId, operation, effect, planOperation, null);
         compiled.put("op", "bind-chart-data-resource");
         compiled.put("path", "chartDocument");
         addWriteDelta(compiled, "chartDocument.source", source);
-        if (input.has("limit")) {
-            addWriteDelta(compiled, "chartDocument.source.options.limit", input.path("limit"));
-        }
-        if (input.has("comparisonPeriod")) {
-            addWriteDelta(compiled, "chartDocument.source.options.comparisonPeriod", input.path("comparisonPeriod"));
-        }
+        sourceOptions.fields().forEachRemaining(entry ->
+                addWriteDelta(compiled, "chartDocument.source.options." + entry.getKey(), entry.getValue()));
         if (input.path("dimensions").isArray()) {
             addWriteDelta(compiled, "chartDocument.dimensions[]", input.path("dimensions"));
         }

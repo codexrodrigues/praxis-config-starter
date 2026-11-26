@@ -4041,6 +4041,206 @@ public final class AgenticAuthoringValidatorRegistry {
                         + ": scatter charts require one or two metrics");
             }
         }
+        validateChartMetricStatisticalOptions(operationId, kind, planOperation, config, failures);
+    }
+
+    private static final Set<String> CHART_LINE_STYLE_KINDS = Set.of("line", "area", "stacked-area");
+    private static final Set<String> CHART_CONFIDENCE_BAND_KINDS = Set.of("line", "area");
+    private static final Set<String> CHART_ERROR_BAR_KINDS = Set.of("bar", "horizontal-bar", "line", "scatter");
+    private static final Set<String> CHART_SEMANTIC_TONES = Set.of(
+            "neutral", "info", "success", "warning", "danger", "critical");
+    private static final Set<String> CHART_SYNTHETIC_INFERENCE_FIELDS = Set.of(
+            "groupKey", "effectSize", "ciLow", "ciHigh", "pValue", "qValueFdr",
+            "aggregateImpact", "sampleSize", "controlSampleSize", "treatmentSampleSize");
+    private static final Set<String> CHART_SYNTHETIC_ANOMALIES_FIELDS = Set.of(
+            "findingId", "cohortKey", "opaqueEntityKey", "method", "severity",
+            "observedValue", "expectedValue", "residualValue", "robustScore",
+            "financialImpact", "zScore", "pValue", "qValueFdr");
+
+    private void validateChartMetricStatisticalOptions(
+            String operationId,
+            String kind,
+            JsonNode planOperation,
+            JsonNode config,
+            List<String> failures) {
+        String effectiveDocKind = kind;
+        if (effectiveDocKind == null || effectiveDocKind.isBlank()) {
+            effectiveDocKind = text(config.path("chartDocument"), "kind");
+        }
+        List<JsonNode> metricCandidates = new ArrayList<>();
+        JsonNode metrics = chartMetricsCandidate(planOperation, config);
+        if (metrics.isArray()) {
+            metrics.forEach(metricCandidates::add);
+        }
+        if ("series.add".equals(operationId)) {
+            JsonNode input = planOperation.path("input");
+            if (input.isObject() && !text(input, "field").isBlank()) {
+                metricCandidates.add(input);
+            }
+        }
+        for (int index = 0; index < metricCandidates.size(); index++) {
+            JsonNode metric = metricCandidates.get(index);
+            if (!metric.isObject()) {
+                continue;
+            }
+            String effectiveKind = "combo".equals(effectiveDocKind)
+                    ? firstNonBlank(text(metric, "seriesKind"), index == 0 ? "bar" : "line")
+                    : effectiveDocKind;
+
+            if (metric.has("lineStyle") && !metric.path("lineStyle").isNull()) {
+                String lineStyle = text(metric, "lineStyle");
+                if (!Set.of("solid", "dashed", "dotted").contains(lineStyle)) {
+                    failures.add("validator chart-type-series-axis-compatible failed for " + operationId
+                            + ": metrics[" + index + "].lineStyle must be solid, dashed or dotted");
+                } else if (!CHART_LINE_STYLE_KINDS.contains(effectiveKind)) {
+                    failures.add("validator chart-type-series-axis-compatible failed for " + operationId
+                            + ": metrics[" + index + "].lineStyle is only supported on line, area or line/area combo series (not "
+                            + effectiveKind + ")");
+                }
+            }
+
+            if (metric.has("step") && !metric.path("step").isNull()) {
+                JsonNode stepNode = metric.path("step");
+                if (stepNode.isBoolean()) {
+                    if (stepNode.asBoolean()) {
+                        failures.add("validator chart-type-series-axis-compatible failed for " + operationId
+                                + ": metrics[" + index + "].step must be false, start, middle or end");
+                    }
+                } else if (stepNode.isTextual()) {
+                    String step = stepNode.asText("");
+                    if (!Set.of("start", "middle", "end").contains(step)) {
+                        failures.add("validator chart-type-series-axis-compatible failed for " + operationId
+                                + ": metrics[" + index + "].step must be false, start, middle or end");
+                    } else if (!CHART_LINE_STYLE_KINDS.contains(effectiveKind)) {
+                        failures.add("validator chart-type-series-axis-compatible failed for " + operationId
+                                + ": metrics[" + index + "].step is only supported on line, area or line/area combo series (not "
+                                + effectiveKind + ")");
+                    }
+                } else {
+                    failures.add("validator chart-type-series-axis-compatible failed for " + operationId
+                            + ": metrics[" + index + "].step must be false, start, middle or end");
+                }
+            }
+
+            if (metric.has("connectNulls") && !metric.path("connectNulls").isNull()) {
+                JsonNode connectNode = metric.path("connectNulls");
+                if (!connectNode.isBoolean()) {
+                    failures.add("validator chart-type-series-axis-compatible failed for " + operationId
+                            + ": metrics[" + index + "].connectNulls must be a boolean");
+                } else if (connectNode.asBoolean(false) && !CHART_LINE_STYLE_KINDS.contains(effectiveKind)) {
+                    failures.add("validator chart-type-series-axis-compatible failed for " + operationId
+                            + ": metrics[" + index + "].connectNulls is only supported on line, area or line/area combo series (not "
+                            + effectiveKind + ")");
+                }
+            }
+
+            if (metric.has("confidenceBands") && !metric.path("confidenceBands").isNull()) {
+                JsonNode bandsNode = metric.path("confidenceBands");
+                if (!bandsNode.isArray()) {
+                    failures.add("validator chart-type-series-axis-compatible failed for " + operationId
+                            + ": metrics[" + index + "].confidenceBands must be an array");
+                } else {
+                    if (!bandsNode.isEmpty() && !CHART_CONFIDENCE_BAND_KINDS.contains(effectiveKind)) {
+                        failures.add("validator chart-type-series-axis-compatible failed for " + operationId
+                                + ": metrics[" + index + "].confidenceBands is only supported on line, area or line/area combo series (not "
+                                + effectiveKind + ")");
+                    }
+                    if (bandsNode.size() > 3) {
+                        failures.add("validator chart-type-series-axis-compatible failed for " + operationId
+                                + ": metrics[" + index + "].confidenceBands supports at most 3 bands per metric");
+                    }
+                    for (int bIdx = 0; bIdx < bandsNode.size(); bIdx++) {
+                        JsonNode band = bandsNode.get(bIdx);
+                        String lowerField = text(band, "lowerField").trim();
+                        String upperField = text(band, "upperField").trim();
+                        if (lowerField.isBlank() || upperField.isBlank()) {
+                            failures.add("validator chart-type-series-axis-compatible failed for " + operationId
+                                    + ": metrics[" + index + "].confidenceBands[" + bIdx
+                                    + "] requires non-empty lowerField and upperField");
+                        } else if (lowerField.equals(upperField)) {
+                            failures.add("validator chart-type-series-axis-compatible failed for " + operationId
+                                    + ": metrics[" + index + "].confidenceBands[" + bIdx
+                                    + "] lowerField and upperField must be distinct");
+                        }
+                        if (band.has("level") && !band.path("level").isNull()) {
+                            JsonNode level = band.path("level");
+                            if (!isFiniteNumber(level) || level.asDouble() <= 0d || level.asDouble() >= 1d) {
+                                failures.add("validator chart-type-series-axis-compatible failed for " + operationId
+                                        + ": metrics[" + index + "].confidenceBands[" + bIdx
+                                        + "].level must be strictly between 0 and 1");
+                            }
+                        }
+                        if (band.has("opacity") && !band.path("opacity").isNull()) {
+                            JsonNode opacity = band.path("opacity");
+                            if (!isFiniteNumber(opacity) || opacity.asDouble() < 0.05d || opacity.asDouble() > 0.6d) {
+                                failures.add("validator chart-type-series-axis-compatible failed for " + operationId
+                                        + ": metrics[" + index + "].confidenceBands[" + bIdx
+                                        + "].opacity must be between 0.05 and 0.6");
+                            }
+                        }
+                        if (band.has("tone") && !band.path("tone").isNull()) {
+                            String tone = text(band, "tone").trim().toLowerCase(Locale.ROOT);
+                            if (!CHART_SEMANTIC_TONES.contains(tone)) {
+                                failures.add("validator chart-type-series-axis-compatible failed for " + operationId
+                                        + ": metrics[" + index + "].confidenceBands[" + bIdx
+                                        + "].tone unsupported value " + text(band, "tone"));
+                            }
+                        }
+                    }
+                }
+            }
+
+            if (metric.has("errorBar") && !metric.path("errorBar").isNull()) {
+                JsonNode errorBar = metric.path("errorBar");
+                if (!errorBar.isObject()) {
+                    failures.add("validator chart-type-series-axis-compatible failed for " + operationId
+                            + ": metrics[" + index + "].errorBar must be an object");
+                } else {
+                    if (!CHART_ERROR_BAR_KINDS.contains(effectiveKind)) {
+                        failures.add("validator chart-type-series-axis-compatible failed for " + operationId
+                                + ": metrics[" + index + "].errorBar is only supported on bar, horizontal-bar, line, scatter or bar/line combo series (not "
+                                + effectiveKind + ")");
+                    }
+                    String lowField = text(errorBar, "lowField").trim();
+                    String highField = text(errorBar, "highField").trim();
+                    if (lowField.isBlank() || highField.isBlank()) {
+                        failures.add("validator chart-type-series-axis-compatible failed for " + operationId
+                                + ": metrics[" + index + "].errorBar requires non-empty lowField and highField");
+                    } else if (lowField.equals(highField)) {
+                        failures.add("validator chart-type-series-axis-compatible failed for " + operationId
+                                + ": metrics[" + index + "].errorBar lowField and highField must be distinct");
+                    }
+                    if (errorBar.has("level") && !errorBar.path("level").isNull()) {
+                        JsonNode level = errorBar.path("level");
+                        if (!isFiniteNumber(level) || level.asDouble() <= 0d || level.asDouble() >= 1d) {
+                            failures.add("validator chart-type-series-axis-compatible failed for " + operationId
+                                    + ": metrics[" + index + "].errorBar.level must be strictly between 0 and 1");
+                        }
+                    }
+                    if (errorBar.has("capWidth") && !errorBar.path("capWidth").isNull()) {
+                        JsonNode capWidth = errorBar.path("capWidth");
+                        if (!isFiniteNumber(capWidth) || capWidth.asDouble() < 4d || capWidth.asDouble() > 24d) {
+                            failures.add("validator chart-type-series-axis-compatible failed for " + operationId
+                                    + ": metrics[" + index + "].errorBar.capWidth must be between 4 and 24");
+                        }
+                    }
+                    if (errorBar.has("lineWidth") && !errorBar.path("lineWidth").isNull()) {
+                        JsonNode lineWidth = errorBar.path("lineWidth");
+                        if (!isFiniteNumber(lineWidth) || lineWidth.asDouble() < 1d || lineWidth.asDouble() > 4d) {
+                            failures.add("validator chart-type-series-axis-compatible failed for " + operationId
+                                    + ": metrics[" + index + "].errorBar.lineWidth must be between 1 and 4");
+                        }
+                    }
+                    if (errorBar.has("tone") && !errorBar.path("tone").isNull()) {
+                        String tone = text(errorBar, "tone").trim().toLowerCase(Locale.ROOT);
+                        if (!CHART_SEMANTIC_TONES.contains(tone)) {
+                            failures.add("validator chart-type-series-axis-compatible failed for " + operationId
+                                    + ": metrics[" + index + "].errorBar.tone unsupported value " + text(errorBar, "tone"));
+                        }
+                    }
+                }
+            }
+        }
     }
 
     private void validateChartCategorySliceSingleMetric(
@@ -4630,17 +4830,47 @@ public final class AgenticAuthoringValidatorRegistry {
         return value != null && value.isNumber() && Double.isFinite(value.asDouble());
     }
 
+    private String resolveChartStatsOperation(JsonNode planOperation, JsonNode config) {
+        JsonNode input = planOperation.path("input");
+        return firstNonBlank(
+                text(input, "operation"),
+                text(input.path("source"), "operation"),
+                text(config.path("chartDocument").path("source"), "operation"));
+    }
+
+    private boolean isSyntheticChartOutputField(String field, String statsOperation) {
+        if (field == null || field.isBlank()) {
+            return false;
+        }
+        if ("inference".equals(statsOperation)) {
+            return CHART_SYNTHETIC_INFERENCE_FIELDS.contains(field);
+        }
+        if ("anomalies".equals(statsOperation)) {
+            return CHART_SYNTHETIC_ANOMALIES_FIELDS.contains(field);
+        }
+        return false;
+    }
+
     private void validateChartInputFieldsExist(
             String operationId,
             JsonNode planOperation,
             JsonNode config,
             List<String> failures) {
         Set<String> known = chartKnownFields(config);
+        boolean catalogAvailable = !known.isEmpty();
+        String statsOperation = resolveChartStatsOperation(planOperation, config);
+        if (catalogAvailable) {
+            if ("inference".equals(statsOperation)) {
+                known.addAll(CHART_SYNTHETIC_INFERENCE_FIELDS);
+            } else if ("anomalies".equals(statsOperation)) {
+                known.addAll(CHART_SYNTHETIC_ANOMALIES_FIELDS);
+            }
+        }
         for (String field : chartInputFields(planOperation.path("input"))) {
             if (field.isBlank()) {
                 continue;
             }
-            if (known.isEmpty()) {
+            if (!catalogAvailable) {
                 failures.add("validator chart-fields-exist failed for " + operationId
                         + ": required field catalog is unavailable");
                 return;
@@ -4719,8 +4949,10 @@ public final class AgenticAuthoringValidatorRegistry {
             return;
         }
         String kind = chartKind(planOperation, config);
+        String statsOperation = resolveChartStatsOperation(planOperation, config);
+        boolean syntheticField = isSyntheticChartOutputField(field, statsOperation);
         JsonNode fieldDescriptor = chartFieldDescriptor(config, field);
-        if (!field.isBlank() && fieldDescriptor.isMissingNode() && !chartKnownFields(config).isEmpty()) {
+        if (!field.isBlank() && !syntheticField && fieldDescriptor.isMissingNode() && !chartKnownFields(config).isEmpty()) {
             failures.add("validator series-field-aggregable failed for " + operationId
                     + ": field is not available for stats aggregation " + field);
         }
@@ -4848,7 +5080,7 @@ public final class AgenticAuthoringValidatorRegistry {
                     + ": stats operation is required");
             return;
         }
-        if (!Set.of("group-by", "timeseries", "distribution", "comparison").contains(operation)) {
+        if (!Set.of("group-by", "timeseries", "distribution", "comparison", "inference", "anomalies").contains(operation)) {
             failures.add("validator stats-operation-supported failed for " + operationId
                     + ": unsupported stats operation " + operation);
             return;
@@ -5482,6 +5714,12 @@ public final class AgenticAuthoringValidatorRegistry {
         }
         if (node.path("comparison").asBoolean(false) || node.path("statsComparison").asBoolean(false)) {
             operations.add("comparison");
+        }
+        if (node.path("inference").asBoolean(false) || node.path("statsInference").asBoolean(false)) {
+            operations.add("inference");
+        }
+        if (node.path("anomalies").asBoolean(false) || node.path("statsAnomalies").asBoolean(false)) {
+            operations.add("anomalies");
         }
     }
 
