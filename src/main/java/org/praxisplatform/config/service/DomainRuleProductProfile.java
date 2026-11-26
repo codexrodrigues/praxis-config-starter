@@ -22,8 +22,20 @@ public record DomainRuleProductProfile(String ownerServiceKey, String hostContra
     return ruleSet.ref().sameIdentity(candidate.ref()) && ruleSet.availableRoots().equals(candidate.availableRoots())
         && sameEntries(ruleSet.slots(),candidate.slots(),DecisionSlot::slotKey)
         && sameEntries(ruleSet.bindings(),candidate.bindings(),DecisionBinding::bindingKey)
-        && ruleSet.compatibility().equals(candidate.compatibility()) && ruleSet.failPolicy()==candidate.failPolicy()
+        && compatibleBaseline(ruleSet.compatibility(), candidate.compatibility())
+        && ruleSet.failPolicy()==candidate.failPolicy()
         && ruleSet.errorDescriptors().equals(candidate.errorDescriptors());
+  }
+
+  private static boolean compatibleBaseline(
+      RuleRuntimeCompatibility registered, RuleRuntimeCompatibility candidate) {
+    if (registered.equals(candidate)) {
+      return true;
+    }
+    return RuleRuntimeCompatibility.isSupported(registered)
+        && RuleRuntimeCompatibility.isSupported(candidate)
+        && registered.jsonLogicDialectVersion().equals(candidate.jsonLogicDialectVersion())
+        && registered.jsonLogicCorpusSha256().equals(candidate.jsonLogicCorpusSha256());
   }
   private static final ObjectMapper CANONICAL_MAPPER = new ObjectMapper();
 

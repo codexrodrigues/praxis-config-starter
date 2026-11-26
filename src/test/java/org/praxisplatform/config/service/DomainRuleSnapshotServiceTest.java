@@ -1165,6 +1165,33 @@ class DomainRuleSnapshotServiceTest {
         new RuleRuntimeCompatibility(current.engineContractVersion(), current.jsonLogicDialectVersion(), "A".repeat(64)));
   }
 
+  @Test
+  void acceptsSupportedOnePointSevenSnapshotUnderOnePointEightRuntime() throws Exception {
+    RuleRuntimeCompatibility compat17 = new RuleRuntimeCompatibility(
+        "1.7",
+        RuleRuntimeCompatibility.JSON_LOGIC_DIALECT_VERSION,
+        RuleRuntimeCompatibility.JSON_LOGIC_CORPUS_SHA256);
+    PublishedRuleSnapshot legacySupported = withCompatibility(publishedSnapshot(), compat17);
+    DomainRuleSnapshot stored = storedSnapshot(legacySupported);
+    stubSelectedSnapshot(stored);
+
+    var status = service.findHeadStatus("tenant-a", "prod", "extraordinary-grant", "evaluate").orElseThrow();
+    assertThat(status.governanceState()).isEqualTo("READY");
+    assertThat(status.executionReady()).isTrue();
+
+    DomainRuleProductProfile profile17 = new DomainRuleProductProfile(
+        "quickstart", "quickstart/1.0", legacySupported.ruleSet());
+    RuleSetDefinition upgradedTo18 = new RuleSetDefinition(
+        legacySupported.ruleSet().ref(),
+        legacySupported.ruleSet().availableRoots(),
+        legacySupported.ruleSet().slots(),
+        legacySupported.ruleSet().bindings(),
+        RuleRuntimeCompatibility.current(),
+        legacySupported.ruleSet().failPolicy(),
+        legacySupported.ruleSet().errorDescriptors());
+    assertThat(profile17.matches(upgradedTo18)).isTrue();
+  }
+
   @ParameterizedTest
   @ValueSource(strings = {"hash", "envelope", "payload", "manifest", "partial-manifest",
       "approval", "approval-role", "approval-hash", "approval-key", "test-evidence"})

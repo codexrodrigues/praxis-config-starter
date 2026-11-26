@@ -62,7 +62,7 @@ final class DomainRuleSnapshotVerifier {
       // Integrity takes precedence: incompatible or pre-manifest content may also be corrupt.
       PublishedRuleSnapshot snapshot = readHistoricallyVerifiedSnapshot(stored);
       if (isPreManifestSnapshot(stored)) return "REPUBLICATION_REQUIRED";
-      if (!RuleRuntimeCompatibility.current().equals(snapshot.ruleSet().compatibility())) {
+      if (!RuleRuntimeCompatibility.isSupported(snapshot.ruleSet().compatibility())) {
         return "RUNTIME_INCOMPATIBLE";
       }
       verifyCurrentRuntime(stored, snapshot);

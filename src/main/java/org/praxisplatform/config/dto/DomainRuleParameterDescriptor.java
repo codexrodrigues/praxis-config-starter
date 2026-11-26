@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import java.math.BigDecimal;
 import java.util.List;
+import org.praxisplatform.rules.contract.RuleParameterMetadata;
 import org.praxisplatform.rules.contract.RuleParameterType;
 import org.praxisplatform.rules.contract.RuleParameterValueOrigin;
 
@@ -12,4 +13,16 @@ public record DomainRuleParameterDescriptor(
     String name, RuleParameterType type, boolean required, boolean nullable, boolean readOnly,
     String unit, @JsonInclude(JsonInclude.Include.NON_NULL) JsonNode defaultValue, BigDecimal minimum, BigDecimal maximum,
     List<JsonNode> allowedValues, @JsonInclude(JsonInclude.Include.NON_NULL) JsonNode declaredValue, JsonNode effectiveValue,
-    RuleParameterValueOrigin origin) {}
+    RuleParameterValueOrigin origin,
+    @JsonInclude(JsonInclude.Include.NON_NULL) RuleParameterMetadata metadata) {
+
+  /** Backward-compatible constructor omitting Contract 1.8 parameter UI/legal metadata. */
+  public DomainRuleParameterDescriptor(
+      String name, RuleParameterType type, boolean required, boolean nullable, boolean readOnly,
+      String unit, JsonNode defaultValue, BigDecimal minimum, BigDecimal maximum,
+      List<JsonNode> allowedValues, JsonNode declaredValue, JsonNode effectiveValue,
+      RuleParameterValueOrigin origin) {
+    this(name, type, required, nullable, readOnly, unit, defaultValue, minimum, maximum,
+        allowedValues, declaredValue, effectiveValue, origin, null);
+  }
+}

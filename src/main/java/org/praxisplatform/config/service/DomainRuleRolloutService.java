@@ -302,7 +302,8 @@ public class DomainRuleRolloutService implements DomainRuleSnapshotActivationGat
       var runtime = snapshot.path("ruleSet").path("compatibility");
       var manifest = objectMapper.readTree(candidate.getCompositionManifest());
       return snapshot.path("requiredHostContractVersion").asText().equals(request.hostContractVersion())
-          && runtime.path("engineContractVersion").asText().equals(request.engineContractVersion())
+          && DomainRuleHostStatusService.isEngineContractCompatible(
+              runtime.path("engineContractVersion").asText(), request.engineContractVersion())
           && runtime.path("jsonLogicDialectVersion").asText().equals(request.jsonLogicDialectVersion())
           && runtime.path("jsonLogicCorpusSha256").asText().equals(request.jsonLogicCorpusSha256())
           && manifest.path("implementationCatalogDigest").asText()

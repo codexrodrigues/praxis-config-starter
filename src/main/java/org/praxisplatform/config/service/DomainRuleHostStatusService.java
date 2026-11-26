@@ -190,10 +190,22 @@ public class DomainRuleHostStatusService {
   private boolean runtimeCompatible(DomainRuleHostStatus status, ExpectedRuntime expected) {
     RuleRuntimeCompatibility compatibility = expected.compatibility();
     return expected.hostContractVersion().equals(status.getHostContractVersion())
-        && compatibility.engineContractVersion().equals(status.getEngineContractVersion())
+        && isEngineContractCompatible(
+            compatibility.engineContractVersion(), status.getEngineContractVersion())
         && compatibility.jsonLogicDialectVersion().equals(status.getJsonLogicDialectVersion())
         && compatibility.jsonLogicCorpusSha256().equals(status.getJsonLogicCorpusSha256())
         && Objects.equals(expected.implementationCatalogDigest(), status.getImplementationCatalogDigest());
+  }
+
+  static boolean isEngineContractCompatible(
+      String snapshotEngineContractVersion, String hostEngineContractVersion) {
+    if (snapshotEngineContractVersion == null || hostEngineContractVersion == null) {
+      return false;
+    }
+    return snapshotEngineContractVersion.equals(hostEngineContractVersion)
+        || (RuleRuntimeCompatibility.ENGINE_CONTRACT_VERSION.equals(hostEngineContractVersion)
+            && RuleRuntimeCompatibility.SUPPORTED_ENGINE_CONTRACT_VERSIONS.contains(
+                snapshotEngineContractVersion));
   }
 
   private ExpectedRuntime expectedRuntime(
