@@ -639,7 +639,23 @@ public class AgenticAuthoringPreviewService {
                     result.plan(),
                     result.providerInvocations()));
         }
-        ObjectNode compiledFormPatch = directComponentEdit
+        boolean pageBuilderRootEdit = isPageBuilderRootEditRequest(request, manifestRef);
+        if (pageBuilderRootEdit) {
+            proposedConfig = verifyAndHydrateAddedChartsAgainstCapabilities(
+                    request,
+                    result.plan(),
+                    proposedConfig,
+                    schemaBaseUrl,
+                    tenantId,
+                    userId,
+                    environment);
+        }
+        ObjectNode compiledFormPatch = pageBuilderRootEdit
+                ? materializePageBuilderRootEditPatch(
+                        result.plan(),
+                        result.compiledPatch(),
+                        proposedConfig)
+                : directComponentEdit
                 ? materializeDirectComponentEditPatch(
                         componentId,
                         result.plan(),
@@ -666,7 +682,7 @@ public class AgenticAuthoringPreviewService {
             warnings.add("component-edit-plan-schema-fields-grounded");
         }
         JsonNode refinedUiCompositionPlan = null;
-        if (persistedUiCompositionPlan != null) {
+        if (persistedUiCompositionPlan != null && !pageBuilderRootEdit) {
             if (directComponentEdit) {
                 return Optional.of(componentEditFailure(
                         request,
@@ -820,6 +836,19 @@ public class AgenticAuthoringPreviewService {
         String componentId = target != null && !value(target.componentId()).trim().isBlank()
                 ? value(target.componentId()).trim()
                 : intentTargetComponentId;
+        boolean pageRootModifyRequested = widgetKey.isBlank()
+                && intent != null
+                && "modify".equals(value(intent.operationKind()).trim())
+                && ("page".equals(value(intent.artifactKind()).trim())
+                        || "praxis-page-builder".equals(componentId)
+                        || "praxis-dynamic-page-builder".equals(componentId))
+                && request.currentPage() != null
+                && request.currentPage().isObject()
+                && request.currentPage().path("widgets").isArray()
+                && !request.currentPage().path("widgets").isEmpty();
+        if (pageRootModifyRequested) {
+            componentId = "praxis-page-builder";
+        }
         if (componentId.isBlank()) {
             return request;
         }
@@ -832,7 +861,7 @@ public class AgenticAuthoringPreviewService {
                 && !request.currentPage().path("widgets").isArray()
                 && !intentTargetComponentId.isBlank()
                 && componentId.equals(intentTargetComponentId);
-        if (!widgetMatches && !standaloneComponentMatches) {
+        if (!widgetMatches && !standaloneComponentMatches && !pageRootModifyRequested) {
             return request;
         }
 
@@ -897,6 +926,8 @@ public class AgenticAuthoringPreviewService {
             case "table.columns.reorder" -> "a reordenação das colunas";
             case "table.sort.set" -> "o ajuste da ordenação da tabela";
             case "table.filter.add", "table.filters.set" -> "o ajuste dos filtros da tabela";
+            case "page.configure" -> "a atualização das propriedades da página";
+            case "canvas.configure" -> "o ajuste do layout e das colunas da página";
             case "rule.visualblockguidance.add" -> "a regra de orientação visual em formRules";
             default -> operationId.contains(".")
                     ? "os ajustes solicitados no componente"
@@ -914,9 +945,36 @@ public class AgenticAuthoringPreviewService {
         String targetComponentId = value(request.intentResolution().targetComponentId()).trim();
         boolean pageDocument = request.currentPage() != null
                 && request.currentPage().path("widgets").isArray();
-        return !manifestComponentId.isBlank()
-                && manifestComponentId.equals(targetComponentId)
-                && !pageDocument;
+        return isPageBuilderRootEditRequest(request, manifestRef)
+                || (!manifestComponentId.isBlank()
+                        && manifestComponentId.equals(targetComponentId)
+                        && !pageDocument);
+    }
+
+    private boolean isPageBuilderRootEditRequest(
+            AgenticAuthoringPlanRequest request,
+            JsonNode manifestRef) {
+        if (request == null || request.intentResolution() == null || manifestRef == null) {
+            return false;
+        }
+        String manifestComponentId = manifestRef.path("componentId").asText("").trim();
+        if (!"praxis-page-builder".equals(manifestComponentId)) {
+            return false;
+        }
+        JsonNode contextHints = request.contextHints();
+        String selectedWidgetKey = contextHints == null ? "" : contextHints.path("selectedWidgetKey").asText("").trim();
+        if (!selectedWidgetKey.isBlank()) {
+            return false;
+        }
+        AgenticAuthoringIntentResolutionResult intent = request.intentResolution();
+        String targetComponentId = value(intent.targetComponentId()).trim();
+        boolean matchesTargetComponent = "praxis-page-builder".equals(targetComponentId)
+                || "praxis-dynamic-page-builder".equals(targetComponentId)
+                || "page".equals(value(intent.artifactKind()).trim());
+        return matchesTargetComponent
+                && request.currentPage() != null
+                && request.currentPage().isObject()
+                && request.currentPage().path("widgets").isArray();
     }
 
     private List<String> validateComponentEditContext(
@@ -958,7 +1016,10 @@ public class AgenticAuthoringPreviewService {
             failures.add("component-edit-plan-intent-not-eligible");
         }
         AgenticAuthoringTarget target = intent.target();
-        boolean semanticTargetMismatch = directComponentEdit
+        boolean pageBuilderRootEdit = isPageBuilderRootEditRequest(request, manifestRef);
+        boolean semanticTargetMismatch = pageBuilderRootEdit
+                ? (target != null && !value(target.widgetKey()).trim().isBlank())
+                : directComponentEdit
                 ? !manifestComponentId.equals(value(intent.targetComponentId()).trim())
                 : target == null
                         || !selectedWidgetKey.equals(value(target.widgetKey()).trim())
@@ -982,6 +1043,164 @@ public class AgenticAuthoringPreviewService {
             }
         }
         return List.copyOf(new LinkedHashSet<>(failures));
+    }
+
+    private ObjectNode materializePageBuilderRootEditPatch(
+            JsonNode plan,
+            JsonNode componentPatch,
+            JsonNode proposedConfig) {
+        ObjectNode compiledFormPatch = objectMapper.createObjectNode();
+        compiledFormPatch.put("version", "1.0.0");
+        compiledFormPatch.put("profileId", "component-manifest-edit");
+        compiledFormPatch.put("targetComponentId", "praxis-dynamic-page-builder");
+        ObjectNode componentEdit = compiledFormPatch.putObject("componentEdit");
+        componentEdit.put("componentId", "praxis-page-builder");
+        componentEdit.put("manifestVersion", componentPatch.path("manifestVersion").asText(""));
+        componentEdit.set("plan", plan == null ? MissingNode.getInstance() : plan.deepCopy());
+        componentEdit.set("compiledPatch", componentPatch.deepCopy());
+        compiledFormPatch.putObject("patch").set("page", proposedConfig.deepCopy());
+        return compiledFormPatch;
+    }
+
+    private JsonNode verifyAndHydrateAddedChartsAgainstCapabilities(
+            AgenticAuthoringPlanRequest request,
+            JsonNode plan,
+            JsonNode proposedConfig,
+            String schemaBaseUrl,
+            String tenantId,
+            String userId,
+            String environment) {
+        if (resourceCapabilitiesRetrievalService == null
+                || !(proposedConfig instanceof ObjectNode)
+                || !proposedConfig.path("widgets").isArray()
+                || plan == null
+                || !plan.path("operations").isArray()) {
+            return proposedConfig;
+        }
+        Set<String> addedChartKeys = new LinkedHashSet<>();
+        for (JsonNode op : plan.path("operations")) {
+            if (!"widget.add".equals(op.path("operationId").asText("").trim())) {
+                continue;
+            }
+            JsonNode input = op.path("input");
+            if ("praxis-chart".equals(input.path("componentId").asText("").trim())) {
+                String key = input.path("widgetKey").asText("").trim();
+                if (!key.isBlank()) {
+                    addedChartKeys.add(key);
+                }
+            }
+        }
+        if (addedChartKeys.isEmpty()) {
+            return proposedConfig;
+        }
+        ObjectNode updatedConfig = ((ObjectNode) proposedConfig).deepCopy();
+        PreviewResourceCapabilitiesFetchCache capCache =
+                new PreviewResourceCapabilitiesFetchCache(resourceCapabilitiesRetrievalService);
+        String promptText = normalize(String.join(
+                " ",
+                value(request == null ? "" : request.userPrompt()),
+                value(request == null || request.intentResolution() == null
+                        ? ""
+                        : request.intentResolution().effectivePrompt())));
+        for (JsonNode widgetNode : updatedConfig.path("widgets")) {
+            if (!(widgetNode instanceof ObjectNode widget)) {
+                continue;
+            }
+            String widgetKey = widget.path("key").asText(widget.path("widgetKey").asText("")).trim();
+            String widgetComponentId = widget.path("definition").path("id").asText(
+                    widget.path("componentId").asText("")).trim();
+            if (!addedChartKeys.contains(widgetKey) || !"praxis-chart".equals(widgetComponentId)) {
+                continue;
+            }
+            JsonNode chartDocNode = widget.path("definition").path("inputs").path("chartDocument");
+            if (!(chartDocNode instanceof ObjectNode chartDoc)) {
+                continue;
+            }
+            String resource = businessResourcePath(chartDoc.path("source").path("resource").asText(""));
+            if (resource.isBlank()) {
+                continue;
+            }
+            ResourceCapabilitiesFetchResult capResult = capCache.fetch(
+                    resource, schemaBaseUrl, tenantId, userId, environment);
+            if (capResult == null || !capResult.isSuccess() || capResult.getCapabilities() == null) {
+                continue;
+            }
+            JsonNode capRoot = capResult.getCapabilities();
+            if (capRoot.path("data").path("stats").isObject()) {
+                capRoot = capRoot.path("data");
+            }
+            JsonNode statsFields = capRoot.path("stats").path("fields");
+            if (!statsFields.isArray() || statsFields.isEmpty()) {
+                continue;
+            }
+            String operation = chartDoc.path("source").path("operation").asText("group-by").trim().toLowerCase(Locale.ROOT);
+            List<JsonNode> eligibleFields = new ArrayList<>();
+            for (JsonNode sf : statsFields) {
+                String name = sf.path("field").asText("").trim();
+                if (name.isBlank()) {
+                    continue;
+                }
+                boolean eligible = switch (operation) {
+                    case "timeseries" -> sf.path("timeSeriesEligible").asBoolean(false);
+                    case "distribution" -> sf.path("distributionTermsEligible").asBoolean(false)
+                            || sf.path("distributionHistogramEligible").asBoolean(false);
+                    default -> sf.path("groupByEligible").asBoolean(false);
+                };
+                if (eligible) {
+                    eligibleFields.add(sf);
+                }
+            }
+            if (eligibleFields.isEmpty()) {
+                continue;
+            }
+            String currentField = chartDoc.path("dimensions").path(0).path("field").asText("").trim();
+            JsonNode exactMatch = null;
+            if (!currentField.isBlank()) {
+                String normCurrent = normalize(currentField);
+                for (JsonNode sf : eligibleFields) {
+                    if (normCurrent.equals(normalize(sf.path("field").asText("")))) {
+                        exactMatch = sf;
+                        break;
+                    }
+                }
+            }
+            JsonNode chosen = exactMatch;
+            if (chosen == null) {
+                String corpus = normalize(String.join(
+                        " ",
+                        promptText,
+                        chartDoc.path("title").asText(""),
+                        currentField));
+                int bestScore = Integer.MIN_VALUE;
+                for (JsonNode sf : eligibleFields) {
+                    String fName = sf.path("field").asText("").trim();
+                    String fLabel = sf.path("label").asText(fName).trim();
+                    int score = "id".equalsIgnoreCase(fName) ? -10 : 1;
+                    String normF = normalize(fName);
+                    String normL = normalize(fLabel);
+                    if (normF.length() >= 3 && corpus.contains(normF)) {
+                        score += 20;
+                    }
+                    if (normL.length() >= 3 && corpus.contains(normL)) {
+                        score += 15;
+                    }
+                    if (score > bestScore) {
+                        bestScore = score;
+                        chosen = sf;
+                    }
+                }
+            }
+            if (chosen != null) {
+                String fieldName = chosen.path("field").asText("").trim();
+                String label = chosen.path("label").asText(fieldName).trim();
+                ArrayNode dimensions = chartDoc.putArray("dimensions");
+                dimensions.addObject()
+                        .put("field", fieldName)
+                        .put("label", label.isBlank() ? fieldName : label)
+                        .put("role", "timeseries".equals(operation) ? "time" : "category");
+            }
+        }
+        return updatedConfig;
     }
 
     private ObjectNode materializeDirectComponentEditPatch(
@@ -1063,6 +1282,7 @@ public class AgenticAuthoringPreviewService {
         List<String> failures = failureCodes == null ? List.of() : List.copyOf(failureCodes);
         List<String> safeWarnings = warnings == null ? List.of() : List.copyOf(warnings);
         JsonNode safePlan = plan == null ? MissingNode.getInstance() : plan;
+        String assistantMessage = componentEditFailureAssistantMessage(request, failures);
         return new AgenticAuthoringPreviewResult(
                 false,
                 failures,
@@ -1071,14 +1291,34 @@ public class AgenticAuthoringPreviewService {
                 MissingNode.getInstance(),
                 diagnostics(
                         request,
-                        request.intentResolution(),
+                        request == null ? null : request.intentResolution(),
                         failures,
                         safeWarnings,
                         safePlan,
                         MissingNode.getInstance()),
                 null,
-                null,
+                assistantMessage,
                 providerInvocations);
+    }
+
+    private String componentEditFailureAssistantMessage(
+            AgenticAuthoringPlanRequest request,
+            List<String> failures) {
+        boolean hasProviderFailure = failures.stream()
+                .anyMatch(code -> code != null
+                        && ("component-edit-plan-provider-failed".equals(code)
+                                || code.endsWith("-provider-failed")));
+        if (!hasProviderFailure) {
+            return null;
+        }
+        String responseLocale = request == null || request.contextHints() == null
+                ? ""
+                : request.contextHints().path("responseLocale").asText("");
+        boolean nonPortuguese = !responseLocale.isBlank()
+                && !responseLocale.toLowerCase(Locale.ROOT).startsWith("pt");
+        return nonPortuguese
+                ? "I could not complete planning this change right now because the AI provider is temporarily unavailable or rate-limited. Please try again in a moment."
+                : "Não consegui concluir o planejamento da alteração agora porque o provedor de IA está temporariamente indisponível ou atingiu o limite de requisições. Tente novamente em instantes.";
     }
 
     private Optional<AgenticAuthoringPreviewResult> previewUiCompositionPlan(
@@ -1250,6 +1490,14 @@ public class AgenticAuthoringPreviewService {
                     userId,
                     environment,
                     capabilitiesFetchCache);
+            if (warnings.contains("semantic-axis-stats-capability-unsupported-chart-pruned")
+                    && uiCompositionPlan instanceof ObjectNode uiCompositionPlanObject) {
+                semanticAxisSchemaVerifier.pruneOrphanWidgetReferences(uiCompositionPlanObject, warnings);
+                if (provider instanceof AgenticAuthoringGenericUiCompositionPlanProvider genericProvider
+                        && genericProvider.reflowPrunedDashboard(request, uiCompositionPlanObject)) {
+                    addWarningOnce(warnings, "ui-composition-plan-layout-reflowed-after-widget-prune");
+                }
+            }
             uiCompositionPlan = verifyResourceSchemaGrounding(
                     request,
                     uiCompositionPlan,

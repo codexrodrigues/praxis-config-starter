@@ -41,6 +41,29 @@ public final class HostContextSystemInstructionContributor implements AgentSyste
                     .append(sanitizePromptHint(context.activeScreenResourcePath(), 240))
                     .append(".\n");
         }
+        if (context.propagatedClaims() != null && !context.propagatedClaims().isEmpty()) {
+            Object rawRoute = context.propagatedClaims()
+                    .get(OperationalAgentTurnStreamService.CLAIM_AUTHORING_WORKSPACE_ROUTE);
+            String authoringRoute = rawRoute instanceof String s
+                    ? OperationalAgentTurnStreamService.sanitizeAuthoringWorkspaceRoute(s)
+                    : null;
+            if (authoringRoute != null) {
+                Object rawLabel = context.propagatedClaims()
+                        .get(OperationalAgentTurnStreamService.CLAIM_AUTHORING_WORKSPACE_LABEL);
+                String authoringLabel = rawLabel instanceof String s
+                        ? OperationalAgentTurnStreamService.sanitizeAuthoringWorkspaceLabel(
+                                sanitizeUntrustedTagBreakouts(s))
+                        : null;
+                if (authoringLabel == null) {
+                    authoringLabel = "Abrir no Construtor de Páginas";
+                }
+                sb.append("Workspace de autoria de páginas customizadas habilitado nesta sessão: rota ")
+                        .append(authoringRoute)
+                        .append(" (botão \"")
+                        .append(authoringLabel)
+                        .append("\"). Quando o usuário pedir para criar, montar ou editar uma página/tela customizada, chame obrigatoriamente 'handoff_to_page_authoring'.\n");
+            }
+        }
         if (context.activeSelectionHints() != null && !context.activeSelectionHints().isEmpty()) {
             Object scrubbedHints = OperationalAssistantBlockComposer.maskMod11InStructure(context.activeSelectionHints());
             String maskedText = TurnScopedPiiVault.maskRawEmails(

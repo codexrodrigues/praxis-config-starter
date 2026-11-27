@@ -1,7 +1,9 @@
 package org.praxisplatform.config.ai.authoring;
 
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import java.util.List;
 
+@JsonIgnoreProperties(ignoreUnknown = true)
 record AgenticAuthoringResourceSearchFocus(
         String primaryBusinessEntity,
         List<String> supportingConcepts,

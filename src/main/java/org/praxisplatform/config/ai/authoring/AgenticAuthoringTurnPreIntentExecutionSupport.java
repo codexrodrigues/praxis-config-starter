@@ -179,7 +179,14 @@ final class AgenticAuthoringTurnPreIntentExecutionSupport {
             return request;
         }
         String failureKind = safeText(last.failureKind());
-        if (!Set.of("quota-exhausted", "auth-error", "provider-not-configured").contains(failureKind)) {
+        if (!Set.of(
+                        "quota-exhausted",
+                        "auth-error",
+                        "provider-not-configured",
+                        "capacity",
+                        "rate-limit",
+                        "server-error")
+                .contains(failureKind)) {
             return request;
         }
         ObjectNode contextHints = request.contextHints() != null && request.contextHints().isObject()
@@ -318,7 +325,8 @@ final class AgenticAuthoringTurnPreIntentExecutionSupport {
         for (JsonNode entry : entries) {
             String entryResourceKey = safeText(entry.path("resourceKey").asText());
             String entryResourcePath = businessResourcePath(entry.path("resourcePath").asText());
-            if (resourceKey.equals(entryResourceKey) && expectedPath.equals(entryResourcePath)) {
+            if (expectedPath.equals(entryResourcePath)
+                    && (resourceKey.equals(entryResourceKey) || StringUtils.hasText(entryResourceKey))) {
                 return true;
             }
         }

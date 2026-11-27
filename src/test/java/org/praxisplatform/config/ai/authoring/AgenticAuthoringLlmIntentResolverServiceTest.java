@@ -3757,11 +3757,9 @@ class AgenticAuthoringLlmIntentResolverServiceTest {
                 .contains("llm-intent-resolution-failed", "llm-provider-error")
                 .doesNotContain("provider quota exhausted");
         assertThat(resolution.assistantMessage())
-                .contains("Não consegui confirmar")
-                .contains("tabela")
+                .contains("limite de cota")
                 .doesNotContain("provider quota exhausted");
-        assertThat(resolution.clarificationQuestions())
-                .contains("Você quer consultar dados disponíveis ou já quer criar uma tabela, formulário, gráfico ou painel?");
+        assertThat(resolution.clarificationQuestions()).isEmpty();
         assertThat(resolution.providerInvocations())
                 .extracting(
                         org.praxisplatform.config.service.AiProviderInvocationTelemetry::phase,
@@ -4549,6 +4547,88 @@ class AgenticAuthoringLlmIntentResolverServiceTest {
         assertThat(result.followUpKind()).isEqualTo("clarification_answer");
         assertThat(result.selectedResourcePath()).isEqualTo("/api/human-resources/ferias-afastamentos");
         Mockito.verifyNoInteractions(domainCatalogPromptContextService);
+    }
+
+    @Test
+    void tablePromptProjectsCurrentPageWidgetsCountInsteadOfMissingComponentCount() throws Exception {
+        ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
+        when(providerManagementService.generateJson(
+                promptCaptor.capture(),
+                any(AiJsonSchema.class),
+                any(AiCallConfig.class),
+                eq("tenant"),
+                eq("user"),
+                eq("local")))
+                .thenReturn(objectMapper.createObjectNode()
+                        .put("resolved", true)
+                        .put("semanticIntentClass", "component_authoring")
+                        .put("operationKind", "create")
+                        .put("artifactKind", "table")
+                        .put("changeKind", "create_artifact")
+                        .put("selectedResourcePath", "/api/human-resources/afastamentos")
+                        .put("followUpKind", "none")
+                        .put("requiresGovernedAuthoring", false)
+                        .put("assistantMessage", "Tabela pronta."));
+
+        ObjectNode currentPageSummary = objectMapper.createObjectNode().put("widgetsCount", 4);
+        ObjectNode contextHints = objectMapper.createObjectNode();
+        ObjectNode resourceDiscovery = contextHints.putObject("resourceDiscovery");
+        resourceDiscovery.put("artifactKind", "table");
+        resourceDiscovery.put("retrievalQuery", "afastamentos");
+        resourceDiscovery.putArray("candidates").addObject()
+                .put("resourcePath", "/api/human-resources/afastamentos")
+                .put("submitUrl", "/api/human-resources/afastamentos/filter/cursor");
+        ObjectNode orientation = contextHints.putObject("preIntentSemanticOrientation");
+        orientation.put("schemaVersion", "praxis-agentic-authoring-pre-intent-orientation-context.v2");
+        orientation.put("semanticIntentClass", "authoring_or_other");
+        orientation.put("artifactKind", "table");
+        orientation.put("requiresFullIntentResolution", true);
+        orientation.put("source", "llm_pre_intent_tool_plan");
+        orientation.set("queryConstraints", objectMapper.readTree("""
+                {"appliesToDataSelection":false,"filters":[]}
+                """));
+        AgenticAuthoringIntentResolutionRequest request = new AgenticAuthoringIntentResolutionRequest(
+                "Criar tabela de afastamentos",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                "/page-builder-ia",
+                objectMapper.createObjectNode(),
+                null,
+                "gemini",
+                "gemini-2.5-flash",
+                "test-key",
+                "conv-widgets-count",
+                "turn-1",
+                List.of(),
+                null,
+                List.of(),
+                contextHints);
+
+        new AgenticAuthoringLlmIntentResolverService(providerManagementService, objectMapper)
+                .resolve(
+                        request,
+                        request.userPrompt(),
+                        currentPageSummary,
+                        null,
+                        List.of(new AgenticAuthoringCandidate(
+                                "/api/human-resources/afastamentos",
+                                "post",
+                                "/schemas/filtered?path=/api/human-resources/afastamentos/filter/cursor&operation=post&schemaType=response",
+                                "/api/human-resources/afastamentos/filter/cursor",
+                                "post",
+                                0.94d,
+                                "Afastamentos.",
+                                List.of("tool-search-api-resources"))),
+                        componentCapabilities(),
+                        "tenant",
+                        "user",
+                        "local")
+                .orElseThrow();
+
+        assertThat(promptCaptor.getValue())
+                .contains("\"componentCount\":4")
+                .contains("\"widgetsCount\":4")
+                .contains("\"isEmpty\":false");
     }
 
     private AgenticAuthoringCandidate weakCandidate(String resourcePath) {

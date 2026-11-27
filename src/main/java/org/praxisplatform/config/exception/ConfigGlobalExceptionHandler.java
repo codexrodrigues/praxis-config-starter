@@ -1,9 +1,12 @@
 package org.praxisplatform.config.exception;
 
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.core.Ordered;
+import org.springframework.core.annotation.Order;
 import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ControllerAdvice;
 import org.springframework.web.bind.annotation.ExceptionHandler;
@@ -15,6 +18,7 @@ import java.util.Map;
 import java.util.stream.Collectors;
 
 @ControllerAdvice(basePackages = "org.praxisplatform.config.controller")
+@Order(Ordered.HIGHEST_PRECEDENCE)
 @Slf4j
 public class ConfigGlobalExceptionHandler {
 
@@ -69,6 +73,19 @@ public class ConfigGlobalExceptionHandler {
         body.put("status", HttpStatus.BAD_REQUEST.value());
         body.put("error", "Bad Request");
         body.put("message", ex.getMessage());
+        return new ResponseEntity<>(body, HttpStatus.BAD_REQUEST);
+    }
+
+    @ExceptionHandler(HttpMessageNotReadableException.class)
+    public ResponseEntity<Object> handleHttpMessageNotReadable(HttpMessageNotReadableException ex) {
+        log.warn("Invalid JSON payload received by config controller: {}", ex.getMostSpecificCause().getMessage());
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("timestamp", LocalDateTime.now());
+        body.put("status", HttpStatus.BAD_REQUEST.value());
+        body.put("code", "REQUEST_PAYLOAD_INVALID");
+        body.put("error", "Bad Request");
+        body.put("message", "Payload JSON inválido ou incompatível com o contrato esperado.");
+        body.put("cause", buildCauseSummary(ex));
         return new ResponseEntity<>(body, HttpStatus.BAD_REQUEST);
     }
 

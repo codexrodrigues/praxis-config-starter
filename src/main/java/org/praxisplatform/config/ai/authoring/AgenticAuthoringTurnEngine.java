@@ -925,10 +925,17 @@ public class AgenticAuthoringTurnEngine {
                     decisionDiagnostics.remove("reviewReason");
                 }
             }
+            boolean previewProviderFailure = hasPreviewProviderFailure(preview);
             boolean canApply = (runtimeValueGrounding != null ? runtimeValueGrounding.valid() : (preview != null && preview.valid()))
                     && terminalPreviewApplyBlockReason.isBlank()
                     && !requiresDecisionReview(decisionDiagnostics)
                     && (toolLoopResult == null || toolLoopResult.completed());
+            if (previewProviderFailure && !canApply) {
+                decisionDiagnostics.put("providerError", true);
+                if (preview != null && StringUtils.hasText(preview.assistantMessage())) {
+                    assistantMessage = preview.assistantMessage();
+                }
+            }
             String effectiveApplyBlockReason = firstNonBlank(
                     terminalPreviewApplyBlockReason,
                     requiresDecisionReview(decisionDiagnostics)
@@ -965,6 +972,9 @@ public class AgenticAuthoringTurnEngine {
                             canApply,
                             decisionDiagnostics));
             resultPayload.put("canApply", canApply);
+            if (previewProviderFailure && !canApply) {
+                resultPayload.put("providerError", true);
+            }
             JsonNode localComponentResponse = canApply
                     ? localComponentEditResponse(preview, assistantMessage)
                     : null;
@@ -995,6 +1005,14 @@ public class AgenticAuthoringTurnEngine {
         } finally {
             cancelPreloadedComponentCapabilities(componentCapabilitiesFuture);
         }
+    }
+
+    private boolean hasPreviewProviderFailure(AgenticAuthoringPreviewResult preview) {
+        return preview != null
+                && preview.failureCodes() != null
+                && preview.failureCodes().stream().anyMatch(code ->
+                        code != null && ("component-edit-plan-provider-failed".equals(code)
+                                || code.endsWith("-provider-failed")));
     }
 
     private String terminalPreviewApplyBlockReason(
@@ -1225,24 +1243,35 @@ public class AgenticAuthoringTurnEngine {
             return scopedSemanticClarification;
         }
         AgenticAuthoringTurnOutcome groundedClarificationOutcome =
-                maybeAnswerGroundedResourceDiscoveryClarification(
-                        request,
-                        eventSink,
-                        state,
-                        intentResolution,
-                        route,
-                        providerInvocations);
+                shouldPrioritizeProviderFailureClarification(request, intentResolution)
+                        ? maybeCompleteProviderFailureClarification(
+                                request,
+                                eventSink,
+                                state,
+                                intentResolution,
+                                route,
+                                providerInvocations)
+                        : null;
         if (groundedClarificationOutcome != null) {
             return groundedClarificationOutcome;
         }
-        groundedClarificationOutcome =
-                maybeAnswerGroundedDomainDiscoveryClarification(
-                        request,
-                        eventSink,
-                        state,
-                        intentResolution,
-                        route,
-                        providerInvocations);
+        groundedClarificationOutcome = maybeAnswerGroundedResourceDiscoveryClarification(
+                request,
+                eventSink,
+                state,
+                intentResolution,
+                route,
+                providerInvocations);
+        if (groundedClarificationOutcome != null) {
+            return groundedClarificationOutcome;
+        }
+        groundedClarificationOutcome = maybeAnswerGroundedDomainDiscoveryClarification(
+                request,
+                eventSink,
+                state,
+                intentResolution,
+                route,
+                providerInvocations);
         if (groundedClarificationOutcome != null) {
             return groundedClarificationOutcome;
         }
@@ -1555,9 +1584,14 @@ public class AgenticAuthoringTurnEngine {
                 null,
                 request,
                 providerInvocations);
+        String providerFailureKind = providerFailureKind(intentResolution);
         decisionDiagnostics.put("routeClass", safeText(route.routeClass()));
         decisionDiagnostics.put("consultativePostIntent", false);
         decisionDiagnostics.put("providerFailureClarification", true);
+        decisionDiagnostics.put("providerError", true);
+        if (!providerFailureKind.isBlank()) {
+            decisionDiagnostics.put("providerFailureKind", providerFailureKind);
+        }
         decisionDiagnostics.put("secondInferenceSkipped", true);
         Map<String, Object> resultPayload = new LinkedHashMap<>();
         resultPayload.put("intentResolution", intentResolution);
@@ -1566,6 +1600,10 @@ public class AgenticAuthoringTurnEngine {
         resultPayload.put("assistantContent", intentResolution.assistantContent());
         resultPayload.put("quickReplies", terminalClarificationQuickReplies(intentResolution));
         resultPayload.put("canApply", false);
+        resultPayload.put("providerError", true);
+        if (!providerFailureKind.isBlank()) {
+            resultPayload.put("providerFailureKind", providerFailureKind);
+        }
         resultPayload.put("decisionDiagnostics", decisionDiagnostics);
         resultPayload.put("streamEventDiagnostics", streamEventDiagnostics(
                 "result:provider_failure_clarification",
@@ -1574,6 +1612,47 @@ public class AgenticAuthoringTurnEngine {
         return terminalResult.appendedType("result")
                 ? AgenticAuthoringTurnOutcome.completed(state.withRouteClass(route.routeClass()))
                 : AgenticAuthoringTurnOutcome.noop(state);
+    }
+
+    private boolean shouldPrioritizeProviderFailureClarification(
+            AgenticAuthoringTurnStreamRequest request,
+            AgenticAuthoringIntentResolutionResult intentResolution) {
+        if (intentResolution == null
+                || !contains(intentResolution.warnings(), "llm-intent-resolution-failed")
+                || !contains(intentResolution.warnings(), "llm-provider-error")) {
+            return false;
+        }
+        String failureKind = providerFailureKind(intentResolution);
+        boolean terminalProviderOutage = switch (failureKind) {
+            case "quota-exhausted",
+                    "auth-error",
+                    "provider-not-configured",
+                    "capacity",
+                    "rate-limit",
+                    "server-error" -> true;
+            default -> false;
+        };
+        if (terminalProviderOutage) {
+            return true;
+        }
+        JsonNode widgets = request == null || request.currentPage() == null
+                ? null
+                : request.currentPage().path("widgets");
+        return widgets != null && widgets.isArray() && !widgets.isEmpty();
+    }
+
+    private String providerFailureKind(AgenticAuthoringIntentResolutionResult intentResolution) {
+        if (intentResolution == null || intentResolution.warnings() == null) {
+            return "";
+        }
+        for (String warning : intentResolution.warnings()) {
+            if (warning != null
+                    && warning.startsWith("llm-provider-")
+                    && !"llm-provider-error".equals(warning)) {
+                return warning.substring("llm-provider-".length());
+            }
+        }
+        return "";
     }
 
     private AgenticAuthoringTurnOutcome maybeCompleteDeclaredClientAction(
@@ -2612,7 +2691,7 @@ public class AgenticAuthoringTurnEngine {
         AgenticAuthoringToolCall toolCall = new AgenticAuthoringToolCall(
                 AgenticAuthoringToolRegistry.VERIFY_DOMAIN_OPERATION,
                 route == null ? "component_authoring" : safeText(route.routeClass()),
-                new DomainOperationVerificationToolRequest(resourceKey, schemaBaseUrl));
+                new DomainOperationVerificationToolRequest(resourceKey, resourcePath, schemaBaseUrl));
         String layoutKind = intentResolution.semanticDecision() != null
                 && intentResolution.semanticDecision().visualizationDecision() != null
                         ? safeText(intentResolution.semanticDecision().visualizationDecision().layoutKind())

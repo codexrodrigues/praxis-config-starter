@@ -155,7 +155,7 @@
       "properties": {
         "governanceKey": { "$ref": "#/$defs/key" },
         "nodeKey": { "$ref": "#/$defs/key" },
-        "annotationType": { "enum": ["privacy", "compliance", "ownership", "security", "llm_visibility", "retention", "quality"] },
+        "annotationType": { "enum": ["privacy", "compliance", "ownership", "security", "llm_visibility", "retention", "quality", null] },
         "classification": { "enum": ["public", "internal", "confidential", "restricted", null] },
         "dataCategory": { "enum": ["none", "personal", "sensitive_personal", "financial", "health", "credential", "legal", "operational", null] },
         "complianceTags": { "$ref": "#/$defs/stringArray" },

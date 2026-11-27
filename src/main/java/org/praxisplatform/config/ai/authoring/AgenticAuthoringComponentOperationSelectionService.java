@@ -415,6 +415,9 @@ public class AgenticAuthoringComponentOperationSelectionService {
                 }
             }
         }
+        if (selected.isEmpty()) {
+            return declaredOperationIds;
+        }
         for (String operationId : semanticContinuityOperationIds(request, manifest, declaredOperationIds)) {
             selected.add(operationId);
             if (selected.size() >= MAX_OPERATION_CANDIDATES) {
@@ -430,9 +433,6 @@ public class AgenticAuthoringComponentOperationSelectionService {
                     || selected.size() >= MAX_OPERATION_CANDIDATES) {
                 break;
             }
-        }
-        if (selected.isEmpty()) {
-            return declaredOperationIds;
         }
         Set<String> canonicalOrder = new LinkedHashSet<>();
         declaredOperationIds.stream().filter(selected::contains).forEach(canonicalOrder::add);
@@ -484,8 +484,9 @@ public class AgenticAuthoringComponentOperationSelectionService {
                 if (related.size() >= MAX_SEMANTIC_CONTINUITY_CANDIDATES) {
                     break;
                 }
-                if (sameTargetKind(seedOperation, candidate.getValue())
-                        && affectedPathsShareCanonicalParent(seedOperation, candidate.getValue())) {
+                if ((sameTargetKind(seedOperation, candidate.getValue())
+                                && affectedPathsShareCanonicalParent(seedOperation, candidate.getValue()))
+                        || sharePageRootContainer(seedOperation, candidate.getValue())) {
                     related.add(candidate.getKey());
                 }
             }
@@ -540,13 +541,23 @@ public class AgenticAuthoringComponentOperationSelectionService {
     }
 
     private boolean sameTargetKind(JsonNode first, JsonNode second) {
-        String firstKind = firstNonBlank(
-                first.path("targetKind").asText(""),
-                first.path("target").path("kind").asText(""));
-        String secondKind = firstNonBlank(
-                second.path("targetKind").asText(""),
-                second.path("target").path("kind").asText(""));
+        String firstKind = targetKind(first);
+        String secondKind = targetKind(second);
         return !firstKind.isBlank() && firstKind.equals(secondKind);
+    }
+
+    private boolean sharePageRootContainer(JsonNode first, JsonNode second) {
+        String firstKind = targetKind(first);
+        String secondKind = targetKind(second);
+        boolean firstIsPageRoot = "page".equals(firstKind) || "canvas".equals(firstKind);
+        boolean secondIsPageRoot = "page".equals(secondKind) || "canvas".equals(secondKind);
+        return firstIsPageRoot && secondIsPageRoot;
+    }
+
+    private String targetKind(JsonNode operation) {
+        return firstNonBlank(
+                operation.path("targetKind").asText(""),
+                operation.path("target").path("kind").asText(""));
     }
 
     private boolean affectedPathsShareCanonicalParent(JsonNode first, JsonNode second) {

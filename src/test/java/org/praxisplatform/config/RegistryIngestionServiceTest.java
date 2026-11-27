@@ -480,4 +480,30 @@ class RegistryIngestionServiceTest {
                 registry.getRegistryKey(),
                 registry.getPayload());
     }
+
+    @Test
+    void skipsEmbeddingsWhenEmbeddingsDisabled() {
+        registryIngestionService.setEmbeddingsEnabled(false);
+
+        RegistryIngestionRequest.ComponentEntry componentEntry = RegistryIngestionRequest.ComponentEntry.builder()
+                .description("Demo component without embeddings")
+                .inputs(List.of(RegistryIngestionRequest.IoEntry.builder()
+                        .name("title")
+                        .type("string")
+                        .required(true)
+                        .build()))
+                .outputs(List.of())
+                .build();
+
+        RegistryIngestionRequest request = RegistryIngestionRequest.builder()
+                .components(Map.of(COMPONENT_ID, componentEntry))
+                .build();
+
+        registryIngestionService.ingestRegistry(request, null, null);
+
+        ArgumentCaptor<AiRegistry> savedCaptor = ArgumentCaptor.forClass(AiRegistry.class);
+        verify(repository, times(1)).save(savedCaptor.capture());
+        assertThat(savedCaptor.getValue().getEmbedding()).isNull();
+        verifyNoInteractions(embeddingService);
+    }
 }

@@ -1,10 +1,12 @@
 package org.praxisplatform.config.ai.authoring;
 
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import io.swagger.v3.oas.annotations.media.Schema;
 import java.time.Instant;
 import java.util.List;
 
+@JsonIgnoreProperties(ignoreUnknown = true)
 @JsonInclude(JsonInclude.Include.NON_NULL)
 @Schema(
         name = "AgenticAuthoringComponentCapabilitiesResult",
@@ -23,6 +25,7 @@ public record AgenticAuthoringComponentCapabilitiesResult(
         this(version, catalogs, null);
     }
 
+    @JsonIgnoreProperties(ignoreUnknown = true)
     @Schema(
             name = "AgenticAuthoringComponentCapabilityDiagnostics",
             description = "Proveniência e estado de atualização usados para avaliar se o catálogo representa a revisão governada corrente ou uma contingência observável.")
@@ -41,6 +44,7 @@ public record AgenticAuthoringComponentCapabilitiesResult(
             Instant lastSuccessfulRegistryLoadAt) {
     }
 
+    @JsonIgnoreProperties(ignoreUnknown = true)
     @Schema(
             name = "AgenticAuthoringComponentCapabilityCatalog",
             description = "Conjunto de operações que podem orientar authoring para um componente canônico.")
@@ -53,6 +57,7 @@ public record AgenticAuthoringComponentCapabilitiesResult(
             List<ComponentCapability> capabilities) {
     }
 
+    @JsonIgnoreProperties(ignoreUnknown = true)
     @Schema(
             name = "AgenticAuthoringComponentCapability",
             description = "Operação declarada que fornece evidência semântica para planejamento e materialização governada.")
@@ -69,6 +74,7 @@ public record AgenticAuthoringComponentCapabilitiesResult(
             List<ComponentCapabilityExample> examples) {
     }
 
+    @JsonIgnoreProperties(ignoreUnknown = true)
     @Schema(
             name = "AgenticAuthoringComponentCapabilityExample",
             description = "Exemplo governado que relaciona uma solicitação humana à intenção e às restrições de uma operação declarada.")
@@ -81,6 +87,7 @@ public record AgenticAuthoringComponentCapabilitiesResult(
             List<String> configHints) {
     }
 
+    @JsonIgnoreProperties(ignoreUnknown = true)
     @Schema(
             name = "AgenticAuthoringComponentFieldAlias",
             description = "Vocabulário de apresentação associado a um campo canônico do componente.")

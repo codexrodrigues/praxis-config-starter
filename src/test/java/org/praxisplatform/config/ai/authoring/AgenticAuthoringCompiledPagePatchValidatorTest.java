@@ -77,6 +77,19 @@ class AgenticAuthoringCompiledPagePatchValidatorTest {
                 .isEqualTo("compiled-page-canvas-widget-not-found");
     }
 
+    @Test
+    void acceptsPushDownCanvasCollisionPolicyAndRejectsUnknownValues() throws Exception {
+        ObjectNode pushDownPatch = validPatch();
+        ((ObjectNode) pushDownPatch.at("/patch/page/canvas")).put("collisionPolicy", "push-down");
+        assertThat(AgenticAuthoringCompiledPagePatchValidator.terminalApplyBlockReason(pushDownPatch))
+                .isEmpty();
+
+        ObjectNode invalidPatch = validPatch();
+        ((ObjectNode) invalidPatch.at("/patch/page/canvas")).put("collisionPolicy", "overlap");
+        assertThat(AgenticAuthoringCompiledPagePatchValidator.terminalApplyBlockReason(invalidPatch))
+                .isEqualTo("compiled-page-canvas-collision-policy-invalid");
+    }
+
     private ObjectNode validPatch() throws Exception {
         return (ObjectNode) objectMapper.readTree("""
                 {

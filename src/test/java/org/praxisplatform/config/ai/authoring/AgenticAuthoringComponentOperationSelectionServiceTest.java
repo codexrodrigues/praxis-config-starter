@@ -516,6 +516,84 @@ class AgenticAuthoringComponentOperationSelectionServiceTest {
                         "\"activeObjective\"");
     }
 
+    @Test
+    void retainsCompleteManifestWhenRetrievalCandidatesAreAbsentEvenWithSemanticSeed() throws Exception {
+        when(provider.generateJson(anyString(), any(), any(), anyString(), anyString(), anyString()))
+                .thenReturn(selectionFor("praxis-page-builder", "page.configure", "canvas.configure"));
+        var service = new AgenticAuthoringComponentOperationSelectionService(provider, objectMapper, 9);
+
+        var result = service.select(
+                new AgenticAuthoringPlanRequest(
+                        "Renomeie a página para Painel Executivo e organize em 2 colunas",
+                        "gemini",
+                        "gemini-2.5-flash",
+                        "key",
+                        null,
+                        intentForPageBuilderOperation("page.configure"),
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        objectMapper.createObjectNode()),
+                "praxis-page-builder",
+                objectMapper.createObjectNode(),
+                pageBuilderRootManifest(),
+                "t",
+                "u",
+                "e");
+
+        assertThat(result.operationIds()).containsExactlyInAnyOrder("page.configure", "canvas.configure");
+        ArgumentCaptor<String> prompt = ArgumentCaptor.forClass(String.class);
+        verify(provider).generateJson(prompt.capture(), any(), any(), anyString(), anyString(), anyString());
+        assertThat(prompt.getValue()).contains(
+                "\"operationId\":\"page.configure\"",
+                "\"operationId\":\"canvas.configure\"",
+                "\"operationId\":\"widget.add\"");
+    }
+
+    @Test
+    void restoresRootPathCanvasSiblingWhenRetrievalReturnsOnlyPageConfigure() throws Exception {
+        when(provider.generateJson(anyString(), any(), any(), anyString(), anyString(), anyString()))
+                .thenReturn(selectionFor("praxis-page-builder", "page.configure", "canvas.configure"));
+        var service = new AgenticAuthoringComponentOperationSelectionService(provider, objectMapper, 9);
+        var contextHints = objectMapper.createObjectNode();
+        contextHints.putObject("authoringEvidence")
+                .putArray("operationCandidates")
+                .addObject()
+                .put("id", "page.configure");
+
+        var result = service.select(
+                new AgenticAuthoringPlanRequest(
+                        "Renomeie a página e organize em 2 colunas",
+                        "gemini",
+                        "gemini-2.5-flash",
+                        "key",
+                        null,
+                        intentForPageBuilderOperation("page.configure"),
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        contextHints),
+                "praxis-page-builder",
+                objectMapper.createObjectNode(),
+                pageBuilderRootManifest(),
+                "t",
+                "u",
+                "e");
+
+        assertThat(result.operationIds()).containsExactlyInAnyOrder("page.configure", "canvas.configure");
+        ArgumentCaptor<String> prompt = ArgumentCaptor.forClass(String.class);
+        verify(provider).generateJson(prompt.capture(), any(), any(), anyString(), anyString(), anyString());
+        assertThat(prompt.getValue())
+                .contains(
+                        "\"operationId\":\"page.configure\"",
+                        "\"operationId\":\"canvas.configure\"")
+                .doesNotContain("\"operationId\":\"widget.add\"");
+    }
+
     private AgenticAuthoringPlanRequest request() { return new AgenticAuthoringPlanRequest("compose", "openai", "gpt", "key"); }
     private AgenticAuthoringIntentResolutionResult incorrectPrimaryIntent() {
         return new AgenticAuthoringIntentResolutionResult(
@@ -799,14 +877,56 @@ class AgenticAuthoringComponentOperationSelectionServiceTest {
           ]
         }
         """); }
+    private AgenticAuthoringIntentResolutionResult intentForPageBuilderOperation(String operationKind) {
+        return new AgenticAuthoringIntentResolutionResult(
+                true,
+                "modify",
+                "page",
+                operationKind,
+                "semantic-manifest",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                new AgenticAuthoringTarget("", "praxis-page-builder", "", "", "", ""),
+                null,
+                java.util.List.of(),
+                new AgenticAuthoringGateResult("component-edit", "eligible", java.util.List.of()),
+                java.util.List.of(),
+                java.util.List.of(),
+                java.util.List.of(),
+                objectMapper.createObjectNode());
+    }
+    private JsonNode pageBuilderRootManifest() throws Exception { return objectMapper.readTree("""
+        {
+          "operations": [
+            {
+              "operationId": "page.configure",
+              "targetKind": "page",
+              "affectedPaths": ["title", "layoutPreset", "themePreset"]
+            },
+            {
+              "operationId": "canvas.configure",
+              "targetKind": "canvas",
+              "affectedPaths": ["canvas.columns", "canvas.rowUnit", "canvas.gap", "canvas.items"]
+            },
+            {
+              "operationId": "widget.add",
+              "targetKind": "widget",
+              "affectedPaths": ["widgets[]", "canvas.items[]"]
+            }
+          ]
+        }
+        """); }
     private JsonNode selection(String... ids) {
+        return selectionFor("praxis-table", ids);
+    }
+    private JsonNode selectionFor(String componentId, String... ids) {
         var root = objectMapper.createObjectNode(); root.put("schemaVersion", AgenticAuthoringComponentOperationSelectionService.SCHEMA_VERSION);
-        root.put("componentId", "praxis-table");
+        root.put("componentId", componentId);
         var goals = root.putArray("goals");
         for (String id : ids) {
             var goal = goals.addObject();
             goal.put("description", "Materialize " + id);
-            goal.put("targetConcept", "praxis-table");
+            goal.put("targetConcept", componentId);
             goal.putArray("operationIds").add(id);
         }
         root.put("requiresClarification", false); root.put("clarificationReason", "");

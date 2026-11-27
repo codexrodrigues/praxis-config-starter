@@ -34,6 +34,15 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements
     private static final Pattern FIELD_DECLARATION_PATTERN = Pattern.compile(
             "(?:field|fieldName|name|id|property|path|column|campo|coluna)\\s*[:=]\\s*['\\\"]?([A-Za-z_][A-Za-z0-9_.-]{1,80})",
             Pattern.CASE_INSENSITIVE);
+    private static final Set<String> NON_SCHEMA_CONTEXT_HINT_KEYS = Set.of(
+            "recommendedIntents",
+            "quickReplies",
+            "preIntentSemanticOrientation",
+            "pendingClarification",
+            "activeSemanticDecision",
+            "authoringScopePolicy",
+            "runtimeComponentObservations",
+            "conversationHistory");
 
     public AgenticAuthoringGenericUiCompositionPlanProvider(ObjectMapper objectMapper) {
         this.objectMapper = objectMapper;
@@ -2690,10 +2699,18 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements
         if (fields.isEmpty()) {
             return List.of();
         }
+        boolean hasVerifiedStatsEligibleFields = fields.stream()
+                .anyMatch(this::isVerifiedStatsEligibleField);
         String normalizedPrompt = normalize(prompt).replaceAll("[^a-z0-9]+", " ").trim();
+        List<FieldCandidate> candidatePool = hasVerifiedStatsEligibleFields
+                ? fields.stream()
+                        .filter(field -> isVerifiedStatsEligibleField(field)
+                                || promptExplicitlyRequestsDashboardField(field, normalizedPrompt))
+                        .toList()
+                : fields;
         List<ScoredFieldCandidate> scored = new ArrayList<>();
-        for (int index = 0; index < fields.size(); index++) {
-            FieldCandidate field = fields.get(index);
+        for (int index = 0; index < candidatePool.size(); index++) {
+            FieldCandidate field = candidatePool.get(index);
             int score = scoreFieldCandidateForDashboard(field, normalizedPrompt);
             if (score > 0) {
                 scored.add(new ScoredFieldCandidate(field, score, index));
@@ -2716,11 +2733,47 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements
                 .map(ScoredFieldCandidate::field)
                 .map(field -> inferredDashboardDimension(
                         field.concept(),
-                        canonicalDashboardAnalyticalField(field, fields),
+                        canonicalDashboardAnalyticalField(field, candidatePool),
                         field.label(),
                         "Registros por " + field.label(),
                         field.provenance()))
                 .toList();
+    }
+
+    private boolean isVerifiedStatsEligibleField(FieldCandidate field) {
+        if (field == null || (!field.groupByHint() && !field.timeSeriesHint())) {
+            return false;
+        }
+        String provenance = safe(field.provenance());
+        return provenance.contains("analyticsFields")
+                || provenance.contains("analyticsCapabilityFieldCatalogs");
+    }
+
+    private boolean promptExplicitlyRequestsDashboardField(FieldCandidate field, String normalizedPrompt) {
+        if (field == null || normalizedPrompt.isBlank()) {
+            return false;
+        }
+        String normalizedField = searchableText(field.field());
+        String normalizedLabel = searchableText(field.label());
+        String compactPrompt = normalizedPrompt.replace(" ", "");
+        String compactField = normalizedField.replace(" ", "");
+        String compactLabel = normalizedLabel.replace(" ", "");
+        if (!normalizedLabel.isBlank() && phrasePresent(normalizedPrompt, normalizedLabel)) {
+            return true;
+        }
+        if (!normalizedField.isBlank() && phrasePresent(normalizedPrompt, normalizedField)) {
+            return true;
+        }
+        if (!compactLabel.isBlank() && compactPrompt.contains(compactLabel)) {
+            return true;
+        }
+        if (!compactField.isBlank() && compactPrompt.contains(compactField)) {
+            return true;
+        }
+        String fieldStem = normalizedField.replaceFirst("\\s+(nome|name|codigo|code|id)$", "").trim();
+        return fieldStem.length() >= 4
+                && isMeaningfulFieldToken(fieldStem)
+                && phrasePresent(normalizedPrompt, fieldStem);
     }
 
     private String canonicalDashboardAnalyticalField(FieldCandidate field, List<FieldCandidate> fields) {
@@ -2993,6 +3046,9 @@ public class AgenticAuthoringGenericUiCompositionPlanProvider implements
         node.fields().forEachRemaining(entry -> {
             String key = entry.getKey();
             JsonNode value = entry.getValue();
+            if (NON_SCHEMA_CONTEXT_HINT_KEYS.contains(key)) {
+                return;
+            }
             if (List.of("fields", "columns", "properties", "schemaFields", "filterableFields",
                     "filterSchemaFields", "analyticsFields", "resourceFields", "fieldCatalog", "fieldMetadata")
                     .contains(key)) {

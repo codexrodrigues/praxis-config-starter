@@ -35,6 +35,20 @@ public interface ApiMetadataRepository extends JpaRepository<ApiMetadata, Long> 
             String releaseId);
 
     @Query(value = """
+        SELECT e.release_id
+        FROM api_metadata e
+        WHERE e.tenant_id = :tenantId
+          AND e.environment = :environment
+          AND e.service_key = :serviceKey
+        ORDER BY e.generated_at DESC NULLS LAST, e.id DESC
+        LIMIT 1
+        """, nativeQuery = true)
+    Optional<String> findLatestReleaseIdByScope(
+            @Param("tenantId") String tenantId,
+            @Param("environment") String environment,
+            @Param("serviceKey") String serviceKey);
+
+    @Query(value = """
         SELECT
             e.path,
             e.method,

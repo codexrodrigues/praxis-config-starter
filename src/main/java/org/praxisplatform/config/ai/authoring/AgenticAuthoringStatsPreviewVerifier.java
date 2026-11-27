@@ -401,12 +401,16 @@ final class AgenticAuthoringStatsPreviewVerifier {
             return objectNode;
         }
         int groundedCharts = 0;
+        int expectedCharts = 0;
+        List<Integer> unsupportedChartIndices = new ArrayList<>();
         JsonNode widgets = objectNode.path("widgets");
         if (widgets.isArray()) {
-            for (JsonNode widget : widgets) {
+            for (int index = 0; index < widgets.size(); index++) {
+                JsonNode widget = widgets.get(index);
                 if (!(widget instanceof ObjectNode widgetObject) || !isPraxisStatsChart(widgetObject)) {
                     continue;
                 }
+                expectedCharts++;
                 ObjectNode config = widgetObject.path("inputs").path("config") instanceof ObjectNode value
                         ? value
                         : null;
@@ -421,6 +425,7 @@ final class AgenticAuthoringStatsPreviewVerifier {
                         : null;
                 if (config == null || query == null || statsRequest == null || semanticAxis == null) {
                     markStatsAxisUnsupported(objectNode, semanticAxis, "invalid-chart-contract");
+                    unsupportedChartIndices.add(index);
                     continue;
                 }
                 String operation = valueOrDefault(query.path("statsOperation").asText(""), "group-by");
@@ -429,6 +434,7 @@ final class AgenticAuthoringStatsPreviewVerifier {
                                 result.getCapabilities(),
                                 "comparison")) {
                     markStatsAxisUnsupported(objectNode, semanticAxis, "operation-unavailable");
+                    unsupportedChartIndices.add(index);
                     continue;
                 }
                 Optional<StatsCapabilityFieldDescriptor> dimension = resolveStatsDimensionCapability(
@@ -456,23 +462,33 @@ final class AgenticAuthoringStatsPreviewVerifier {
                 }
                 if (dimension.isEmpty()) {
                     markStatsAxisUnsupported(objectNode, semanticAxis, "unsupported-dimension");
+                    unsupportedChartIndices.add(index);
                     continue;
                 }
                 if ("comparison".equals(normalize(operation))
                         && !alignComparisonPeriodCapability(statsRequest, capabilityFields)) {
                     markStatsAxisUnsupported(objectNode, semanticAxis, "unsupported-comparison-period");
+                    unsupportedChartIndices.add(index);
                     continue;
                 }
                 if (!alignStatsMetricCapability(config, capabilityFields)) {
                     markStatsAxisUnsupported(objectNode, semanticAxis, "unsupported-metric");
+                    unsupportedChartIndices.add(index);
                     continue;
                 }
                 alignStatsExecutionField(query, statsRequest, dimension.get());
                 markStatsAxisVerified(objectNode, semanticAxis, dimension.get(), result);
                 groundedCharts++;
             }
+            if (!unsupportedChartIndices.isEmpty()
+                    && widgets instanceof ArrayNode widgetArray
+                    && widgetArray.size() > unsupportedChartIndices.size()) {
+                for (int removeIndex = unsupportedChartIndices.size() - 1; removeIndex >= 0; removeIndex--) {
+                    widgetArray.remove(unsupportedChartIndices.get(removeIndex));
+                }
+                addWarningOnce(warnings, "semantic-axis-stats-capability-unsupported-chart-pruned");
+            }
         }
-        int expectedCharts = countPraxisStatsCharts(objectNode);
         markResourceStatsGrounding(
                 objectNode,
                 resourcePath,

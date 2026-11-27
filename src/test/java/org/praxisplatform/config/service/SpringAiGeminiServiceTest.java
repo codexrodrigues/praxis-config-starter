@@ -216,6 +216,193 @@ class SpringAiGeminiServiceTest {
         assertEquals(false, retryable);
     }
 
+    @Test
+    void transientPerMinuteRateLimitWithRetryInfoAllowsRetryAndFallback() {
+        SpringAiGeminiService service = new SpringAiGeminiService(provider(chatClient), objectMapper);
+        String body = """
+                {
+                  "error": {
+                    "code": 429,
+                    "message": "You exceeded your current quota, please check your plan and billing details. * Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_requests, limit: 5, model: gemini-2.5-flash Please retry in 24.3s.",
+                    "status": "RESOURCE_EXHAUSTED",
+                    "details": [
+                      {
+                        "@type": "type.googleapis.com/google.rpc.RetryInfo",
+                        "retryDelay": "24s"
+                      }
+                    ]
+                  }
+                }
+                """;
+        String summary = ReflectionTestUtils.invokeMethod(service, "summarizeErrorBodyForClassification", body);
+        Object retryAfter = ReflectionTestUtils.invokeMethod(service, "extractRetryAfter", body);
+        AiProviderCallException rateLimit = AiProviderCallException.fromHttpStatus(
+                "gemini",
+                429,
+                summary,
+                (java.time.Instant) retryAfter,
+                null);
+
+        Boolean capacity = ReflectionTestUtils.invokeMethod(service, "isCapacityExhausted", rateLimit);
+        Boolean retryable = ReflectionTestUtils.invokeMethod(service, "isRetryable", rateLimit);
+
+        assertNotNull(retryAfter);
+        assertEquals(AiProviderCallException.Kind.RATE_LIMIT, rateLimit.getKind());
+        assertEquals(true, capacity);
+        assertEquals(true, retryable);
+    }
+
+    @Test
+    void zeroLimitQuotaExhaustionRemainsNonRetryable() {
+        SpringAiGeminiService service = new SpringAiGeminiService(provider(chatClient), objectMapper);
+        String body = """
+                {
+                  "error": {
+                    "code": 429,
+                    "message": "You exceeded your current quota, please check your plan and billing details. Quota exceeded for limit: 0, model: gemini-2.5-pro. Please retry in 10s.",
+                    "status": "RESOURCE_EXHAUSTED",
+                    "details": [
+                      {
+                        "@type": "type.googleapis.com/google.rpc.RetryInfo",
+                        "retryDelay": "10s"
+                      }
+                    ]
+                  }
+                }
+                """;
+        String summary = ReflectionTestUtils.invokeMethod(service, "summarizeErrorBodyForClassification", body);
+        Object retryAfter = ReflectionTestUtils.invokeMethod(service, "extractRetryAfter", body);
+        AiProviderCallException quota = AiProviderCallException.fromHttpStatus(
+                "gemini",
+                429,
+                summary,
+                (java.time.Instant) retryAfter,
+                null);
+
+        Boolean capacity = ReflectionTestUtils.invokeMethod(service, "isCapacityExhausted", quota);
+        Boolean retryable = ReflectionTestUtils.invokeMethod(service, "isRetryable", quota);
+
+        assertEquals(AiProviderCallException.Kind.QUOTA_EXHAUSTED, quota.getKind());
+        assertEquals(false, capacity);
+        assertEquals(false, retryable);
+    }
+
+    @Test
+    void dailyFreeTierQuotaExhaustionDoesNotRetryAsRateLimit() {
+        SpringAiGeminiService service = new SpringAiGeminiService(provider(chatClient), objectMapper);
+        String body = """
+                {
+                  "error": {
+                    "code": 429,
+                    "message": "You exceeded your current quota, please check your plan and billing details. * Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_requests, limit: 20, model: gemini-2.5-flash-lite, description: Generate content requests per day limit exceeded on Free Tier. Please retry in 10h36m48.537126298s.",
+                    "status": "RESOURCE_EXHAUSTED",
+                    "details": [
+                      {
+                        "@type": "type.googleapis.com/google.rpc.RetryInfo",
+                        "retryDelay": "38208s"
+                      }
+                    ]
+                  }
+                }
+                """;
+        String summary = ReflectionTestUtils.invokeMethod(service, "summarizeErrorBodyForClassification", body);
+        Object retryAfter = ReflectionTestUtils.invokeMethod(service, "extractRetryAfter", body);
+        AiProviderCallException quota = AiProviderCallException.fromHttpStatus(
+                "gemini",
+                429,
+                summary,
+                (java.time.Instant) retryAfter,
+                null);
+
+        Boolean capacity = ReflectionTestUtils.invokeMethod(service, "isCapacityExhausted", quota);
+        Boolean retryable = ReflectionTestUtils.invokeMethod(service, "isRetryable", quota);
+
+        assertTrue(retryAfter == null);
+        assertEquals(AiProviderCallException.Kind.QUOTA_EXHAUSTED, quota.getKind());
+        assertEquals(false, capacity);
+        assertEquals(false, retryable);
+    }
+
+    @Test
+    void agenticAuthoringOnGemini3AppliesLowThinkingLevelAndHonorsCallTimeout() {
+        SpringAiGeminiService service = new SpringAiGeminiService(provider(chatClient), objectMapper);
+        ReflectionTestUtils.setField(service, "temperature", 0.1d);
+        ReflectionTestUtils.setField(service, "maxTokens", 2048);
+        ReflectionTestUtils.setField(service, "jsonMinOutputTokens", 8192);
+        ReflectionTestUtils.setField(service, "timeoutSeconds", 75);
+        ReflectionTestUtils.setField(service, "authoringThinkingLevel", "LOW");
+
+        AiCallConfig authoringCall = AiCallConfig.agenticAuthoringBuilder()
+                .timeoutSeconds(60)
+                .build();
+
+        ObjectNode gemini38Payload = service.buildDirectRequestPayload("prompt", authoringCall, true, "gemini-3.8-flash");
+        assertEquals(
+                "LOW",
+                gemini38Payload.path("generationConfig").path("thinkingConfig").path("thinkingLevel").asText());
+
+        ObjectNode gemini35LitePayload = service.buildDirectRequestPayload(
+                "prompt", authoringCall, true, "gemini-3.5-flash-lite");
+        assertTrue(gemini35LitePayload.path("generationConfig").path("thinkingConfig").isMissingNode());
+
+        ObjectNode gemini25Payload = service.buildDirectRequestPayload("prompt", authoringCall, true, "gemini-2.5-flash");
+        assertTrue(gemini25Payload.path("generationConfig").path("thinkingConfig").isMissingNode());
+
+        assertEquals(60, service.resolveTimeoutSeconds(authoringCall));
+        assertEquals(75, service.resolveTimeoutSeconds(AiCallConfig.builder().build()));
+    }
+
+    @Test
+    void explicitThinkingProfileMapsGemini3ThinkingLevelsSafely() {
+        SpringAiGeminiService service = new SpringAiGeminiService(provider(chatClient), objectMapper);
+        ReflectionTestUtils.setField(service, "temperature", 0.1d);
+        ReflectionTestUtils.setField(service, "maxTokens", 2048);
+        ReflectionTestUtils.setField(service, "jsonMinOutputTokens", 8192);
+
+        ObjectNode offOn38 = service.buildDirectRequestPayload(
+                "prompt",
+                AiCallConfig.builder().thinkingProfile(AiThinkingProfile.OFF).build(),
+                true,
+                "gemini-3.8-flash");
+        assertEquals("LOW", offOn38.path("generationConfig").path("thinkingConfig").path("thinkingLevel").asText());
+
+        ObjectNode offOnLite = service.buildDirectRequestPayload(
+                "prompt",
+                AiCallConfig.builder().thinkingProfile(AiThinkingProfile.OFF).build(),
+                true,
+                "gemini-3.5-flash-lite");
+        assertEquals("MINIMAL", offOnLite.path("generationConfig").path("thinkingConfig").path("thinkingLevel").asText());
+
+        ObjectNode deepOn38 = service.buildDirectRequestPayload(
+                "prompt",
+                AiCallConfig.builder().thinkingProfile(AiThinkingProfile.DEEP_ANALYSIS).build(),
+                true,
+                "gemini-3.8-flash");
+        assertEquals("HIGH", deepOn38.path("generationConfig").path("thinkingConfig").path("thinkingLevel").asText());
+    }
+
+    @Test
+    void extractContentFromGeminiSkipsThoughtParts() throws Exception {
+        SpringAiGeminiService service = new SpringAiGeminiService(provider(chatClient), objectMapper);
+        JsonNode root = objectMapper.readTree("""
+                {
+                  "candidates": [
+                    {
+                      "content": {
+                        "parts": [
+                          { "thought": true, "text": "chain of thought" },
+                          { "text": "{\\"status\\":\\"ok\\"}" }
+                        ]
+                      }
+                    }
+                  ]
+                }
+                """);
+
+        String extracted = ReflectionTestUtils.invokeMethod(service, "extractContentFromGemini", root);
+        assertEquals("{\"status\":\"ok\"}", extracted);
+    }
+
     private static ObjectProvider<GoogleGenAiChatModel> provider(GoogleGenAiChatModel client) {
         return new ObjectProvider<>() {
             @Override

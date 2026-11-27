@@ -992,6 +992,21 @@ final class AgenticAuthoringIntentQuickReplySupport {
                                 "Clique para descartar esta trilha de criacao.")));
     }
 
+    List<AgenticAuthoringQuickReply> candidateResourceClarificationQuickReplies(
+            String effectivePrompt,
+            List<AgenticAuthoringCandidate> candidates) {
+        if (candidates == null || candidates.isEmpty()) {
+            return List.of();
+        }
+        List<AgenticAuthoringCandidate> trusted = candidates.stream()
+                .filter(Objects::nonNull)
+                .filter(candidate -> candidate.evidence() == null
+                        || (!candidate.evidence().contains("lexical-fallback")
+                                && !candidate.evidence().contains("weak-evidence")))
+                .toList();
+        return candidateResourceQuickReplies(effectivePrompt, trusted);
+    }
+
     private List<AgenticAuthoringQuickReply> candidateResourceQuickReplies(
             String effectivePrompt,
             List<AgenticAuthoringCandidate> candidates) {

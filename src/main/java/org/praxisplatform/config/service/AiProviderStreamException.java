@@ -1,5 +1,8 @@
 package org.praxisplatform.config.service;
 
+import java.util.Locale;
+import java.util.regex.Pattern;
+
 /**
  * Falha de streaming normalizada no nivel do provider.
  *
@@ -74,17 +77,46 @@ public final class AiProviderStreamException extends RuntimeException {
         return new AiProviderStreamException(provider, kind, statusCode, message, null);
     }
 
+    private static final Pattern LONG_RETRY_HINT_PATTERN =
+            Pattern.compile("(?:please\\s+)?retry\\s+in\\s+\\d+\\s*[hm]", Pattern.CASE_INSENSITIVE);
+
     private static boolean isQuotaExhausted(String reason) {
         if (reason == null || reason.isBlank()) {
             return false;
         }
-        String normalized = reason.toLowerCase();
+        String normalized = reason.toLowerCase(Locale.ROOT);
+        boolean zeroLimit = normalized.contains("limit: 0") || normalized.contains("limit:0");
+        boolean dailyQuotaExhausted = normalized.contains("quota_exhausted_daily")
+                || normalized.contains("requests_per_day")
+                || normalized.contains("requests per day")
+                || normalized.contains("per day")
+                || normalized.contains("per_day")
+                || LONG_RETRY_HINT_PATTERN.matcher(reason).find();
+        if (zeroLimit || dailyQuotaExhausted) {
+            return true;
+        }
+        if (isTransientRateLimitHint(normalized)) {
+            return false;
+        }
         return normalized.contains("insufficient_quota")
+                || normalized.contains("quota_exhausted")
                 || normalized.contains("quota exhausted")
                 || normalized.contains("quota exceeded")
                 || normalized.contains("exceeded your current quota")
                 || normalized.contains("billing")
                 || normalized.contains("check your plan");
+    }
+
+    private static boolean isTransientRateLimitHint(String normalized) {
+        return normalized.contains("please retry in")
+                || normalized.contains("retry in ")
+                || normalized.contains("retrydelay")
+                || normalized.contains("retryinfo")
+                || normalized.contains("per minute")
+                || normalized.contains("per_minute")
+                || normalized.contains("requests_per_minute")
+                || normalized.contains("tokens_per_minute")
+                || normalized.contains("rate_limit_retryable");
     }
 
     public static AiProviderStreamException timeout(String provider, Throwable cause) {

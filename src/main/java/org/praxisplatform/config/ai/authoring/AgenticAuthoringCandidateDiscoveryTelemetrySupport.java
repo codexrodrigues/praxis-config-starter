@@ -232,7 +232,12 @@ final class AgenticAuthoringCandidateDiscoveryTelemetrySupport {
                 hasEvidence(selectedCandidate, "domain-anchor") && !hasStrongGroundingEvidence(selectedCandidate));
         telemetry.put("selectedCandidateUsesDomainCatalogGrounding",
                 hasEvidence(selectedCandidate, AgenticAuthoringDomainCatalogCandidateEnhancer.DOMAIN_CATALOG_GROUNDING));
-        telemetry.put("selectedCandidateUsesLexicalFallback", hasEvidence(selectedCandidate, "lexical-fallback"));
+        boolean explicitSourceMatchWithSchema = (hasEvidence(selectedCandidate, "explicit-resource-path")
+                || hasEvidence(selectedCandidate, "explicit-source-match"))
+                && (hasEvidence(selectedCandidate, "schema-available")
+                        || hasEvidence(selectedCandidate, "schema-grounding-verified"));
+        telemetry.put("selectedCandidateUsesLexicalFallback",
+                hasEvidence(selectedCandidate, "lexical-fallback") && !explicitSourceMatchWithSchema);
         telemetry.put("selectedCandidateUsesBroadArtifactDiscovery",
                 hasEvidence(selectedCandidate, "broad-artifact-discovery"));
         List<AgenticAuthoringCandidate> usableCandidates = candidates == null ? List.of() : candidates;

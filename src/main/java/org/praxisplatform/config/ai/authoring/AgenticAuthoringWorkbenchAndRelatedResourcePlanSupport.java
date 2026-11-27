@@ -228,9 +228,7 @@ final class AgenticAuthoringWorkbenchAndRelatedResourcePlanSupport {
         String resourcePath = provider.businessResourcePath(candidate == null ? "" : candidate.resourcePath());
         List<JsonNode> details = grounding.operations().stream()
                 .filter(operation -> "resource_operation".equals(provider.safe(operation.path("kind").asText())))
-                .filter(operation -> "principal_capability".equals(provider.safe(operation.path("verificationMode").asText())))
-                .filter(operation -> operation.path("availability").path("allowed").asBoolean(false)
-                        && "resource_capabilities".equals(provider.safe(operation.path("availability").path("resolution").asText())))
+                .filter(this::isVerifiedResourceOperationAvailability)
                 .filter(operation -> grounding.resourceKey().equals(provider.safe(operation.path("resourceKey").asText()))
                         && resourcePath.equals(provider.safe(operation.path("resourcePath").asText())))
                 .filter(operation -> "get".equalsIgnoreCase(provider.safe(operation.path("apiMethod").asText()))
@@ -240,8 +238,48 @@ final class AgenticAuthoringWorkbenchAndRelatedResourcePlanSupport {
                 .filter(operation -> provider.safe(operation.path("apiPath").asText())
                         .matches(java.util.regex.Pattern.quote(resourcePath) + "/\\{[^/{}]+\\}"))
                 .toList();
-        // Multiple verified item projections still need semantic disambiguation.
-        return details.size() == 1 ? details.get(0) : null;
+        java.util.Map<String, JsonNode> distinctByEndpoint = new java.util.LinkedHashMap<>();
+        for (JsonNode detail : details) {
+            String endpointKey = provider.safe(detail.path("apiPath").asText())
+                    + "|" + provider.safe(detail.path("apiMethod").asText()).toLowerCase(Locale.ROOT)
+                    + "|" + provider.safe(detail.path("schemaUrl").asText());
+            distinctByEndpoint.merge(endpointKey, detail, (existing, incoming) ->
+                    detailOperationPriority(incoming) < detailOperationPriority(existing)
+                            ? incoming
+                            : existing);
+        }
+        // Multiple distinct verified item projections still need semantic disambiguation.
+        return distinctByEndpoint.size() == 1
+                ? distinctByEndpoint.values().iterator().next()
+                : null;
+    }
+
+    private int detailOperationPriority(JsonNode operation) {
+        return switch (provider.safe(operation.path("operationId").asText()).toLowerCase(Locale.ROOT)) {
+            case "byid" -> 0;
+            case "view" -> 1;
+            case "read" -> 2;
+            case "get" -> 3;
+            default -> 4;
+        };
+    }
+
+    private boolean isVerifiedResourceOperationAvailability(JsonNode operation) {
+        if (!"principal_capability".equals(provider.safe(operation.path("verificationMode").asText()))) {
+            return false;
+        }
+        JsonNode availability = operation.path("availability");
+        String resolution = provider.safe(availability.path("resolution").asText());
+        if (availability.path("allowed").asBoolean(false)
+                && "resource_capabilities".equals(resolution)) {
+            return true;
+        }
+        String scope = provider.safe(operation.path("scope").asText()).toUpperCase(Locale.ROOT);
+        String reason = provider.safe(availability.path("reason").asText());
+        return "ITEM".equals(scope)
+                && !availability.path("allowed").asBoolean(true)
+                && Set.of("resource-context-required", "resource-state-not-found").contains(reason)
+                && "item_capabilities_at_selection".equals(resolution);
     }
 
     private boolean isActionWorkbenchRequested(AgenticAuthoringVisualizationDecision visualizationDecision) {
@@ -1946,9 +1984,7 @@ final class AgenticAuthoringWorkbenchAndRelatedResourcePlanSupport {
         String verificationMode = provider.safe(operation.path("verificationMode").asText());
         String availabilityResolution = provider.safe(operation.path("availability").path("resolution").asText());
         if ("resource_operation".equals(kind)) {
-            return "principal_capability".equals(verificationMode)
-                    && operation.path("availability").path("allowed").asBoolean(false)
-                    && "resource_capabilities".equals(availabilityResolution);
+            return isVerifiedResourceOperationAvailability(operation);
         }
         if (!"workflow_action".equals(kind)
                 || !"runtime_action_discovery".equals(verificationMode)

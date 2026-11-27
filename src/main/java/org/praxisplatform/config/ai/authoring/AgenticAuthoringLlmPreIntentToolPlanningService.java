@@ -526,6 +526,7 @@ public class AgenticAuthoringLlmPreIntentToolPlanningService implements AgenticA
                     quickReplies));
         }
         if (!result.path("shouldRetrieveGovernedResources").asBoolean(false)) {
+            String layoutKind = layoutKind(result);
             return AgenticAuthoringPreIntentToolPlanningResult.planned(new AgenticAuthoringPreIntentToolPlan(
                     textOrDefault(result, "schemaVersion", "praxis-agentic-authoring-pre-intent-tool-plan.v3"),
                     text(result, "reason"),
@@ -534,13 +535,9 @@ public class AgenticAuthoringLlmPreIntentToolPlanningService implements AgenticA
                     assistantMessage,
                     result.path("requiresFullIntentResolution").asBoolean(false),
                     result.path("queryConstraints").deepCopy(),
-                    text(result, "artifactKind"),
-                    "parent-child-related-resource".equals(layoutKind(result))
-                            ? "praxis-related-resource-outlet"
-                            : "approval-workbench".equals(layoutKind(result))
-                                    ? "praxis-table"
-                                    : primaryComponent(result),
-                    layoutKind(result),
+                    normalizeCompactLayoutArtifactKind(text(result, "artifactKind"), layoutKind),
+                    resolveCompactLayoutPrimaryComponent(primaryComponent(result), layoutKind),
+                    layoutKind,
                     quickReplies));
         }
         String groundingProfile = text(result, "groundingProfile");
@@ -585,11 +582,13 @@ public class AgenticAuthoringLlmPreIntentToolPlanningService implements AgenticA
         if (!"domain_decision".equals(groundingProfile)) {
             retrievalQuery = focusedRetrievalQuery(retrievalQuery, resourceSearchFocus);
         }
-        String artifactKind = text(result, "artifactKind");
+        String layoutKind = layoutKind(result);
+        String artifactKind = normalizeCompactLayoutArtifactKind(text(result, "artifactKind"), layoutKind);
         if (!List.of("page", "dashboard", "chart", "table", "form", "api_catalog", "unknown")
                 .contains(artifactKind)) {
             artifactKind = "page";
         }
+        String resolvedPrimaryComponent = resolveCompactLayoutPrimaryComponent(primaryComponent(result), layoutKind);
         AgenticAuthoringToolCall toolCall = progressiveToolCall(
                 request, groundingProfile, retrievalQuery, artifactKind, resourceSearchFocus);
         return AgenticAuthoringPreIntentToolPlanningResult.planned(new AgenticAuthoringPreIntentToolPlan(
@@ -601,13 +600,25 @@ public class AgenticAuthoringLlmPreIntentToolPlanningService implements AgenticA
                 requiresFullIntentResolution,
                 result.path("queryConstraints").deepCopy(),
                 artifactKind,
-                "parent-child-related-resource".equals(layoutKind(result))
-                        ? "praxis-related-resource-outlet"
-                        : "approval-workbench".equals(layoutKind(result))
-                                ? "praxis-table"
-                                : primaryComponent(result),
-                layoutKind(result),
+                resolvedPrimaryComponent,
+                layoutKind,
                 quickReplies));
+    }
+
+    private static String normalizeCompactLayoutArtifactKind(String artifactKind, String layoutKind) {
+        if ("resource-master-detail".equals(layoutKind) || "resource-crud".equals(layoutKind)) {
+            return "page";
+        }
+        return artifactKind;
+    }
+
+    private static String resolveCompactLayoutPrimaryComponent(String fallbackPrimaryComponent, String layoutKind) {
+        return switch (layoutKind) {
+            case "parent-child-related-resource" -> "praxis-related-resource-outlet";
+            case "approval-workbench", "resource-master-detail" -> "praxis-table";
+            case "resource-crud" -> "praxis-crud";
+            default -> fallbackPrimaryComponent;
+        };
     }
 
     private AgenticAuthoringToolCall progressiveToolCall(
@@ -806,19 +817,10 @@ public class AgenticAuthoringLlmPreIntentToolPlanningService implements AgenticA
                 fully represented by layoutKind needs no second pass. Resource discovery and defaults are not constraints.
                 Use groundingProfile=domain_decision for LLM semantic discovery; searchDomainRules returns identities,
                 never conditions or authority.
-                Select groundingProfile progressively.
-                Use domain_capability, domain_concept, domain_binding or operation_verification when needed.
-                Use api_resource when an operational
-                resource is needed.
-                Use API resource retrieval when
-                governed resources, fields, datasets or
-                API-backed sources are needed for a page, view, table, dashboard, form, overview, analysis,
-                monitoring surface, or data-source change. User wording may be vague, misspelled, colloquial, multilingual
-                or loosely related to domainDiscovery. If domainDiscovery exists and resourceDiscovery
-                is absent, use it as semantic context for retrievalQuery, not as a reason to skip.
-                Return false only for visual/local/editorial work, existing resourceDiscovery, or no data grounding need.
-                When retrieval is true, author only retrievalQuery and resourceSearchFocus; do not choose resourcePath,
-                endpoints, configuration or patches.
+                Select groundingProfile progressively (domain_capability, domain_concept, domain_binding, operation_verification when needed).
+                Use api_resource when governed resources, fields or datasets are needed for a page, table, dashboard, form, monitoring view or data-source change (wording may be vague, misspelled, colloquial, multilingual; if domainDiscovery lacks resourceDiscovery, use it as semantic context for retrievalQuery).
+                Return false for visual/editorial work, existing resourceDiscovery, existing-page title/layout edits (requiresFullIntentResolution=true, artifactKind=page), or no data need.
+                When retrieving, author only retrievalQuery and resourceSearchFocus (never resourcePath, endpoints or patches).
                 Model resourceSearchFocus in two semantic layers. primaryBusinessEntity is the canonical business
                 subject explicitly requested, never a view or UI artifact; desiredSurface is presentation only ("painel/visão 360" is desiredSurface). A
                 collection-oriented dashboard with filters, charts and a detail table stays on that subject. Use an
@@ -840,7 +842,7 @@ public class AgenticAuthoringLlmPreIntentToolPlanningService implements AgenticA
                 Use artifactKind dashboard when the requested outcome depends on multiple coordinated analytical
                 regions such as filters, KPIs, multiple charts and a detail/list/table surface. Use artifactKind page
                 for general layout or content composition where analytics are not the dominant requested outcome.
-                Choose layoutKind: single-table + table + praxis-table; resource-master-detail + praxis-table;
+                Choose layoutKind: single-table + table + praxis-table; resource-master-detail + page + praxis-table;
                 approval-workbench + page + praxis-table; parent-child-related-resource + praxis-related-resource-outlet;
                 resource-crud + praxis-crud; tabs_layout + page + praxis-tabs covers Table -> state -> Form; no full pass.
                 Never keyword-route or substitute primaryComponent for layoutKind.
@@ -1045,16 +1047,47 @@ public class AgenticAuthoringLlmPreIntentToolPlanningService implements AgenticA
         if (node.isObject()) {
             if (isWidgetLike(node)) {
                 ObjectNode widget = widgets.addObject();
+                JsonNode definition = node.path("definition");
+                JsonNode inputs = definition.path("inputs");
                 copyText(widget, "key", node, "key");
                 copyText(widget, "id", node, "id");
-                copyText(widget, "componentId", node, "componentId");
+                String componentId = StringUtils.hasText(text(node, "componentId"))
+                        ? text(node, "componentId")
+                        : text(definition, "id");
+                if (StringUtils.hasText(componentId)) {
+                    widget.put("componentId", componentId);
+                }
                 copyText(widget, "type", node, "type");
                 copyText(widget, "title", node, "title");
+                if (!widget.has("title")) {
+                    copyText(widget, "title", inputs, "title");
+                }
                 copyText(widget, "label", node, "label");
-                copyText(widget, "resourcePath", node, "resourcePath");
+                String resourcePath = text(node, "resourcePath");
+                if (!StringUtils.hasText(resourcePath)) {
+                    resourcePath = text(inputs, "resourcePath");
+                }
+                if (!StringUtils.hasText(resourcePath)) {
+                    resourcePath = text(inputs.path("metadata").path("resource"), "path");
+                }
+                if (!StringUtils.hasText(resourcePath)) {
+                    resourcePath = text(inputs.path("config").path("dataSource"), "resourcePath");
+                }
+                if (StringUtils.hasText(resourcePath)) {
+                    widget.put("resourcePath", resourcePath);
+                }
                 copyText(widget, "schemaUrl", node, "schemaUrl");
+                if (!widget.has("schemaUrl")) {
+                    copyText(widget, "schemaUrl", inputs, "schemaUrl");
+                }
                 copyText(widget, "submitUrl", node, "submitUrl");
+                if (!widget.has("submitUrl")) {
+                    copyText(widget, "submitUrl", inputs, "submitUrl");
+                }
                 copyText(widget, "submitMethod", node, "submitMethod");
+                if (!widget.has("submitMethod")) {
+                    copyText(widget, "submitMethod", inputs, "submitMethod");
+                }
             }
             Iterator<JsonNode> values = node.elements();
             while (values.hasNext() && widgets.size() < MAX_PLANNER_PAGE_WIDGETS) {
@@ -1077,6 +1110,9 @@ public class AgenticAuthoringLlmPreIntentToolPlanningService implements AgenticA
                 && node.isObject()
                 && (hasText(node, "componentId")
                 || hasText(node, "widgetKey")
+                || (hasText(node, "key")
+                        && node.path("definition").isObject()
+                        && hasText(node.path("definition"), "id"))
                 || hasText(node, "resourcePath")
                 || hasText(node, "schemaUrl")
                 || hasText(node, "submitUrl"));

@@ -609,6 +609,71 @@ class AgenticAuthoringControllerTest {
         verify(turnStreamService).probe(streamId, explicitContext);
     }
 
+    @Test
+    void deserializesSelectedWidgetKeyAndForwardsItToIntentResolutionOnPreviewPage() throws Exception {
+        var mapper = new com.fasterxml.jackson.databind.ObjectMapper()
+                .configure(com.fasterxml.jackson.databind.DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, true);
+        AgenticAuthoringPlanRequest deserialized = mapper.readValue("""
+                {
+                  "userPrompt": "Altere o titulo do widget selecionado",
+                  "provider": "gemini",
+                  "model": "gemini-3.8-flash",
+                  "currentPage": { "title": "Painel Atual", "widgets": [] },
+                  "selectedWidgetKey": "widget-1",
+                  "futureClientHint": true
+                }
+                """, AgenticAuthoringPlanRequest.class);
+        assertThat(deserialized.selectedWidgetKey()).isEqualTo("widget-1");
+
+        AgenticAuthoringIntentResolutionResult resolvedIntent = new AgenticAuthoringIntentResolutionResult(
+                true,
+                "modify",
+                "table",
+                "widget.shell.configure",
+                "component-edit",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                null,
+                null,
+                List.of(),
+                new org.praxisplatform.config.ai.authoring.AgenticAuthoringGateResult(
+                        "candidate-eligibility@0.1.0",
+                        "eligible",
+                        List.of()),
+                List.of(),
+                List.of(),
+                List.of(),
+                com.fasterxml.jackson.databind.node.MissingNode.getInstance());
+        when(intentResolverService.resolve(any(), eq("tenant"), eq("user"), eq("local")))
+                .thenReturn(resolvedIntent);
+        AgenticAuthoringPreviewResult expectedPreview = new AgenticAuthoringPreviewResult(
+                true,
+                List.of(),
+                List.of(),
+                com.fasterxml.jackson.databind.node.MissingNode.getInstance(),
+                com.fasterxml.jackson.databind.node.MissingNode.getInstance(),
+                null,
+                null,
+                "Preview ok.");
+        when(previewService.preview(any(), eq("tenant"), eq("user"), eq("local"), any()))
+                .thenReturn(expectedPreview);
+
+        ResponseEntity<?> response = controller().previewPage(deserialized, "tenant", "user", "local");
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+        verify(intentResolverService).resolve(
+                argThat(req -> req != null && "widget-1".equals(req.selectedWidgetKey())),
+                eq("tenant"),
+                eq("user"),
+                eq("local"));
+        verify(previewService).preview(
+                argThat(req -> req != null && "widget-1".equals(req.selectedWidgetKey())),
+                eq("tenant"),
+                eq("user"),
+                eq("local"),
+                isNull());
+    }
+
     private AgenticAuthoringController controller() {
         return new AgenticAuthoringController(
                 dryRunService,

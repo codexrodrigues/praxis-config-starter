@@ -230,7 +230,7 @@ final class AgenticAuthoringCompiledPagePatchValidator {
             return prefix + "-auto-rows-invalid";
         }
         if (canvas.has("collisionPolicy")
-                && !Set.of("block", "swap").contains(text(canvas.get("collisionPolicy")))) {
+                && !Set.of("block", "swap", "push-down").contains(text(canvas.get("collisionPolicy")))) {
             return prefix + "-collision-policy-invalid";
         }
         if (!canvas.has("items")) return "";

@@ -14,6 +14,7 @@ import java.util.HashSet;
 import java.util.Iterator;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
@@ -48,6 +49,21 @@ public final class AgenticAuthoringEffectCompilerRegistry {
             "minBenfordSamples",
             "minBucketCount",
             "maxFindings");
+
+    private static final Set<String> ALLOWED_PRAXIS_CHART_INPUTS = Set.of(
+            "config",
+            "resourceKey",
+            "data",
+            "chartDocument",
+            "queryContext",
+            "remoteDataResolver",
+            "dataAlternativeMode",
+            "externalDataAlternativeLabel",
+            "filterCriteria",
+            "enableCustomization",
+            "availableResources",
+            "availableFields",
+            "availableTargets");
 
     private final ObjectMapper objectMapper;
     private final AgenticAuthoringTargetResolverRegistry targetResolverRegistry;
@@ -3144,6 +3160,7 @@ public final class AgenticAuthoringEffectCompilerRegistry {
         JsonNode input = planOperation.path("input");
         copyIfPresent(input, proposedConfig, "title");
         copyIfPresent(input, proposedConfig, "layoutPreset");
+        copyIfPresent(input, proposedConfig, "themePreset");
         if (input.path("context").isObject()) {
             mergeObject(objectAt(proposedConfig, "context", true), input.path("context"));
         }
@@ -3161,14 +3178,81 @@ public final class AgenticAuthoringEffectCompilerRegistry {
         ObjectNode canvas = objectAt(proposedConfig, "canvas", true);
         JsonNode input = planOperation.path("input");
         copyIfPresent(input, canvas, "columns");
-        copyIfPresent(input, canvas, "rowUnit");
-        copyIfPresent(input, canvas, "gap");
-        copyIfPresent(input, canvas, "items");
+        boolean runtimeGridCanvas = canvas.has("mode");
+        copyCanvasDimension(input, canvas, "rowUnit", runtimeGridCanvas);
+        copyCanvasDimension(input, canvas, "gap", runtimeGridCanvas);
+        if (canvas.path("items").isObject() && input.path("items").isArray()) {
+            mergeCanvasItemsArrayIntoObject((ObjectNode) canvas.path("items"), input.path("items"));
+        } else {
+            copyIfPresent(input, canvas, "items");
+        }
+        if (proposedConfig.path("layout").isObject()
+                && input.has("columns")
+                && input.path("columns").canConvertToInt()
+                && input.path("columns").asInt() > 0) {
+            ((ObjectNode) proposedConfig.path("layout")).put("columns", input.path("columns").asInt());
+        }
         ObjectNode compiled = baseDomainPatch(componentId, operation, effect, planOperation, null);
         compiled.put("op", "configure-page-builder-canvas");
         compiled.put("path", "canvas");
         compiled.set("canvas", canvas.deepCopy());
         return compiled;
+    }
+
+    private void copyCanvasDimension(JsonNode input, ObjectNode canvas, String field, boolean runtimeGridCanvas) {
+        JsonNode value = input.path(field);
+        if (value.isMissingNode() || value.isNull()) {
+            return;
+        }
+        if (runtimeGridCanvas && value.isNumber()) {
+            canvas.put(field, value.asText() + "px");
+            return;
+        }
+        canvas.set(field, value.deepCopy());
+    }
+
+    private void mergeCanvasItemsArrayIntoObject(ObjectNode targetItems, JsonNode itemsArray) {
+        for (JsonNode entry : itemsArray) {
+            if (!entry.isObject()) {
+                continue;
+            }
+            String widgetKey = firstNonBlank(text(entry, "widgetKey"), text(entry, "key"), text(entry, "id"));
+            if (widgetKey.isBlank()) {
+                continue;
+            }
+            JsonNode col = entry.get("col");
+            JsonNode row = entry.get("row");
+            JsonNode colSpan = entry.get("colSpan");
+            JsonNode rowSpan = entry.get("rowSpan");
+            boolean hasExisting = targetItems.path(widgetKey).isObject();
+            boolean validGeometry = isPositiveIntNode(col)
+                    && isPositiveIntNode(row)
+                    && isPositiveIntNode(colSpan)
+                    && isPositiveIntNode(rowSpan);
+            if (!hasExisting && !validGeometry) {
+                continue;
+            }
+            ObjectNode targetItem = hasExisting
+                    ? (ObjectNode) targetItems.path(widgetKey)
+                    : targetItems.putObject(widgetKey);
+            targetItem.put("widgetKey", widgetKey);
+            if (isPositiveIntNode(col)) {
+                targetItem.put("col", col.asInt());
+            }
+            if (isPositiveIntNode(row)) {
+                targetItem.put("row", row.asInt());
+            }
+            if (isPositiveIntNode(colSpan)) {
+                targetItem.put("colSpan", colSpan.asInt());
+            }
+            if (isPositiveIntNode(rowSpan)) {
+                targetItem.put("rowSpan", rowSpan.asInt());
+            }
+        }
+    }
+
+    private static boolean isPositiveIntNode(JsonNode node) {
+        return node != null && node.canConvertToInt() && node.asInt() > 0;
     }
 
     private ObjectNode compilePageBuilderWidgetAdd(String componentId, JsonNode operation, JsonNode effect, JsonNode planOperation, ObjectNode proposedConfig, List<String> failures) {
@@ -3184,25 +3268,51 @@ public final class AgenticAuthoringEffectCompilerRegistry {
             failures.add("page-builder-widget-add duplicate widgetKey: " + widgetKey);
             return null;
         }
+        boolean runtimeObjectCanvas = isRuntimeObjectCanvas(proposedConfig);
         ObjectNode widget = objectMapper.createObjectNode();
         widget.put("widgetKey", widgetKey);
         widget.put("key", widgetKey);
         widget.put("componentId", childComponentId);
         copyIfPresent(input, widget, "title");
         ObjectNode definition = widget.putObject("definition");
+        definition.put("id", childComponentId);
         definition.put("componentId", childComponentId);
         if (input.path("inputs").isObject()) {
             definition.set("inputs", input.path("inputs").deepCopy());
         }
+        if ("praxis-chart".equals(childComponentId)) {
+            hydrateAddedChartWidget(widget, definition, input, proposedConfig, widgetKey);
+        }
         widgets.add(widget);
-        ArrayNode items = pageCanvasItems(proposedConfig, true);
-        ObjectNode item = input.path("canvasItem").isObject() ? input.path("canvasItem").deepCopy() : objectMapper.createObjectNode();
-        item.put("widgetKey", widgetKey);
-        copyIfMissing(item, "x", 0);
-        copyIfMissing(item, "y", items.size());
-        copyIfMissing(item, "w", 4);
-        copyIfMissing(item, "h", 3);
-        items.add(item);
+        ObjectNode item;
+        if (runtimeObjectCanvas) {
+            ObjectNode itemsObj = objectAt(proposedConfig, "canvas.items", true);
+            int defaultRow = nextRuntimeCanvasRow(itemsObj);
+            item = findOrCreateRuntimeCanvasItem(itemsObj, widgetKey, true);
+            JsonNode rawCanvasItem = input.path("canvasItem");
+            applyRuntimeCanvasItemGeometry(
+                    item,
+                    widgetKey,
+                    rawCanvasItem,
+                    false,
+                    defaultRow,
+                    runtimeCanvasColumns(proposedConfig));
+            enforceAddedChartMinimumGeometry(
+                    item,
+                    childComponentId,
+                    hasExplicitColumnSpan(rawCanvasItem),
+                    runtimeCanvasColumns(proposedConfig));
+            resolveRuntimeCanvasCollisions(proposedConfig, itemsObj, widgetKey);
+        } else {
+            ArrayNode items = pageCanvasItems(proposedConfig, true);
+            item = input.path("canvasItem").isObject() ? input.path("canvasItem").deepCopy() : objectMapper.createObjectNode();
+            item.put("widgetKey", widgetKey);
+            copyIfMissing(item, "x", 0);
+            copyIfMissing(item, "y", items.size());
+            copyIfMissing(item, "w", 4);
+            copyIfMissing(item, "h", 3);
+            items.add(item);
+        }
         ObjectNode compiled = baseDomainPatch(componentId, operation, effect, planOperation, null);
         compiled.put("op", "add-page-builder-widget");
         compiled.put("path", "widgets[]");
@@ -3222,7 +3332,12 @@ public final class AgenticAuthoringEffectCompilerRegistry {
             return null;
         }
         JsonNode removed = widgets.remove(index);
-        int removedItems = removeObjectsByAnyKey(pageCanvasItems(proposedConfig, false), List.of("widgetKey", "key", "id"), widgetKey);
+        int removedItems;
+        if (proposedConfig != null && proposedConfig.path("canvas").path("items").isObject()) {
+            removedItems = removeObjectCanvasItem((ObjectNode) proposedConfig.path("canvas").path("items"), widgetKey);
+        } else {
+            removedItems = removeObjectsByAnyKey(pageCanvasItems(proposedConfig, false), List.of("widgetKey", "key", "id"), widgetKey);
+        }
         int removedLinks = removeCompositionLinksForWidget(proposedConfig, widgetKey);
         ObjectNode compiled = baseDomainPatch(componentId, operation, effect, planOperation, null);
         compiled.put("op", "remove-page-builder-widget");
@@ -3238,20 +3353,561 @@ public final class AgenticAuthoringEffectCompilerRegistry {
     private ObjectNode compilePageBuilderWidgetMoveResize(String componentId, JsonNode operation, JsonNode effect, JsonNode planOperation, ObjectNode proposedConfig, List<String> failures) {
         JsonNode input = planOperation.path("input");
         String widgetKey = text(input, "widgetKey");
-        ObjectNode item = pageCanvasItem(proposedConfig, widgetKey, true);
-        if (item == null) {
-            failures.add("page-builder-widget-move-resize canvas item not found: " + widgetKey);
-            return null;
+        boolean runtimeObjectCanvas = isRuntimeObjectCanvas(proposedConfig);
+        ObjectNode item;
+        if (runtimeObjectCanvas) {
+            ObjectNode itemsObj = objectAt(proposedConfig, "canvas.items", true);
+            boolean hasExisting = findOrCreateRuntimeCanvasItem(itemsObj, widgetKey, false) != null;
+            int defaultRow = nextRuntimeCanvasRow(itemsObj);
+            item = findOrCreateRuntimeCanvasItem(itemsObj, widgetKey, true);
+            if (item == null) {
+                failures.add("page-builder-widget-move-resize canvas item not found: " + widgetKey);
+                return null;
+            }
+            JsonNode geometry = input.path("canvasItem").isObject() ? input.path("canvasItem") : input;
+            applyRuntimeCanvasItemGeometry(
+                    item,
+                    widgetKey,
+                    geometry,
+                    hasExisting,
+                    defaultRow,
+                    runtimeCanvasColumns(proposedConfig));
+            resolveRuntimeCanvasCollisions(proposedConfig, itemsObj, widgetKey);
+        } else {
+            item = pageCanvasItem(proposedConfig, widgetKey, true);
+            if (item == null) {
+                failures.add("page-builder-widget-move-resize canvas item not found: " + widgetKey);
+                return null;
+            }
+            mergeObject(item, input.path("canvasItem"));
+            item.put("widgetKey", widgetKey);
         }
-        mergeObject(item, input.path("canvasItem"));
-        item.put("widgetKey", widgetKey);
         ObjectNode compiled = baseDomainPatch(componentId, operation, effect, planOperation, null);
         compiled.put("op", "move-resize-page-builder-widget");
-        compiled.put("path", "canvas.items[]");
+        compiled.put("path", runtimeObjectCanvas ? "canvas.items" : "canvas.items[]");
         compiled.put("key", "widgetKey");
         compiled.put("keyValue", widgetKey);
         compiled.set("canvasItem", item.deepCopy());
         return compiled;
+    }
+
+    private boolean isRuntimeObjectCanvas(ObjectNode proposedConfig) {
+        if (proposedConfig == null) {
+            return false;
+        }
+        JsonNode canvas = proposedConfig.path("canvas");
+        return canvas.isObject() && (canvas.path("items").isObject() || canvas.has("mode"));
+    }
+
+    private int runtimeCanvasColumns(ObjectNode proposedConfig) {
+        JsonNode columns = proposedConfig == null ? MissingNode.getInstance() : proposedConfig.path("canvas").path("columns");
+        return isPositiveIntNode(columns) ? columns.asInt() : 12;
+    }
+
+    private int nextRuntimeCanvasRow(ObjectNode itemsObj) {
+        if (itemsObj == null || itemsObj.isEmpty()) {
+            return 1;
+        }
+        int nextRow = 1;
+        Iterator<JsonNode> values = itemsObj.elements();
+        while (values.hasNext()) {
+            JsonNode item = values.next();
+            if (!item.isObject()) {
+                continue;
+            }
+            JsonNode row = item.get("row");
+            JsonNode rowSpan = item.get("rowSpan");
+            if (isPositiveIntNode(row) && isPositiveIntNode(rowSpan)) {
+                nextRow = Math.max(nextRow, row.asInt() + rowSpan.asInt());
+            } else if (isPositiveIntNode(row)) {
+                nextRow = Math.max(nextRow, row.asInt() + 1);
+            }
+        }
+        return nextRow;
+    }
+
+    private ObjectNode findOrCreateRuntimeCanvasItem(ObjectNode itemsObj, String widgetKey, boolean create) {
+        if (itemsObj == null || widgetKey == null || widgetKey.isBlank()) {
+            return null;
+        }
+        if (itemsObj.path(widgetKey) instanceof ObjectNode direct) {
+            return direct;
+        }
+        Iterator<Map.Entry<String, JsonNode>> fields = itemsObj.fields();
+        while (fields.hasNext()) {
+            Map.Entry<String, JsonNode> entry = fields.next();
+            if (entry.getValue() instanceof ObjectNode obj) {
+                for (String keyField : List.of("widgetKey", "key", "id")) {
+                    if (widgetKey.equals(text(obj, keyField))) {
+                        return obj;
+                    }
+                }
+            }
+        }
+        return create ? itemsObj.putObject(widgetKey) : null;
+    }
+
+    private int removeObjectCanvasItem(ObjectNode itemsObj, String widgetKey) {
+        if (itemsObj == null || widgetKey == null || widgetKey.isBlank()) {
+            return 0;
+        }
+        int removed = 0;
+        if (itemsObj.remove(widgetKey) != null) {
+            removed++;
+        }
+        List<String> matchingKeys = new ArrayList<>();
+        Iterator<Map.Entry<String, JsonNode>> fields = itemsObj.fields();
+        while (fields.hasNext()) {
+            Map.Entry<String, JsonNode> entry = fields.next();
+            JsonNode value = entry.getValue();
+            if (value != null && value.isObject()) {
+                for (String keyField : List.of("widgetKey", "key", "id")) {
+                    if (widgetKey.equals(text(value, keyField))) {
+                        matchingKeys.add(entry.getKey());
+                        break;
+                    }
+                }
+            }
+        }
+        for (String key : matchingKeys) {
+            if (itemsObj.remove(key) != null) {
+                removed++;
+            }
+        }
+        return removed;
+    }
+
+    private void applyRuntimeCanvasItemGeometry(
+            ObjectNode targetItem,
+            String widgetKey,
+            JsonNode source,
+            boolean hasExisting,
+            int defaultRow,
+            int canvasColumns) {
+        targetItem.put("widgetKey", widgetKey);
+        if (source != null && source.isObject()) {
+            JsonNode col = source.get("col");
+            JsonNode x = source.get("x");
+            if (isPositiveIntNode(col)) {
+                targetItem.put("col", col.asInt());
+            } else if (isNonNegativeIntNode(x)) {
+                targetItem.put("col", x.asInt() + 1);
+            }
+
+            JsonNode row = source.get("row");
+            JsonNode y = source.get("y");
+            if (isPositiveIntNode(row)) {
+                targetItem.put("row", row.asInt());
+            } else if (isNonNegativeIntNode(y)) {
+                targetItem.put("row", y.asInt() + 1);
+            }
+
+            JsonNode colSpan = source.get("colSpan");
+            JsonNode w = source.get("w");
+            if (isPositiveIntNode(colSpan)) {
+                targetItem.put("colSpan", colSpan.asInt());
+            } else if (isPositiveIntNode(w)) {
+                targetItem.put("colSpan", w.asInt());
+            }
+
+            JsonNode rowSpan = source.get("rowSpan");
+            JsonNode h = source.get("h");
+            if (isPositiveIntNode(rowSpan)) {
+                targetItem.put("rowSpan", rowSpan.asInt());
+            } else if (isPositiveIntNode(h)) {
+                targetItem.put("rowSpan", h.asInt());
+            }
+
+            Set<String> handledFields = Set.of(
+                    "x", "y", "w", "h", "col", "row", "colSpan", "rowSpan", "widgetKey", "key", "id");
+            Iterator<Map.Entry<String, JsonNode>> fields = source.fields();
+            while (fields.hasNext()) {
+                Map.Entry<String, JsonNode> field = fields.next();
+                String key = field.getKey();
+                if (handledFields.contains(key)) {
+                    continue;
+                }
+                JsonNode incoming = field.getValue();
+                JsonNode current = targetItem.path(key);
+                if (current instanceof ObjectNode currentObj && incoming != null && incoming.isObject()) {
+                    mergeObject(currentObj, incoming);
+                } else {
+                    targetItem.set(key, incoming == null ? MissingNode.getInstance() : incoming.deepCopy());
+                }
+            }
+        }
+        targetItem.remove("x");
+        targetItem.remove("y");
+        targetItem.remove("w");
+        targetItem.remove("h");
+
+        int safeColumns = Math.max(1, canvasColumns);
+        if (!hasExisting || !isPositiveIntNode(targetItem.get("col"))) {
+            if (!isPositiveIntNode(targetItem.get("col"))) {
+                targetItem.put("col", 1);
+            }
+        }
+        if (!hasExisting || !isPositiveIntNode(targetItem.get("row"))) {
+            if (!isPositiveIntNode(targetItem.get("row"))) {
+                targetItem.put("row", Math.max(1, defaultRow));
+            }
+        }
+        if (!hasExisting || !isPositiveIntNode(targetItem.get("colSpan"))) {
+            if (!isPositiveIntNode(targetItem.get("colSpan"))) {
+                targetItem.put("colSpan", Math.min(6, safeColumns));
+            }
+        }
+        if (!hasExisting || !isPositiveIntNode(targetItem.get("rowSpan"))) {
+            if (!isPositiveIntNode(targetItem.get("rowSpan"))) {
+                targetItem.put("rowSpan", 4);
+            }
+        }
+        int colSpanVal = Math.min(targetItem.get("colSpan").asInt(), safeColumns);
+        targetItem.put("colSpan", Math.max(1, colSpanVal));
+        if (targetItem.get("col").asInt() > safeColumns) {
+            targetItem.put("col", 1);
+        }
+    }
+
+    private static boolean isNonNegativeIntNode(JsonNode node) {
+        return node != null && node.canConvertToInt() && node.asInt() >= 0;
+    }
+
+    private boolean hasExplicitColumnSpan(JsonNode canvasItem) {
+        return canvasItem != null
+                && canvasItem.isObject()
+                && (isPositiveIntNode(canvasItem.get("colSpan")) || isPositiveIntNode(canvasItem.get("w")));
+    }
+
+    private void enforceAddedChartMinimumGeometry(
+            ObjectNode item,
+            String childComponentId,
+            boolean explicitColSpan,
+            int canvasColumns) {
+        if (item == null
+                || (!"praxis-chart".equals(childComponentId)
+                        && !"praxis-analytics-presentation".equals(childComponentId))) {
+            return;
+        }
+        if (item.path("rowSpan").asInt(0) < 5) {
+            item.put("rowSpan", 5);
+        }
+        if (!explicitColSpan) {
+            item.put("colSpan", Math.max(1, canvasColumns));
+        }
+    }
+
+    private void resolveRuntimeCanvasCollisions(
+            ObjectNode proposedConfig,
+            ObjectNode itemsObj,
+            String anchorWidgetKey) {
+        if (itemsObj == null || itemsObj.size() < 2) {
+            return;
+        }
+        String policy = proposedConfig == null
+                ? "push-down"
+                : proposedConfig.path("canvas").path("collisionPolicy").asText("push-down").trim().toLowerCase(Locale.ROOT);
+        if ("none".equals(policy) || "allow-overlap".equals(policy)) {
+            return;
+        }
+        record CanvasItemSlot(String key, ObjectNode node, boolean anchor, int originalRow, int originalCol) {
+        }
+        List<CanvasItemSlot> slots = new ArrayList<>();
+        Iterator<Map.Entry<String, JsonNode>> fields = itemsObj.fields();
+        while (fields.hasNext()) {
+            Map.Entry<String, JsonNode> entry = fields.next();
+            if (!(entry.getValue() instanceof ObjectNode obj)) {
+                continue;
+            }
+            if (!isPositiveIntNode(obj.get("col"))
+                    || !isPositiveIntNode(obj.get("row"))
+                    || !isPositiveIntNode(obj.get("colSpan"))
+                    || !isPositiveIntNode(obj.get("rowSpan"))) {
+                continue;
+            }
+            String slotKey = firstNonBlank(text(obj, "widgetKey"), entry.getKey());
+            boolean isAnchor = anchorWidgetKey != null && !anchorWidgetKey.isBlank() && anchorWidgetKey.equals(slotKey);
+            slots.add(new CanvasItemSlot(
+                    slotKey,
+                    obj,
+                    isAnchor,
+                    obj.get("row").asInt(),
+                    obj.get("col").asInt()));
+        }
+        if (slots.size() < 2) {
+            return;
+        }
+        slots.sort(Comparator.comparing(CanvasItemSlot::anchor).reversed()
+                .thenComparingInt(CanvasItemSlot::originalRow)
+                .thenComparingInt(CanvasItemSlot::originalCol)
+                .thenComparing(CanvasItemSlot::key));
+        int maxPasses = Math.max(16, slots.size() * 4);
+        for (int pass = 0; pass < maxPasses; pass++) {
+            boolean changed = false;
+            for (int i = 0; i < slots.size(); i++) {
+                ObjectNode upper = slots.get(i).node();
+                int uCol = upper.get("col").asInt();
+                int uRow = upper.get("row").asInt();
+                int uColEnd = uCol + upper.get("colSpan").asInt();
+                int uRowEnd = uRow + upper.get("rowSpan").asInt();
+                for (int j = i + 1; j < slots.size(); j++) {
+                    ObjectNode lower = slots.get(j).node();
+                    int lCol = lower.get("col").asInt();
+                    int lRow = lower.get("row").asInt();
+                    int lColEnd = lCol + lower.get("colSpan").asInt();
+                    int lRowEnd = lRow + lower.get("rowSpan").asInt();
+                    boolean colOverlap = uCol < lColEnd && lCol < uColEnd;
+                    boolean rowOverlap = uRow < lRowEnd && lRow < uRowEnd;
+                    if (colOverlap && rowOverlap && lRow < uRowEnd) {
+                        lower.put("row", uRowEnd);
+                        changed = true;
+                    }
+                }
+            }
+            if (!changed) {
+                break;
+            }
+        }
+    }
+
+    private void hydrateAddedChartWidget(
+            ObjectNode widget,
+            ObjectNode definition,
+            JsonNode input,
+            ObjectNode proposedConfig,
+            String widgetKey) {
+        if (widget == null || definition == null) {
+            return;
+        }
+        ObjectNode inputs = definition.path("inputs").isObject()
+                ? (ObjectNode) definition.path("inputs")
+                : definition.putObject("inputs");
+        if (!definition.path("bindingOrder").isArray() || definition.path("bindingOrder").isEmpty()) {
+            definition.putArray("bindingOrder")
+                    .add("chartDocument")
+                    .add("queryContext")
+                    .add("enableCustomization");
+        }
+        if (!definition.path("outputs").isObject()) {
+            ObjectNode outputs = definition.putObject("outputs");
+            outputs.put("pointClick", "emit");
+            outputs.put("selectionChange", "emit");
+            outputs.put("crossFilter", "emit");
+        }
+        if (!inputs.path("queryContext").isObject()) {
+            inputs.putObject("queryContext").putObject("filters");
+        } else if (!inputs.path("queryContext").path("filters").isObject()) {
+            ((ObjectNode) inputs.path("queryContext")).putObject("filters");
+        }
+        if (!inputs.has("enableCustomization")) {
+            inputs.put("enableCustomization", true);
+        }
+
+        JsonNode legacyConfig = inputs.path("config");
+        boolean chartDocumentCreated = !inputs.path("chartDocument").isObject();
+        ObjectNode chartDoc = chartDocumentCreated
+                ? inputs.putObject("chartDocument")
+                : (ObjectNode) inputs.path("chartDocument");
+
+        chartDoc.put("version", firstNonBlank(text(chartDoc, "version"), "0.1.0"));
+        chartDoc.put("chartId", firstNonBlank(text(chartDoc, "chartId"), text(legacyConfig, "id"), widgetKey));
+        String kind = firstNonBlank(
+                text(chartDoc, "kind"),
+                text(chartDoc, "type"),
+                text(inputs, "kind"),
+                text(inputs, "chartType"),
+                text(legacyConfig, "type"),
+                text(input, "chartType"),
+                "bar")
+                .trim()
+                .toLowerCase(Locale.ROOT);
+        chartDoc.put("kind", kind);
+
+        String title = firstNonBlank(
+                text(chartDoc, "title"),
+                text(legacyConfig, "title"),
+                text(inputs, "title"),
+                text(input, "title"),
+                text(widget, "title"),
+                "Distribuição");
+        chartDoc.put("title", title);
+        if (!widget.has("title")) {
+            widget.put("title", title);
+        }
+        if (!widget.path("shell").isObject()) {
+            if (input != null && input.path("shell").isObject()) {
+                widget.set("shell", input.path("shell").deepCopy());
+            } else {
+                ObjectNode shell = widget.putObject("shell");
+                shell.put("kind", "dashboard-card");
+                shell.put("title", title);
+                shell.put("icon", "bar_chart");
+                shell.put("showHeader", true);
+            }
+        }
+        if (!chartDoc.path("sizing").isObject()) {
+            chartDoc.putObject("sizing").put("mode", "fill-container").put("minHeight", 240);
+        }
+
+        ObjectNode source = chartDoc.path("source").isObject()
+                ? (ObjectNode) chartDoc.path("source")
+                : chartDoc.putObject("source");
+        source.put("kind", firstNonBlank(
+                text(source, "kind"),
+                text(legacyConfig.path("dataSource").path("query"), "sourceKind"),
+                "praxis.stats"));
+        String rawResource = firstNonBlank(
+                text(source, "resource"),
+                text(source, "resourcePath"),
+                text(legacyConfig.path("dataSource"), "resourcePath"),
+                text(legacyConfig.path("dataSource"), "resourceKey"),
+                text(inputs, "resourcePath"),
+                text(inputs, "resource"),
+                text(input, "resourcePath"),
+                inferSiblingWidgetResourcePath(proposedConfig));
+        String normalizedResource = stripResourceOperationSuffix(rawResource);
+        if (!normalizedResource.isBlank()) {
+            source.put("resource", normalizedResource);
+        }
+        String operation = firstNonBlank(
+                text(source, "operation"),
+                text(legacyConfig.path("dataSource").path("query"), "statsOperation"),
+                "group-by")
+                .trim()
+                .toLowerCase(Locale.ROOT);
+        source.put("operation", operation);
+        if (!source.path("options").isObject()) {
+            ObjectNode options = source.putObject("options");
+            if ("timeseries".equals(operation)) {
+                options.put("granularity", firstNonBlank(text(legacyConfig.path("dataSource").path("query"), "granularity"), "month"));
+                options.put("fillGaps", false);
+            } else {
+                options.put("orderBy", "value-desc");
+                options.put("limit", 12);
+            }
+        }
+
+        if (!chartDoc.path("dimensions").isArray() || chartDoc.path("dimensions").isEmpty()) {
+            String dimField = firstNonBlank(
+                    text(legacyConfig.path("semanticAxis"), "field"),
+                    text(legacyConfig.path("axes").path("x"), "field"),
+                    text(inputs.path("categoryAxis"), "field"),
+                    text(inputs.path("xAxis"), "field"),
+                    text(input.path("categoryAxis"), "field"),
+                    text(inputs, "dimension"),
+                    text(inputs, "groupBy"),
+                    text(inputs, "field"),
+                    text(inputs, "categoryField"),
+                    text(inputs, "xField"),
+                    text(input, "dimension"),
+                    text(input, "groupBy"),
+                    text(input, "field"));
+            if (!dimField.isBlank()) {
+                String dimLabel = firstNonBlank(
+                        text(inputs.path("categoryAxis"), "label"),
+                        text(inputs.path("xAxis"), "label"),
+                        text(input.path("categoryAxis"), "label"),
+                        humanizeChartToken(dimField));
+                ArrayNode dimensions = chartDoc.putArray("dimensions");
+                dimensions.addObject()
+                        .put("field", dimField)
+                        .put("label", dimLabel)
+                        .put("role", "timeseries".equals(operation) ? "time" : "category");
+            }
+        }
+        if (!chartDoc.path("metrics").isArray() || chartDoc.path("metrics").isEmpty()) {
+            JsonNode firstSeries = inputs.path("series").isArray() && !inputs.path("series").isEmpty()
+                    ? inputs.path("series").get(0)
+                    : MissingNode.getInstance();
+            String metricField = firstNonBlank(
+                    text(inputs, "metricField"),
+                    text(firstSeries, "field"),
+                    text(input, "metricField"));
+            String metricAgg = firstNonBlank(
+                    text(inputs, "metricAggregation"),
+                    text(inputs, "aggregation"),
+                    text(firstSeries, "aggregation"),
+                    text(input, "metricAggregation"),
+                    "count");
+            boolean isCount = "count".equalsIgnoreCase(metricAgg) || metricField.isBlank();
+            String metricLabel = firstNonBlank(
+                    text(firstSeries, "label"),
+                    isCount ? "Registros" : humanizeChartToken(metricField));
+            chartDoc.putArray("metrics").addObject()
+                    .put("field", isCount ? "total" : metricField)
+                    .put("label", metricLabel)
+                    .put("aggregation", isCount ? "count" : metricAgg.toLowerCase(Locale.ROOT));
+        }
+        if (!chartDoc.has("legend")) {
+            chartDoc.put("legend", "pie".equals(kind) || "donut".equals(kind));
+        }
+        if (!chartDoc.has("labels")) {
+            chartDoc.put("labels", !"timeseries".equals(operation));
+        }
+        if (!chartDoc.has("tooltip")) {
+            chartDoc.put("tooltip", true);
+        }
+        if (chartDocumentCreated && inputs.has("config")) {
+            inputs.remove("config");
+        }
+        if ("praxis.stats".equals(text(source, "kind")) && inputs.has("data")) {
+            inputs.remove("data");
+        }
+        List<String> unknownInputKeys = new ArrayList<>();
+        inputs.fieldNames().forEachRemaining(fieldName -> {
+            if (!ALLOWED_PRAXIS_CHART_INPUTS.contains(fieldName)) {
+                unknownInputKeys.add(fieldName);
+            }
+        });
+        if (!unknownInputKeys.isEmpty()) {
+            inputs.remove(unknownInputKeys);
+        }
+    }
+
+    private String inferSiblingWidgetResourcePath(ObjectNode proposedConfig) {
+        if (proposedConfig == null || !proposedConfig.path("widgets").isArray()) {
+            return "";
+        }
+        for (JsonNode sibling : proposedConfig.path("widgets")) {
+            JsonNode siblingInputs = sibling.path("definition").path("inputs");
+            String candidate = firstNonBlank(
+                    text(siblingInputs, "resourcePath"),
+                    text(siblingInputs, "filterResourcePath"),
+                    text(siblingInputs.path("chartDocument").path("source"), "resource"),
+                    text(siblingInputs.path("config").path("dataSource"), "resourcePath"));
+            if (!candidate.isBlank()) {
+                return candidate;
+            }
+        }
+        return "";
+    }
+
+    private String stripResourceOperationSuffix(String rawPath) {
+        String value = rawPath == null ? "" : rawPath.trim().replaceAll("/+$", "");
+        for (String suffix : List.of(
+                "/stats/group-by",
+                "/stats/timeseries",
+                "/stats/distribution",
+                "/stats/comparison",
+                "/filter/cursor",
+                "/filter",
+                "/all")) {
+            if (value.endsWith(suffix)) {
+                return value.substring(0, value.length() - suffix.length());
+            }
+        }
+        return value;
+    }
+
+    private String humanizeChartToken(String raw) {
+        if (raw == null || raw.isBlank()) {
+            return "";
+        }
+        String spaced = raw.replaceAll("[-_]+", " ").trim();
+        if (spaced.isEmpty()) {
+            return "";
+        }
+        return Character.toUpperCase(spaced.charAt(0)) + spaced.substring(1);
     }
 
     private ObjectNode compilePageBuilderWidgetShellConfigure(String componentId, JsonNode operation, JsonNode effect, JsonNode planOperation, ObjectNode proposedConfig, List<String> failures) {

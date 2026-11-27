@@ -1,8 +1,10 @@
 package org.praxisplatform.config.ai.authoring;
 
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import java.util.List;
 import java.util.Map;
 
+@JsonIgnoreProperties(ignoreUnknown = true)
 public record AgenticAuthoringSemanticRefinement(
         String schemaVersion,
         String refinementKind,

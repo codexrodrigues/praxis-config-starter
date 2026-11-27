@@ -685,6 +685,12 @@ public class OperationalAgentTurnStreamService {
         return flag != null && flag.get();
     }
 
+    public static final String CLAIM_AUTHORING_WORKSPACE_ROUTE = "praxis.authoringWorkspaceRoute";
+    public static final String CLAIM_AUTHORING_WORKSPACE_LABEL = "praxis.authoringWorkspaceLabel";
+
+    private static final java.util.regex.Pattern SAFE_INTERNAL_ROUTE_PATTERN =
+            java.util.regex.Pattern.compile("^/[A-Za-z0-9/_-]{1,159}$");
+
     private AgentExecutionContext buildExecutionContext(
             UUID threadId,
             UUID turnId,
@@ -695,6 +701,15 @@ public class OperationalAgentTurnStreamService {
         Set<String> principalAuthorities = principalContext.authorities() != null
                 ? principalContext.authorities()
                 : Set.of();
+        Map<String, Object> initialClaims = new LinkedHashMap<>();
+        String authoringWorkspaceRoute = sanitizeAuthoringWorkspaceRoute(request.authoringWorkspaceRoute());
+        if (authoringWorkspaceRoute != null) {
+            initialClaims.put(CLAIM_AUTHORING_WORKSPACE_ROUTE, authoringWorkspaceRoute);
+            String authoringWorkspaceLabel = sanitizeAuthoringWorkspaceLabel(request.authoringWorkspaceLabel());
+            if (authoringWorkspaceLabel != null) {
+                initialClaims.put(CLAIM_AUTHORING_WORKSPACE_LABEL, authoringWorkspaceLabel);
+            }
+        }
         AgentExecutionContext ctx = new AgentExecutionContext(
                 threadId,
                 turnId,
@@ -707,7 +722,7 @@ public class OperationalAgentTurnStreamService {
                 request.activeScreenResourcePath(),
                 request.activeTopicKey(),
                 request.activeSelectionHints(),
-                Map.of());
+                initialClaims.isEmpty() ? Map.of() : java.util.Collections.unmodifiableMap(initialClaims));
         for (AgentExecutionContextCustomizer customizer : contextCustomizers) {
             AgentExecutionContext updated = customizer.customize(ctx, servletRequest);
             if (updated != null) {
@@ -715,6 +730,34 @@ public class OperationalAgentTurnStreamService {
             }
         }
         return ctx;
+    }
+
+    public static String sanitizeAuthoringWorkspaceRoute(String rawRoute) {
+        if (!StringUtils.hasText(rawRoute)) {
+            return null;
+        }
+        String trimmed = rawRoute.trim();
+        if (trimmed.length() > 160
+                || trimmed.contains("//")
+                || trimmed.contains("..")
+                || !SAFE_INTERNAL_ROUTE_PATTERN.matcher(trimmed).matches()) {
+            return null;
+        }
+        return trimmed;
+    }
+
+    public static String sanitizeAuthoringWorkspaceLabel(String rawLabel) {
+        if (!StringUtils.hasText(rawLabel)) {
+            return null;
+        }
+        String cleaned = rawLabel
+                .replaceAll("[\\p{Cntrl}<>]+", " ")
+                .replaceAll("\\s+", " ")
+                .trim();
+        if (cleaned.isEmpty()) {
+            return null;
+        }
+        return cleaned.length() > 80 ? cleaned.substring(0, 80).trim() : cleaned;
     }
 
     private AiCallConfig resolveCallConfig(

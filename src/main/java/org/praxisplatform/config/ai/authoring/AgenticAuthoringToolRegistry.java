@@ -575,8 +575,23 @@ public class AgenticAuthoringToolRegistry {
                 return AgenticAuthoringToolResult.failure(
                         call.name(), "tool-payload-invalid", "verifyDomainOperation requires its canonical request.");
             }
+            String canonicalPathFromKey = request.resourceKey() == null || request.resourceKey().isBlank()
+                    ? ""
+                    : "/api/" + request.resourceKey().trim().replace('.', '/');
+            String preferredPath = request.resourcePath() == null
+                    ? ""
+                    : request.resourcePath().trim().replaceAll("/+$", "");
             AgenticAuthoringOperationalBindingVerificationService.VerificationResult result =
-                    verificationService.verify(request.resourceKey(), request.requestBaseUrl(), principalContext);
+                    !preferredPath.isBlank() && !preferredPath.equals(canonicalPathFromKey)
+                            ? verificationService.verify(
+                                    request.resourceKey(),
+                                    preferredPath,
+                                    request.requestBaseUrl(),
+                                    principalContext)
+                            : verificationService.verify(
+                                    request.resourceKey(),
+                                    request.requestBaseUrl(),
+                                    principalContext);
             return result.verified()
                     ? AgenticAuthoringToolResult.success(
                             call.name(),
@@ -1063,9 +1078,25 @@ public class AgenticAuthoringToolRegistry {
                 // resolved it to one governed Domain Catalog resource. This is post-intent target
                 // grounding, not textual intent routing: promote that unique canonical identity to
                 // the same exact schema/capability proof required for an explicitly named key.
+                String preferredResourcePath = result.candidates().stream()
+                        .filter(Objects::nonNull)
+                        .map(AgenticAuthoringCandidate::resourcePath)
+                        .filter(path -> path != null && !path.isBlank())
+                        .filter(path -> discoveredResourceKey.equals(canonicalResourceKey(path)))
+                        .findFirst()
+                        .orElseGet(() -> result.candidates().size() == 1
+                                ? safeText(result.candidates().get(0).resourcePath()).trim().replaceAll("/+$", "")
+                                : "");
+                String canonicalPathFromKey = "/api/" + discoveredResourceKey.trim().replace('.', '/');
                 AgenticAuthoringOperationalBindingVerificationService.VerificationResult verification =
-                        operationalVerificationService.verify(
-                                discoveredResourceKey, requestBaseUrl, principalContext);
+                        !preferredResourcePath.isBlank() && !preferredResourcePath.equals(canonicalPathFromKey)
+                                ? operationalVerificationService.verify(
+                                        discoveredResourceKey,
+                                        preferredResourcePath,
+                                        requestBaseUrl,
+                                        principalContext)
+                                : operationalVerificationService.verify(
+                                        discoveredResourceKey, requestBaseUrl, principalContext);
                 if (!verification.verified()) {
                     return AgenticAuthoringToolResult.failure(
                             call.name(),

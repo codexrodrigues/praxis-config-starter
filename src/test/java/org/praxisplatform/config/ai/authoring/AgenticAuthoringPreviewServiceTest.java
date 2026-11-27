@@ -1707,7 +1707,14 @@ class AgenticAuthoringPreviewServiceTest {
         assertThat(result.failureCodes())
                 .contains("semantic-preview-axis-stats-capability-verification-required");
         assertThat(result.warnings())
-                .contains("semantic-axis-stats-capability-verification-unsupported");
+                .contains(
+                        "semantic-axis-stats-capability-verification-unsupported",
+                        "semantic-axis-stats-capability-unsupported-chart-pruned");
+        assertThat(result.uiCompositionPlan().path("widgets").findValuesAsText("componentId"))
+                .doesNotContain("praxis-chart");
+        assertThat(result.assistantMessage())
+                .contains("campos analiticos")
+                .doesNotContain("componente de tabela");
     }
 
     @Test
@@ -4921,6 +4928,72 @@ class AgenticAuthoringPreviewServiceTest {
     }
 
     @Test
+    void previewAcceptsItemContextPendingByIdAndDeduplicatesViewAliasForMasterDetailWorkspace() throws Exception {
+        ObjectNode contextHints = objectMapper.createObjectNode();
+        ObjectNode envelope = contextHints.putObject("verifiedDomainOperations");
+        envelope.put("schemaVersion", "praxis-agentic-authoring-verified-domain-operations.v2");
+        envelope.put("source", "schemas.filtered+resource.capabilities+schemas.actions");
+        ArrayNode entries = envelope.putArray("entries");
+        addVerifiedWorkspaceOperation(entries, "/api/human-resources/funcionarios/all", "get", "all");
+        addVerifiedWorkspaceOperation(entries, "/api/human-resources/funcionarios/filter", "post", "filter");
+
+        for (String detailOpId : List.of("byId", "view")) {
+            ObjectNode itemDetail = entries.addObject();
+            itemDetail.put("conceptKey", "human-resources.funcionarios.workspace");
+            itemDetail.put("bindingKey", detailOpId);
+            itemDetail.put("resourceKey", "human-resources.funcionarios");
+            itemDetail.put("resourcePath", "/api/human-resources/funcionarios");
+            itemDetail.put("apiPath", "/api/human-resources/funcionarios/{id}");
+            itemDetail.put("apiMethod", "get");
+            itemDetail.put("schemaType", "response");
+            itemDetail.put("schemaUrl",
+                    "/schemas/filtered?path=/api/human-resources/funcionarios/{id}&operation=get&schemaType=response");
+            itemDetail.put("kind", "resource_operation");
+            itemDetail.put("metadataUrl", "/api/human-resources/funcionarios/capabilities");
+            itemDetail.put("operationId", detailOpId);
+            itemDetail.put("actionId", "");
+            itemDetail.put("scope", "ITEM");
+            itemDetail.put("verificationMode", "principal_capability");
+            ObjectNode availability = itemDetail.putObject("availability");
+            availability.put("allowed", false);
+            availability.put("reason", "resource-state-not-found");
+            availability.put("resolution", "item_capabilities_at_selection");
+            itemDetail.put("sourceRelease", "quickstart-funcionarios-v1");
+            itemDetail.putArray("evidence").add("schema-grounding-verified").add("resource-capabilities-verified");
+        }
+        envelope.put("operationCount", entries.size());
+
+        AgenticAuthoringPlanRequest request = new AgenticAuthoringPlanRequest(
+                "Materialize o workspace operacional resolvido.",
+                "openai",
+                "gpt-5.6-terra",
+                "test-key",
+                null,
+                selectedMasterDetailIntent(),
+                "session-1",
+                "turn-1",
+                List.of(),
+                null,
+                List.of(),
+                contextHints);
+
+        AgenticAuthoringPreviewResult result = new AgenticAuthoringPreviewService(
+                planService,
+                patchCompilerService,
+                objectMapper,
+                List.of(new AgenticAuthoringGenericUiCompositionPlanProvider(objectMapper)))
+                .preview(request, "tenant", "user", "local");
+
+        assertThat(result.valid())
+                .withFailMessage("Preview failure codes: %s", result.failureCodes())
+                .isTrue();
+        JsonNode compiledPage = result.compiledFormPatch().at("/patch/page");
+        assertThat(compiledPage.path("widgets")).hasSize(3);
+        assertThat(compiledPage.at("/widgets/2/definition/inputs/schemaUrl").asText())
+                .isEqualTo("/schemas/filtered?path=/api/human-resources/funcionarios/{id}&operation=get&schemaType=response");
+    }
+
+    @Test
     void previewVerifiesRelatedResourceSurfaceBeforeCompilingThePlan() throws Exception {
         AgenticAuthoringPlanRequest request = new AgenticAuthoringPlanRequest(
                 "Crie uma página de missões com a equipe relacionada.",
@@ -7575,6 +7648,148 @@ class AgenticAuthoringPreviewServiceTest {
                 List.of("keyword-fallback-applied"),
                 List.of("shared-rule-authoring-required"),
                 objectMapper.createObjectNode());
+    }
+
+    @Test
+    void pageBuilderRootEditHydratesAddedChartDimensionAgainstResourceCapabilitiesStatsFields() throws Exception {
+        AgenticAuthoringIntentResolutionResult intent = new AgenticAuthoringIntentResolutionResult(
+                true,
+                "modify",
+                "page",
+                "modify_component",
+                "generic-page-change",
+                "praxis-ui-angular",
+                "praxis-page-builder",
+                null,
+                new AgenticAuthoringCandidate(
+                        "/api/human-resources/funcionarios",
+                        "post",
+                        "/schemas/filtered?path=/api/human-resources/funcionarios/filter&operation=post&schemaType=response",
+                        "/api/human-resources/funcionarios/filter",
+                        "POST",
+                        0.96d,
+                        "selected resource",
+                        List.of("semantic-retrieval", "schema-available")),
+                List.of(),
+                new AgenticAuthoringGateResult("candidate-eligibility@0.1.0", "eligible", List.of()),
+                "Adicione um grafico de barras por cargo nesta pagina",
+                "Vou adicionar o grafico por cargo na pagina.",
+                List.of(),
+                List.of(),
+                List.of("llm-fast-intent-resolution-used"),
+                List.of(),
+                objectMapper.createObjectNode());
+
+        ObjectNode currentPage = objectMapper.createObjectNode();
+        ObjectNode siblingTable = currentPage.putArray("widgets").addObject();
+        siblingTable.put("key", "employees-table");
+        ObjectNode siblingDef = siblingTable.putObject("definition");
+        siblingDef.put("id", "praxis-table");
+        siblingDef.putObject("inputs").put("resourcePath", "/api/human-resources/funcionarios");
+
+        ObjectNode contextHints = objectMapper.createObjectNode();
+        contextHints.putObject("authoringManifestRef").put("componentId", "praxis-page-builder");
+
+        AgenticAuthoringPlanRequest request = new AgenticAuthoringPlanRequest(
+                "Adicione um grafico de barras por cargo nesta pagina",
+                "openai",
+                "gpt-5.4-mini",
+                "test-key",
+                currentPage,
+                intent,
+                null,
+                null,
+                null,
+                null,
+                null,
+                contextHints,
+                null);
+
+        ObjectNode operationPlan = objectMapper.createObjectNode();
+        ObjectNode addOp = operationPlan.putArray("operations").addObject();
+        addOp.put("operationId", "widget.add");
+        addOp.putObject("input")
+                .put("widgetKey", "employees-chart")
+                .put("componentId", "praxis-chart");
+
+        ObjectNode proposedPage = currentPage.deepCopy();
+        ObjectNode addedChart = proposedPage.withArray("widgets").addObject();
+        addedChart.put("key", "employees-chart");
+        ObjectNode addedDef = addedChart.putObject("definition");
+        addedDef.put("id", "praxis-chart");
+        ObjectNode addedChartDoc = addedDef.putObject("inputs").putObject("chartDocument");
+        addedChartDoc.put("version", "0.1.0");
+        addedChartDoc.put("title", "Funcionários por cargo");
+        addedChartDoc.putObject("source")
+                .put("kind", "praxis.stats")
+                .put("resource", "/api/human-resources/funcionarios")
+                .put("operation", "group-by");
+        addedChartDoc.putArray("dimensions").addObject()
+                .put("field", "statusDesconhecido")
+                .put("label", "Status")
+                .put("role", "category");
+
+        ObjectNode compiledPatch = objectMapper.createObjectNode();
+        compiledPatch.put("manifestVersion", "2.0.0");
+        compiledPatch.set("proposedConfig", proposedPage);
+
+        when(componentEditPlanService.generateAndCompile(
+                any(AgenticAuthoringPlanRequest.class), eq("praxis-page-builder"), any(), any(), eq("tenant"), eq("user"), eq("local")))
+                .thenReturn(new AgenticAuthoringComponentEditPlanResult(
+                        true,
+                        List.of(),
+                        List.of("component-edit-plan-source:governed-materializer"),
+                        operationPlan,
+                        compiledPatch));
+
+        ObjectNode capabilities = objectMapper.createObjectNode();
+        ArrayNode statsFields = capabilities.putObject("data").putObject("stats").putArray("fields");
+        statsFields.addObject()
+                .put("field", "id")
+                .put("label", "ID")
+                .put("groupByEligible", true);
+        statsFields.addObject()
+                .put("field", "cargoNome")
+                .put("label", "Cargo")
+                .put("groupByEligible", true);
+        statsFields.addObject()
+                .put("field", "departamentoNome")
+                .put("label", "Departamento")
+                .put("groupByEligible", true);
+
+        when(resourceCapabilitiesRetrievalService.fetchCapabilitiesResult(
+                eq("/api/human-resources/funcionarios"),
+                eq("http://localhost"),
+                eq("tenant"),
+                eq("user"),
+                eq("local")))
+                .thenReturn(ResourceCapabilitiesFetchResult.success(
+                        capabilities,
+                        "http://localhost/api/human-resources/funcionarios/capabilities"));
+
+        AgenticAuthoringPreviewResult result = new AgenticAuthoringPreviewService(
+                planService,
+                patchCompilerService,
+                objectMapper,
+                List.of(new AgenticAuthoringGenericUiCompositionPlanProvider(objectMapper)),
+                null,
+                schemaRetrievalService,
+                resourceCapabilitiesRetrievalService,
+                null,
+                componentEditPlanService)
+                .preview(request, "tenant", "user", "local", "http://localhost");
+
+        assertThat(result.valid()).isTrue();
+        JsonNode chartWidget = result.compiledFormPatch()
+                .path("patch")
+                .path("page")
+                .path("widgets")
+                .get(1);
+        assertThat(chartWidget.path("key").asText()).isEqualTo("employees-chart");
+        assertThat(chartWidget.at("/definition/inputs/chartDocument/dimensions/0/field").asText())
+                .isEqualTo("cargoNome");
+        assertThat(chartWidget.at("/definition/inputs/chartDocument/dimensions/0/label").asText())
+                .isEqualTo("Cargo");
     }
 
     private JsonNode findColumn(JsonNode columns, String field) {

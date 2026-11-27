@@ -21,6 +21,10 @@ final class AgenticAuthoringPreviewAssistantMessageSupport {
             boolean valid,
             List<String> failureCodes) {
         if (!valid) {
+            if (failureCodes != null
+                    && failureCodes.contains(AgenticAuthoringSemanticMaterializationPolicy.AXIS_STATS_CAPABILITY_VERIFICATION_REQUIRED_FAILURE)) {
+                return "Encontrei a fonte de dados, mas a dimensao escolhida para o grafico nao e suportada pelos campos analiticos deste recurso. Vou manter a proposta em revisao para ajustar o eixo do grafico antes de aplicar.";
+            }
             if (failureCodes != null && failureCodes.contains("semantic-preview-chart-required")) {
                 return "Encontrei a fonte certa, mas ainda nao consegui montar o grafico pedido com seguranca. Vou deixar a proposta em revisao e ajustar a visualizacao antes de voce salvar.";
             }

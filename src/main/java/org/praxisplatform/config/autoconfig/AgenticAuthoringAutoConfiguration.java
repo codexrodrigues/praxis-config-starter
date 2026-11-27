@@ -407,12 +407,15 @@ public class AgenticAuthoringAutoConfiguration {
     public LiveOptionValueRetrievalService liveOptionValueRetrievalService(
             ObjectMapper objectMapper,
             SchemaRetrievalService schemaRetrievalService,
-            ObjectProvider<GovernedPlatformRequestAuthorizationProvider> authorizationProviders) {
-        return new LiveOptionValueRetrievalService(
+            ObjectProvider<GovernedPlatformRequestAuthorizationProvider> authorizationProviders,
+            @Value("${praxis.ai.capabilities.base-url:}") String capabilitiesBaseUrl) {
+        LiveOptionValueRetrievalService service = new LiveOptionValueRetrievalService(
                 objectMapper,
                 schemaRetrievalService,
                 authorizationProviders.getIfAvailable(
                         GovernedPlatformRequestAuthorizationProvider::none));
+        service.setConfiguredBaseUrl(capabilitiesBaseUrl);
+        return service;
     }
 
     @Bean

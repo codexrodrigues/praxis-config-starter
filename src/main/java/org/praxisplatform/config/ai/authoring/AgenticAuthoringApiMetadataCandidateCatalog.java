@@ -11,6 +11,8 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import org.praxisplatform.config.dto.ApiSearchResult;
 import org.praxisplatform.config.projection.ApiMetadataCandidateEvidence;
 import org.praxisplatform.config.repository.ApiMetadataRepository;
@@ -26,6 +28,8 @@ public class AgenticAuthoringApiMetadataCandidateCatalog {
     private static final String SEMANTIC_ROLE_ANALYTICS_PROJECTION = "semantic-role:analytics-projection";
     private static final String SEMANTIC_ROLE_PROFILE_PROJECTION = "semantic-role:profile-projection";
     private static final String DOMAIN_DISCOVERY_RESOURCE_FOCUS = "domain-discovery-resource-focus";
+    private static final Pattern EXPLICIT_RESOURCE_KEY_PATTERN =
+            Pattern.compile("\"(?:x-)?resource[-_]?key\"\\s*:\\s*\"([^\"]+)\"", Pattern.CASE_INSENSITIVE);
 
     private static final Set<String> STOP_WORDS = Set.of(
             "a", "as", "o", "os", "um", "uma", "de", "da", "das", "do", "dos", "para", "por",
@@ -319,7 +323,7 @@ public class AgenticAuthoringApiMetadataCandidateCatalog {
                 .filter(metadata -> isRenderableBusinessEndpoint(metadata.getPath()))
                 .filter(metadata -> context.expectedMethod() == null
                         || context.expectedMethod().equalsIgnoreCase(metadata.getMethod()))
-                .filter(metadata -> resourceFocus.equals(resourceKey(baseResourcePath(metadata.getPath()))))
+                .filter(metadata -> matchesFocusedResourceMetadata(resourceFocus, metadata))
                 .map(metadata -> toLlmFocusedCandidate(metadata, context, resourceFocus))
                 .sorted(CandidateRankingPolicy.byScoreDescending())
                 .limit(CANDIDATE_LIMIT)
@@ -377,10 +381,153 @@ public class AgenticAuthoringApiMetadataCandidateCatalog {
         if (!exactMatches.isEmpty()) {
             return exactMatches;
         }
-        return structuredMetadata(context).stream()
+        List<ApiMetadataCandidateEvidence> catalogMetadata = structuredMetadata(context);
+        List<ApiMetadataCandidateEvidence> exactKeyMatches = catalogMetadata.stream()
                 .filter(metadata -> metadata.getPath() != null && metadata.getMethod() != null)
                 .filter(metadata -> resourceFocus.equals(resourceKey(baseResourcePath(metadata.getPath()))))
                 .toList();
+        if (!exactKeyMatches.isEmpty()) {
+            return exactKeyMatches;
+        }
+        return resolveCanonicalResourceFocusCatalogMatches(resourceFocus, context, catalogMetadata);
+    }
+
+    private List<ApiMetadataCandidateEvidence> resolveCanonicalResourceFocusCatalogMatches(
+            String resourceFocus,
+            RetrievalContext context,
+            List<ApiMetadataCandidateEvidence> catalogMetadata) {
+        if (catalogMetadata == null || catalogMetadata.isEmpty()) {
+            return List.of();
+        }
+        List<ApiMetadataCandidateEvidence> renderable = catalogMetadata.stream()
+                .filter(metadata -> metadata != null
+                        && metadata.getPath() != null
+                        && metadata.getMethod() != null
+                        && isRenderableBusinessEndpoint(metadata.getPath()))
+                .filter(metadata -> context == null
+                        || context.expectedMethod() == null
+                        || context.expectedMethod().equalsIgnoreCase(metadata.getMethod()))
+                .toList();
+        if (renderable.isEmpty()) {
+            return List.of();
+        }
+        Map<String, List<ApiMetadataCandidateEvidence>> explicitResourceKeyGroups = new LinkedHashMap<>();
+        for (ApiMetadataCandidateEvidence metadata : renderable) {
+            if (declaresExplicitResourceKey(metadata, resourceFocus)) {
+                explicitResourceKeyGroups
+                        .computeIfAbsent(baseResourcePath(metadata.getPath()), ignored -> new ArrayList<>())
+                        .add(metadata);
+            }
+        }
+        if (explicitResourceKeyGroups.size() == 1) {
+            return List.copyOf(explicitResourceKeyGroups.values().iterator().next());
+        }
+        if (explicitResourceKeyGroups.size() > 1) {
+            return List.of();
+        }
+        String entitySegment = focusEntitySegment(resourceFocus);
+        if (entitySegment.length() < 3) {
+            return List.of();
+        }
+        Map<String, List<ApiMetadataCandidateEvidence>> terminalSegmentGroups = new LinkedHashMap<>();
+        for (ApiMetadataCandidateEvidence metadata : renderable) {
+            String candidateTerminal = terminalPathSegment(baseResourcePath(metadata.getPath()));
+            if (entitySegment.equals(candidateTerminal)) {
+                terminalSegmentGroups
+                        .computeIfAbsent(baseResourcePath(metadata.getPath()), ignored -> new ArrayList<>())
+                        .add(metadata);
+            }
+        }
+        if (terminalSegmentGroups.isEmpty()) {
+            return List.of();
+        }
+        if (terminalSegmentGroups.size() == 1) {
+            return List.copyOf(terminalSegmentGroups.values().iterator().next());
+        }
+        List<String> qualifierTokens = meaningfulTokens(
+                normalize(resourceFocusQualifier(resourceFocus).replace('.', ' ').replace('-', ' ').replace('_', ' ')));
+        if (qualifierTokens.isEmpty()) {
+            return List.of();
+        }
+        int bestScore = 0;
+        int bestCount = 0;
+        List<ApiMetadataCandidateEvidence> bestGroup = List.of();
+        for (List<ApiMetadataCandidateEvidence> group : terminalSegmentGroups.values()) {
+            String groupText = normalize(group.stream()
+                    .map(item -> String.join(" ",
+                            valueOrEmpty(item.getPath()),
+                            valueOrEmpty(item.getTags()),
+                            valueOrEmpty(item.getSummary()),
+                            valueOrEmpty(item.getDescription()),
+                            valueOrEmpty(item.getRawJson())))
+                    .reduce("", (left, right) -> left + " " + right));
+            int score = 0;
+            for (String token : qualifierTokens) {
+                if (matchesToken(groupText, token)) {
+                    score++;
+                }
+            }
+            if (score > bestScore) {
+                bestScore = score;
+                bestCount = 1;
+                bestGroup = group;
+            } else if (score > 0 && score == bestScore) {
+                bestCount++;
+            }
+        }
+        return bestScore > 0 && bestCount == 1 ? List.copyOf(bestGroup) : List.of();
+    }
+
+    private boolean matchesFocusedResourceMetadata(
+            String resourceFocus,
+            ApiMetadataCandidateEvidence metadata) {
+        if (metadata == null || metadata.getPath() == null) {
+            return false;
+        }
+        String candidateBasePath = baseResourcePath(metadata.getPath());
+        if (resourceFocus.equals(resourceKey(candidateBasePath))
+                || declaresExplicitResourceKey(metadata, resourceFocus)) {
+            return true;
+        }
+        String entitySegment = focusEntitySegment(resourceFocus);
+        return entitySegment.length() >= 3 && entitySegment.equals(terminalPathSegment(candidateBasePath));
+    }
+
+    private boolean declaresExplicitResourceKey(ApiMetadataCandidateEvidence metadata, String resourceFocus) {
+        String rawJson = metadata == null ? "" : valueOrEmpty(metadata.getRawJson());
+        if (rawJson.isBlank() || resourceFocus == null || resourceFocus.isBlank()) {
+            return false;
+        }
+        Matcher matcher = EXPLICIT_RESOURCE_KEY_PATTERN.matcher(rawJson);
+        while (matcher.find()) {
+            String declared = canonicalResourceFocus(matcher.group(1));
+            if (resourceFocus.equals(declared)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private String focusEntitySegment(String resourceFocus) {
+        String normalizedFocus = normalize(valueOrEmpty(resourceFocus));
+        int lastDot = normalizedFocus.lastIndexOf('.');
+        return lastDot >= 0 && lastDot < normalizedFocus.length() - 1
+                ? normalizedFocus.substring(lastDot + 1).trim()
+                : "";
+    }
+
+    private String resourceFocusQualifier(String resourceFocus) {
+        String normalizedFocus = normalize(valueOrEmpty(resourceFocus));
+        int lastDot = normalizedFocus.lastIndexOf('.');
+        return lastDot > 0 ? normalizedFocus.substring(0, lastDot).trim() : "";
+    }
+
+    private String terminalPathSegment(String basePath) {
+        String normalizedPath = normalizePath(normalize(valueOrEmpty(basePath)));
+        int lastSlash = normalizedPath.lastIndexOf('/');
+        return lastSlash >= 0 && lastSlash < normalizedPath.length() - 1
+                ? normalizedPath.substring(lastSlash + 1).trim()
+                : normalizedPath;
     }
 
     private List<ApiMetadataCandidateEvidence> exactLlmFocusedMetadataMatches(
@@ -772,7 +919,7 @@ public class AgenticAuthoringApiMetadataCandidateCatalog {
 
         @Override
         public List<AgenticAuthoringCandidate> retrieve(RetrievalContext context) {
-            return structuredMetadata(context).stream()
+            List<ScoredCandidate> scored = structuredMetadata(context).stream()
                     .filter(metadata -> metadata.getPath() != null && metadata.getMethod() != null)
                     .filter(metadata -> isRenderableBusinessEndpoint(metadata.getPath()))
                     .filter(metadata -> context.expectedMethod() == null
@@ -786,10 +933,23 @@ public class AgenticAuthoringApiMetadataCandidateCatalog {
                             context.tenantId(),
                             context.environment(),
                             context.releaseId()))
-                    .filter(scored -> scored.score() >= 0.45d)
+                    .filter(candidate -> candidate.score() >= 0.45d)
                     .sorted(CandidateRankingPolicy.byScoreDescending())
+                    .toList();
+            Map<String, AgenticAuthoringCandidate> deduplicated = new LinkedHashMap<>();
+            for (ScoredCandidate entry : scored) {
+                AgenticAuthoringCandidate candidate = entry.candidate();
+                String key = valueOrEmpty(candidate.resourcePath());
+                if (key.isBlank()) {
+                    continue;
+                }
+                deduplicated.merge(
+                        key,
+                        candidate,
+                        AgenticAuthoringApiMetadataCandidateCatalog.this::preferredCandidateForSameResource);
+            }
+            return deduplicated.values().stream()
                     .limit(CANDIDATE_LIMIT)
-                    .map(ScoredCandidate::candidate)
                     .toList();
         }
     }
@@ -810,22 +970,46 @@ public class AgenticAuthoringApiMetadataCandidateCatalog {
         if (context != null && hasScope(context.tenantId(), context.environment())) {
             String primaryTenant = normalizeOrDefault(context.tenantId(), "GLOBAL");
             String primaryEnv = normalizeOrDefault(context.environment(), "default");
+            boolean blankReleaseId = context.releaseId() == null || context.releaseId().isBlank();
             String releaseId = normalizeOrDefault(context.releaseId(), "v1");
-            List<ApiMetadataCandidateEvidence> scoped = new ArrayList<>(repository.findCandidateProjectionsByScope(
-                    primaryTenant,
-                    primaryEnv,
-                    "default",
-                    releaseId));
+            List<ApiMetadataCandidateEvidence> scoped = findCandidateProjectionsWithReleaseFallback(
+                    primaryTenant, primaryEnv, "default", releaseId, blankReleaseId);
             if (scoped.isEmpty() && shouldFallbackToCatalogScope(context.tenantId(), context.environment())) {
-                scoped = new ArrayList<>(repository.findCandidateProjectionsByScope(
+                scoped = findCandidateProjectionsWithReleaseFallback(
                         effectiveCatalogFallbackTenantId(primaryTenant),
                         effectiveCatalogFallbackEnvironment(primaryEnv),
                         "default",
-                        releaseId));
+                        releaseId,
+                        blankReleaseId);
             }
             return scoped;
         }
         return new ArrayList<>(repository.findAllCandidateProjections());
+    }
+
+    private List<ApiMetadataCandidateEvidence> findCandidateProjectionsWithReleaseFallback(
+            String tenantId,
+            String environment,
+            String serviceKey,
+            String releaseId,
+            boolean allowLatestReleaseFallback) {
+        List<ApiMetadataCandidateEvidence> rows = new ArrayList<>(repository.findCandidateProjectionsByScope(
+                tenantId,
+                environment,
+                serviceKey,
+                releaseId));
+        if (!rows.isEmpty() || !allowLatestReleaseFallback) {
+            return rows;
+        }
+        Optional<String> latestRelease = repository.findLatestReleaseIdByScope(tenantId, environment, serviceKey);
+        if (latestRelease == null || latestRelease.isEmpty() || releaseId.equals(latestRelease.get())) {
+            return rows;
+        }
+        return new ArrayList<>(repository.findCandidateProjectionsByScope(
+                tenantId,
+                environment,
+                serviceKey,
+                latestRelease.get()));
     }
 
     private Optional<ApiMetadataCandidateEvidence> findStructuredMetadataByPathAndMethod(
@@ -835,26 +1019,19 @@ public class AgenticAuthoringApiMetadataCandidateCatalog {
         if (context != null && hasScope(context.tenantId(), context.environment())) {
             String primaryTenant = normalizeOrDefault(context.tenantId(), "GLOBAL");
             String primaryEnv = normalizeOrDefault(context.environment(), "default");
+            boolean blankReleaseId = context.releaseId() == null || context.releaseId().isBlank();
             String releaseId = normalizeOrDefault(context.releaseId(), "v1");
-            Optional<ApiMetadataCandidateEvidence> scoped = repository
-                    .findByTenantIdAndEnvironmentAndServiceKeyAndReleaseIdAndPathAndMethod(
-                            primaryTenant,
-                            primaryEnv,
-                            "default",
-                            releaseId,
-                            path,
-                            method)
-                    .map(metadata -> (ApiMetadataCandidateEvidence) metadata);
+            Optional<ApiMetadataCandidateEvidence> scoped = findStructuredMetadataWithReleaseFallback(
+                    primaryTenant, primaryEnv, "default", releaseId, blankReleaseId, path, method);
             if (scoped.isEmpty() && shouldFallbackToCatalogScope(context.tenantId(), context.environment())) {
-                scoped = repository
-                        .findByTenantIdAndEnvironmentAndServiceKeyAndReleaseIdAndPathAndMethod(
-                                effectiveCatalogFallbackTenantId(primaryTenant),
-                                effectiveCatalogFallbackEnvironment(primaryEnv),
-                                "default",
-                                releaseId,
-                                path,
-                                method)
-                        .map(metadata -> (ApiMetadataCandidateEvidence) metadata);
+                scoped = findStructuredMetadataWithReleaseFallback(
+                        effectiveCatalogFallbackTenantId(primaryTenant),
+                        effectiveCatalogFallbackEnvironment(primaryEnv),
+                        "default",
+                        releaseId,
+                        blankReleaseId,
+                        path,
+                        method);
             }
             return scoped;
         }
@@ -863,6 +1040,41 @@ public class AgenticAuthoringApiMetadataCandidateCatalog {
                 .filter(metadata -> method.equalsIgnoreCase(metadata.getMethod()))
                 .map(metadata -> (ApiMetadataCandidateEvidence) metadata)
                 .findFirst();
+    }
+
+    private Optional<ApiMetadataCandidateEvidence> findStructuredMetadataWithReleaseFallback(
+            String tenantId,
+            String environment,
+            String serviceKey,
+            String releaseId,
+            boolean allowLatestReleaseFallback,
+            String path,
+            String method) {
+        Optional<ApiMetadataCandidateEvidence> scoped = repository
+                .findByTenantIdAndEnvironmentAndServiceKeyAndReleaseIdAndPathAndMethod(
+                        tenantId,
+                        environment,
+                        serviceKey,
+                        releaseId,
+                        path,
+                        method)
+                .map(metadata -> (ApiMetadataCandidateEvidence) metadata);
+        if (scoped.isPresent() || !allowLatestReleaseFallback) {
+            return scoped;
+        }
+        Optional<String> latestRelease = repository.findLatestReleaseIdByScope(tenantId, environment, serviceKey);
+        if (latestRelease == null || latestRelease.isEmpty() || releaseId.equals(latestRelease.get())) {
+            return scoped;
+        }
+        return repository
+                .findByTenantIdAndEnvironmentAndServiceKeyAndReleaseIdAndPathAndMethod(
+                        tenantId,
+                        environment,
+                        serviceKey,
+                        latestRelease.get(),
+                        path,
+                        method)
+                .map(metadata -> (ApiMetadataCandidateEvidence) metadata);
     }
 
     private boolean shouldFallbackToCatalogScope(String tenantId, String environment) {
@@ -1056,6 +1268,16 @@ public class AgenticAuthoringApiMetadataCandidateCatalog {
         if (matches == 0) {
             score = 0d;
         }
+        String resourcePath = baseResourcePath(metadata.getPath());
+        String terminalSegment = normalizePath(resourcePath)
+                .replaceAll("/+$", "")
+                .replaceAll("^.*/", "");
+        String normalizedTerminal = normalize(terminalSegment.replaceAll("[^a-z0-9]+", " ")).trim();
+        boolean exactTerminalMatch = !normalizedTerminal.isBlank()
+                && tokens.stream().anyMatch(token -> matchesExactOrPluralToken(normalizedTerminal, token));
+        if (matches > 0 && exactTerminalMatch) {
+            score += 0.12d;
+        }
         score += artifactScoreAdjustment(artifactKind, endpointText, path);
         score = Math.min(0.98d, score);
         score += dashboardOperationScoreAdjustment(artifactKind, path, tokens);
@@ -1069,7 +1291,6 @@ public class AgenticAuthoringApiMetadataCandidateCatalog {
         String operation = metadata.getMethod().toLowerCase(Locale.ROOT);
         String submitUrl = canonicalSubmitUrl(metadata.getPath(), operation, artifactKind);
         String submitMethod = canonicalSubmitMethod(submitUrl, operation);
-        String resourcePath = baseResourcePath(metadata.getPath());
         ResourceSemanticRole semanticRole = semanticRole(
                 resourcePath,
                 submitUrl,
@@ -1198,6 +1419,7 @@ public class AgenticAuthoringApiMetadataCandidateCatalog {
                 context.artifactKind());
         score = Math.max(0.45d, Math.min(0.99d, score));
         List<String> evidence = new ArrayList<>(List.of(
+                DOMAIN_DISCOVERY_RESOURCE_FOCUS,
                 "api-metadata",
                 "semantic-retrieval",
                 "llm-resource-focus",
@@ -1363,7 +1585,15 @@ public class AgenticAuthoringApiMetadataCandidateCatalog {
                 && !normalizedPath.endsWith("/export")
                 && !normalizedPath.contains("/export/")
                 && !normalizedPath.endsWith("/locate")
-                && !normalizedPath.contains("/locate/");
+                && !normalizedPath.contains("/locate/")
+                && !normalizedPath.endsWith("/bulk")
+                && !normalizedPath.contains("/bulk/")
+                && !normalizedPath.endsWith("/evaluation")
+                && !normalizedPath.contains("/evaluation/")
+                && !normalizedPath.endsWith("/duplicate-draft")
+                && !normalizedPath.contains("/duplicate-draft/")
+                && !normalizedPath.endsWith("/determinations")
+                && !normalizedPath.contains("/determinations/");
     }
 
     private double dashboardOperationScoreAdjustment(String artifactKind, String path, List<String> tokens) {
@@ -1491,7 +1721,8 @@ public class AgenticAuthoringApiMetadataCandidateCatalog {
             if ("chart".equals(artifactKind)) {
                 return SemanticResourceNeed.ANALYTICS;
             }
-            if (hasProfileIntentSignal(focusedIntent, normalized)) {
+            if (hasProfileIntentSignal(focusedIntent, normalized)
+                    && !hasFocusedExplicitCollectionSurfaceSignal(focusedIntent)) {
                 return SemanticResourceNeed.PROFILE;
             }
             if (hasFocusedOperationalCollectionSignal(focusedIntent)
@@ -1513,7 +1744,8 @@ public class AgenticAuthoringApiMetadataCandidateCatalog {
                 "tendencia", "distribuicao", "serie temporal")) {
             return SemanticResourceNeed.ANALYTICS;
         }
-        if (hasProfileIntentSignal(intentBearingText, normalized)) {
+        if (hasProfileIntentSignal(intentBearingText, normalized)
+                && !hasFocusedExplicitCollectionSurfaceSignal(intentBearingText)) {
             return SemanticResourceNeed.PROFILE;
         }
         return SemanticResourceNeed.GENERIC_OPERATIONAL;
@@ -1523,6 +1755,13 @@ public class AgenticAuthoringApiMetadataCandidateCatalog {
         return normalizedPrompt.contains("primary business entity:")
                 && normalizedPrompt.contains("supporting concepts:")
                 && normalizedPrompt.contains("semantic query:");
+    }
+
+    private boolean hasFocusedExplicitCollectionSurfaceSignal(String focusedIntent) {
+        return containsAny(valueOrEmpty(focusedIntent),
+                "tabela", "table", "lista", "listagem",
+                "mestre-detalhe", "mestre detalhe", "master-detail", "master detail",
+                "colecao", "collection");
     }
 
     private boolean hasFocusedOperationalCollectionSignal(String focusedIntent) {

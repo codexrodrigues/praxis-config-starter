@@ -1933,6 +1933,52 @@ class AgenticAuthoringLlmPreIntentToolPlanningServiceTest {
         assertThat(skipped.skipReason()).isEqualTo("pending-clarification-present");
     }
 
+    @Test
+    void normalizesMasterDetailArtifactKindSlipToPageBeforeToolDispatch() throws Exception {
+        when(providerManagementService.generateJson(
+                any(), any(), any(), eq("tenant"), eq("user"), eq("local")))
+                .thenReturn(objectMapper.readTree("""
+                        {
+                          "schemaVersion": "praxis-agentic-authoring-pre-intent-tool-plan.v3",
+                          "semanticIntentClass": "authoring_or_other",
+                          "assistantMessage": "",
+                          "shouldRetrieveGovernedResources": true,
+                          "requiresFullIntentResolution": false,
+                          "queryConstraints": {"appliesToDataSelection": false, "filters": []},
+                          "groundingProfile": "api_resource",
+                          "artifactKind": "dashboard",
+                          "primaryComponent": "praxis-table",
+                          "layoutKind": "resource-master-detail",
+                          "retrievalQuery": "alocacoes funcionais",
+                          "resourceSearchFocus": {
+                            "primaryBusinessEntity": "human-resources.assignments",
+                            "supportingConcepts": ["ficha de detalhes"],
+                            "desiredSurface": "master-detail",
+                            "uncertainty": null,
+                            "rationale": "Tabela principal com detalhe do registro selecionado."
+                          },
+                          "reason": "Resource master-detail workspace."
+                        }
+                        """));
+        AgenticAuthoringLlmPreIntentToolPlanningService service =
+                new AgenticAuthoringLlmPreIntentToolPlanningService(providerManagementService, objectMapper);
+
+        AgenticAuthoringPreIntentToolPlanningResult result = service.plan(
+                request("Crie um painel de acompanhamento funcional com tabela e ficha de detalhes"),
+                new AiPrincipalContext("tenant", "user", "local", true));
+
+        assertThat(result.planned()).isTrue();
+        assertThat(result.plan().artifactKind()).isEqualTo("page");
+        assertThat(result.plan().primaryComponent()).isEqualTo("praxis-table");
+        assertThat(result.plan().layoutKind()).isEqualTo("resource-master-detail");
+        assertThat(result.plan().toolCalls()).singleElement().satisfies(call -> {
+            assertThat(call.name()).isEqualTo(AgenticAuthoringToolRegistry.SEARCH_API_RESOURCES);
+            assertThat(call.payload()).isInstanceOfSatisfying(
+                    AgenticAuthoringResourceCandidatesRequest.class,
+                    payload -> assertThat(payload.artifactKind()).isEqualTo("page"));
+        });
+    }
+
     private AgenticAuthoringTurnStreamRequest request(
             String prompt,
             JsonNode currentPage,

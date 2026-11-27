@@ -95,6 +95,9 @@ public class EmbeddingService {
     @Value("${spring.ai.google.genai.embedding.text.options.model:gemini-embedding-2}")
     private String geminiModel;
 
+    @Value("${praxis.ai.gemini.embedding-fallback-model:}")
+    private String geminiFallbackModel;
+
     @Value("${praxis.ai.timeout-seconds:30}")
     private int timeoutSeconds;
 
@@ -197,19 +200,40 @@ public class EmbeddingService {
                         "spring.ai.google.genai.embedding.api-key is required when spring.ai.embedding.provider=gemini.");
             }
             try {
-                List<List<Float>> vectors = new ArrayList<>(texts.size());
-                for (List<String> batch : partitionEmbeddingInputs(texts)) {
-                    vectors.addAll(callEmbeddingProvider(
-                            PROVIDER_GEMINI,
-                            () -> embedAllWithGoogleGenAi(batch, override, effectiveApiKey)));
-                }
-                return vectors;
+                return embedAllGeminiBatches(texts, override, effectiveApiKey);
             } catch (Exception ex) {
-                throw classifyEmbeddingFailure(PROVIDER_GEMINI, ex);
+                AiProviderCallException failure = classifyEmbeddingFailure(PROVIDER_GEMINI, ex);
+                EmbeddingCallConfig fallbackOverride = geminiFallbackOverride(override, failure);
+                if (fallbackOverride != null) {
+                    log.warn(
+                            "Gemini batch embedding failed for model={}; falling back to fallbackModel={} kind={}",
+                            resolveModel(override, geminiModel),
+                            fallbackOverride.model(),
+                            failure.getKind());
+                    try {
+                        return embedAllGeminiBatches(texts, fallbackOverride, effectiveApiKey);
+                    } catch (Exception fallbackEx) {
+                        throw classifyEmbeddingFailure(PROVIDER_GEMINI, fallbackEx);
+                    }
+                }
+                throw failure;
             }
         }
         throw new IllegalStateException(
                 "Unsupported spring.ai.embedding.provider '" + provider + "'. Supported values: gemini, openai, mock.");
+    }
+
+    private List<List<Float>> embedAllGeminiBatches(
+            List<String> texts,
+            EmbeddingCallConfig override,
+            String effectiveApiKey) {
+        List<List<Float>> vectors = new ArrayList<>(texts.size());
+        for (List<String> batch : partitionEmbeddingInputs(texts)) {
+            vectors.addAll(callEmbeddingProvider(
+                    PROVIDER_GEMINI,
+                    () -> embedAllWithGoogleGenAi(batch, override, effectiveApiKey)));
+        }
+        return vectors;
     }
 
     private List<List<String>> partitionEmbeddingInputs(List<String> texts) {
@@ -382,7 +406,23 @@ public class EmbeddingService {
                         PROVIDER_GEMINI,
                         () -> embedWithGoogleGenAi(text, override, effectiveApiKey));
             } catch (Exception e) {
-                throw classifyEmbeddingFailure(PROVIDER_GEMINI, e);
+                AiProviderCallException failure = classifyEmbeddingFailure(PROVIDER_GEMINI, e);
+                EmbeddingCallConfig fallbackOverride = geminiFallbackOverride(override, failure);
+                if (fallbackOverride != null) {
+                    log.warn(
+                            "Gemini embedding failed for model={}; falling back to fallbackModel={} kind={}",
+                            resolveModel(override, geminiModel),
+                            fallbackOverride.model(),
+                            failure.getKind());
+                    try {
+                        return callEmbeddingProvider(
+                                PROVIDER_GEMINI,
+                                () -> embedWithGoogleGenAi(text, fallbackOverride, effectiveApiKey));
+                    } catch (Exception fallbackEx) {
+                        throw classifyEmbeddingFailure(PROVIDER_GEMINI, fallbackEx);
+                    }
+                }
+                throw failure;
             }
         }
         if (PROVIDER_OPENAI.equals(selected)) {
@@ -693,6 +733,34 @@ public class EmbeddingService {
             return override.model();
         }
         return fallback;
+    }
+
+    private EmbeddingCallConfig geminiFallbackOverride(
+            EmbeddingCallConfig override,
+            AiProviderCallException failure) {
+        if (override != null && trimToNull(override.model()) != null) {
+            return null;
+        }
+        String fallbackModel = trimToNull(geminiFallbackModel);
+        if (fallbackModel == null) {
+            return null;
+        }
+        String primaryModel = trimToNull(resolveModel(override, geminiModel));
+        if (fallbackModel.equals(primaryModel)) {
+            return null;
+        }
+        boolean eligible = switch (failure.getKind()) {
+            case CLIENT_ERROR, CAPACITY, RATE_LIMIT, QUOTA_EXHAUSTED -> true;
+            default -> false;
+        };
+        if (!eligible) {
+            return null;
+        }
+        return new EmbeddingCallConfig(
+                override != null ? override.provider() : null,
+                override != null ? override.apiKey() : null,
+                fallbackModel,
+                override != null ? override.dimensions() : null);
     }
 
     private OpenAiEmbeddingModel resolveOpenAiClient(EmbeddingCallConfig override, String apiKey) {

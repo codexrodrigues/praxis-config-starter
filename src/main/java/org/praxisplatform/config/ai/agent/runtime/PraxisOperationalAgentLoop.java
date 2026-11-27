@@ -10,6 +10,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import lombok.extern.slf4j.Slf4j;
 import org.praxisplatform.config.ai.agent.model.AgentConversationItem;
 import org.praxisplatform.config.ai.agent.model.AgentModelStreamListener;
@@ -67,6 +68,7 @@ public class PraxisOperationalAgentLoop {
         }
     }
 
+    @JsonIgnoreProperties(ignoreUnknown = true)
     public record ConversationHistoryEntry(String role, String text) {
     }
 

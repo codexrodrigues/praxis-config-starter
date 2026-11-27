@@ -174,6 +174,25 @@ public final class AgentTurnArtifactStore {
         return Collections.unmodifiableList(new ArrayList<>(simulationPreviews));
     }
 
+    private final List<org.praxisplatform.config.ai.agent.spi.AgentActionAffordance> handoffActions = new ArrayList<>();
+
+    public synchronized void recordHandoffAction(org.praxisplatform.config.ai.agent.spi.AgentActionAffordance action) {
+        if (action == null) {
+            return;
+        }
+        boolean duplicate = handoffActions.stream().anyMatch(existing ->
+                java.util.Objects.equals(existing.actionId(), action.actionId())
+                        && java.util.Objects.equals(existing.route(), action.route())
+                        && java.util.Objects.equals(existing.queryParams(), action.queryParams()));
+        if (!duplicate) {
+            handoffActions.add(action);
+        }
+    }
+
+    public synchronized List<org.praxisplatform.config.ai.agent.spi.AgentActionAffordance> handoffActions() {
+        return Collections.unmodifiableList(new ArrayList<>(handoffActions));
+    }
+
     public synchronized List<AgentPersistedActionProposal> actionProposals() {
         return Collections.unmodifiableList(new ArrayList<>(actionProposals));
     }
