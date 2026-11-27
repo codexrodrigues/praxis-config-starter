@@ -159,6 +159,28 @@ class ResourceCapabilitiesRetrievalServiceTest {
         assertThat(requests).containsExactly("tenant-a", "tenant-b");
     }
 
+    @Test
+    void normalizesRelativeResourcePathToGovernedApiPrefix() throws Exception {
+        List<String> requests = new ArrayList<>();
+        server = HttpServer.create(new InetSocketAddress(0), 0);
+        server.createContext("/api/human-resources/funcionarios/capabilities", exchange -> {
+            requests.add(exchange.getRequestURI().toString());
+            writeJson(exchange, 200, "{\"resourcePath\":\"/api/human-resources/funcionarios\"}");
+        });
+        server.start();
+
+        ResourceCapabilitiesRetrievalService service = new ResourceCapabilitiesRetrievalService(
+                new ObjectMapper(),
+                "http://localhost:" + server.getAddress().getPort(),
+                5_000L);
+
+        ResourceCapabilitiesFetchResult result = service.fetchCapabilitiesResult(
+                "human-resources/funcionarios", null, "tenant-a", "user-a", "local");
+
+        assertThat(result.isSuccess()).isTrue();
+        assertThat(requests).containsExactly("/api/human-resources/funcionarios/capabilities");
+    }
+
     private static void writeJson(HttpExchange exchange, int status, String body) throws IOException {
         byte[] bytes = body.getBytes(StandardCharsets.UTF_8);
         exchange.getResponseHeaders().add("Content-Type", "application/json");

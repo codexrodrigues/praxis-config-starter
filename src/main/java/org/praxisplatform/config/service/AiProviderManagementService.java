@@ -56,7 +56,7 @@ public class AiProviderManagementService {
     @Value("${spring.ai.openai.chat.options.model:gpt-4o-mini}")
     private String openaiModel;
 
-    @Value("${spring.ai.google.genai.chat.options.model:gemini-flash-latest}")
+    @Value("${spring.ai.google.genai.chat.options.model:gemini-2.5-flash}")
     private String geminiModel;
 
     @Value("${spring.ai.openai.chat.options.model:grok-2-latest}")
@@ -342,7 +342,7 @@ public class AiProviderManagementService {
                 .id("gemini")
                 .label("Google Gemini")
                 .description("Modelos rápidos e multimodais do Google.")
-                .defaultModel("gemini-flash-latest")
+                .defaultModel("gemini-2.5-flash")
                 .requiresApiKey(true)
                 .supportsModels(true)
                 .supportsEmbeddings(true)

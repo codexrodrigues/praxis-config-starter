@@ -15,11 +15,15 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Set;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
@@ -69,10 +73,17 @@ public class SpringAiGeminiService implements AiProvider {
     private final ObjectProvider<GoogleGenAiChatModel> chatClientProvider;
     private final ObjectMapper objectMapper;
 
-    private static final String DEFAULT_GEMINI_MODEL = "gemini-2.0-flash";
+    private static final String DEFAULT_GEMINI_MODEL = "gemini-2.5-flash";
     private static final long DEFAULT_BREAKER_WINDOW_MS = TimeUnit.SECONDS.toMillis(30);
     private static final long DEFAULT_BREAKER_OPEN_MS = TimeUnit.SECONDS.toMillis(30);
     private static final int DEFAULT_BREAKER_THRESHOLD = 3;
+    private static final Pattern RETRY_DURATION_PATTERN =
+            Pattern.compile("^([0-9]+(?:\\.[0-9]+)?)(ms|s)$", Pattern.CASE_INSENSITIVE);
+    private static final Pattern RETRY_DELAY_MESSAGE_PATTERN =
+            Pattern.compile("please retry in\\s+([0-9]+(?:\\.[0-9]+)?)\\s*(ms|s)(?!\\w)", Pattern.CASE_INSENSITIVE);
+    private static final Pattern LONG_RETRY_MESSAGE_PATTERN =
+            Pattern.compile("(?:please\\s+)?retry\\s+in\\s+\\d+\\s*[hm]", Pattern.CASE_INSENSITIVE);
+    private static final long TRANSIENT_RATE_LIMIT_MAX_DELAY_MS = TimeUnit.SECONDS.toMillis(120);
 
     @Autowired(required = false)
     private ObjectProvider<RagChatAdvisorService> ragChatAdvisorServiceProvider;
@@ -80,7 +91,7 @@ public class SpringAiGeminiService implements AiProvider {
     @Value("${spring.ai.google.genai.api-key:#{null}}")
     private String apiKey;
 
-    @Value("${spring.ai.google.genai.chat.options.model:gemini-2.0-flash}")
+    @Value("${spring.ai.google.genai.chat.options.model:gemini-2.5-flash}")
     private String model;
 
     @Value("${spring.ai.google.genai.project-id:#{null}}")
@@ -126,6 +137,9 @@ public class SpringAiGeminiService implements AiProvider {
 
     @Value("${praxis.ai.gemini.json-min-output-tokens:8192}")
     private int jsonMinOutputTokens;
+
+    @Value("${praxis.ai.gemini.authoring-thinking-level:LOW}")
+    private String authoringThinkingLevel = "LOW";
 
     @Value("${praxis.ai.timeout-seconds:30}")
     private int timeoutSeconds;
@@ -309,6 +323,13 @@ public class SpringAiGeminiService implements AiProvider {
         return maxTokens;
     }
 
+    int resolveTimeoutSeconds(AiCallConfig config) {
+        if (config != null && config.getTimeoutSeconds() != null && config.getTimeoutSeconds() > 0) {
+            return config.getTimeoutSeconds();
+        }
+        return Math.max(1, timeoutSeconds);
+    }
+
     private int resolveGenerationMaxTokens(AiCallConfig config, boolean jsonMode) {
         int resolvedMaxTokens = resolveMaxTokens(config);
         if (!jsonMode) {
@@ -431,13 +452,8 @@ public class SpringAiGeminiService implements AiProvider {
         return service.resolveAdvisors();
     }
 
-    private String callWithApiKey(String prompt, String apiKey, AiCallConfig config, boolean jsonMode) {
-        return callWithApiKey(prompt, apiKey, config, jsonMode, resolveModel(config));
-    }
-
-    private String callWithApiKey(
+    ObjectNode buildDirectRequestPayload(
             String prompt,
-            String apiKey,
             AiCallConfig config,
             boolean jsonMode,
             String resolvedModel) {
@@ -451,26 +467,100 @@ public class SpringAiGeminiService implements AiProvider {
         if (jsonMode) {
             generationConfig.put("responseMimeType", "application/json");
         }
+        applyThinkingConfig(generationConfig, resolvedModel, config);
+        return payload;
+    }
+
+    private void applyThinkingConfig(
+            ObjectNode generationConfig,
+            String resolvedModel,
+            AiCallConfig config) {
+        String lower = resolvedModel == null ? "" : resolvedModel.trim().toLowerCase(Locale.ROOT);
+        boolean isGemini3Family = lower.contains("gemini-3")
+                || lower.equals("gemini-flash-latest")
+                || lower.equals("gemini-pro-latest")
+                || lower.equals("gemini-flash-lite-latest");
+        boolean supportsMinimalLevel = lower.contains("lite");
+        if (isGemini3Family) {
+            if (config != null && config.getThinkingProfile() != null) {
+                String level = switch (config.getThinkingProfile()) {
+                    case OFF -> supportsMinimalLevel ? "MINIMAL" : "LOW";
+                    case FAST_LOOKUP -> "LOW";
+                    case OPERATIONAL_AUDIT -> "MEDIUM";
+                    case DEEP_ANALYSIS -> "HIGH";
+                };
+                generationConfig.putObject("thinkingConfig").put("thinkingLevel", level);
+                return;
+            }
+            if (config != null
+                    && config.getExecutionProfile() == AiExecutionProfile.AGENTIC_AUTHORING
+                    && !supportsMinimalLevel) {
+                String configuredLevel = authoringThinkingLevel == null
+                        ? "LOW"
+                        : authoringThinkingLevel.trim().toUpperCase(Locale.ROOT);
+                if (!configuredLevel.isBlank()
+                        && !"DEFAULT".equals(configuredLevel)
+                        && !"NONE".equals(configuredLevel)) {
+                    if ("MINIMAL".equals(configuredLevel)) {
+                        configuredLevel = "LOW";
+                    }
+                    generationConfig.putObject("thinkingConfig").put("thinkingLevel", configuredLevel);
+                }
+            }
+            return;
+        }
+        if (config != null && (config.getThinkingBudgetTokens() != null || config.getThinkingProfile() != null)) {
+            boolean supportsBudget = lower.contains("gemini-2.5") || config.getThinkingBudgetTokens() != null;
+            if (!supportsBudget) {
+                return;
+            }
+            int budget = config.getThinkingBudgetTokens() != null
+                    ? Math.max(0, config.getThinkingBudgetTokens())
+                    : switch (config.getThinkingProfile()) {
+                        case OFF -> lower.contains("pro") ? 128 : 0;
+                        case FAST_LOOKUP -> 1024;
+                        case OPERATIONAL_AUDIT -> 4096;
+                        case DEEP_ANALYSIS -> 12288;
+                    };
+            generationConfig.putObject("thinkingConfig").put("thinkingBudget", budget);
+        }
+    }
+
+    private String callWithApiKey(String prompt, String apiKey, AiCallConfig config, boolean jsonMode) {
+        return callWithApiKey(prompt, apiKey, config, jsonMode, resolveModel(config));
+    }
+
+    private String callWithApiKey(
+            String prompt,
+            String apiKey,
+            AiCallConfig config,
+            boolean jsonMode,
+            String resolvedModel) {
+        int resolvedTimeoutSeconds = resolveTimeoutSeconds(config);
+        ObjectNode payload = buildDirectRequestPayload(prompt, config, jsonMode, resolvedModel);
         String url = "https://generativelanguage.googleapis.com/v1beta/models/"
                 + resolvedModel
                 + ":generateContent?key="
                 + URLEncoder.encode(apiKey, StandardCharsets.UTF_8);
         try {
             HttpClient client = HttpClient.newBuilder()
-                    .connectTimeout(Duration.ofSeconds(Math.max(1, timeoutSeconds)))
+                    .connectTimeout(Duration.ofSeconds(resolvedTimeoutSeconds))
                     .build();
             HttpRequest request = HttpRequest.newBuilder()
                     .uri(URI.create(url))
-                    .timeout(Duration.ofSeconds(Math.max(1, timeoutSeconds)))
+                    .timeout(Duration.ofSeconds(resolvedTimeoutSeconds))
                     .header("Content-Type", "application/json")
                     .POST(HttpRequest.BodyPublishers.ofString(payload.toString()))
                     .build();
             HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
             if (response.statusCode() >= 400) {
+                String errorBody = response.body();
                 throw AiProviderCallException.fromHttpStatus(
                         "gemini",
                         response.statusCode(),
-                        summarizeErrorBody(response.body()));
+                        summarizeErrorBodyForClassification(errorBody),
+                        extractRetryAfter(errorBody),
+                        null);
             }
             JsonNode root = objectMapper.readTree(response.body());
             captureDirectInvocationMetadata(config, root, resolvedModel);
@@ -498,13 +588,8 @@ public class SpringAiGeminiService implements AiProvider {
             Consumer<String> onChunk,
             Supplier<Boolean> cancellationRequested) {
         String resolvedModel = resolveModel(config);
-        double resolvedTemperature = resolveTemperature(config);
-        int resolvedMaxTokens = resolveMaxTokens(config);
-        ObjectNode payload = objectMapper.createObjectNode();
-        addTextContent(payload, prompt);
-        ObjectNode generationConfig = payload.putObject("generationConfig");
-        generationConfig.put("temperature", resolvedTemperature);
-        generationConfig.put("maxOutputTokens", resolvedMaxTokens);
+        int resolvedTimeoutSeconds = resolveTimeoutSeconds(config);
+        ObjectNode payload = buildDirectRequestPayload(prompt, config, false, resolvedModel);
         String url = "https://generativelanguage.googleapis.com/v1beta/models/"
                 + resolvedModel
                 + ":streamGenerateContent?alt=sse&key="
@@ -517,11 +602,11 @@ public class SpringAiGeminiService implements AiProvider {
         AiStreamExecutionContextHolder.AbortRegistration abortRegistration = null;
         try {
             HttpClient client = HttpClient.newBuilder()
-                    .connectTimeout(Duration.ofSeconds(Math.max(1, timeoutSeconds)))
+                    .connectTimeout(Duration.ofSeconds(resolvedTimeoutSeconds))
                     .build();
             HttpRequest request = HttpRequest.newBuilder()
                     .uri(URI.create(url))
-                    .timeout(Duration.ofSeconds(Math.max(1, timeoutSeconds)))
+                    .timeout(Duration.ofSeconds(resolvedTimeoutSeconds))
                     .header("Content-Type", "application/json")
                     .POST(HttpRequest.BodyPublishers.ofString(payload.toString()))
                     .build();
@@ -539,14 +624,14 @@ public class SpringAiGeminiService implements AiProvider {
                 responseFuture.cancel(true);
                 throw new CancellationException("Gemini stream cancelled before response.");
             }
-            HttpResponse<InputStream> response = responseFuture.get(Math.max(1, timeoutSeconds), TimeUnit.SECONDS);
+            HttpResponse<InputStream> response = responseFuture.get(resolvedTimeoutSeconds, TimeUnit.SECONDS);
             streamRef.set(response.body());
             if (response.statusCode() >= 400) {
                 String errorBody = new String(response.body().readAllBytes(), StandardCharsets.UTF_8);
                 throw AiProviderStreamException.fromHttpStatus(
                         "gemini",
                         response.statusCode(),
-                        summarizeErrorBody(errorBody));
+                        summarizeErrorBodyForClassification(errorBody));
             }
 
             StringBuilder out = new StringBuilder();
@@ -1010,7 +1095,7 @@ public class SpringAiGeminiService implements AiProvider {
         return AiProviderStreamException.unknown(provider, error);
     }
 
-    private String summarizeErrorBody(String body) {
+    private String summarizeErrorBodyForClassification(String body) {
         if (body == null) {
             return null;
         }
@@ -1018,8 +1103,125 @@ public class SpringAiGeminiService implements AiProvider {
         if (trimmed.isEmpty()) {
             return null;
         }
-        int max = Math.min(trimmed.length(), 180);
-        return trimmed.substring(0, max);
+        String normalizedBody = trimmed.toLowerCase(Locale.ROOT);
+        boolean zeroLimit = normalizedBody.contains("limit: 0") || normalizedBody.contains("limit:0");
+        boolean dailyQuota = isDailyQuotaExhaustion(trimmed, normalizedBody);
+        boolean transientHint = !dailyQuota && containsTransientRateLimitSignal(normalizedBody);
+        String candidateSummary = trimmed;
+        try {
+            JsonNode root = objectMapper.readTree(trimmed);
+            String jsonMessage = textOrNull(root.path("error"), "message");
+            if (jsonMessage != null && !jsonMessage.isBlank()) {
+                candidateSummary = jsonMessage.replaceAll("\\s+", " ").trim();
+            }
+        } catch (Exception ignored) {
+            // Fall back to bounded raw error body when payload is not JSON.
+        }
+        int max = Math.min(candidateSummary.length(), 240);
+        String summary = candidateSummary.substring(0, max);
+        String normalizedSummary = summary.toLowerCase(Locale.ROOT);
+        if (zeroLimit && !normalizedSummary.contains("limit: 0") && !normalizedSummary.contains("limit:0")) {
+            summary += " [limit: 0]";
+        } else if (!zeroLimit && dailyQuota && !normalizedSummary.contains("quota_exhausted_daily")) {
+            summary += " [quota_exhausted_daily]";
+        } else if (!zeroLimit && !dailyQuota && transientHint && !containsTransientRateLimitSignal(normalizedSummary)) {
+            summary += " [rate_limit_retryable]";
+        }
+        return summary;
+    }
+
+    private boolean isDailyQuotaExhaustion(String rawBody, String normalizedBody) {
+        if (normalizedBody.contains("requests_per_day")
+                || normalizedBody.contains("requests per day")
+                || normalizedBody.contains("per day")
+                || normalizedBody.contains("per_day")
+                || LONG_RETRY_MESSAGE_PATTERN.matcher(rawBody).find()) {
+            return true;
+        }
+        Long delayMillis = extractRawRetryDelayMillis(rawBody);
+        return delayMillis != null && delayMillis > TRANSIENT_RATE_LIMIT_MAX_DELAY_MS;
+    }
+
+    private boolean containsTransientRateLimitSignal(String normalized) {
+        return normalized.contains("please retry in")
+                || normalized.contains("retry in ")
+                || normalized.contains("retrydelay")
+                || normalized.contains("retryinfo")
+                || normalized.contains("per minute")
+                || normalized.contains("per_minute")
+                || normalized.contains("requests_per_minute")
+                || normalized.contains("tokens_per_minute");
+    }
+
+    private Instant extractRetryAfter(String body) {
+        if (body == null || body.isBlank()) {
+            return null;
+        }
+        String normalized = body.toLowerCase(Locale.ROOT);
+        if (normalized.contains("limit: 0") || normalized.contains("limit:0") || isDailyQuotaExhaustion(body, normalized)) {
+            return null;
+        }
+        Long delayMillis = extractRawRetryDelayMillis(body);
+        return delayMillis != null && delayMillis > 0 ? Instant.now().plusMillis(delayMillis) : null;
+    }
+
+    private Long extractRawRetryDelayMillis(String body) {
+        Long delayMillis = null;
+        try {
+            JsonNode root = objectMapper.readTree(body);
+            delayMillis = parseRetryDelayFromDetails(root.path("error").path("details"));
+            if (delayMillis == null) {
+                delayMillis = parseRetryDelayFromMessage(textOrNull(root.path("error"), "message"));
+            }
+        } catch (Exception ignored) {
+            // Fall back to scanning raw text when payload is not JSON.
+        }
+        if (delayMillis == null) {
+            delayMillis = parseRetryDelayFromMessage(body);
+        }
+        return delayMillis;
+    }
+
+    private Long parseRetryDelayFromDetails(JsonNode details) {
+        if (details == null || !details.isArray()) {
+            return null;
+        }
+        for (JsonNode detail : details) {
+            String retryDelay = textOrNull(detail, "retryDelay");
+            if (retryDelay == null) {
+                continue;
+            }
+            Matcher matcher = RETRY_DURATION_PATTERN.matcher(retryDelay.trim());
+            if (matcher.matches()) {
+                return toMillis(matcher.group(1), matcher.group(2));
+            }
+        }
+        return null;
+    }
+
+    private Long parseRetryDelayFromMessage(String text) {
+        if (text == null || text.isBlank()) {
+            return null;
+        }
+        Matcher matcher = RETRY_DELAY_MESSAGE_PATTERN.matcher(text);
+        if (!matcher.find()) {
+            return null;
+        }
+        return toMillis(matcher.group(1), matcher.group(2));
+    }
+
+    private Long toMillis(String numericValue, String unit) {
+        try {
+            double amount = Double.parseDouble(numericValue);
+            if (amount <= 0) {
+                return null;
+            }
+            double multiplier = "ms".equalsIgnoreCase(unit) ? 1.0d : 1000.0d;
+            long millis = Math.round(amount * multiplier);
+            return millis > 0 ? millis : null;
+        } catch (NumberFormatException ignored) {
+            return null;
+        }
     }
 
     private String parseReasonFromJson(String message) {
@@ -1158,6 +1360,9 @@ public class SpringAiGeminiService implements AiProvider {
         if (parts.isArray() && parts.size() > 0) {
             StringBuilder merged = new StringBuilder();
             for (JsonNode part : parts) {
+                if (part.path("thought").asBoolean(false)) {
+                    continue;
+                }
                 String text = part.path("text").asText(null);
                 if (text != null && !text.isBlank()) {
                     merged.append(text);

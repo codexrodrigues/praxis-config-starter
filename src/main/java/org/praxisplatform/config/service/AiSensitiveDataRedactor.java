@@ -82,10 +82,12 @@ public class AiSensitiveDataRedactor {
             "optionref",
             "questionkind",
             "requiresactivesemanticdecision",
+            "requiresreview",
             "resourcekey",
             "resourcepath",
             "resourcerole",
             "retrievalquery",
+            "reviewreason",
             "schemaversion",
             "schemaurl",
             "selectedcomponentid",
@@ -107,7 +109,8 @@ public class AiSensitiveDataRedactor {
     private static final Set<String> QUICK_REPLY_FREE_TEXT_FIELDS = Set.of(
             "retrievalquery");
     private static final Set<String> QUICK_REPLY_BOOLEAN_FIELDS = Set.of(
-            "requiresactivesemanticdecision");
+            "requiresactivesemanticdecision",
+            "requiresreview");
 
     public String redactText(String value) {
         if (value == null || value.isBlank()) {

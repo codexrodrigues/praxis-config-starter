@@ -186,4 +186,24 @@ class AiSensitiveDataRedactorTest {
         assertThat(sanitized.path("assistantMessage").asText()).isEqualTo("Resumo token=[REDACTED]");
         assertThat(sanitized.path("text").asText()).isEqualTo("Analise concluida sem segredos.");
     }
+
+    @Test
+    void shouldPreserveQuickReplyReviewMetadataHints() {
+        ObjectNode payload = objectMapper.createObjectNode();
+        ObjectNode contextHints = payload.putArray("quickReplies").addObject().putObject("contextHints");
+        contextHints.put("requiresReview", true);
+        contextHints.put("reviewReason", "semantic-preview-materialization-mismatch");
+        contextHints.put("secretExtra", "should-redact");
+
+        JsonNode sanitizedHints = redactor.sanitizeEventPayload(payload)
+                .path("quickReplies")
+                .path(0)
+                .path("contextHints");
+
+        assertThat(sanitizedHints.path("requiresReview").isBoolean()).isTrue();
+        assertThat(sanitizedHints.path("requiresReview").asBoolean()).isTrue();
+        assertThat(sanitizedHints.path("reviewReason").asText())
+                .isEqualTo("semantic-preview-materialization-mismatch");
+        assertThat(sanitizedHints.path("secretExtra").asText()).isEqualTo("[REDACTED]");
+    }
 }

@@ -177,12 +177,20 @@ public class ResourceCapabilitiesRetrievalService {
             return null;
         }
         String normalized = resourcePath.trim().replaceAll("/+$", "");
-        if (!normalized.startsWith("/api/")
+        if (normalized.isEmpty()
                 || normalized.contains("..")
                 || normalized.contains("?")
                 || normalized.contains("#")
-                || normalized.contains("://")
-                || normalized.endsWith("/capabilities")) {
+                || normalized.contains("://")) {
+            return null;
+        }
+        if (!normalized.startsWith("/")) {
+            normalized = "/" + normalized;
+        }
+        if (!normalized.startsWith("/api/")) {
+            normalized = "/api" + normalized;
+        }
+        if (normalized.equals("/api") || normalized.endsWith("/capabilities")) {
             return null;
         }
         return normalized;

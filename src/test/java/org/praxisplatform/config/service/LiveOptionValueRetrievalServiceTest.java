@@ -186,6 +186,47 @@ class LiveOptionValueRetrievalServiceTest {
         }
     }
 
+    @Test
+    void prefersConfiguredLoopbackBaseUrlOverRequestBaseUrl() throws Exception {
+        SchemaRetrievalService schemaRetrievalService = Mockito.mock(SchemaRetrievalService.class);
+        when(schemaRetrievalService.fetchSchemaResult(any(), any(), eq("tenant-a"), eq("user-a"), eq("dev")))
+                .thenReturn(SchemaFetchResult.success(filterSchema(true), "/schemas/filtered"));
+        HttpServer server = HttpServer.create(new InetSocketAddress(0), 0);
+        server.createContext("/api/departamentos/option-sources/department/options/filter", exchange -> {
+            byte[] body = ("{\"content\":[{\"id\":1,\"label\":\"Folha\",\"extra\":null}],\"totalPages\":1,\"totalElements\":1}")
+                    .getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().add("Content-Type", "application/json");
+            exchange.sendResponseHeaders(200, body.length);
+            exchange.getResponseBody().write(body);
+            exchange.close();
+        });
+        server.start();
+        try {
+            LiveOptionValueRetrievalService service = new LiveOptionValueRetrievalService(
+                    objectMapper,
+                    schemaRetrievalService,
+                    GovernedPlatformRequestAuthorizationProvider.none());
+            service.setConfiguredBaseUrl("http://127.0.0.1:" + server.getAddress().getPort());
+
+            LiveOptionValueRetrievalResult result = service.retrieve(
+                    new LiveOptionValueRetrievalRequest(
+                            "funcionarios",
+                            "departamento",
+                            "departamento",
+                            "in",
+                            objectMapper.createArrayNode().add("folha"),
+                            objectMapper.createObjectNode(),
+                            50),
+                    new AiPrincipalContext("tenant-a", "user-a", "dev", true),
+                    "http://127.0.0.1:4303");
+
+            assertThat(result.valid()).isTrue();
+            assertThat(result.candidates()).extracting(LiveOptionValueCandidate::label).containsExactly("Folha");
+        } finally {
+            server.stop(0);
+        }
+    }
+
     private JsonNode filterSchema(boolean aiVisible) {
         String governance = aiVisible
                 ? "\"x-domain-governance\":{\"aiUsage\":{\"visibility\":\"allow\"}},"

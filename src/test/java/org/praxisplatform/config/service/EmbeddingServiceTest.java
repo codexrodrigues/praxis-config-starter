@@ -14,6 +14,7 @@ import com.openai.core.http.Headers;
 import com.openai.errors.OpenAIServiceException;
 import java.net.http.HttpHeaders;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
@@ -455,6 +456,35 @@ class EmbeddingServiceTest {
         assertEquals(125_000f, vectors.get(0).get(0));
         assertEquals(125_000f, vectors.get(1).get(0));
         assertEquals(5f, vectors.get(2).get(0));
+    }
+
+    @Test
+    void embedFallsBackToConfiguredGeminiFallbackModelWhenPrimaryModelReturnsNotFound() {
+        GoogleGenAiTextEmbeddingModel client = Mockito.mock(GoogleGenAiTextEmbeddingModel.class);
+        List<String> requestedModels = new ArrayList<>();
+        when(client.call(any(EmbeddingRequest.class))).thenAnswer(invocation -> {
+            EmbeddingRequest request = invocation.getArgument(0);
+            String requestedModel = ((org.springframework.ai.google.genai.text.GoogleGenAiTextEmbeddingOptions) request.getOptions())
+                    .getModel();
+            requestedModels.add(requestedModel);
+            if ("gemini-embedding-2".equals(requestedModel)) {
+                throw new ClientException(404, "NOT_FOUND", "Model gemini-embedding-2 not found.");
+            }
+            return new EmbeddingResponse(List.of(new Embedding(new float[] {0.75f, 0.25f}, 0)));
+        });
+
+        EmbeddingService service = new EmbeddingService(emptyOpenAiProvider(), provider(client), new ObjectMapper());
+        ReflectionTestUtils.setField(service, "provider", "gemini");
+        ReflectionTestUtils.setField(service, "geminiApiKey", "gemini-key");
+        ReflectionTestUtils.setField(service, "geminiModel", "gemini-embedding-2");
+        ReflectionTestUtils.setField(service, "geminiFallbackModel", "gemini-embedding-001");
+        ReflectionTestUtils.setField(service, "openaiDimensions", 0);
+        ReflectionTestUtils.setField(service, "geminiDimensions", 0);
+
+        List<Float> vector = service.embed("hello fallback");
+
+        assertEquals(List.of("gemini-embedding-2", "gemini-embedding-001"), requestedModels);
+        assertEquals(List.of(0.75f, 0.25f), vector);
     }
 
     private EmbeddingService openAiService(OpenAiEmbeddingModel client) {

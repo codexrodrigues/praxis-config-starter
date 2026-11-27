@@ -13,8 +13,11 @@ import java.util.regex.Pattern;
 public final class AiProviderCallException extends RuntimeException {
 
     private static final int MAX_PROVIDER_REQUEST_ID_LENGTH = 128;
+    private static final long TRANSIENT_RATE_LIMIT_MAX_DELAY_SECONDS = 120L;
     private static final Pattern SAFE_PROVIDER_REQUEST_ID =
             Pattern.compile("[A-Za-z0-9][A-Za-z0-9._:-]*");
+    private static final Pattern LONG_RETRY_HINT_PATTERN =
+            Pattern.compile("(?:please\\s+)?retry\\s+in\\s+\\d+\\s*[hm]", Pattern.CASE_INSENSITIVE);
 
     public enum Kind {
         TRANSPORT,
@@ -130,7 +133,7 @@ public final class AiProviderCallException extends RuntimeException {
         if (statusCode == 408 || statusCode == 504) {
             kind = Kind.TIMEOUT;
         } else if (statusCode == 429) {
-            kind = isQuotaExhausted(reason) ? Kind.QUOTA_EXHAUSTED : Kind.RATE_LIMIT;
+            kind = isQuotaExhausted(reason, retryAfter) ? Kind.QUOTA_EXHAUSTED : Kind.RATE_LIMIT;
         } else if (statusCode == 503) {
             kind = Kind.CAPACITY;
         } else if (statusCode == 401 || statusCode == 403) {
@@ -150,11 +153,26 @@ public final class AiProviderCallException extends RuntimeException {
                 provider, kind, statusCode, retryAfter, providerRequestId, message, cause);
     }
 
-    private static boolean isQuotaExhausted(String reason) {
+    private static boolean isQuotaExhausted(String reason, Instant retryAfter) {
         if (reason == null || reason.isBlank()) {
             return false;
         }
         String normalized = reason.toLowerCase(Locale.ROOT);
+        boolean zeroLimit = normalized.contains("limit: 0") || normalized.contains("limit:0");
+        boolean dailyQuotaExhausted = normalized.contains("quota_exhausted_daily")
+                || normalized.contains("requests_per_day")
+                || normalized.contains("requests per day")
+                || normalized.contains("per day")
+                || normalized.contains("per_day")
+                || LONG_RETRY_HINT_PATTERN.matcher(reason).find()
+                || (retryAfter != null && retryAfter.isAfter(Instant.now().plusSeconds(TRANSIENT_RATE_LIMIT_MAX_DELAY_SECONDS)));
+        if (zeroLimit || dailyQuotaExhausted) {
+            return true;
+        }
+        // Transient per-minute/short-backoff 429s carry a retry window and should fall back across models.
+        if (retryAfter != null || isTransientRateLimitHint(normalized)) {
+            return false;
+        }
         return normalized.contains("insufficient_quota")
                 || normalized.contains("quota_exhausted")
                 || normalized.contains("quota exhausted")
@@ -162,6 +180,18 @@ public final class AiProviderCallException extends RuntimeException {
                 || normalized.contains("exceeded your current quota")
                 || normalized.contains("billing")
                 || normalized.contains("check your plan");
+    }
+
+    private static boolean isTransientRateLimitHint(String normalized) {
+        return normalized.contains("please retry in")
+                || normalized.contains("retry in ")
+                || normalized.contains("retrydelay")
+                || normalized.contains("retryinfo")
+                || normalized.contains("per minute")
+                || normalized.contains("per_minute")
+                || normalized.contains("requests_per_minute")
+                || normalized.contains("tokens_per_minute")
+                || normalized.contains("rate_limit_retryable");
     }
 
     public static AiProviderCallException timeout(String provider, Throwable cause) {

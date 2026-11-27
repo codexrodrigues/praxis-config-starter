@@ -452,7 +452,8 @@
             "security",
             "llm_visibility",
             "retention",
-            "quality"
+            "quality",
+            null
           ]
         },
         "classification": {

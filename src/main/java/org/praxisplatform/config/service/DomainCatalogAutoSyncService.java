@@ -29,7 +29,7 @@ import org.springframework.util.StringUtils;
  */
 @Service
 @Slf4j
-@ConditionalOnBean({DomainCatalogReleaseRepository.class, DomainCatalogItemRepository.class, DomainCatalogIngestionService.class})
+@ConditionalOnBean({DomainCatalogReleaseRepository.class, DomainCatalogItemRepository.class})
 @ConditionalOnProperty(prefix = "praxis.domain-catalog.auto-sync", name = "enabled", havingValue = "true", matchIfMissing = true)
 public class DomainCatalogAutoSyncService {
 
@@ -64,8 +64,10 @@ public class DomainCatalogAutoSyncService {
         this.syncOnStartup = syncOnStartup;
         this.defaultTenantId = StringUtils.hasText(defaultTenantId) ? defaultTenantId.trim() : "default";
         this.defaultEnvironment = StringUtils.hasText(defaultEnvironment) ? defaultEnvironment.trim() : "dev";
-        this.configuredGroups = sanitizeList(configuredGroups);
-        this.configuredResourceKeys = sanitizeList(configuredResourceKeys);
+        this.configuredGroups = bindConfiguredList(
+                applicationContext, "praxis.domain-catalog.auto-sync.groups", configuredGroups);
+        this.configuredResourceKeys = bindConfiguredList(
+                applicationContext, "praxis.domain-catalog.auto-sync.resource-keys", configuredResourceKeys);
     }
 
     @EventListener(ApplicationReadyEvent.class)
@@ -89,6 +91,12 @@ public class DomainCatalogAutoSyncService {
         String effectiveEnvironment = StringUtils.hasText(environment) ? environment.trim() : defaultEnvironment;
         List<JsonNode> documents = collectLocalCatalogDocuments();
         if (documents.isEmpty()) {
+            log.info(
+                    "Domain catalog auto-sync found no local documents to ingest (tenant={}, environment={}, configuredGroups={}, configuredResourceKeys={})",
+                    effectiveTenant,
+                    effectiveEnvironment,
+                    configuredGroups.size(),
+                    configuredResourceKeys.size());
             return List.of();
         }
         List<DomainCatalogIngestionResponse> ingested = new ArrayList<>(documents.size());
@@ -96,10 +104,20 @@ public class DomainCatalogAutoSyncService {
             if (document == null || !document.isObject()) {
                 continue;
             }
-            DomainCatalogIngestionResponse release =
-                    ingestionService.ingest(document, effectiveTenant, effectiveEnvironment);
-            if (release != null) {
-                ingested.add(release);
+            try {
+                DomainCatalogIngestionResponse release =
+                        ingestionService.ingest(document, effectiveTenant, effectiveEnvironment);
+                if (release != null) {
+                    ingested.add(release);
+                }
+            } catch (RuntimeException ex) {
+                String docResourceKey = document.path("resourceKey").asText("<unknown>");
+                log.warn(
+                        "Skipping domain catalog document during auto-sync (resourceKey={}, tenant={}, environment={}): {}",
+                        docResourceKey,
+                        effectiveTenant,
+                        effectiveEnvironment,
+                        ex.getMessage());
             }
         }
         if (!ingested.isEmpty()) {
@@ -145,18 +163,34 @@ public class DomainCatalogAutoSyncService {
             if (!configuredGroups.isEmpty()) {
                 Method findByGroup = serviceType.getMethod("findByGroup", String.class);
                 for (String group : configuredGroups) {
-                    Object response = findByGroup.invoke(catalogService, group);
-                    if (response != null) {
-                        resolved.add(objectMapper.valueToTree(response));
+                    try {
+                        Object response = findByGroup.invoke(catalogService, group);
+                        if (response != null) {
+                            resolved.add(objectMapper.valueToTree(response));
+                        }
+                    } catch (Exception ex) {
+                        Throwable cause = ex.getCause() != null ? ex.getCause() : ex;
+                        log.warn(
+                                "Could not resolve semantic domain catalog group '{}' during auto-sync: {}",
+                                group,
+                                cause.getMessage());
                     }
                 }
             }
             if (!configuredResourceKeys.isEmpty()) {
                 Method findByResourceKey = serviceType.getMethod("findByResourceKey", String.class);
                 for (String resourceKey : configuredResourceKeys) {
-                    Object response = findByResourceKey.invoke(catalogService, resourceKey);
-                    if (response != null) {
-                        resolved.add(objectMapper.valueToTree(response));
+                    try {
+                        Object response = findByResourceKey.invoke(catalogService, resourceKey);
+                        if (response != null) {
+                            resolved.add(objectMapper.valueToTree(response));
+                        }
+                    } catch (Exception ex) {
+                        Throwable cause = ex.getCause() != null ? ex.getCause() : ex;
+                        log.warn(
+                                "Could not resolve semantic domain catalog resource '{}' during auto-sync: {}",
+                                resourceKey,
+                                cause.getMessage());
                     }
                 }
             }
@@ -167,6 +201,21 @@ public class DomainCatalogAutoSyncService {
             log.warn("Could not collect domain catalog from SemanticDomainCatalogService bean: {}", ex.getMessage());
             return List.of();
         }
+    }
+
+    private static List<String> bindConfiguredList(
+            ApplicationContext applicationContext,
+            String propertyName,
+            List<String> directValue) {
+        List<String> direct = sanitizeList(directValue);
+        if (!direct.isEmpty() || applicationContext == null || applicationContext.getEnvironment() == null) {
+            return direct;
+        }
+        List<String> bound = org.springframework.boot.context.properties.bind.Binder
+                .get(applicationContext.getEnvironment())
+                .bind(propertyName, org.springframework.boot.context.properties.bind.Bindable.listOf(String.class))
+                .orElse(List.of());
+        return sanitizeList(bound);
     }
 
     private static List<String> sanitizeList(List<String> values) {

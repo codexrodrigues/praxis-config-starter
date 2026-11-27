@@ -44,6 +44,9 @@ public class LiveOptionValueRetrievalService {
     @Value("${praxis.ai.option-values.timeout-ms:15000}")
     private long timeoutMs;
 
+    @Value("${praxis.ai.capabilities.base-url:}")
+    private String configuredBaseUrl;
+
     @Autowired
     public LiveOptionValueRetrievalService(
             ObjectMapper objectMapper,
@@ -66,6 +69,10 @@ public class LiveOptionValueRetrievalService {
                 : authorizationProvider;
     }
 
+    public void setConfiguredBaseUrl(String configuredBaseUrl) {
+        this.configuredBaseUrl = configuredBaseUrl;
+    }
+
     public LiveOptionValueRetrievalResult retrieve(
             LiveOptionValueRetrievalRequest request,
             AiPrincipalContext principalContext,
@@ -79,7 +86,8 @@ public class LiveOptionValueRetrievalService {
             return failure(request.resourcePath(), "option-values-principal-scope-required",
                     "Live option values require authenticated tenant and environment scope.");
         }
-        URI baseUri = safeBaseUri(requestBaseUrl);
+        String effectiveBaseUrl = StringUtils.hasText(configuredBaseUrl) ? configuredBaseUrl : requestBaseUrl;
+        URI baseUri = safeBaseUri(effectiveBaseUrl);
         if (baseUri == null) {
             return failure(request.resourcePath(), "option-values-base-url-required",
                     "A governed request base URL is required.");
@@ -95,7 +103,7 @@ public class LiveOptionValueRetrievalService {
                         .operation("post")
                         .schemaType("request")
                         .build(),
-                requestBaseUrl,
+                effectiveBaseUrl,
                 principalContext.tenantId(),
                 principalContext.userId(),
                 principalContext.environment());
@@ -523,7 +531,14 @@ public class LiveOptionValueRetrievalService {
         if (!normalized.startsWith("/")) {
             normalized = "/" + normalized;
         }
-        return normalized.replaceAll("/+$", "");
+        normalized = normalized.replaceAll("/+$", "");
+        if (!normalized.isEmpty()
+                && !normalized.startsWith("/api/")
+                && !normalized.startsWith("/schemas/")
+                && !normalized.contains("://")) {
+            normalized = "/api" + normalized;
+        }
+        return normalized;
     }
 
     private String normalize(String value) {

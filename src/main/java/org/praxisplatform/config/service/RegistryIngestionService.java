@@ -30,6 +30,7 @@ import org.praxisplatform.config.repository.AiRegistryRepository;
 import org.praxisplatform.config.repository.projection.AiRegistryMaterialSummary;
 import org.praxisplatform.config.tx.ConfigTransactionManagerNames;
 import org.springframework.ai.document.Document;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -53,6 +54,13 @@ public class RegistryIngestionService {
     private final RagVectorStoreService ragVectorStoreService;
     private final AgenticAuthoringManifestContractValidator manifestContractValidator;
     private final ApplicationEventPublisher eventPublisher;
+
+    @Value("${praxis.ai.registry.embeddings.enabled:${praxis.ai.rag.vector-store.enabled:true}}")
+    private boolean embeddingsEnabled = true;
+
+    public void setEmbeddingsEnabled(boolean embeddingsEnabled) {
+        this.embeddingsEnabled = embeddingsEnabled;
+    }
     private static final String REGISTRY_TYPE_COMPONENT_DEF = "component_definition";
     private static final String COMPONENT_DEF_COMPONENT_TYPE = "component-definition";
     /**
@@ -382,7 +390,7 @@ public class RegistryIngestionService {
 
         String summary = buildSummary(componentId, description, entry);
         List<Float> embedding = resolvedEmbedding;
-        if (embedding == null || embedding.isEmpty()) {
+        if (embeddingsEnabled && (embedding == null || embedding.isEmpty())) {
             embedding = embeddingService.embed(summary);
         }
 
@@ -403,6 +411,10 @@ public class RegistryIngestionService {
             RegistryIngestionRequest request,
             com.fasterxml.jackson.databind.JsonNode definitions,
             Map<String, AiRegistry> previousDefinitions) {
+        if (!embeddingsEnabled) {
+            log.info("Skipping component-definition embedding generation because registry embeddings are disabled.");
+            return Map.of();
+        }
         Map<String, List<Float>> resolved = new LinkedHashMap<>();
         List<String> missingComponentIds = new ArrayList<>();
         List<String> missingSummaries = new ArrayList<>();
