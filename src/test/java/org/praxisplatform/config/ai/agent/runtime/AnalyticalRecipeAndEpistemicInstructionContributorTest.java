@@ -23,6 +23,12 @@ class AnalyticalRecipeAndEpistemicInstructionContributorTest {
         assertThat(section.content())
                 .contains("kpi.addFromRecipe")
                 .contains("governance.lockLevel")
+                .contains("run_resource_stochastic_simulation")
+                .contains("run_resource_counterfactual_search")
+                .contains("VALIDATED_BY_RULES_ENGINE")
+                .contains("BigDecimal")
+                .contains("DRAFT/PROPOSAL")
+                .contains("DEGRADED")
                 .contains("UNAUTHORIZED")
                 .contains("TRUNCATED")
                 .contains("K_ANONYMITY_SUPPRESSED");

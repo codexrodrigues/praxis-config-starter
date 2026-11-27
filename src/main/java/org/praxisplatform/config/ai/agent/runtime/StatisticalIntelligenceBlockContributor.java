@@ -43,7 +43,9 @@ public class StatisticalIntelligenceBlockContributor implements OperationalAssis
                 continue;
             }
             if (!AgentExtensionArtifact.KIND_STATISTICAL_INFERENCE.equals(artifact.kind())
-                    && !AgentExtensionArtifact.KIND_ANOMALY_SCAN.equals(artifact.kind())) {
+                    && !AgentExtensionArtifact.KIND_ANOMALY_SCAN.equals(artifact.kind())
+                    && !AgentExtensionArtifact.KIND_STOCHASTIC_SIMULATION.equals(artifact.kind())
+                    && !AgentExtensionArtifact.KIND_COUNTERFACTUAL_SEARCH.equals(artifact.kind())) {
                 continue;
             }
             ObjectNode badge = buildEpistemicBadgeBlock(artifact, objectMapper);
@@ -51,8 +53,42 @@ public class StatisticalIntelligenceBlockContributor implements OperationalAssis
                 blocks.add(badge);
             }
             AgentEpistemicEnvelope envelope = artifact.epistemicEnvelope();
+            if (AgentExtensionArtifact.KIND_STOCHASTIC_SIMULATION.equals(artifact.kind())) {
+                String availability = envelope != null ? envelope.availabilityState() : null;
+                boolean available = envelope == null
+                        || AgentEpistemicEnvelope.AVAILABILITY_AVAILABLE.equals(availability);
+                boolean degraded = AgentEpistemicEnvelope.AVAILABILITY_DEGRADED.equals(availability);
+                if (available) {
+                    ObjectNode fanChart = buildSimulationFanChartWidgetBlock(artifact, objectMapper);
+                    if (fanChart != null) {
+                        blocks.add(fanChart);
+                    }
+                    ObjectNode tornado = buildSimulationTornadoWidgetBlock(artifact, objectMapper);
+                    if (tornado != null) {
+                        blocks.add(tornado);
+                    }
+                    ObjectNode thresholds = buildSimulationThresholdsBlock(artifact, objectMapper);
+                    if (thresholds != null) {
+                        blocks.add(thresholds);
+                    }
+                }
+                if (available || degraded) {
+                    ObjectNode anchors = buildSimulationAnchorsBlock(artifact, objectMapper);
+                    if (anchors != null) {
+                        blocks.add(anchors);
+                    }
+                }
+                continue;
+            }
             if (envelope != null
                     && !AgentEpistemicEnvelope.AVAILABILITY_AVAILABLE.equals(envelope.availabilityState())) {
+                continue;
+            }
+            if (AgentExtensionArtifact.KIND_COUNTERFACTUAL_SEARCH.equals(artifact.kind())) {
+                ObjectNode recourse = buildCounterfactualRecourseBlock(artifact, objectMapper);
+                if (recourse != null) {
+                    blocks.add(recourse);
+                }
                 continue;
             }
             ObjectNode boxplot = buildBoxplotWidgetBlock(artifact, objectMapper);
@@ -72,9 +108,12 @@ public class StatisticalIntelligenceBlockContributor implements OperationalAssis
         Map<String, Object> uiPayload = artifact.uiPayload();
         ObjectNode badge = objectMapper.createObjectNode();
         badge.put("type", "epistemic-badge");
-        String defaultTitle = AgentExtensionArtifact.KIND_ANOMALY_SCAN.equals(artifact.kind())
-                ? "Auditoria Estatística de Anomalias"
-                : "Inferência Estatística por Coortes";
+        String defaultTitle = switch (artifact.kind()) {
+            case AgentExtensionArtifact.KIND_ANOMALY_SCAN -> "Auditoria Estatística de Anomalias";
+            case AgentExtensionArtifact.KIND_STOCHASTIC_SIMULATION -> "Simulação Estocástica de Trajetórias";
+            case AgentExtensionArtifact.KIND_COUNTERFACTUAL_SEARCH -> "Análise Contrafactual Governada";
+            default -> "Inferência Estatística por Coortes";
+        };
         String title = textValue(uiPayload.get("title"));
         badge.put("title", mask(StringUtils.hasText(title) ? title : defaultTitle));
         putIfText(badge, "analysisKind", artifact.kind());
@@ -86,7 +125,9 @@ public class StatisticalIntelligenceBlockContributor implements OperationalAssis
             putIfText(badge, "datasetKey", mask(env.datasetKey()));
             putIfText(badge, "epistemicKind", env.epistemicKind());
             putIfText(badge, "availabilityState", env.availabilityState());
-            badge.put("statisticallySignificant", env.statisticallySignificant());
+            if (shouldPublishStatisticalSignificance(env)) {
+                badge.put("statisticallySignificant", env.statisticallySignificant());
+            }
             if (env.qValueFdr() != null) {
                 badge.put("qValueFdr", env.qValueFdr());
             }
@@ -115,6 +156,16 @@ public class StatisticalIntelligenceBlockContributor implements OperationalAssis
         }
         if (!badge.has("groupsEvaluated")) {
             copyIfNumber(badge, uiPayload, "groupsEvaluated");
+        }
+        copyIfNumber(badge, uiPayload, "scenarioCount");
+        copyIfNumber(badge, uiPayload, "horizonPeriods");
+        copyIfNumber(badge, uiPayload, "validatedCandidateCount");
+        copyIfNumber(badge, uiPayload, "excludedCandidateCount");
+        if (uiPayload.get("advisoryOnly") instanceof Boolean b) {
+            badge.put("advisoryOnly", b);
+        }
+        if (uiPayload.get("allAnchorsWithinTolerance") instanceof Boolean b) {
+            badge.put("allAnchorsWithinTolerance", b);
         }
         putIfText(badge, "failClosedNote", mask(textValue(uiPayload.get("failClosedNote"))));
         putIfText(badge, "errorCode", textValue(uiPayload.get("errorCode")));
@@ -321,6 +372,383 @@ public class StatisticalIntelligenceBlockContributor implements OperationalAssis
             data.add(masked);
         }
         return block;
+    }
+
+    private ObjectNode buildSimulationFanChartWidgetBlock(AgentExtensionArtifact artifact, ObjectMapper objectMapper) {
+        Map<String, Object> uiPayload = artifact.uiPayload();
+        List<Map<String, Object>> fanRows = extractFanChartRows(uiPayload);
+        if (fanRows.isEmpty()) {
+            return null;
+        }
+        boolean hasP50 = fanRows.stream().anyMatch(r -> asFiniteDouble(r.get("p50")) != null);
+        String centralField = hasP50 ? "p50" : "mean";
+        String centralLabel = hasP50 ? "Mediana (P50)" : "Média projetada";
+        List<Map<String, Object>> bands = buildConfidenceBands(fanRows);
+
+        String slug = safeSlug(firstNonBlank(textValue(uiPayload.get("entityKey")), "resource"));
+        String chartId = "sim-fan-" + slug;
+        Object rawHorizon = uiPayload.get("horizonPeriods");
+        Object rawScenarios = uiPayload.get("scenarioCount");
+        String subtitle = "Projeção estocástica"
+                + (rawScenarios != null ? " — " + rawScenarios + " cenários" : "")
+                + (rawHorizon != null ? ", horizonte " + rawHorizon + " períodos" : "");
+        ObjectNode block = baseChartWidgetBlock(
+                artifact,
+                objectMapper,
+                "Projeção Estocástica (Fan Chart)",
+                subtitle);
+        ObjectNode inputs = (ObjectNode) block.path("widget").path("inputs");
+
+        ObjectNode chartDocument = inputs.putObject("chartDocument");
+        chartDocument.put("version", "0.1.0");
+        chartDocument.put("kind", "line");
+        chartDocument.put("chartId", chartId);
+        ObjectNode docSizing = chartDocument.putObject("sizing");
+        docSizing.put("mode", "fixed");
+        docSizing.put("height", 280);
+        chartDocument.putObject("source").put("kind", "derived");
+        ArrayNode dimensions = chartDocument.putArray("dimensions");
+        ObjectNode dim = dimensions.addObject();
+        dim.put("field", "periodLabel");
+        dim.put("role", "category");
+        dim.put("label", "Horizonte");
+        ArrayNode metrics = chartDocument.putArray("metrics");
+        ObjectNode metricNode = metrics.addObject();
+        metricNode.put("field", centralField);
+        metricNode.put("aggregation", "avg");
+        metricNode.put("label", centralLabel);
+        metricNode.put("lineStyle", "dashed");
+        metricNode.put("smooth", false);
+        metricNode.put("connectNulls", false);
+        addConfidenceBandsArray(metricNode, bands);
+        List<Map<String, Object>> referenceLines = buildThresholdReferenceLines(uiPayload);
+        addReferenceLinesArray(chartDocument, referenceLines);
+        chartDocument.putObject("legend").put("enabled", true);
+        chartDocument.putObject("tooltip").put("enabled", true);
+        chartDocument.putObject("theme").putObject("surface").put("mode", "embedded");
+        appendEpistemicMeta(chartDocument.putObject("epistemicMeta"), artifact.epistemicEnvelope());
+
+        ObjectNode config = inputs.putObject("config");
+        config.put("id", chartId);
+        config.put("type", "line");
+        ObjectNode cfgSizing = config.putObject("sizing");
+        cfgSizing.put("mode", "fixed");
+        cfgSizing.put("height", 280);
+        ObjectNode axes = config.putObject("axes");
+        ObjectNode xAxis = axes.putObject("x");
+        xAxis.put("field", "periodLabel");
+        xAxis.put("label", "Horizonte");
+        xAxis.put("type", "category");
+        ObjectNode yAxis = axes.putObject("y");
+        yAxis.put("field", centralField);
+        yAxis.put("label", "Valor projetado");
+        yAxis.put("type", "value");
+        ArrayNode series = config.putArray("series");
+        ObjectNode sCentral = series.addObject();
+        sCentral.put("id", "fan-" + centralField);
+        sCentral.put("name", centralLabel);
+        sCentral.put("type", "line");
+        sCentral.put("lineStyle", "dashed");
+        sCentral.put("smooth", false);
+        sCentral.put("connectNulls", false);
+        ObjectNode sMetric = sCentral.putObject("metric");
+        sMetric.put("field", centralField);
+        sMetric.put("aggregation", "avg");
+        addConfidenceBandsArray(sCentral, bands);
+        addReferenceLinesArray(config, referenceLines);
+        ObjectNode cfgTheme = config.putObject("theme");
+        cfgTheme.putObject("surface").put("mode", "embedded");
+        cfgTheme.putObject("legend").put("visible", true);
+        cfgTheme.putObject("tooltip").put("enabled", true);
+        appendEpistemicMeta(config.putObject("epistemicMeta"), artifact.epistemicEnvelope());
+
+        ArrayNode data = inputs.putArray("data");
+        for (Map<String, Object> row : fanRows) {
+            data.add(objectMapper.valueToTree(OperationalAssistantBlockComposer.maskPiiInStructure(row)));
+        }
+        return block;
+    }
+
+    private ObjectNode buildSimulationTornadoWidgetBlock(AgentExtensionArtifact artifact, ObjectMapper objectMapper) {
+        Map<String, Object> uiPayload = artifact.uiPayload();
+        List<Map<String, Object>> tornadoRows = extractTornadoRows(uiPayload);
+        if (tornadoRows.isEmpty()) {
+            return null;
+        }
+        String slug = safeSlug(firstNonBlank(textValue(uiPayload.get("entityKey")), "resource"));
+        String chartId = "sim-tornado-" + slug;
+        ObjectNode block = baseChartWidgetBlock(
+                artifact,
+                objectMapper,
+                "Sensibilidade de Fatores (Tornado)",
+                "Ordenado por amplitude entre percentis P90 e P10");
+        ObjectNode inputs = (ObjectNode) block.path("widget").path("inputs");
+
+        ObjectNode chartDocument = inputs.putObject("chartDocument");
+        chartDocument.put("version", "0.1.0");
+        chartDocument.put("kind", "horizontal-bar");
+        chartDocument.put("orientation", "horizontal");
+        chartDocument.put("yAxisInverse", true);
+        chartDocument.put("chartId", chartId);
+        ObjectNode docSizing = chartDocument.putObject("sizing");
+        docSizing.put("mode", "fixed");
+        docSizing.put("height", 260);
+        chartDocument.putObject("source").put("kind", "derived");
+        ArrayNode dimensions = chartDocument.putArray("dimensions");
+        ObjectNode dim = dimensions.addObject();
+        dim.put("field", "factorLabel");
+        dim.put("role", "category");
+        dim.put("label", "Fator estocástico");
+        dim.put("inverse", true);
+        ArrayNode metrics = chartDocument.putArray("metrics");
+        ObjectNode metricNode = metrics.addObject();
+        metricNode.put("field", "swingMagnitude");
+        metricNode.put("aggregation", "sum");
+        metricNode.put("label", "Amplitude de sensibilidade (P90 - P10)");
+        chartDocument.putObject("legend").put("enabled", true);
+        chartDocument.putObject("tooltip").put("enabled", true);
+        chartDocument.putObject("theme").putObject("surface").put("mode", "embedded");
+        appendEpistemicMeta(chartDocument.putObject("epistemicMeta"), artifact.epistemicEnvelope());
+
+        ObjectNode config = inputs.putObject("config");
+        config.put("id", chartId);
+        config.put("type", "horizontal-bar");
+        config.put("orientation", "horizontal");
+        config.put("yAxisInverse", true);
+        ObjectNode cfgSizing = config.putObject("sizing");
+        cfgSizing.put("mode", "fixed");
+        cfgSizing.put("height", 260);
+        ObjectNode axes = config.putObject("axes");
+        ObjectNode xAxis = axes.putObject("x");
+        xAxis.put("field", "factorLabel");
+        xAxis.put("label", "Fator estocástico");
+        xAxis.put("type", "category");
+        xAxis.put("inverse", true);
+        ObjectNode yAxis = axes.putObject("y");
+        yAxis.put("field", "swingMagnitude");
+        yAxis.put("label", "Amplitude de sensibilidade");
+        yAxis.put("type", "value");
+        ArrayNode series = config.putArray("series");
+        ObjectNode sTornado = series.addObject();
+        sTornado.put("id", "tornado-swing");
+        sTornado.put("name", "Amplitude (P90 - P10)");
+        sTornado.put("type", "bar");
+        ObjectNode sMetric = sTornado.putObject("metric");
+        sMetric.put("field", "swingMagnitude");
+        sMetric.put("aggregation", "sum");
+        ObjectNode cfgTheme = config.putObject("theme");
+        cfgTheme.putObject("surface").put("mode", "embedded");
+        cfgTheme.putObject("legend").put("visible", true);
+        cfgTheme.putObject("tooltip").put("enabled", true);
+        appendEpistemicMeta(config.putObject("epistemicMeta"), artifact.epistemicEnvelope());
+
+        ArrayNode data = inputs.putArray("data");
+        for (Map<String, Object> row : tornadoRows) {
+            data.add(objectMapper.valueToTree(OperationalAssistantBlockComposer.maskPiiInStructure(row)));
+        }
+        return block;
+    }
+
+    private ObjectNode buildCounterfactualRecourseBlock(AgentExtensionArtifact artifact, ObjectMapper objectMapper) {
+        Map<String, Object> uiPayload = artifact.uiPayload();
+        List<Map<String, Object>> rawCandidates = asMapList(uiPayload.get("candidates"));
+        List<Map<String, Object>> validated = new ArrayList<>();
+        for (Map<String, Object> candidate : rawCandidates) {
+            if ("VALIDATED_BY_RULES_ENGINE".equalsIgnoreCase(textValue(candidate.get("feasibilityStatus")))) {
+                validated.add(candidate);
+            }
+        }
+        if (validated.isEmpty()) {
+            return null;
+        }
+        ObjectNode block = objectMapper.createObjectNode();
+        block.put("type", "counterfactual-recourse");
+        putIfText(block, "title", mask(firstNonBlank(textValue(uiPayload.get("title")), "Alternativas Contrafactuais Governadas")));
+        putIfText(block, "entityKey", textValue(uiPayload.get("entityKey")));
+        putIfText(block, "resourceKey", textValue(uiPayload.get("resourceKey")));
+        putIfText(block, "resourcePath", textValue(uiPayload.get("resourcePath")));
+        putIfText(block, "targetMetricKey", mask(textValue(uiPayload.get("targetMetricKey"))));
+        putIfText(block, "direction", textValue(uiPayload.get("direction")));
+        putNumericIfPresent(block, "baselineValue", uiPayload.get("baselineValue"));
+        putNumericIfPresent(block, "targetValue", uiPayload.get("targetValue"));
+        block.put("converged", Boolean.TRUE.equals(uiPayload.get("converged")));
+        block.put("advisoryOnly", true);
+        block.put("requiresHumanGovernanceApproval", true);
+        block.put("validatedCandidateCount", validated.size());
+        if (uiPayload.get("excludedCandidateCount") instanceof Number n) {
+            block.put("excludedCandidateCount", n.intValue());
+        } else {
+            block.put("excludedCandidateCount", Math.max(0, rawCandidates.size() - validated.size()));
+        }
+        appendEpistemicMeta(block.putObject("epistemicMeta"), artifact.epistemicEnvelope());
+        ArrayNode candidatesNode = block.putArray("candidates");
+        for (Map<String, Object> candidate : validated) {
+            candidatesNode.add(objectMapper.valueToTree(
+                    OperationalAssistantBlockComposer.maskPiiInStructure(candidate)));
+        }
+        return block;
+    }
+
+    private static List<Map<String, Object>> extractFanChartRows(Map<String, Object> uiPayload) {
+        List<Map<String, Object>> raw = asMapList(uiPayload.get("fanChart"));
+        if (raw.isEmpty()) {
+            raw = asMapList(uiPayload.get("fanSeries"));
+        }
+        if (raw.isEmpty()) {
+            return List.of();
+        }
+        List<Map<String, Object>> rows = new ArrayList<>(raw.size());
+        for (Map<String, Object> item : raw) {
+            Map<String, Object> row = new LinkedHashMap<>();
+            Object periodIndex = item.get("periodIndex");
+            if (periodIndex != null) {
+                row.put("periodIndex", periodIndex);
+            }
+            String periodLabel = firstNonBlank(
+                    textValue(item.get("periodLabel")),
+                    periodIndex != null ? "T+" + periodIndex : null);
+            if (!StringUtils.hasText(periodLabel)) {
+                continue;
+            }
+            row.put("periodLabel", periodLabel);
+            copyIfPresent(item, row, "mean");
+            copyIfPresent(item, row, "stdDev");
+            if (item.get("quantiles") instanceof Map<?, ?> qMap) {
+                qMap.forEach((k, v) -> {
+                    if (k != null && v != null) {
+                        row.put(normalizeQuantileKey(k.toString()), v);
+                    }
+                });
+            }
+            for (String q : List.of("p05", "p10", "p25", "p50", "p75", "p90", "p95")) {
+                if (item.get(q) != null) {
+                    row.put(q, item.get(q));
+                }
+            }
+            rows.add(row);
+        }
+        return rows;
+    }
+
+    private static List<Map<String, Object>> buildConfidenceBands(List<Map<String, Object>> fanRows) {
+        List<Map<String, Object>> bands = new ArrayList<>(3);
+        if (hasBandPair(fanRows, "p05", "p95")) {
+            bands.add(Map.of(
+                    "id", "band-90-outer",
+                    "lowerField", "p05",
+                    "upperField", "p95",
+                    "label", "P05–P95 (90%)",
+                    "level", 0.9d,
+                    "tone", "info",
+                    "opacity", 0.12d));
+        }
+        if (hasBandPair(fanRows, "p10", "p90")) {
+            bands.add(Map.of(
+                    "id", "band-80",
+                    "lowerField", "p10",
+                    "upperField", "p90",
+                    "label", "P10–P90 (80%)",
+                    "level", 0.8d,
+                    "tone", "info",
+                    "opacity", 0.18d));
+        }
+        if (hasBandPair(fanRows, "p25", "p75")) {
+            bands.add(Map.of(
+                    "id", "band-50",
+                    "lowerField", "p25",
+                    "upperField", "p75",
+                    "label", "P25–P75 (50%)",
+                    "level", 0.5d,
+                    "tone", "info",
+                    "opacity", 0.28d));
+        }
+        return bands;
+    }
+
+    private static boolean hasBandPair(List<Map<String, Object>> rows, String lowerField, String upperField) {
+        for (Map<String, Object> row : rows) {
+            if (asFiniteDouble(row.get(lowerField)) != null && asFiniteDouble(row.get(upperField)) != null) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static void addConfidenceBandsArray(ObjectNode target, List<Map<String, Object>> bands) {
+        if (bands.isEmpty()) {
+            return;
+        }
+        ArrayNode arr = target.putArray("confidenceBands");
+        for (Map<String, Object> b : bands) {
+            ObjectNode node = arr.addObject();
+            node.put("id", String.valueOf(b.get("id")));
+            node.put("lowerField", String.valueOf(b.get("lowerField")));
+            node.put("upperField", String.valueOf(b.get("upperField")));
+            node.put("label", String.valueOf(b.get("label")));
+            node.put("level", ((Number) b.get("level")).doubleValue());
+            node.put("tone", String.valueOf(b.get("tone")));
+            node.put("opacity", ((Number) b.get("opacity")).doubleValue());
+        }
+    }
+
+    private static List<Map<String, Object>> extractTornadoRows(Map<String, Object> uiPayload) {
+        List<Map<String, Object>> raw = asMapList(uiPayload.get("tornadoDrivers"));
+        if (raw.isEmpty()) {
+            return List.of();
+        }
+        List<Map<String, Object>> rows = new ArrayList<>(raw.size());
+        for (Map<String, Object> item : raw) {
+            Double swing = asFiniteDouble(item.get("swingMagnitude"));
+            if (swing == null) {
+                continue;
+            }
+            String factorKey = textValue(item.get("factorKey"));
+            String factorLabel = firstNonBlank(textValue(item.get("factorLabel")), factorKey);
+            if (!StringUtils.hasText(factorLabel)) {
+                continue;
+            }
+            Map<String, Object> row = new LinkedHashMap<>();
+            if (StringUtils.hasText(factorKey)) {
+                row.put("factorKey", factorKey);
+            }
+            row.put("factorLabel", factorLabel);
+            row.put("swingMagnitude", swing);
+            copyFirstPresent(item, row, "rankCorrelation", "spearmanCorrelation");
+            copyFirstPresent(item, row, "p10Outcome", "p10ConditionalOutcome");
+            copyFirstPresent(item, row, "p90Outcome", "p90ConditionalOutcome");
+            copyIfPresent(item, row, "rank");
+            rows.add(row);
+        }
+        rows.sort(java.util.Comparator
+                .comparingDouble((Map<String, Object> r) -> asFiniteDouble(r.get("swingMagnitude")))
+                .reversed());
+        return rows;
+    }
+
+    private static String normalizeQuantileKey(String rawKey) {
+        String key = rawKey.trim().toLowerCase(Locale.ROOT);
+        if (key.startsWith("p")) {
+            String digits = key.substring(1);
+            if (digits.length() == 1 && Character.isDigit(digits.charAt(0))) {
+                return "p0" + digits;
+            }
+            return key;
+        }
+        try {
+            double val = Double.parseDouble(key);
+            if (val > 0.0d && val < 1.0d) {
+                return String.format(Locale.ROOT, "p%02d", Math.round(val * 100.0d));
+            }
+        } catch (NumberFormatException ignored) {
+            // keep raw token
+        }
+        return rawKey.trim();
+    }
+
+    private static void putNumericIfPresent(ObjectNode node, String field, Object value) {
+        if (value instanceof Number n) {
+            node.put(field, n.doubleValue());
+        }
     }
 
     private ObjectNode baseChartWidgetBlock(
@@ -711,7 +1139,9 @@ public class StatisticalIntelligenceBlockContributor implements OperationalAssis
         }
         putIfText(target, "kind", env.epistemicKind());
         putIfText(target, "availabilityState", env.availabilityState());
-        target.put("statisticallySignificant", env.statisticallySignificant());
+        if (shouldPublishStatisticalSignificance(env)) {
+            target.put("statisticallySignificant", env.statisticallySignificant());
+        }
         target.put("sampleSize", env.sampleSize());
         target.put("suppressedCellCount", env.suppressedCellCount());
         if (env.qValueFdr() != null) {
@@ -719,6 +1149,144 @@ public class StatisticalIntelligenceBlockContributor implements OperationalAssis
         }
         putIfText(target, "modelCardId", mask(env.modelCardId()));
         putIfText(target, "provenanceHash", env.provenanceHash());
+    }
+
+    private static boolean shouldPublishStatisticalSignificance(AgentEpistemicEnvelope env) {
+        if (env == null) {
+            return false;
+        }
+        if (env.qValueFdr() != null) {
+            return true;
+        }
+        return !AgentEpistemicEnvelope.KIND_STOCHASTIC_SIMULATION.equals(env.epistemicKind())
+                && !AgentEpistemicEnvelope.KIND_OPTIMIZATION_RESULT.equals(env.epistemicKind());
+    }
+
+    private static List<Map<String, Object>> buildThresholdReferenceLines(Map<String, Object> uiPayload) {
+        List<Map<String, Object>> raw = asMapList(uiPayload.get("thresholdOutcomes"));
+        if (raw.isEmpty()) {
+            return List.of();
+        }
+        List<Map<String, Object>> lines = new ArrayList<>();
+        for (Map<String, Object> item : raw) {
+            Double limitValue = asFiniteDouble(item.get("limitValue"));
+            if (limitValue == null) {
+                continue;
+            }
+            String id = firstNonBlank(textValue(item.get("thresholdId")), "threshold-" + (lines.size() + 1));
+            String label = mask(firstNonBlank(textValue(item.get("label")), id));
+            Map<String, Object> line = new LinkedHashMap<>();
+            line.put("id", id);
+            line.put("label", label);
+            line.put("value", limitValue);
+            line.put("axis", "y");
+            line.put("tone", "warning");
+            line.put("lineStyle", "dashed");
+            lines.add(line);
+        }
+        return lines;
+    }
+
+    private static void addReferenceLinesArray(ObjectNode target, List<Map<String, Object>> lines) {
+        if (lines.isEmpty()) {
+            return;
+        }
+        ArrayNode arr = target.putArray("referenceLines");
+        for (Map<String, Object> line : lines) {
+            ObjectNode node = arr.addObject();
+            node.put("id", String.valueOf(line.get("id")));
+            node.put("label", String.valueOf(line.get("label")));
+            node.put("value", ((Number) line.get("value")).doubleValue());
+            node.put("axis", String.valueOf(line.get("axis")));
+            node.put("tone", String.valueOf(line.get("tone")));
+            node.put("lineStyle", String.valueOf(line.get("lineStyle")));
+        }
+    }
+
+    private ObjectNode buildSimulationThresholdsBlock(AgentExtensionArtifact artifact, ObjectMapper objectMapper) {
+        Map<String, Object> uiPayload = artifact.uiPayload();
+        List<Map<String, Object>> outcomes = asMapList(uiPayload.get("thresholdOutcomes"));
+        if (outcomes.isEmpty()) {
+            return null;
+        }
+        List<Map<String, Object>> rows = new ArrayList<>(outcomes.size());
+        for (Map<String, Object> outcome : outcomes) {
+            Map<String, Object> row = new LinkedHashMap<>();
+            row.put("label", firstNonBlank(textValue(outcome.get("label")), textValue(outcome.get("thresholdId"))));
+            copyIfPresent(outcome, row, "thresholdId");
+            copyIfPresent(outcome, row, "direction");
+            copyIfPresent(outcome, row, "limitValue");
+            copyIfPresent(outcome, row, "breachProbability");
+            copyIfPresent(outcome, row, "ciLow");
+            copyIfPresent(outcome, row, "ciHigh");
+            copyIfPresent(outcome, row, "safeCutoffPeriodIndex");
+            copyIfPresent(outcome, row, "expectedShortfallOrExcess");
+            rows.add(row);
+        }
+        return buildCompactCollectionBlock(
+                artifact,
+                objectMapper,
+                "Avaliação de Limiares e Ruptura",
+                List.of(
+                        Map.entry("label", "Limiar"),
+                        Map.entry("direction", "Direção"),
+                        Map.entry("limitValue", "Valor limite"),
+                        Map.entry("breachProbability", "Prob. de ruptura"),
+                        Map.entry("ciLow", "IC inferior"),
+                        Map.entry("ciHigh", "IC superior"),
+                        Map.entry("safeCutoffPeriodIndex", "Corte seguro"),
+                        Map.entry("expectedShortfallOrExcess", "Cauda condicional")),
+                rows);
+    }
+
+    private ObjectNode buildSimulationAnchorsBlock(AgentExtensionArtifact artifact, ObjectMapper objectMapper) {
+        Map<String, Object> uiPayload = artifact.uiPayload();
+        List<Map<String, Object>> anchors = asMapList(uiPayload.get("anchorScenarios"));
+        if (anchors.isEmpty()) {
+            return null;
+        }
+        return buildCompactCollectionBlock(
+                artifact,
+                objectMapper,
+                "Revalidação Determinística de Âncoras",
+                List.of(
+                        Map.entry("anchorLabel", "Âncora"),
+                        Map.entry("quantile", "Quantil"),
+                        Map.entry("monteCarloValue", "Surrogate MC"),
+                        Map.entry("deterministicBigDecimalValue", "Exato BigDecimal"),
+                        Map.entry("relativeErrorPct", "Desvio relativo"),
+                        Map.entry("revalidationStatus", "Status")),
+                anchors);
+    }
+
+    private ObjectNode buildCompactCollectionBlock(
+            AgentExtensionArtifact artifact,
+            ObjectMapper objectMapper,
+            String title,
+            List<Map.Entry<String, String>> columnSpecs,
+            List<Map<String, Object>> rawRows) {
+        Map<String, Object> uiPayload = artifact.uiPayload();
+        ObjectNode block = objectMapper.createObjectNode();
+        block.put("type", "compact-collection");
+        block.put("variant", "records");
+        block.put("title", mask(title));
+        putIfText(block, "entityKey", textValue(uiPayload.get("entityKey")));
+        putIfText(block, "resourceKey", textValue(uiPayload.get("resourceKey")));
+        putIfText(block, "resourcePath", textValue(uiPayload.get("resourcePath")));
+        block.put("totalCount", rawRows.size());
+        appendEpistemicMeta(block.putObject("epistemicMeta"), artifact.epistemicEnvelope());
+
+        ArrayNode columns = block.putArray("columns");
+        for (Map.Entry<String, String> spec : columnSpecs) {
+            ObjectNode col = columns.addObject();
+            col.put("key", spec.getKey());
+            col.put("label", spec.getValue());
+        }
+        ArrayNode rows = block.putArray("rows");
+        for (Map<String, Object> rawRow : rawRows) {
+            rows.add(objectMapper.valueToTree(OperationalAssistantBlockComposer.maskPiiInStructure(rawRow)));
+        }
+        return block;
     }
 
     @SuppressWarnings("unchecked")

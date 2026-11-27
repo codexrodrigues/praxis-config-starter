@@ -63,7 +63,13 @@ public class AiSensitiveDataRedactor {
             "prompt",
             "sourceprompt",
             "userprompt",
-            "content");
+            "content",
+            "methodologynote",
+            "failclosednote",
+            "rulevalidationmessages",
+            "nonanomalynote",
+            "factorlabel",
+            "segmentlabel");
     private static final Set<String> EVENT_OPERATIONAL_TOKEN_COUNTER_FIELDS = Set.of(
             "inputtokens",
             "outputtokens",

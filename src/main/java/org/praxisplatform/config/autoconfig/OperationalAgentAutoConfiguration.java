@@ -53,7 +53,9 @@ import org.praxisplatform.config.ai.agent.tools.OperationalAgentTool;
 import org.praxisplatform.config.ai.agent.tools.PrepareActionOrMutationTool;
 import org.praxisplatform.config.ai.agent.tools.PrepareBulkOperationTool;
 import org.praxisplatform.config.ai.agent.tools.QueryResourceRecordsTool;
+import org.praxisplatform.config.ai.agent.tools.RunResourceCounterfactualSearchTool;
 import org.praxisplatform.config.ai.agent.tools.RunResourceStatisticalInferenceTool;
+import org.praxisplatform.config.ai.agent.tools.RunResourceStochasticSimulationTool;
 import org.praxisplatform.config.ai.agent.tools.ScanResourceAnomaliesTool;
 import org.praxisplatform.config.ai.agent.tools.SearchAndResolveEntitiesTool;
 import org.praxisplatform.config.ai.agent.tools.SearchDomainKnowledgeAndRulesTool;
@@ -302,6 +304,14 @@ public class OperationalAgentAutoConfiguration {
         static class OnExecutorBean {
         }
 
+        @ConditionalOnBean(type = "org.praxisplatform.intelligence.contracts.spi.StochasticSimulationOrchestrator")
+        static class OnSimulationOrchestratorBean {
+        }
+
+        @ConditionalOnBean(type = "org.praxisplatform.intelligence.contracts.spi.CounterfactualSearchOrchestrator")
+        static class OnCounterfactualOrchestratorBean {
+        }
+
         @ConditionalOnProperty(
                 prefix = "praxis.ai.agent.statistical-tools",
                 name = "expose-when-unavailable",
@@ -311,7 +321,7 @@ public class OperationalAgentAutoConfiguration {
     }
 
     @ConditionalOnClass(name = "org.praxisplatform.intelligence.contracts.spi.ResourceIntelligenceExecutor")
-    static class StatisticalIntelligenceToolsConfiguration {
+    public static class StatisticalIntelligenceToolsConfiguration {
 
         @Bean
         @Conditional(StatisticalToolsEnabledCondition.class)
@@ -329,6 +339,24 @@ public class OperationalAgentAutoConfiguration {
         public ScanResourceAnomaliesTool scanResourceAnomaliesTool(
                 AgentResourceExecutionBridge bridge) {
             return new ScanResourceAnomaliesTool(bridge);
+        }
+
+        @Bean
+        @Conditional(StatisticalToolsEnabledCondition.class)
+        @ConditionalOnBean(AgentResourceExecutionBridge.class)
+        @ConditionalOnMissingBean(RunResourceStochasticSimulationTool.class)
+        public RunResourceStochasticSimulationTool runResourceStochasticSimulationTool(
+                AgentResourceExecutionBridge bridge) {
+            return new RunResourceStochasticSimulationTool(bridge);
+        }
+
+        @Bean
+        @Conditional(StatisticalToolsEnabledCondition.class)
+        @ConditionalOnBean(AgentResourceExecutionBridge.class)
+        @ConditionalOnMissingBean(RunResourceCounterfactualSearchTool.class)
+        public RunResourceCounterfactualSearchTool runResourceCounterfactualSearchTool(
+                AgentResourceExecutionBridge bridge) {
+            return new RunResourceCounterfactualSearchTool(bridge);
         }
     }
 
