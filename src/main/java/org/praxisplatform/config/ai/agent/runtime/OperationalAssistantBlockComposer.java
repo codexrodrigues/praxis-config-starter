@@ -149,6 +149,10 @@ public class OperationalAssistantBlockComposer {
                 }
             }
         }
+        List<AgentActionAffordance> handoffActions = artifacts != null ? artifacts.handoffActions() : List.of();
+        if (!handoffActions.isEmpty()) {
+            appendActionBar(blocks, "Criar ou editar página customizada", handoffActions);
+        }
         if (!knowledgeCitations.isEmpty()) {
             appendKnowledgeCitationsBlock(blocks, knowledgeCitations);
         }

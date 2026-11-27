@@ -39,6 +39,7 @@ import org.praxisplatform.config.ai.agent.tools.SearchAndResolveEntitiesTool;
 import org.praxisplatform.config.ai.agent.tools.SearchDomainKnowledgeAndRulesTool;
 import org.praxisplatform.config.ai.agent.tools.SimulateDeterminationOrRulesTool;
 import org.praxisplatform.config.service.AiCallConfig;
+import org.praxisplatform.config.service.AiProviderCallException;
 import static org.mockito.Mockito.mock;
 
 @Tag("unit")
@@ -345,5 +346,94 @@ class GoogleGenAiAgentToolGatewayTest {
         assertThat(cfg.toolConfig()).isPresent();
         assertThat(cfg.toolConfig().get().functionCallingConfig().orElseThrow().mode())
                 .contains(new com.google.genai.types.FunctionCallingConfigMode(FunctionCallingConfigMode.Known.NONE));
+    }
+
+    @Test
+    void fallsBackToConfiguredLiteModelOnCapacityFailure() {
+        List<String> attemptedModels = new ArrayList<>();
+        GoogleGenAiAgentToolGateway gateway = new GoogleGenAiAgentToolGateway(
+                new ObjectMapper(),
+                "test-gemini-key",
+                "gemini-2.5-flash",
+                (apiKey, model, contents, config) -> {
+                    attemptedModels.add(model);
+                    if ("gemini-2.5-flash".equals(model)) {
+                        throw AiProviderCallException.fromHttpStatusSanitized(
+                                "gemini", 429, "MODEL_CAPACITY_EXHAUSTED", null, null);
+                    }
+                    return GenerateContentResponse.builder()
+                            .candidates(List.of(Candidate.builder()
+                                    .content(Content.builder()
+                                            .role("model")
+                                            .parts(List.of(Part.fromText("Fallback ok.")))
+                                            .build())
+                                    .build()))
+                            .build();
+                });
+        gateway.setFallbackModels("gemini-2.5-flash,gemini-2.5-flash-lite");
+
+        AgentModelTurnResponse response = gateway.generateTurn(
+                new AgentModelTurnRequest(
+                        "System policy",
+                        List.of(AgentConversationItem.userText("Summarize")),
+                        List.of(),
+                        AiCallConfig.builder().provider("gemini").model("gemini-2.5-flash").build()),
+                AgentModelStreamListener.NOOP);
+
+        assertThat(attemptedModels).containsExactly("gemini-2.5-flash", "gemini-2.5-flash-lite");
+        assertThat(response.model()).isEqualTo("gemini-2.5-flash-lite");
+        assertThat(response.text()).isEqualTo("Fallback ok.");
+    }
+
+    @Test
+    void offThinkingProfileMapsToLowOnGemini3FlashAndMinimalOnLiteModels() {
+        List<GenerateContentConfig> capturedConfigs = new ArrayList<>();
+        GoogleGenAiAgentToolGateway gateway = new GoogleGenAiAgentToolGateway(
+                new ObjectMapper(),
+                "test-gemini-key",
+                "gemini-3.8-flash",
+                (apiKey, model, contents, config) -> {
+                    capturedConfigs.add(config);
+                    return GenerateContentResponse.builder()
+                            .candidates(List.of(Candidate.builder()
+                                    .content(Content.builder()
+                                            .role("model")
+                                            .parts(List.of(Part.fromText("Ok.")))
+                                            .build())
+                                    .build()))
+                            .build();
+                });
+
+        gateway.generateTurn(
+                new AgentModelTurnRequest(
+                        "System",
+                        List.of(AgentConversationItem.userText("Ping")),
+                        List.of(),
+                        AiCallConfig.builder()
+                                .provider("gemini")
+                                .model("gemini-3.8-flash")
+                                .thinkingProfile(org.praxisplatform.config.service.AiThinkingProfile.OFF)
+                                .build()),
+                AgentModelStreamListener.NOOP);
+
+        gateway.generateTurn(
+                new AgentModelTurnRequest(
+                        "System",
+                        List.of(AgentConversationItem.userText("Ping")),
+                        List.of(),
+                        AiCallConfig.builder()
+                                .provider("gemini")
+                                .model("gemini-3.5-flash-lite")
+                                .thinkingProfile(org.praxisplatform.config.service.AiThinkingProfile.OFF)
+                                .build()),
+                AgentModelStreamListener.NOOP);
+
+        assertThat(capturedConfigs).hasSize(2);
+        assertThat(capturedConfigs.get(0).thinkingConfig()).isPresent();
+        assertThat(capturedConfigs.get(0).thinkingConfig().get().thinkingLevel())
+                .contains(new com.google.genai.types.ThinkingLevel(com.google.genai.types.ThinkingLevel.Known.LOW));
+        assertThat(capturedConfigs.get(1).thinkingConfig()).isPresent();
+        assertThat(capturedConfigs.get(1).thinkingConfig().get().thinkingLevel())
+                .contains(new com.google.genai.types.ThinkingLevel(com.google.genai.types.ThinkingLevel.Known.MINIMAL));
     }
 }

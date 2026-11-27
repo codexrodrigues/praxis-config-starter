@@ -49,6 +49,7 @@ import org.praxisplatform.config.ai.agent.tools.DiscoverTopicResourcesAndSchemas
 import org.praxisplatform.config.ai.agent.tools.ExecuteVerifiedAnalyticalRecipeTool;
 import org.praxisplatform.config.ai.agent.tools.ExplainCalculationMemoryTool;
 import org.praxisplatform.config.ai.agent.tools.GetEntity360DossierTool;
+import org.praxisplatform.config.ai.agent.tools.HandoffToPageAuthoringTool;
 import org.praxisplatform.config.ai.agent.tools.OperationalAgentTool;
 import org.praxisplatform.config.ai.agent.tools.PrepareActionOrMutationTool;
 import org.praxisplatform.config.ai.agent.tools.PrepareBulkOperationTool;
@@ -215,7 +216,7 @@ public class OperationalAgentAutoConfiguration {
     public GoogleGenAiAgentToolGateway googleGenAiAgentToolGateway(
             ObjectProvider<ObjectMapper> objectMapperProvider,
             @Value("${spring.ai.google.genai.api-key:${GEMINI_API_KEY:${GOOGLE_API_KEY:}}}") String apiKey,
-            @Value("${spring.ai.google.genai.chat.options.model:gemini-flash-latest}") String model) {
+            @Value("${spring.ai.google.genai.chat.options.model:gemini-2.5-flash}") String model) {
         return new GoogleGenAiAgentToolGateway(
                 objectMapperProvider.getIfAvailable(),
                 apiKey,
@@ -503,6 +504,12 @@ public class OperationalAgentAutoConfiguration {
     @ConditionalOnMissingBean(PrepareBulkOperationTool.class)
     public PrepareBulkOperationTool prepareBulkOperationTool(OperationalAgentProposalService proposalService) {
         return new PrepareBulkOperationTool(proposalService);
+    }
+
+    @Bean
+    @ConditionalOnMissingBean(HandoffToPageAuthoringTool.class)
+    public HandoffToPageAuthoringTool handoffToPageAuthoringTool() {
+        return new HandoffToPageAuthoringTool();
     }
 
     @Bean

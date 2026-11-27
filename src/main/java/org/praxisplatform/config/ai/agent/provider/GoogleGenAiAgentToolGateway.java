@@ -27,13 +27,16 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import lombok.extern.slf4j.Slf4j;
 import org.praxisplatform.config.ai.agent.model.AgentConversationItem;
 import org.praxisplatform.config.ai.agent.model.AgentConversationRole;
 import org.praxisplatform.config.ai.agent.model.AgentModelStreamListener;
@@ -58,10 +61,11 @@ import org.springframework.util.StringUtils;
  * ferramenta passem pela camada de governanca, mascara e autorizacao da aplicacao, preservando
  * {@code thoughtSignature} entre turnos.
  */
+@Slf4j
 public class GoogleGenAiAgentToolGateway implements AiToolCallingProvider {
 
     public static final String PROVIDER_ID = "gemini";
-    private static final String DEFAULT_MODEL = "gemini-flash-latest";
+    private static final String DEFAULT_MODEL = "gemini-2.5-flash";
     private static final String SYNTHETIC_CALL_PREFIX = "gemini-auto-";
     private static final int MAX_CACHED_CLIENTS = 32;
     private static final long MIN_RETRY_AFTER_MS = 1_000L;
@@ -84,6 +88,7 @@ public class GoogleGenAiAgentToolGateway implements AiToolCallingProvider {
     private final String defaultApiKey;
     private final String defaultModel;
     private String defaultBaseUrl;
+    private List<String> fallbackModels = List.of();
     private final GeminiExchange exchange;
     private final Map<ClientKey, Client> clientCache = new ConcurrentHashMap<>();
 
@@ -116,6 +121,22 @@ public class GoogleGenAiAgentToolGateway implements AiToolCallingProvider {
         this.defaultBaseUrl = trimToNull(defaultBaseUrl);
     }
 
+    @Autowired(required = false)
+    void setFallbackModels(@Value("${praxis.ai.gemini.fallback-models:}") String rawFallbackModels) {
+        if (!StringUtils.hasText(rawFallbackModels)) {
+            this.fallbackModels = List.of();
+            return;
+        }
+        List<String> parsed = new ArrayList<>();
+        for (String token : rawFallbackModels.split(",")) {
+            String trimmed = trimToNull(token);
+            if (trimmed != null) {
+                parsed.add(trimmed);
+            }
+        }
+        this.fallbackModels = List.copyOf(parsed);
+    }
+
     @Override
     public String providerId() {
         return PROVIDER_ID;
@@ -136,20 +157,61 @@ public class GoogleGenAiAgentToolGateway implements AiToolCallingProvider {
         if (!StringUtils.hasText(apiKey)) {
             throw new IllegalStateException("Gemini API key is not configured.");
         }
-        String model = firstNonBlank(callConfig != null ? callConfig.getModel() : null, defaultModel);
+        String primaryModel = firstNonBlank(callConfig != null ? callConfig.getModel() : null, defaultModel);
+        List<String> modelCandidates = resolveModelCandidates(primaryModel);
         String effectiveBaseUrl = firstNonBlank(callConfig != null ? callConfig.getBaseUrl() : null, defaultBaseUrl);
 
         List<Content> contents = toGeminiContents(request.conversation());
-        GenerateContentConfig config = toGeminiConfig(request, model, callConfig, effectiveBaseUrl);
-
-        try {
-            GenerateContentResponse response = exchange == null
-                    ? invokeSdk(apiKey, effectiveBaseUrl, model, contents, config)
-                    : exchange.generate(apiKey, model, contents, config);
-            return fromGeminiResponse(model, response, listener);
-        } catch (RuntimeException ex) {
-            throw mapProviderException(ex);
+        for (int i = 0; i < modelCandidates.size(); i++) {
+            String candidateModel = modelCandidates.get(i);
+            GenerateContentConfig config = toGeminiConfig(request, candidateModel, callConfig, effectiveBaseUrl);
+            try {
+                GenerateContentResponse response = exchange == null
+                        ? invokeSdk(apiKey, effectiveBaseUrl, candidateModel, contents, config)
+                        : exchange.generate(apiKey, candidateModel, contents, config);
+                return fromGeminiResponse(candidateModel, response, listener);
+            } catch (RuntimeException ex) {
+                RuntimeException mapped = mapProviderException(ex);
+                if (i < modelCandidates.size() - 1 && isFallbackEligible(mapped)) {
+                    log.warn(
+                            "[GoogleGenAiAgentToolGateway] Gemini invocation failed; falling back from model={} to nextModel={} reason={}",
+                            candidateModel,
+                            modelCandidates.get(i + 1),
+                            mapped.getMessage());
+                    continue;
+                }
+                throw mapped;
+            }
         }
+        throw new IllegalStateException("No Gemini model candidates available.");
+    }
+
+    private List<String> resolveModelCandidates(String primaryModel) {
+        Set<String> ordered = new LinkedHashSet<>();
+        String normalizedPrimary = trimToNull(primaryModel);
+        if (normalizedPrimary != null) {
+            ordered.add(normalizedPrimary);
+        }
+        for (String fallback : fallbackModels) {
+            String trimmed = trimToNull(fallback);
+            if (trimmed != null) {
+                ordered.add(trimmed);
+            }
+        }
+        if (ordered.isEmpty()) {
+            ordered.add(DEFAULT_MODEL);
+        }
+        return List.copyOf(ordered);
+    }
+
+    private boolean isFallbackEligible(RuntimeException mapped) {
+        if (!(mapped instanceof AiProviderCallException callException)) {
+            return false;
+        }
+        return switch (callException.getKind()) {
+            case CAPACITY, RATE_LIMIT, SERVER_ERROR, TIMEOUT -> true;
+            default -> false;
+        };
     }
 
     List<Content> toGeminiContents(List<AgentConversationItem> conversation) {
@@ -302,7 +364,7 @@ public class GoogleGenAiAgentToolGateway implements AiToolCallingProvider {
         AiThinkingProfile profile = callConfig.getThinkingProfile();
         if (lower.contains("gemini-3")) {
             ThinkingLevel.Known level = switch (profile != null ? profile : AiThinkingProfile.OPERATIONAL_AUDIT) {
-                case OFF -> lower.contains("pro") ? ThinkingLevel.Known.LOW : ThinkingLevel.Known.MINIMAL;
+                case OFF -> lower.contains("lite") ? ThinkingLevel.Known.MINIMAL : ThinkingLevel.Known.LOW;
                 case FAST_LOOKUP -> ThinkingLevel.Known.LOW;
                 case OPERATIONAL_AUDIT -> ThinkingLevel.Known.MEDIUM;
                 case DEEP_ANALYSIS -> ThinkingLevel.Known.HIGH;
