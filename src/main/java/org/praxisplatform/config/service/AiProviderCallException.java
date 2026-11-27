@@ -169,8 +169,8 @@ public final class AiProviderCallException extends RuntimeException {
         if (zeroLimit || dailyQuotaExhausted) {
             return true;
         }
-        // Transient per-minute/short-backoff 429s carry a retry window and should fall back across models.
-        if (retryAfter != null || isTransientRateLimitHint(normalized)) {
+        // Transient per-minute/short-backoff 429s carry an explicit retry hint and should fall back across models.
+        if (isTransientRateLimitHint(normalized)) {
             return false;
         }
         return normalized.contains("insufficient_quota")

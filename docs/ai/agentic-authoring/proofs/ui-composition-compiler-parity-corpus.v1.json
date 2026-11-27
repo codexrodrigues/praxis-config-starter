@@ -59,9 +59,9 @@
         {
           "id": "compiled-page-patch-validator",
           "sourcePath": "src/main/java/org/praxisplatform/config/ai/authoring/AgenticAuthoringCompiledPagePatchValidator.java",
-          "sourceGitBlob": "762f62c9702ba72e4eccaf04b5af1858496bc082",
+          "sourceGitBlob": "9f29ea094ccd77f114c8908d26760b72f866ac13",
           "artifacts": [
-            { "path": "target/classes/org/praxisplatform/config/ai/authoring/AgenticAuthoringCompiledPagePatchValidator.class", "sha256": "18e74ae7aa9e36377c888a6508fdff47193766193dcb307b4a8185a64102e495" }
+            { "path": "target/classes/org/praxisplatform/config/ai/authoring/AgenticAuthoringCompiledPagePatchValidator.class", "sha256": "6d09ac93fa8d059a6a91eb91cd38f2eb1e40e80bc34651c75a4f3228a40dee24" }
           ]
         },
         {
@@ -182,7 +182,7 @@
         "org.praxisplatform.config.dto.AiRegistryTemplateRevision -> org.praxisplatform.config.dto.AiRegistryTemplateRevision$AiRegistryTemplateRevisionBuilder",
         "org.praxisplatform.config.dto.AiRegistryTemplateRevision$AiRegistryTemplateRevisionBuilder -> org.praxisplatform.config.dto.AiRegistryTemplateRevision"
       ],
-      "closureSha256": "8d9668b82441a39a4ee7139ecfcdcbac9ab333680d0e75f7b1a5706631b6ea5e"
+      "closureSha256": "95b810e60eedc6556357379020a1956e0f26842a551abeb37f15c531b0f1722b"
     }
   },
   "targetProfiles": {

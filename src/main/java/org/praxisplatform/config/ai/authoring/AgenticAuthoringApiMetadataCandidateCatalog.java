@@ -1274,7 +1274,9 @@ public class AgenticAuthoringApiMetadataCandidateCatalog {
                 .replaceAll("^.*/", "");
         String normalizedTerminal = normalize(terminalSegment.replaceAll("[^a-z0-9]+", " ")).trim();
         boolean exactTerminalMatch = !normalizedTerminal.isBlank()
-                && tokens.stream().anyMatch(token -> matchesExactOrPluralToken(normalizedTerminal, token));
+                && tokens.stream().anyMatch(token ->
+                        matchesExactOrPluralToken(normalizedTerminal, token)
+                                && !isGroupingDimensionOnlyToken(normalizedPrompt, token));
         if (matches > 0 && exactTerminalMatch) {
             score += 0.12d;
         }
@@ -2185,6 +2187,21 @@ public class AgenticAuthoringApiMetadataCandidateCatalog {
             normalized = normalized.substring(0, normalized.length() - 1);
         }
         return normalized;
+    }
+
+    private boolean isGroupingDimensionOnlyToken(String normalizedPrompt, String token) {
+        if (normalizedPrompt == null || normalizedPrompt.isBlank() || token == null || token.isBlank()) {
+            return false;
+        }
+        String quoted = Pattern.quote(token);
+        Pattern wordPattern = Pattern.compile("(?<![a-z0-9])" + quoted + "(?![a-z0-9])");
+        if (!wordPattern.matcher(normalizedPrompt).find()) {
+            return false;
+        }
+        Pattern groupingPattern = Pattern.compile(
+                "(?<![a-z0-9])(?:por|by|per|pelo|pela|pelos|pelas)\\s+" + quoted + "(?![a-z0-9])");
+        String withoutGrouping = groupingPattern.matcher(normalizedPrompt).replaceAll(" ");
+        return !wordPattern.matcher(withoutGrouping).find();
     }
 
     private String normalize(String value) {
