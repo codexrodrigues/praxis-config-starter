@@ -69,7 +69,7 @@ public class AgenticAuthoringCurrentPageAnalyzer {
 
     public AgenticAuthoringTarget resolveTarget(JsonNode currentPage, String selectedWidgetKey) {
         JsonNode selected = selectedWidget(currentPage, selectedWidgetKey);
-        if (selected.isMissingNode()) {
+        if (selected.isMissingNode() && widgets(currentPage).size() == 1) {
             selected = firstFormWidget(currentPage);
         }
         if (selected.isMissingNode()) {

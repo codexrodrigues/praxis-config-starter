@@ -9768,6 +9768,85 @@ class AgenticAuthoringTurnEngineTest {
     }
 
     @Test
+    void nonStatsTableWithVerifiedResourceCapabilitiesAndSchemaIsDirectlyApplyable() throws Exception {
+        AgenticAuthoringCandidate tableCandidate = new AgenticAuthoringCandidate(
+                "/api/human-resources/funcionarios",
+                "post",
+                "/schemas/filtered?path=/api/human-resources/funcionarios/filter/cursor&operation=post&schemaType=response",
+                "/api/human-resources/funcionarios/filter/cursor",
+                "POST",
+                0.92d,
+                "Governed semantic candidate",
+                List.of("api-metadata", "semantic-retrieval", "llm-resource-focus", "schema-available", "resource-capabilities-verified"));
+        AgenticAuthoringSemanticDecision semanticDecision = AgenticAuthoringSemanticDecision.from(
+                "create",
+                "table",
+                "create_artifact",
+                tableCandidate,
+                List.of(tableCandidate),
+                null,
+                List.of(),
+                null,
+                null,
+                null,
+                "conv-4b",
+                "turn-1",
+                "Crie uma tabela de funcionarios",
+                "Crie uma tabela de funcionarios",
+                "Verified table candidate.");
+
+        org.assertj.core.api.Assertions.assertThat(semanticDecision.reviewRequired()).isFalse();
+        AgenticAuthoringIntentResolutionResult intent = new AgenticAuthoringIntentResolutionResult(
+                true,
+                "create",
+                "table",
+                "create_artifact",
+                "page-builder",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                null,
+                tableCandidate,
+                List.of(tableCandidate),
+                new AgenticAuthoringGateResult("candidate-eligibility@0.1.0", "eligible", List.of()),
+                "Crie uma tabela de funcionarios",
+                "Tabela pronta.",
+                objectMapper.createObjectNode(),
+                List.of(),
+                null,
+                List.of(),
+                List.of(),
+                List.of(),
+                objectMapper.createObjectNode(),
+                objectMapper.createObjectNode(),
+                null,
+                semanticDecision);
+
+        AiPrincipalContext principalContext = new AiPrincipalContext("tenant", "user", "local", true);
+        CapturingSink sink = new CapturingSink();
+        when(intentResolverService.resolve(any(), eq("tenant"), eq("user"), eq("local")))
+                .thenReturn(intent);
+        when(previewService.preview(any(), eq("tenant"), eq("user"), eq("local")))
+                .thenReturn(new AgenticAuthoringPreviewResult(
+                        true,
+                        List.of(),
+                        List.of(),
+                        objectMapper.createObjectNode(),
+                        compiledPagePatch(),
+                        null,
+                        uiCompositionPlanWithResourceSchemaGrounding(),
+                        "Preview ready."));
+
+        engine().execute(
+                request("Crie uma tabela de funcionarios"),
+                principalContext,
+                sink);
+
+        com.fasterxml.jackson.databind.JsonNode result = objectMapper.valueToTree(sink.payloads.get(sink.payloads.size() - 1));
+        org.assertj.core.api.Assertions.assertThat(result.path("canApply").asBoolean()).isTrue();
+        org.assertj.core.api.Assertions.assertThat(result.path("decisionDiagnostics").path("requiresReview").asBoolean()).isFalse();
+    }
+
+    @Test
     void allowsKeywordFallbackRefinementAfterCurrentPageResourceIsRegroundedByPreviewSchema() throws Exception {
         AiPrincipalContext principalContext = new AiPrincipalContext("tenant", "user", "local", true);
         CapturingSink sink = new CapturingSink();
@@ -13432,6 +13511,11 @@ class AgenticAuthoringTurnEngineTest {
         assertThat(result.path("canApply").asBoolean()).isFalse();
         assertThat(result.path("decisionDiagnostics").path("providerFailureClarification").asBoolean())
                 .isTrue();
+        assertThat(result.path("providerError").asBoolean()).isTrue();
+        assertThat(result.path("providerFailureKind").asText()).isEqualTo("unknown-error");
+        assertThat(result.path("decisionDiagnostics").path("providerError").asBoolean()).isTrue();
+        assertThat(result.path("decisionDiagnostics").path("providerFailureKind").asText())
+                .isEqualTo("unknown-error");
         assertThat(result.path("decisionDiagnostics").path("secondInferenceSkipped").asBoolean())
                 .isTrue();
         assertThat(result.path("quickReplies")).hasSize(2);
@@ -15910,6 +15994,263 @@ class AgenticAuthoringTurnEngineTest {
                     assertThat(reply.contextHints().has("previewPage")).isFalse();
                     assertThat(reply.contextHints().has("targetWidgetSnapshot")).isFalse();
                 });
+    }
+
+    @Test
+    void prioritizesProviderFailureClarificationOverGroundedDiscoveryOnQuotaExhaustion() throws Exception {
+        AiPrincipalContext principalContext = new AiPrincipalContext("tenant", "user", "local", true);
+        CapturingSink sink = new CapturingSink();
+        ApiMetadataRepository repository = Mockito.mock(ApiMetadataRepository.class);
+        when(repository.findCandidateProjectionsByScope(
+                "tenant", "local", "default", "v1")).thenReturn(candidateProjections(new ApiMetadata(
+                "/api/human-resources/funcionarios",
+                "GET",
+                "funcionarios,colaboradores,recursos humanos,pessoas",
+                "Funcionários",
+                "Cadastro e perfil de funcionarios",
+                "listFuncionarios",
+                null,
+                "{\"type\":\"object\"}",
+                "[]",
+                "{}",
+                null)));
+        AgenticAuthoringPreIntentToolPlanningService planningService = (request, principal) ->
+                AgenticAuthoringPreIntentToolPlanningResult.planned(new AgenticAuthoringPreIntentToolPlan(
+                        "praxis-agentic-authoring-pre-intent-tool-plan.v1",
+                        "Consultar catálogo governado antes de decidir.",
+                        List.of(new AgenticAuthoringToolCall(
+                                AgenticAuthoringToolRegistry.SEARCH_API_RESOURCES,
+                                "pre_intent_resource_discovery",
+                                new AgenticAuthoringResourceCandidatesRequest(
+                                        "funcionarios colaboradores",
+                                        request.userPrompt(),
+                                        "page",
+                                        6)))));
+        AgenticAuthoringToolRegistry registry = new AgenticAuthoringToolRegistry(
+                new AgenticAuthoringResourceDiscoveryService(
+                        new AgenticAuthoringApiMetadataCandidateCatalog(repository),
+                        objectMapper));
+        AgenticAuthoringTurnEngine engine = new AgenticAuthoringTurnEngine(
+                intentResolverService,
+                previewService,
+                objectMapper,
+                new AgenticAuthoringCurrentPageAnalyzer(objectMapper),
+                registry,
+                null,
+                new AgenticAuthoringOrchestrator(new AgenticAuthoringToolLoopExecutor(
+                        registry,
+                        new AgenticAuthoringDefaultToolLoopPlanner())),
+                null,
+                new AgenticAuthoringComponentCapabilitiesService(),
+                null,
+                planningService);
+        AgenticAuthoringTurnStreamRequest request = requestWithContextHintsOnEmptyPage(
+                "quero uma tela de funcionarios",
+                domainDiscoveryContext());
+
+        AgenticAuthoringIntentResolutionResult quotaFailureIntent = new AgenticAuthoringIntentResolutionResult(
+                false,
+                "unknown",
+                "unknown",
+                "provider_error",
+                "page-builder",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                null,
+                null,
+                List.of(),
+                new AgenticAuthoringGateResult("candidate-eligibility@0.1.0", "clarification_required", List.of(
+                        "intent-artifact-unknown",
+                        "intent-operation-unknown")),
+                "quero uma tela de funcionarios",
+                "O provedor de IA atingiu o limite de cota configurado. Verifique a credencial ou cota do modelo antes de tentar novamente.",
+                List.of(),
+                List.of(),
+                List.of(
+                        "llm-intent-resolution-used",
+                        "llm-intent-resolution-provider-failed-clarification-required",
+                        "llm-intent-resolution-failed",
+                        "llm-provider-error",
+                        "llm-provider-quota-exhausted"),
+                List.of(),
+                objectMapper.createObjectNode());
+
+        when(intentResolverService.resolve(any(), eq("tenant"), eq("user"), eq("local")))
+                .thenReturn(quotaFailureIntent);
+
+        AgenticAuthoringTurnOutcome outcome = engine.execute(request, principalContext, sink);
+
+        assertThat(outcome.completion()).isEqualTo(Completion.COMPLETE);
+        assertThat(phases(sink)).contains("consultative.provider-failure-clarification");
+        JsonNode result = objectMapper.valueToTree(sink.payloads.get(sink.payloads.size() - 1));
+        assertThat(result.path("canApply").asBoolean()).isFalse();
+        assertThat(result.path("providerError").asBoolean()).isTrue();
+        assertThat(result.path("providerFailureKind").asText()).isEqualTo("quota-exhausted");
+        assertThat(result.path("assistantMessage").asText())
+                .contains("limite de cota configurado")
+                .doesNotContain("busca governada retornou candidatos preliminares");
+    }
+
+    @Test
+    void marksPreviewProviderFailureWithHonestMessageAndProviderErrorFlag() throws Exception {
+        AiPrincipalContext principalContext = new AiPrincipalContext("tenant", "user", "local", true);
+        CapturingSink sink = new CapturingSink();
+        when(intentResolverService.resolve(any(), eq("tenant"), eq("user"), eq("local")))
+                .thenReturn(validIntent());
+        String honestMessage =
+                "Não consegui concluir o planejamento da alteração agora porque o provedor de IA está temporariamente indisponível ou atingiu o limite de requisições. Tente novamente em instantes.";
+        when(previewService.preview(any(), eq("tenant"), eq("user"), eq("local")))
+                .thenReturn(new AgenticAuthoringPreviewResult(
+                        false,
+                        List.of("component-edit-plan-provider-failed"),
+                        List.of(),
+                        com.fasterxml.jackson.databind.node.MissingNode.getInstance(),
+                        com.fasterxml.jackson.databind.node.MissingNode.getInstance(),
+                        null,
+                        null,
+                        honestMessage));
+        AgenticAuthoringToolRegistry registry = new AgenticAuthoringToolRegistry(
+                new AgenticAuthoringResourceDiscoveryService(null, objectMapper));
+        AgenticAuthoringTurnEngine engine = new AgenticAuthoringTurnEngine(
+                intentResolverService,
+                previewService,
+                objectMapper,
+                new AgenticAuthoringCurrentPageAnalyzer(objectMapper),
+                registry);
+
+        AgenticAuthoringTurnOutcome outcome = engine.execute(
+                request("Renomeie a pagina para Painel Executivo de RH"),
+                principalContext,
+                sink);
+
+        assertThat(outcome.completion()).isEqualTo(Completion.COMPLETE);
+        JsonNode result = objectMapper.valueToTree(sink.payloads.get(sink.payloads.size() - 1));
+        assertThat(result.path("canApply").asBoolean()).isFalse();
+        assertThat(result.path("providerError").asBoolean()).isTrue();
+        assertThat(result.path("decisionDiagnostics").path("providerError").asBoolean()).isTrue();
+        assertThat(result.path("assistantMessage").asText())
+                .contains("provedor de IA está temporariamente indisponível")
+                .doesNotContain("Entendido! Vou");
+    }
+
+    @Test
+    void doesNotFlagWeakLexicalReviewForExplicitResourcePathOrLocalPageComponentEdit() throws Exception {
+        AiPrincipalContext principalContext = new AiPrincipalContext("tenant", "user", "local", true);
+        AgenticAuthoringCandidate explicitCandidate = new AgenticAuthoringCandidate(
+                "/api/human-resources/funcionarios",
+                "post",
+                "/schemas/filtered?path=/api/human-resources/funcionarios/filter/cursor&operation=post&schemaType=response",
+                "/api/human-resources/funcionarios/filter/cursor",
+                "POST",
+                0.99d,
+                "Explicitly named resource path verified by OpenAPI.",
+                List.of(
+                        "api-metadata",
+                        "explicit-resource-path",
+                        "explicit-source-match",
+                        "schema-available",
+                        "lexical-fallback",
+                        "weak-evidence"),
+                AgenticAuthoringEvidenceBundle.of("explicit_source_match", List.of()));
+        AgenticAuthoringSemanticDecision explicitDecision = AgenticAuthoringSemanticDecision.from(
+                "create",
+                "page",
+                "create_artifact",
+                explicitCandidate,
+                List.of(explicitCandidate),
+                null,
+                List.of(),
+                null,
+                null,
+                null,
+                "conv-explicit",
+                "turn-explicit",
+                "Use /api/human-resources/funcionarios",
+                "Use /api/human-resources/funcionarios",
+                "Explicit resource path resolved cleanly.");
+        assertThat(explicitDecision.reviewRequired()).isFalse();
+
+        com.fasterxml.jackson.databind.node.ObjectNode localLlmDiagnostics = objectMapper.createObjectNode();
+        var localTelemetry = localLlmDiagnostics.putObject("resolutionTelemetry");
+        localTelemetry.put("schemaVersion", "praxis-agentic-authoring-resolution-telemetry.v1");
+        localTelemetry.put("llmResolutionAttempted", true);
+        localTelemetry.put("llmResolved", true);
+        localTelemetry.put("keywordFallbackApplied", false);
+        localTelemetry.put("selectedCandidateUsesLexicalFallback", true);
+
+        AgenticAuthoringCandidate backgroundLexicalCandidate = new AgenticAuthoringCandidate(
+                "/api/human-resources/funcionarios",
+                "post",
+                "/schemas/filtered?path=/api/human-resources/funcionarios/filter/cursor&operation=post&schemaType=response",
+                "/api/human-resources/funcionarios/filter/cursor",
+                "POST",
+                0.49d,
+                "Background lexical candidate",
+                List.of("api-metadata", "lexical-fallback", "weak-evidence"));
+        AgenticAuthoringSemanticDecision localDecision = AgenticAuthoringSemanticDecision.from(
+                "modify",
+                "page",
+                "page.configure",
+                backgroundLexicalCandidate,
+                List.of(backgroundLexicalCandidate),
+                null,
+                List.of(),
+                null,
+                null,
+                null,
+                "conv-local",
+                "turn-local",
+                "Renomeie o titulo para Painel Executivo",
+                "Renomeie o titulo para Painel Executivo",
+                "Local page rename.");
+        AgenticAuthoringIntentResolutionResult localEditIntent = new AgenticAuthoringIntentResolutionResult(
+                true,
+                "modify",
+                "page",
+                "page.configure",
+                "page-builder",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                null,
+                backgroundLexicalCandidate,
+                List.of(backgroundLexicalCandidate),
+                new AgenticAuthoringGateResult("candidate-eligibility@0.1.0", "eligible", List.of()),
+                "Renomeie o titulo para Painel Executivo",
+                "Vou aplicar o ajuste local no painel.",
+                objectMapper.createObjectNode(),
+                List.of(),
+                null,
+                List.of(),
+                List.of(),
+                List.of(),
+                objectMapper.createObjectNode(),
+                localLlmDiagnostics,
+                null,
+                localDecision);
+
+        when(intentResolverService.resolve(any(), eq("tenant"), eq("user"), eq("local")))
+                .thenReturn(localEditIntent);
+        when(previewService.preview(any(), eq("tenant"), eq("user"), eq("local")))
+                .thenReturn(new AgenticAuthoringPreviewResult(
+                        true,
+                        List.of(),
+                        List.of("component-edit-target-is-local-component"),
+                        objectMapper.createObjectNode(),
+                        compiledPagePatch(),
+                        null,
+                        null,
+                        "Ajuste local compilado."));
+
+        CapturingSink sink = new CapturingSink();
+        engine().execute(
+                request("Renomeie o titulo para Painel Executivo"),
+                principalContext,
+                sink);
+
+        JsonNode result = objectMapper.valueToTree(sink.payloads.get(sink.payloads.size() - 1));
+        assertThat(result.path("canApply").asBoolean()).isTrue();
+        assertThat(result.path("decisionDiagnostics").path("selectedCandidateUsesLexicalFallback").asBoolean()).isFalse();
+        assertThat(result.path("decisionDiagnostics").path("requiresReview").asBoolean()).isFalse();
     }
 
     private static final class CapturingSink implements AgenticAuthoringTurnEventSink {

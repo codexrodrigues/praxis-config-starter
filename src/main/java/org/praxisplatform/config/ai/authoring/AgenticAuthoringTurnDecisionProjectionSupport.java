@@ -680,9 +680,13 @@ final class AgenticAuthoringTurnDecisionProjectionSupport {
         diagnostics.put("operationKind", safeText(intentResolution.operationKind()));
         diagnostics.put("artifactKind", safeText(intentResolution.artifactKind()));
         AgenticAuthoringSemanticDecision semanticDecision = intentResolution.semanticDecision();
+        boolean groundedLocalPageEdit = isGroundedLocalPageComponentEdit(intentResolution, preview);
         if (semanticDecision != null) {
             boolean semanticDecisionReviewGroundedByPreview =
-                    semanticDecisionReviewGroundedByPreview(semanticDecision, preview);
+                    semanticDecisionReviewGroundedByPreview(semanticDecision, preview)
+                            || (groundedLocalPageEdit
+                                    && semanticDecision.reviewRequired()
+                                    && "weak-lexical-evidence".equals(safeText(semanticDecision.reviewReason())));
             diagnostics.put("semanticDecisionSchemaVersion", safeText(semanticDecision.schemaVersion()));
             diagnostics.put("semanticDecisionId", safeText(semanticDecision.decisionId()));
             diagnostics.put("semanticDecisionReviewRequired",
@@ -714,7 +718,8 @@ final class AgenticAuthoringTurnDecisionProjectionSupport {
         boolean selectedCandidateUsesLexicalFallback =
                 telemetry.path("selectedCandidateUsesLexicalFallback").asBoolean(false)
                         && !Boolean.TRUE.equals(diagnostics.get("semanticDecisionReviewGroundedByPreview"))
-                        && !strongVerifiedSemanticDecisionEvidence(semanticDecision, selectedCandidate);
+                        && !strongVerifiedSemanticDecisionEvidence(semanticDecision, selectedCandidate)
+                        && !groundedLocalPageEdit;
         diagnostics.put("selectedCandidateUsesLexicalFallback", selectedCandidateUsesLexicalFallback);
         boolean selectedCandidateUsesBroadArtifactDiscovery =
                 telemetry.path("selectedCandidateUsesBroadArtifactDiscovery").asBoolean(false)
@@ -768,9 +773,15 @@ final class AgenticAuthoringTurnDecisionProjectionSupport {
                 || evidence.evidence() == null) {
             return false;
         }
+        boolean statsArtifact = "dashboard".equals(safeText(semanticDecision.artifactKind()))
+                || "chart".equals(safeText(semanticDecision.artifactKind()));
+        boolean schemaVerified = evidence.evidence().contains("schema-available")
+                || evidence.evidence().contains("schema-grounding-verified");
+        boolean capabilitiesVerified = evidence.evidence().contains("stats-capabilities-verified")
+                || (!statsArtifact && evidence.evidence().contains("resource-capabilities-verified"));
         return evidence.evidence().contains("llm-resource-focus")
-                && evidence.evidence().contains("schema-available")
-                && evidence.evidence().contains("stats-capabilities-verified");
+                && schemaVerified
+                && capabilitiesVerified;
     }
 
     List<AiProviderInvocationTelemetry> providerInvocations(
@@ -1006,6 +1017,19 @@ final class AgenticAuthoringTurnDecisionProjectionSupport {
                 || hasEvidence(selectedCandidate, "tool-search-api-resources")
                 || hasEvidence(selectedCandidate, "api-metadata")
                 || hasEvidence(selectedCandidate, "schema-available");
+    }
+
+    private boolean isGroundedLocalPageComponentEdit(
+            AgenticAuthoringIntentResolutionResult intentResolution,
+            AgenticAuthoringPreviewResult preview) {
+        return intentResolution != null
+                && "modify".equals(safeText(intentResolution.operationKind()))
+                && "page".equals(safeText(intentResolution.artifactKind()))
+                && preview != null
+                && preview.valid()
+                && preview.uiCompositionPlan() == null
+                && preview.warnings() != null
+                && preview.warnings().contains("component-edit-target-is-local-component");
     }
 
     private boolean semanticDecisionReviewGroundedByPreview(

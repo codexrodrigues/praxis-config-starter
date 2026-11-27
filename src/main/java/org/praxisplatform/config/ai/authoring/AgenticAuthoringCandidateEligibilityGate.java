@@ -56,10 +56,14 @@ public class AgenticAuthoringCandidateEligibilityGate {
         if ("create".equals(operationKind) && selectedCandidate == null && !hasCandidates) {
             messages.add("resource-candidate-required");
         }
+        boolean targetlessPageModify = "modify".equals(operationKind)
+                && "page".equals(artifactKind)
+                && manifestOwnedComponentOperation;
         if (!apiCatalogQuestion
                 && !componentCatalogQuestion
                 && !domainDecisionExplanation
                 && !localHistoryUndo
+                && !targetlessPageModify
                 && selectedCandidate == null
                 && candidates != null
                 && candidates.size() > 1) {

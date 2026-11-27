@@ -185,13 +185,21 @@ final class AgenticAuthoringSemanticAxisSchemaVerifier {
             }
             alignDashboardFilterFieldsWithResolvedChartAxes(widgetArray, filterSchemaFields, schemaResult, warnings);
             normalizeFilterQueryContextBindings(uiCompositionPlan, widgetArray, warnings);
-            Set<String> widgetKeys = widgetKeys(widgetArray);
-            pruneOrphanWidgetBindings(uiCompositionPlan, widgetKeys, warnings);
-            pruneOrphanCanvasItems(uiCompositionPlan, widgetKeys, warnings);
-            pruneOrphanGroupingItems(uiCompositionPlan, widgetKeys, warnings);
-            pruneOrphanDeviceLayoutItems(uiCompositionPlan, widgetKeys, warnings);
-            pruneOrphanSlotAssignments(uiCompositionPlan, widgetKeys, warnings);
+            pruneOrphanWidgetReferences(uiCompositionPlan, warnings);
         }
+    }
+
+    void pruneOrphanWidgetReferences(ObjectNode uiCompositionPlan, List<String> warnings) {
+        JsonNode widgets = uiCompositionPlan == null ? MissingNode.getInstance() : uiCompositionPlan.path("widgets");
+        if (!(widgets instanceof ArrayNode widgetArray)) {
+            return;
+        }
+        Set<String> widgetKeys = widgetKeys(widgetArray);
+        pruneOrphanWidgetBindings(uiCompositionPlan, widgetKeys, warnings);
+        pruneOrphanCanvasItems(uiCompositionPlan, widgetKeys, warnings);
+        pruneOrphanGroupingItems(uiCompositionPlan, widgetKeys, warnings);
+        pruneOrphanDeviceLayoutItems(uiCompositionPlan, widgetKeys, warnings);
+        pruneOrphanSlotAssignments(uiCompositionPlan, widgetKeys, warnings);
     }
 
     private void alignDashboardFilterFieldsWithResolvedChartAxes(

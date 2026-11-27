@@ -4132,4 +4132,111 @@ class AgenticAuthoringGenericUiCompositionPlanProviderTest {
         }
         return values;
     }
+
+    @Test
+    void ignoresUiRecommendedIntentsAndFiltersInferredDimensionsToStatsEligibleFieldsWhenAvailable() {
+        ObjectNode contextHints = objectMapper.createObjectNode();
+        ArrayNode recommendedIntents = contextHints.putArray("recommendedIntents");
+        recommendedIntents.addObject()
+                .put("id", "starter-chip-1")
+                .put("label", "Painel de servidores com indicador de lotacao")
+                .put("description", "Gera tabela e indicador de lotacao.");
+        ArrayNode schemaFields = contextHints.putArray("schemaFields");
+        schemaFields.addObject()
+                .put("fieldName", "emprestimoFerias")
+                .put("label", "Emprestimo de Ferias")
+                .put("type", "boolean");
+        schemaFields.addObject()
+                .put("fieldName", "situacao")
+                .put("label", "Situacao")
+                .put("type", "string");
+        ArrayNode analyticsFields = contextHints.putArray("analyticsFields");
+        analyticsFields.addObject()
+                .put("field", "situacao")
+                .put("label", "Situacao")
+                .put("groupByEligible", true);
+        analyticsFields.addObject()
+                .put("field", "emprestimoFerias")
+                .put("label", "Emprestimo de Ferias")
+                .put("groupByEligible", false)
+                .put("timeSeriesEligible", false);
+
+        AgenticAuthoringPlanRequest request = new AgenticAuthoringPlanRequest(
+                "Criar dashboard de ferias com grafico e tabela",
+                "gemini",
+                "gemini-3.8-flash",
+                "test-key",
+                null,
+                dashboardIntent("/api/human-resources/leaves", List.of()),
+                "session-dim",
+                "turn-dim",
+                List.of(),
+                null,
+                List.of(),
+                contextHints);
+
+        AgenticAuthoringUiCompositionPlanResult result = provider.plan(request).orElseThrow();
+
+        assertThat(result.valid()).isTrue();
+        List<String> widgetKeys = result.uiCompositionPlan().path("widgets").findValuesAsText("key");
+        assertThat(widgetKeys).contains("leaves-chart-situacao");
+        assertThat(widgetKeys).noneMatch(key ->
+                key.contains("emprestimoFerias") || key.contains("lotacao") || key.contains("indicador"));
+        assertThat(result.uiCompositionPlan().path("diagnostics").path("semanticAxes").toString())
+                .doesNotContain("recommendedIntents");
+    }
+
+    @Test
+    void restrictsBroadPromptToStatsEligibleFieldsWhenAvailableButPreservesExplicitUnsupportedRequest() {
+        ObjectNode broadHints = objectMapper.createObjectNode();
+        broadHints.putArray("schemaFields").addObject()
+                .put("fieldName", "categoryName")
+                .put("label", "Category")
+                .put("type", "string");
+        broadHints.path("schemaFields").isArray();
+        ((com.fasterxml.jackson.databind.node.ArrayNode) broadHints.path("schemaFields")).addObject()
+                .put("fieldName", "legacyGroupName")
+                .put("label", "Legacy Group")
+                .put("type", "string");
+        broadHints.putArray("analyticsFields").addObject()
+                .put("field", "status")
+                .put("label", "Status")
+                .put("groupByEligible", true);
+
+        AgenticAuthoringUiCompositionPlanResult broadResult = provider.plan(new AgenticAuthoringPlanRequest(
+                "Painel operacional de atribuicoes com grafico e tabela",
+                "gemini",
+                "gemini-3.8-flash",
+                "test-key",
+                null,
+                dashboardIntent("/api/workforce/assignments", List.of()),
+                "s1",
+                "t1",
+                List.of(),
+                null,
+                List.of(),
+                broadHints)).orElseThrow();
+
+        assertThat(broadResult.uiCompositionPlan().path("widgets").findValuesAsText("key"))
+                .contains("assignments-chart-status")
+                .noneMatch(key -> key.contains("categoryName") || key.contains("legacyGroupName"));
+
+        AgenticAuthoringUiCompositionPlanResult explicitResult = provider.plan(new AgenticAuthoringPlanRequest(
+                "Quero um painel de atribuicoes com grafico por category",
+                "gemini",
+                "gemini-3.8-flash",
+                "test-key",
+                null,
+                dashboardIntent("/api/workforce/assignments", List.of()),
+                "s2",
+                "t2",
+                List.of(),
+                null,
+                List.of(),
+                broadHints)).orElseThrow();
+
+        assertThat(explicitResult.uiCompositionPlan().path("widgets").findValuesAsText("key"))
+                .contains("assignments-chart-categoryName")
+                .noneMatch(key -> key.contains("legacyGroupName"));
+    }
 }

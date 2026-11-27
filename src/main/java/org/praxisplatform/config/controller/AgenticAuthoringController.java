@@ -512,7 +512,8 @@ public class AgenticAuthoringController {
                 request.conversationMessages(),
                 request.pendingClarification(),
                 request.attachmentSummaries(),
-                contextHints);
+                contextHints,
+                request.selectedWidgetKey());
     }
 
     private AgenticAuthoringTurnStreamRequest withoutClientVerifiedDomainOperations(
@@ -649,7 +650,7 @@ public class AgenticAuthoringController {
                         "praxis-dynamic-page-builder",
                         "/page-builder-ia",
                         request.currentPage(),
-                        null,
+                        request.selectedWidgetKey(),
                         request.provider(),
                         request.model(),
                         request.apiKey(),
@@ -677,7 +678,8 @@ public class AgenticAuthoringController {
                 request.conversationMessages(),
                 request.pendingClarification(),
                 request.attachmentSummaries(),
-                request.contextHints());
+                request.contextHints(),
+                request.selectedWidgetKey());
     }
 
     private String currentContextBaseUrl() {

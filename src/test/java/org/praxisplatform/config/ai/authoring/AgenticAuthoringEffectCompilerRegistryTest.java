@@ -4734,4 +4734,307 @@ class AgenticAuthoringEffectCompilerRegistryTest {
                 }
                 """.formatted(targetJson, inputJson));
     }
+
+    @Test
+    void preservesRuntimeGridCanvasContractWhenCompilingCanvasAndPageConfigure() throws Exception {
+        ObjectNode proposedConfig = (ObjectNode) objectMapper.readTree("""
+                {
+                  "title": "Painel Atual",
+                  "layoutPreset": "canvas-12",
+                  "themePreset": "analytics-calm",
+                  "layout": { "orientation": "columns", "columns": 1, "gap": "20px" },
+                  "widgets": [
+                    { "key": "table-1", "definition": { "id": "praxis-table", "inputs": { "resourcePath": "/api/human-resources/registros" } } }
+                  ],
+                  "canvas": {
+                    "mode": "grid",
+                    "columns": 12,
+                    "rowUnit": "80px",
+                    "gap": "20px",
+                    "items": {
+                      "table-1": { "widgetKey": "table-1", "col": 1, "row": 1, "colSpan": 12, "rowSpan": 6 }
+                    }
+                  }
+                }
+                """);
+        ArrayNode patchOperations = objectMapper.createArrayNode();
+        List<String> failures = new ArrayList<>();
+
+        registry.appendCompiledEffects("praxis-page-builder",
+                operationWithHandler("page.configure", "page", "widget-page-definition-root", false,
+                        "compile-domain-patch", "page-builder-page-configure", "title"),
+                plan("{}", "{ \"title\": \"Painel Executivo\", \"themePreset\": \"orbital-slate\" }"),
+                proposedConfig, patchOperations, failures, new ArrayList<>());
+        registry.appendCompiledEffects("praxis-page-builder",
+                operationWithHandler("canvas.configure", "canvas", "widget-page-canvas", true,
+                        "compile-domain-patch", "page-builder-canvas-configure", "canvas"),
+                plan("{}", "{ \"columns\": 2, \"gap\": 16, \"items\": [{ \"widgetKey\": \"table-1\", \"colSpan\": 6 }] }"),
+                proposedConfig, patchOperations, failures, new ArrayList<>());
+
+        assertThat(failures).isEmpty();
+        assertThat(proposedConfig.path("title").asText()).isEqualTo("Painel Executivo");
+        assertThat(proposedConfig.path("themePreset").asText()).isEqualTo("orbital-slate");
+        assertThat(proposedConfig.path("layout").path("columns").asInt()).isEqualTo(2);
+        assertThat(proposedConfig.path("canvas").path("mode").asText()).isEqualTo("grid");
+        assertThat(proposedConfig.path("canvas").path("columns").asInt()).isEqualTo(2);
+        assertThat(proposedConfig.path("canvas").path("gap").asText()).isEqualTo("16px");
+        assertThat(proposedConfig.path("canvas").path("items").isObject()).isTrue();
+        assertThat(proposedConfig.path("canvas").path("items").path("table-1").path("colSpan").asInt()).isEqualTo(6);
+        assertThat(proposedConfig.path("canvas").path("items").path("table-1").path("col").asInt()).isEqualTo(1);
+    }
+
+    @Test
+    void preservesRuntimeObjectCanvasAcrossWidgetMoveResizeAddAndRemove() throws Exception {
+        ObjectNode proposedConfig = (ObjectNode) objectMapper.readTree("""
+                {
+                  "title": "Painel Executivo",
+                  "layoutPreset": "canvas-12",
+                  "layout": { "orientation": "columns", "columns": 12, "gap": "20px" },
+                  "widgets": [
+                    { "key": "table-1", "definition": { "id": "praxis-table", "inputs": { "resourcePath": "/api/human-resources/registros" } } },
+                    { "key": "kpi-old", "definition": { "id": "praxis-kpi", "inputs": {} } }
+                  ],
+                  "canvas": {
+                    "mode": "grid",
+                    "columns": 12,
+                    "rowUnit": "80px",
+                    "gap": "20px",
+                    "items": {
+                      "table-1": { "widgetKey": "table-1", "col": 1, "row": 1, "colSpan": 12, "rowSpan": 6 },
+                      "kpi-old": { "widgetKey": "kpi-old", "col": 1, "row": 7, "colSpan": 12, "rowSpan": 3 }
+                    }
+                  }
+                }
+                """);
+        ArrayNode patchOperations = objectMapper.createArrayNode();
+        List<String> failures = new ArrayList<>();
+
+        registry.appendCompiledEffects("praxis-page-builder",
+                operationWithHandler("widget.moveResize", "widget", "widget-by-stable-key", true,
+                        "compile-domain-patch", "page-builder-widget-move-resize", "canvas.items[]"),
+                plan("\"table-1\"", "{ \"widgetKey\": \"table-1\", \"canvasItem\": { \"col\": 1, \"row\": 1, \"colSpan\": 6, \"rowSpan\": 6 } }"),
+                proposedConfig, patchOperations, failures, new ArrayList<>());
+        registry.appendCompiledEffects("praxis-page-builder",
+                operationWithHandler("widget.add", "widget", "widget-by-stable-key", true,
+                        "compile-domain-patch", "page-builder-widget-add", "widgets[]"),
+                plan("\"form-2\"", "{ \"widgetKey\": \"form-2\", \"componentId\": \"praxis-dynamic-form\", \"canvasItem\": { \"x\": 6, \"y\": 0, \"w\": 6, \"h\": 6 } }"),
+                proposedConfig, patchOperations, failures, new ArrayList<>());
+        registry.appendCompiledEffects("praxis-page-builder",
+                operationWithHandler("widget.remove", "widget", "widget-by-stable-key", true,
+                        "compile-domain-patch", "page-builder-widget-remove", "widgets[]"),
+                plan("\"kpi-old\"", "{ \"widgetKey\": \"kpi-old\", \"confirmed\": true }"),
+                proposedConfig, patchOperations, failures, new ArrayList<>());
+
+        assertThat(failures).isEmpty();
+        assertThat(proposedConfig.path("canvas").path("items").isObject()).isTrue();
+        ObjectNode items = (ObjectNode) proposedConfig.path("canvas").path("items");
+        assertThat(items.has("kpi-old")).isFalse();
+        assertThat(items.path("table-1").path("col").asInt()).isEqualTo(1);
+        assertThat(items.path("table-1").path("colSpan").asInt()).isEqualTo(6);
+        assertThat(items.path("form-2").path("col").asInt()).isEqualTo(7);
+        assertThat(items.path("form-2").path("row").asInt()).isEqualTo(1);
+        assertThat(items.path("form-2").path("colSpan").asInt()).isEqualTo(6);
+        assertThat(items.path("form-2").path("rowSpan").asInt()).isEqualTo(6);
+        assertThat(items.path("form-2").has("x")).isFalse();
+        assertThat(items.path("form-2").has("w")).isFalse();
+
+        ObjectNode patchWrapper = objectMapper.createObjectNode();
+        patchWrapper.putObject("patch").set("page", proposedConfig.deepCopy());
+        assertThat(AgenticAuthoringCompiledPagePatchValidator.terminalApplyBlockReason(patchWrapper)).isBlank();
+    }
+
+    @Test
+    void widgetAddAtTopRowPushesCollidingWidgetsDownWithoutOverlapAndHydratesAddedChart() throws Exception {
+        ObjectNode proposedConfig = (ObjectNode) objectMapper.readTree("""
+                {
+                  "title": "Painel Operacional",
+                  "layout": { "orientation": "columns", "columns": 12, "gap": "20px" },
+                  "widgets": [
+                    {
+                      "key": "filter-main",
+                      "definition": {
+                        "id": "praxis-dynamic-filter",
+                        "inputs": { "resourcePath": "/api/workforce/assignments" }
+                      }
+                    },
+                    {
+                      "key": "table-main",
+                      "definition": {
+                        "id": "praxis-table",
+                        "inputs": { "resourcePath": "/api/workforce/assignments" }
+                      }
+                    },
+                    {
+                      "key": "form-detail",
+                      "definition": {
+                        "id": "praxis-dynamic-form",
+                        "inputs": { "resourcePath": "/api/workforce/assignments" }
+                      }
+                    }
+                  ],
+                  "canvas": {
+                    "mode": "grid",
+                    "columns": 12,
+                    "rowUnit": "80px",
+                    "gap": "20px",
+                    "collisionPolicy": "push-down",
+                    "items": {
+                      "filter-main": { "widgetKey": "filter-main", "col": 1, "row": 1, "colSpan": 12, "rowSpan": 2 },
+                      "table-main": { "widgetKey": "table-main", "col": 1, "row": 3, "colSpan": 7, "rowSpan": 8 },
+                      "form-detail": { "widgetKey": "form-detail", "col": 8, "row": 3, "colSpan": 5, "rowSpan": 8 }
+                    }
+                  }
+                }
+                """);
+        ArrayNode patchOperations = objectMapper.createArrayNode();
+        List<String> failures = new ArrayList<>();
+
+        registry.appendCompiledEffects("praxis-page-builder",
+                operationWithHandler("widget.add", "widget", "widget-by-stable-key", true,
+                        "compile-domain-patch", "page-builder-widget-add", "widgets[]"),
+                plan("\"chart-dist\"", """
+                        {
+                          "widgetKey": "chart-dist",
+                          "componentId": "praxis-chart",
+                          "title": "Distribuicao por Situacao",
+                          "inputs": { "groupBy": "situacao", "chartType": "bar" },
+                          "canvasItem": { "col": 1, "row": 1, "colSpan": 12, "rowSpan": 3 }
+                        }
+                        """),
+                proposedConfig, patchOperations, failures, new ArrayList<>());
+
+        assertThat(failures).isEmpty();
+        ObjectNode items = (ObjectNode) proposedConfig.path("canvas").path("items");
+        assertThat(items.path("chart-dist").path("row").asInt()).isEqualTo(1);
+        assertThat(items.path("chart-dist").path("rowSpan").asInt()).isGreaterThanOrEqualTo(5);
+        int chartEnd = items.path("chart-dist").path("row").asInt() + items.path("chart-dist").path("rowSpan").asInt();
+        assertThat(items.path("filter-main").path("row").asInt()).isEqualTo(chartEnd);
+        int filterEnd = items.path("filter-main").path("row").asInt() + items.path("filter-main").path("rowSpan").asInt();
+        assertThat(items.path("table-main").path("row").asInt()).isEqualTo(filterEnd);
+        assertThat(items.path("form-detail").path("row").asInt()).isEqualTo(filterEnd);
+
+        JsonNode chartWidget = proposedConfig.path("widgets").get(3);
+        JsonNode chartDoc = chartWidget.path("definition").path("inputs").path("chartDocument");
+        assertThat(chartDoc.isObject()).isTrue();
+        assertThat(chartDoc.path("version").asText()).isEqualTo("0.1.0");
+        assertThat(chartDoc.path("chartId").asText()).isEqualTo("chart-dist");
+        assertThat(chartDoc.path("source").path("kind").asText()).isEqualTo("praxis.stats");
+        assertThat(chartDoc.path("source").path("resource").asText()).isEqualTo("/api/workforce/assignments");
+        assertThat(chartDoc.path("dimensions").path(0).path("field").asText()).isEqualTo("situacao");
+        assertThat(chartDoc.path("metrics").path(0).path("aggregation").asText()).isEqualTo("count");
+    }
+
+    @Test
+    void widgetMoveResizePushesCollidingCanvasItemsDownWithoutOverlap() throws Exception {
+        ObjectNode proposedConfig = (ObjectNode) objectMapper.readTree("""
+                {
+                  "title": "Painel Executivo",
+                  "widgets": [
+                    { "key": "table-1", "definition": { "id": "praxis-table", "inputs": { "resourcePath": "/api/workforce/assignments" } } },
+                    { "key": "chart-1", "definition": { "id": "praxis-chart", "inputs": {} } }
+                  ],
+                  "canvas": {
+                    "mode": "grid",
+                    "columns": 12,
+                    "collisionPolicy": "push-down",
+                    "items": {
+                      "table-1": { "widgetKey": "table-1", "col": 1, "row": 1, "colSpan": 12, "rowSpan": 6 },
+                      "chart-1": { "widgetKey": "chart-1", "col": 1, "row": 7, "colSpan": 12, "rowSpan": 5 }
+                    }
+                  }
+                }
+                """);
+        ArrayNode patchOperations = objectMapper.createArrayNode();
+        List<String> failures = new ArrayList<>();
+
+        registry.appendCompiledEffects("praxis-page-builder",
+                operationWithHandler("widget.moveResize", "widget", "widget-by-stable-key", true,
+                        "compile-domain-patch", "page-builder-widget-move-resize", "canvas.items[]"),
+                plan("\"chart-1\"", "{ \"widgetKey\": \"chart-1\", \"canvasItem\": { \"col\": 1, \"row\": 1, \"colSpan\": 12, \"rowSpan\": 5 } }"),
+                proposedConfig, patchOperations, failures, new ArrayList<>());
+
+        assertThat(failures).isEmpty();
+        ObjectNode items = (ObjectNode) proposedConfig.path("canvas").path("items");
+        assertThat(items.path("chart-1").path("row").asInt()).isEqualTo(1);
+        assertThat(items.path("table-1").path("row").asInt()).isEqualTo(6);
+    }
+
+    @Test
+    void widgetAddHydratesChartDocumentWithOnlyAllowedChartInputsAndDefinitionOutputs() throws Exception {
+        ObjectNode proposedConfig = (ObjectNode) objectMapper.readTree("""
+                {
+                  "title": "Workforce Overview",
+                  "widgets": [
+                    {
+                      "key": "assignments-table",
+                      "definition": {
+                        "id": "praxis-table",
+                        "inputs": { "resourcePath": "/api/workforce/assignments" }
+                      }
+                    }
+                  ],
+                  "canvas": {
+                    "mode": "grid",
+                    "columns": 12,
+                    "collisionPolicy": "push-down",
+                    "items": {
+                      "assignments-table": { "widgetKey": "assignments-table", "col": 1, "row": 1, "colSpan": 12, "rowSpan": 8 }
+                    }
+                  }
+                }
+                """);
+        ArrayNode patchOperations = objectMapper.createArrayNode();
+        List<String> failures = new ArrayList<>();
+
+        registry.appendCompiledEffects("praxis-page-builder",
+                operationWithHandler("widget.add", "widget", "widget-by-stable-key", true,
+                        "compile-domain-patch", "page-builder-widget-add", "widgets[]"),
+                plan("\"chart-status\"", """
+                        {
+                          "widgetKey": "chart-status",
+                          "componentId": "praxis-chart",
+                          "title": "Assignments by Status",
+                          "inputs": {
+                            "title": "Assignments by Status",
+                            "resourcePath": "/api/workforce/assignments",
+                            "chartType": "bar",
+                            "categoryAxis": { "field": "status", "label": "Status" },
+                            "series": [{ "label": "Total Records", "aggregation": "count" }],
+                            "data": [{ "category": "Placeholder", "value": 1 }]
+                          },
+                          "canvasItem": { "col": 1, "row": 1, "colSpan": 12, "rowSpan": 4 }
+                        }
+                        """),
+                proposedConfig, patchOperations, failures, new ArrayList<>());
+
+        assertThat(failures).isEmpty();
+        JsonNode chartWidget = proposedConfig.path("widgets").get(1);
+        assertThat(chartWidget.has("bindingOrder")).isFalse();
+        assertThat(chartWidget.has("outputs")).isFalse();
+
+        JsonNode definition = chartWidget.path("definition");
+        assertThat(definition.path("bindingOrder").isArray()).isTrue();
+        assertThat(definition.path("bindingOrder")).hasSize(3);
+        assertThat(definition.path("outputs").path("selectionChange").asText()).isEqualTo("emit");
+
+        JsonNode inputs = definition.path("inputs");
+        assertThat(inputs.has("title")).isFalse();
+        assertThat(inputs.has("resourcePath")).isFalse();
+        assertThat(inputs.has("chartType")).isFalse();
+        assertThat(inputs.has("categoryAxis")).isFalse();
+        assertThat(inputs.has("series")).isFalse();
+        assertThat(inputs.has("groupBy")).isFalse();
+        assertThat(inputs.has("data")).isFalse();
+        assertThat(inputs.has("chartDocument")).isTrue();
+        assertThat(inputs.has("queryContext")).isTrue();
+        assertThat(inputs.has("enableCustomization")).isTrue();
+
+        JsonNode chartDoc = inputs.path("chartDocument");
+        assertThat(chartDoc.path("source").path("resource").asText()).isEqualTo("/api/workforce/assignments");
+        assertThat(chartDoc.path("dimensions").path(0).path("field").asText()).isEqualTo("status");
+        assertThat(chartDoc.path("dimensions").path(0).path("label").asText()).isEqualTo("Status");
+        assertThat(chartDoc.path("metrics").path(0).path("field").asText()).isEqualTo("total");
+        assertThat(chartDoc.path("metrics").path(0).path("label").asText()).isEqualTo("Total Records");
+        assertThat(chartDoc.path("metrics").path(0).path("aggregation").asText()).isEqualTo("count");
+    }
 }

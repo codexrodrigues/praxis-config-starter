@@ -1,5 +1,8 @@
 package org.praxisplatform.config.ai.authoring;
 
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+
+@JsonIgnoreProperties(ignoreUnknown = true)
 public record AgenticAuthoringResourceCandidatesRequest(
         String retrievalQuery,
         String userPrompt,

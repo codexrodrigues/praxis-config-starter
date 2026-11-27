@@ -1024,6 +1024,143 @@ class AgenticAuthoringApiMetadataCandidateCatalogTest {
         Mockito.verify(repository).findCandidateProjectionsByScope("desenv", "local", "default", "v1");
     }
 
+    @Test
+    void fallsBackToLatestReleaseExcludesOperationalNoiseAndPrefersExactTerminalResource() {
+        ApiMetadataRepository repository = Mockito.mock(ApiMetadataRepository.class);
+        Mockito.when(repository.findCandidateProjectionsByScope("rio", "local", "default", "v1"))
+                .thenReturn(List.of());
+        Mockito.when(repository.findLatestReleaseIdByScope("rio", "local", "default"))
+                .thenReturn(java.util.Optional.of("rel-2026-11"));
+        Mockito.when(repository.findCandidateProjectionsByScope("rio", "local", "default", "rel-2026-11"))
+                .thenReturn(projections(
+                        apiMetadata(
+                                "/api/human-resources/afastamentos/bulk/delete",
+                                "POST",
+                                "hr afastamentos bulk",
+                                "Afastamentos bulk delete",
+                                "Afastamentos bulk operation."),
+                        apiMetadata(
+                                "/api/human-resources/afastamentos/duplicate-draft",
+                                "POST",
+                                "hr afastamentos draft",
+                                "Duplicar afastamento",
+                                "Draft."),
+                        apiMetadata(
+                                "/api/human-resources/vw-historico-afastamentos-detalhes",
+                                "POST",
+                                "hr afastamentos historico analitico",
+                                "Historico de afastamentos",
+                                "Afastamentos analiticos e ocorrencias de afastamentos."),
+                        apiMetadata(
+                                "/api/human-resources/afastamentos/filter",
+                                "POST",
+                                "hr afastamentos",
+                                "Afastamentos",
+                                "Listagem operacional de afastamentos.")));
+
+        AgenticAuthoringApiMetadataCandidateCatalog catalog =
+                new AgenticAuthoringApiMetadataCandidateCatalog(repository);
+
+        List<AgenticAuthoringCandidate> candidates = catalog.discover(
+                "Crie uma tabela de afastamentos",
+                "table",
+                "rio",
+                "local",
+                null);
+
+        assertThat(candidates)
+                .extracting(AgenticAuthoringCandidate::resourcePath)
+                .doesNotContain(
+                        "/api/human-resources/afastamentos/bulk/delete",
+                        "/api/human-resources/afastamentos/duplicate-draft")
+                .startsWith("/api/human-resources/afastamentos");
+    }
+
+    @Test
+    void llmAuthoredMasterDetailFocusResolvesCanonicalResourceAcrossModulePrefixViaTerminalSegment() {
+        ApiMetadataRepository repository = Mockito.mock(ApiMetadataRepository.class);
+        ApiMetadata assignments = apiMetadata(
+                "/api/workforce/assignments/filter/cursor",
+                "POST",
+                "workforce assignments vinculos",
+                "Assignments",
+                "Tabela e detalhes de vinculos funcionais.");
+        ApiMetadata assignmentsHistory = apiMetadata(
+                "/api/workforce/assignments-history/filter/cursor",
+                "POST",
+                "workforce assignments history",
+                "Assignment History",
+                "Historico funcional derivado de vinculos.");
+        Mockito.when(repository.findCandidateProjectionsByScope("tenant", "local", "default", "v1"))
+                .thenReturn(projections(assignmentsHistory, assignments));
+        ContextRetrievalService retrievalService = Mockito.mock(ContextRetrievalService.class);
+        AgenticAuthoringApiMetadataCandidateCatalog catalog =
+                new AgenticAuthoringApiMetadataCandidateCatalog(repository, retrievalService);
+
+        List<AgenticAuthoringCandidate> candidates = catalog.discover(
+                "primary business entity: human-resources.assignments. "
+                        + "supporting concepts: tabela de vinculos e ficha de detalhes do registro selecionado. "
+                        + "desired surface: painel mestre-detalhe com tabela e ficha de detalhes. "
+                        + "semantic query: painel de acompanhamento funcional com tabela de vinculos e ficha de detalhes",
+                "page",
+                "tenant",
+                "local",
+                null);
+
+        assertThat(candidates).singleElement().satisfies(candidate -> {
+            assertThat(candidate.resourcePath()).isEqualTo("/api/workforce/assignments");
+            assertThat(candidate.submitUrl()).isEqualTo("/api/workforce/assignments/filter/cursor");
+            assertThat(candidate.evidence())
+                    .contains(
+                            "domain-discovery-resource-focus",
+                            "api-metadata",
+                            "semantic-retrieval",
+                            "llm-resource-focus",
+                            "schema-available",
+                            "semantic-role:operational-resource")
+                    .doesNotContain("schema-probe-pending");
+        });
+        Mockito.verifyNoInteractions(retrievalService);
+    }
+
+    @Test
+    void llmAuthoredCanonicalFocusFailsClosedWhenTerminalSegmentMatchesMultipleModulesAmbiguously() {
+        ApiMetadataRepository repository = Mockito.mock(ApiMetadataRepository.class);
+        ApiMetadata hrItems = apiMetadata(
+                "/api/hr/items/filter/cursor",
+                "POST",
+                "catalog items",
+                "Items",
+                "Listagem generica de itens.");
+        ApiMetadata billingItems = apiMetadata(
+                "/api/billing/items/filter/cursor",
+                "POST",
+                "invoice items",
+                "Items",
+                "Listagem generica de itens.");
+        Mockito.when(repository.findCandidateProjectionsByScope("tenant", "local", "default", "v1"))
+                .thenReturn(projections(hrItems, billingItems));
+        ContextRetrievalService retrievalService = Mockito.mock(ContextRetrievalService.class);
+        AgenticAuthoringApiMetadataCandidateCatalog catalog =
+                new AgenticAuthoringApiMetadataCandidateCatalog(repository, retrievalService);
+
+        List<AgenticAuthoringCandidate> candidates = catalog.discover(
+                "primary business entity: operations.items. "
+                        + "supporting concepts: lista. "
+                        + "desired surface: tabela de itens. "
+                        + "semantic query: consultar itens",
+                "table",
+                "tenant",
+                "local",
+                null);
+
+        assertThat(candidates).singleElement().satisfies(candidate -> {
+            assertThat(candidate.resourcePath()).isEqualTo("/api/operations/items");
+            assertThat(candidate.evidence()).contains("schema-probe-pending");
+        });
+        Mockito.verifyNoInteractions(retrievalService);
+    }
+
     private ApiMetadata apiMetadata(
             String path,
             String method,

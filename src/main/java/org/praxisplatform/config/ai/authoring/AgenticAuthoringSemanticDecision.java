@@ -1,5 +1,6 @@
 package org.praxisplatform.config.ai.authoring;
 
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.databind.JsonNode;
 import java.util.List;
 import java.util.Objects;
@@ -11,6 +12,7 @@ import java.util.Objects;
  * response projections. New orchestration, preview and apply gates should use this decision as the
  * governed source of truth.</p>
  */
+@JsonIgnoreProperties(ignoreUnknown = true)
 public record AgenticAuthoringSemanticDecision(
         String schemaVersion,
         String decisionId,
@@ -242,7 +244,7 @@ public record AgenticAuthoringSemanticDecision(
         boolean activeDecisionReviewRequired = refinement
                 && activeDecision != null
                 && activeDecision.reviewRequired();
-        boolean weakLexicalEvidence = weakLexicalEvidence(retrievedEvidence, selectedCandidate);
+        boolean weakLexicalEvidence = weakLexicalEvidence(retrievedEvidence, selectedCandidate, artifactKind);
         boolean reviewRequired = keywordFallback
                 || domainAnchorSelection
                 || activeDecisionReviewRequired
@@ -557,7 +559,15 @@ public record AgenticAuthoringSemanticDecision(
     private static boolean weakLexicalEvidence(
             AgenticAuthoringEvidenceBundle retrievedEvidence,
             AgenticAuthoringCandidate selectedCandidate) {
-        if (strongVerifiedSemanticEvidence(retrievedEvidence, selectedCandidate)) {
+        return weakLexicalEvidence(retrievedEvidence, selectedCandidate, "");
+    }
+
+    private static boolean weakLexicalEvidence(
+            AgenticAuthoringEvidenceBundle retrievedEvidence,
+            AgenticAuthoringCandidate selectedCandidate,
+            String artifactKind) {
+        if (strongVerifiedSemanticEvidence(retrievedEvidence, selectedCandidate, artifactKind)
+                || explicitSourceMatchEvidence(retrievedEvidence, selectedCandidate)) {
             return false;
         }
         if (selectedCandidateHasEvidence(selectedCandidate, "lexical-fallback")
@@ -574,16 +584,35 @@ public record AgenticAuthoringSemanticDecision(
                 .anyMatch(evidence -> "weak_lexical_match".equals(safe(evidence.kind())));
     }
 
-    private static boolean strongVerifiedSemanticEvidence(
+    private static boolean explicitSourceMatchEvidence(
             AgenticAuthoringEvidenceBundle retrievedEvidence,
             AgenticAuthoringCandidate selectedCandidate) {
+        boolean explicitSource = selectedCandidateHasEvidence(selectedCandidate, "explicit-resource-path")
+                || selectedCandidateHasEvidence(selectedCandidate, "explicit-source-match")
+                || (retrievedEvidence != null && "explicit_source_match".equals(safe(retrievedEvidence.retrievalSource())));
+        boolean schemaVerified = selectedCandidateHasEvidence(selectedCandidate, "schema-available")
+                || selectedCandidateHasEvidence(selectedCandidate, "schema-grounding-verified");
+        return explicitSource && schemaVerified;
+    }
+
+    private static boolean strongVerifiedSemanticEvidence(
+            AgenticAuthoringEvidenceBundle retrievedEvidence,
+            AgenticAuthoringCandidate selectedCandidate,
+            String artifactKind) {
         boolean semanticRetrieval = selectedCandidateHasEvidence(selectedCandidate, "semantic-retrieval")
                 || retrievedEvidence != null
                 && "semantic_retrieval".equals(safe(retrievedEvidence.retrievalSource()));
+        boolean statsArtifact = "dashboard".equals(safe(artifactKind))
+                || "chart".equals(safe(artifactKind));
+        boolean schemaVerified = selectedCandidateHasEvidence(selectedCandidate, "schema-available")
+                || selectedCandidateHasEvidence(selectedCandidate, "schema-grounding-verified");
+        boolean capabilitiesVerified = selectedCandidateHasEvidence(selectedCandidate, "stats-capabilities-verified")
+                || (!statsArtifact
+                        && selectedCandidateHasEvidence(selectedCandidate, "resource-capabilities-verified"));
         return semanticRetrieval
                 && selectedCandidateHasEvidence(selectedCandidate, "llm-resource-focus")
-                && selectedCandidateHasEvidence(selectedCandidate, "schema-available")
-                && selectedCandidateHasEvidence(selectedCandidate, "stats-capabilities-verified");
+                && schemaVerified
+                && capabilitiesVerified;
     }
 
     private static double weakEvidenceConfidence(AgenticAuthoringEvidenceBundle retrievedEvidence) {
@@ -647,6 +676,7 @@ public record AgenticAuthoringSemanticDecision(
         return value == null ? "" : value.trim();
     }
 
+    @JsonIgnoreProperties(ignoreUnknown = true)
     public record SelectedResource(
             String resourcePath,
             String operation,
@@ -679,6 +709,7 @@ public record AgenticAuthoringSemanticDecision(
         }
     }
 
+    @JsonIgnoreProperties(ignoreUnknown = true)
     public record RetrievalEvidence(
             String retrievalSource,
             List<String> evidence,

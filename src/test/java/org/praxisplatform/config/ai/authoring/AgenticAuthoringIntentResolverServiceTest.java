@@ -17646,4 +17646,531 @@ class AgenticAuthoringIntentResolverServiceTest {
                         "semantic-decision-memory-refinement-applied",
                         "semantic-refinement-applied");
     }
+
+    @Test
+    void allowsTargetlessModifyOnExistingMultiWidgetPageWithoutRequiringChildWidget() {
+        AgenticAuthoringLlmIntentResolverService llmIntentResolver =
+                Mockito.mock(AgenticAuthoringLlmIntentResolverService.class);
+        Mockito.when(llmIntentResolver.resolve(
+                        Mockito.any(),
+                        Mockito.anyString(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.anyList(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.any()))
+                .thenReturn(Optional.of(new AgenticAuthoringLlmIntentResolution(
+                        true,
+                        "modify",
+                        "page",
+                        "page.configure",
+                        null,
+                        null,
+                        "refinement",
+                        "Vou renomear a página e ajustar o grid para 2 colunas.",
+                        List.of(),
+                        List.of(),
+                        List.of("llm-intent-resolution-used"))));
+        AgenticAuthoringIntentResolverService llmFirstService = new AgenticAuthoringIntentResolverService(
+                objectMapper,
+                quickstartCandidateCatalog(),
+                llmIntentResolver,
+                new AgenticAuthoringComponentCapabilitiesService());
+
+        ObjectNode page = objectMapper.createObjectNode();
+        page.put("title", "Painel Atual");
+        var widgets = page.putArray("widgets");
+        widgets.addObject().put("key", "kpi-1").putObject("definition").put("id", "praxis-kpi");
+        widgets.addObject().put("key", "table-1").putObject("definition").put("id", "praxis-table");
+
+        AgenticAuthoringIntentResolutionResult result = llmFirstService.resolve(new AgenticAuthoringIntentResolutionRequest(
+                "Renomeie a pagina para Painel Executivo e organize em 2 colunas",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                "/page-builder-ia",
+                page,
+                null,
+                "gemini",
+                "gemini-2.5-flash",
+                null));
+
+        assertThat(result.valid()).isTrue();
+        assertThat(result.operationKind()).isEqualTo("modify");
+        assertThat(result.artifactKind()).isEqualTo("page");
+        assertThat(result.gate().status()).isEqualTo("eligible");
+        assertThat(result.failureCodes()).doesNotContain("target-widget-required");
+    }
+
+    @Test
+    void preservesLlmAuthoredQuickRepliesWhenPrimaryClarificationRequiresSelection() {
+        AgenticAuthoringLlmIntentResolverService llmIntentResolver =
+                Mockito.mock(AgenticAuthoringLlmIntentResolverService.class);
+        AgenticAuthoringQuickReply optionOne = new AgenticAuthoringQuickReply(
+                "opt-vinculos",
+                "suggestion",
+                "Vínculos funcionais",
+                "Crie uma tabela de vínculos funcionais");
+        Mockito.when(llmIntentResolver.resolve(
+                        Mockito.any(),
+                        Mockito.anyString(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.anyList(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.any()))
+                .thenReturn(Optional.of(new AgenticAuthoringLlmIntentResolution(
+                        false,
+                        "unknown",
+                        "unknown",
+                        "needs_clarification",
+                        null,
+                        null,
+                        "clarification",
+                        "Qual assunto você quer consultar primeiro?",
+                        List.of(optionOne),
+                        List.of("Você prefere vínculos ou afastamentos?"),
+                        List.of("llm-intent-resolution-used"))));
+        AgenticAuthoringIntentResolverService llmFirstService = new AgenticAuthoringIntentResolverService(
+                objectMapper,
+                quickstartCandidateCatalog(),
+                llmIntentResolver,
+                new AgenticAuthoringComponentCapabilitiesService());
+
+        AgenticAuthoringIntentResolutionResult result = llmFirstService.resolve(new AgenticAuthoringIntentResolutionRequest(
+                "Quero uma consulta de pessoal",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                "/page-builder-ia",
+                objectMapper.createObjectNode(),
+                null,
+                "gemini",
+                "gemini-2.5-flash",
+                null));
+
+        assertThat(result.valid()).isFalse();
+        assertThat(result.quickReplies())
+                .extracting(AgenticAuthoringQuickReply::id)
+                .contains("opt-vinculos");
+    }
+
+    @Test
+    void doesNotHijackTargetlessPageRenameContainingPainelIntoCreateDashboard() {
+        AgenticAuthoringLlmIntentResolverService llmIntentResolver =
+                Mockito.mock(AgenticAuthoringLlmIntentResolverService.class);
+        Mockito.when(llmIntentResolver.resolve(
+                        Mockito.any(),
+                        Mockito.anyString(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.anyList(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.any()))
+                .thenReturn(Optional.of(new AgenticAuthoringLlmIntentResolution(
+                        true,
+                        "modify",
+                        "page",
+                        "page.configure",
+                        null,
+                        null,
+                        "refinement",
+                        "Vou renomear a página para Painel Executivo de RH e organizar em 2 colunas.",
+                        List.of(),
+                        List.of(),
+                        List.of("llm-intent-resolution-used"))));
+        AgenticAuthoringIntentResolverService llmFirstService = new AgenticAuthoringIntentResolverService(
+                objectMapper,
+                quickstartCandidateCatalog(),
+                llmIntentResolver,
+                new AgenticAuthoringComponentCapabilitiesService());
+
+        ObjectNode page = objectMapper.createObjectNode();
+        page.put("title", "Painel Atual");
+        var widgets = page.putArray("widgets");
+        widgets.addObject()
+                .put("key", "table-1")
+                .putObject("definition")
+                .put("id", "praxis-table")
+                .putObject("inputs")
+                .put("resourcePath", "/api/human-resources/registros");
+        widgets.addObject()
+                .put("key", "form-2")
+                .putObject("definition")
+                .put("id", "praxis-dynamic-form")
+                .putObject("inputs")
+                .put("resourcePath", "/api/human-resources/registros");
+
+        AgenticAuthoringIntentResolutionResult result = llmFirstService.resolve(new AgenticAuthoringIntentResolutionRequest(
+                "Renomeie a página para Painel Executivo de RH e organize em 2 colunas",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                "/page-builder-ia",
+                page,
+                null,
+                "gemini",
+                "gemini-2.5-flash",
+                null));
+
+        assertThat(result.valid()).isTrue();
+        assertThat(result.operationKind()).isEqualTo("modify");
+        assertThat(result.artifactKind()).isEqualTo("page");
+        assertThat(result.gate().status()).isEqualTo("eligible");
+        assertThat(result.candidates()).isEmpty();
+        assertThat(result.selectedCandidate()).isNull();
+        assertThat(result.semanticDecision().reviewRequired()).isFalse();
+        assertThat(result.warnings()).doesNotContain("semantic-policy-refined-visual-projection");
+    }
+
+    @Test
+    void clearsLexicalCandidateOnTargetlessPageStructuralModifyEvenWhenLlmEchoesResourcePath() {
+        AgenticAuthoringLlmIntentResolverService llmIntentResolver =
+                Mockito.mock(AgenticAuthoringLlmIntentResolverService.class);
+        Mockito.when(llmIntentResolver.resolve(
+                        Mockito.any(),
+                        Mockito.anyString(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.anyList(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.any()))
+                .thenReturn(Optional.of(new AgenticAuthoringLlmIntentResolution(
+                        true,
+                        "modify",
+                        "page",
+                        "page.configure",
+                        "/api/human-resources/folhas-pagamento",
+                        null,
+                        "refinement",
+                        "Vou renomear a pagina e equilibrar o layout.",
+                        List.of(),
+                        List.of(),
+                        List.of("llm-intent-resolution-used"))));
+        AgenticAuthoringIntentResolverService llmFirstService = new AgenticAuthoringIntentResolverService(
+                objectMapper,
+                quickstartCandidateCatalog(),
+                llmIntentResolver,
+                new AgenticAuthoringComponentCapabilitiesService());
+
+        ObjectNode page = objectMapper.createObjectNode();
+        page.put("title", "Painel Atual");
+        var widgets = page.putArray("widgets");
+        widgets.addObject()
+                .put("key", "table-1")
+                .putObject("definition")
+                .put("id", "praxis-table")
+                .putObject("inputs")
+                .put("resourcePath", "/api/human-resources/folhas-pagamento");
+
+        AgenticAuthoringIntentResolutionResult result = llmFirstService.resolve(new AgenticAuthoringIntentResolutionRequest(
+                "Renomeie o titulo para Painel Executivo e equilibre as colunas",
+                "praxis-ui-angular",
+                "praxis-dynamic-page-builder",
+                "/page-builder-ia",
+                page,
+                null,
+                "gemini",
+                "gemini-3.8-flash",
+                null));
+
+        assertThat(result.valid()).isTrue();
+        assertThat(result.operationKind()).isEqualTo("modify");
+        assertThat(result.artifactKind()).isEqualTo("page");
+        assertThat(result.candidates()).isEmpty();
+        assertThat(result.selectedCandidate()).isNull();
+        assertThat(result.semanticDecision().reviewRequired()).isFalse();
+    }
+
+    @Test
+    void acceptsTerminalMatchedGovernedResourceOnTurn1WhenModulePrefixDiffers() {
+        AgenticAuthoringApiMetadataCandidateCatalog candidateCatalog =
+                Mockito.mock(AgenticAuthoringApiMetadataCandidateCatalog.class);
+        AgenticAuthoringLlmIntentResolverService llmIntentResolver =
+                Mockito.mock(AgenticAuthoringLlmIntentResolverService.class);
+        AgenticAuthoringCandidate anchoredCandidate = new AgenticAuthoringCandidate(
+                "/api/workforce/assignments",
+                "post",
+                "/schemas/filtered?path=/api/workforce/assignments/filter/cursor&operation=post&schemaType=response",
+                "/api/workforce/assignments/filter/cursor",
+                "POST",
+                0.91d,
+                "api_metadata llm-authored resource focus",
+                List.of(
+                        "domain-discovery-resource-focus",
+                        "api-metadata",
+                        "semantic-retrieval",
+                        "llm-resource-focus",
+                        "schema-available",
+                        "tool-search-api-resources",
+                        "semantic-role:operational-resource"));
+        Mockito.when(llmIntentResolver.resolve(
+                        Mockito.any(),
+                        Mockito.anyString(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.anyList(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.any()))
+                .thenReturn(Optional.of(new AgenticAuthoringLlmIntentResolution(
+                        true,
+                        "create",
+                        "page",
+                        "create_artifact",
+                        anchoredCandidate.resourcePath(),
+                        null,
+                        "none",
+                        "Estruturei o painel mestre-detalhe para acompanhamento.",
+                        List.of(),
+                        List.of(),
+                        List.of("llm-intent-resolution-used"))));
+        AgenticAuthoringIntentResolverService resolver = new AgenticAuthoringIntentResolverService(
+                objectMapper,
+                candidateCatalog,
+                llmIntentResolver,
+                null);
+        ObjectNode contextHints = resourceDiscoveryContext(
+                "page",
+                List.of(anchoredCandidate),
+                new AgenticAuthoringResourceSearchFocus(
+                        "human-resources.assignments",
+                        List.of("tabela", "ficha de detalhes"),
+                        "painel mestre-detalhe com tabela e ficha de detalhes",
+                        "",
+                        "LLM-authored canonical focus"));
+        ObjectNode queryConstraints = objectMapper.createObjectNode();
+        queryConstraints.put("appliesToDataSelection", false);
+        queryConstraints.putArray("filters");
+        AgenticAuthoringPreIntentToolPlan semanticOrientation = new AgenticAuthoringPreIntentToolPlan(
+                "praxis-agentic-authoring-pre-intent-tool-plan.v3",
+                "Create master-detail page.",
+                List.of(),
+                "authoring_or_other",
+                "",
+                true,
+                queryConstraints,
+                "page",
+                "praxis-table");
+
+        AgenticAuthoringIntentResolutionResult result = resolver.resolve(
+                requestWithContextHints(
+                        "Crie um painel com tabela de vinculos e ficha de detalhes.",
+                        "gemini",
+                        contextHints),
+                "tenant",
+                "user",
+                "local",
+                semanticOrientation);
+
+        assertThat(result.valid()).isTrue();
+        assertThat(result.gate().status()).isEqualTo("eligible");
+        assertThat(result.selectedCandidate()).isNotNull();
+        assertThat(result.selectedCandidate().resourcePath()).isEqualTo("/api/workforce/assignments");
+        assertThat(result.warnings()).doesNotContain("llm-resource-selection-unconfirmed-by-ai-authored-focus");
+    }
+
+    @Test
+    void doesNotLeakOptimisticCreatingCopyWhenUnconfirmedAiFocusForcesClarification() {
+        AgenticAuthoringApiMetadataCandidateCatalog candidateCatalog =
+                Mockito.mock(AgenticAuthoringApiMetadataCandidateCatalog.class);
+        AgenticAuthoringLlmIntentResolverService llmIntentResolver =
+                Mockito.mock(AgenticAuthoringLlmIntentResolverService.class);
+        AgenticAuthoringCandidate unrelatedCandidate = withEvidence(
+                withEvidence(candidateWithEvidence(
+                        "/api/human-resources/departamentos",
+                        0.89d,
+                        List.of("departamentos")),
+                        "tool-search-api-resources"),
+                "semantic-role:operational-resource");
+        Mockito.when(llmIntentResolver.resolve(
+                        Mockito.any(),
+                        Mockito.anyString(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.anyList(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.any()))
+                .thenReturn(Optional.of(new AgenticAuthoringLlmIntentResolution(
+                        true,
+                        "create",
+                        "page",
+                        "create_artifact",
+                        "/api/human-resources/departamentos",
+                        null,
+                        "none",
+                        "Criando um espaço mestre-detalhe para departamentos.",
+                        List.of(),
+                        List.of(),
+                        List.of("llm-intent-resolution-used"))));
+        AgenticAuthoringIntentResolverService resolver = new AgenticAuthoringIntentResolverService(
+                objectMapper,
+                candidateCatalog,
+                llmIntentResolver,
+                null);
+        ObjectNode contextHints = resourceDiscoveryContext(
+                "page",
+                List.of(unrelatedCandidate),
+                new AgenticAuthoringResourceSearchFocus(
+                        "human-resources.assignments",
+                        List.of("tabela"),
+                        "painel de acompanhamentos",
+                        "",
+                        "Mismatched candidate selection"));
+        ObjectNode queryConstraints = objectMapper.createObjectNode();
+        queryConstraints.put("appliesToDataSelection", false);
+        queryConstraints.putArray("filters");
+        AgenticAuthoringPreIntentToolPlan semanticOrientation = new AgenticAuthoringPreIntentToolPlan(
+                "praxis-agentic-authoring-pre-intent-tool-plan.v3",
+                "Create operational panel.",
+                List.of(),
+                "authoring_or_other",
+                "",
+                true,
+                queryConstraints,
+                "page",
+                "praxis-table");
+
+        AgenticAuthoringIntentResolutionResult result = resolver.resolve(
+                requestWithContextHints(
+                        "Crie um painel com tabela de alocacoes.",
+                        "gemini",
+                        contextHints),
+                "tenant",
+                "user",
+                "local",
+                semanticOrientation);
+
+        assertThat(result.valid()).isFalse();
+        assertThat(result.changeKind()).isEqualTo("needs_clarification");
+        assertThat(result.assistantMessage()).doesNotContain("Criando um espaço mestre-detalhe");
+        assertThat(result.warnings()).contains("llm-resource-selection-unconfirmed-by-ai-authored-focus");
+    }
+
+    @Test
+    void skipsPreIntentGovernedCreateShortcutWhenCurrentPageAlreadyHasWidgetsAndPreservesModifyPage() {
+        AgenticAuthoringApiMetadataCandidateCatalog candidateCatalog =
+                Mockito.mock(AgenticAuthoringApiMetadataCandidateCatalog.class);
+        AgenticAuthoringLlmIntentResolverService llmIntentResolver =
+                Mockito.mock(AgenticAuthoringLlmIntentResolverService.class);
+        AgenticAuthoringCandidate existingResourceCandidate = withEvidence(
+                withEvidence(candidateWithEvidence(
+                        "/api/workforce/assignments",
+                        0.95d,
+                        List.of("workforce assignments")),
+                        "tool-search-api-resources"),
+                "semantic-role:operational-resource");
+        Mockito.when(llmIntentResolver.resolve(
+                        Mockito.any(),
+                        Mockito.anyString(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.anyList(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.any(),
+                        Mockito.any()))
+                .thenReturn(Optional.of(new AgenticAuthoringLlmIntentResolution(
+                        true,
+                        "modify",
+                        "page",
+                        "modify_page_layout",
+                        null,
+                        null,
+                        "refinement",
+                        "Vou renomear o título da página e reorganizar em 2 colunas.",
+                        List.of(),
+                        List.of(),
+                        List.of("llm-intent-resolution-used"))));
+        AgenticAuthoringIntentResolverService resolver = new AgenticAuthoringIntentResolverService(
+                objectMapper,
+                candidateCatalog,
+                llmIntentResolver,
+                new AgenticAuthoringComponentCapabilitiesService());
+
+        ObjectNode page = objectMapper.createObjectNode();
+        page.put("title", "Visão Atual");
+        var widgets = page.putArray("widgets");
+        widgets.addObject()
+                .put("key", "assignments-table")
+                .putObject("definition")
+                .put("id", "praxis-table")
+                .putObject("inputs")
+                .put("resourcePath", "/api/workforce/assignments");
+        widgets.addObject()
+                .put("key", "assignments-form")
+                .putObject("definition")
+                .put("id", "praxis-dynamic-form");
+
+        ObjectNode queryConstraints = objectMapper.createObjectNode();
+        queryConstraints.put("appliesToDataSelection", false);
+        queryConstraints.putArray("filters");
+        AgenticAuthoringPreIntentToolPlan orientation = new AgenticAuthoringPreIntentToolPlan(
+                "praxis-agentic-authoring-pre-intent-tool-plan.v3",
+                "Pre-intent wrongly attached resource discovery on non-empty page.",
+                List.of(),
+                "authoring_or_other",
+                "",
+                false,
+                queryConstraints,
+                "dashboard",
+                "");
+        ObjectNode contextHints = resourceDiscoveryContext(
+                "dashboard",
+                List.of(existingResourceCandidate),
+                new AgenticAuthoringResourceSearchFocus(
+                        "workforce.assignments",
+                        List.of("layout"),
+                        "dashboard",
+                        "",
+                        "Test fixture"));
+        contextHints.put("includeLlmDiagnostics", true);
+
+        AgenticAuthoringIntentResolutionResult result = resolver.resolve(
+                new AgenticAuthoringIntentResolutionRequest(
+                        "Renomeie o título principal da página para 'Painel Executivo de Alocacoes' e organize os widgets em 2 colunas equilibradas",
+                        "praxis-ui-angular",
+                        "praxis-dynamic-page-builder",
+                        "/laboratorio/assignments",
+                        page,
+                        null,
+                        "gemini",
+                        "gemini-3.8-flash",
+                        null,
+                        "session-c1",
+                        "turn-c1",
+                        List.of(),
+                        null,
+                        List.of(),
+                        contextHints,
+                        null),
+                "tenant",
+                "user",
+                "local",
+                orientation);
+
+        assertThat(result.valid()).isTrue();
+        assertThat(result.operationKind()).isEqualTo("modify");
+        assertThat(result.artifactKind()).isEqualTo("page");
+        assertThat(result.llmDiagnostics().path("preIntentGovernedEvidenceOutcome").asText())
+                .isEqualTo("skipped:non-empty-existing-page");
+        Mockito.verify(llmIntentResolver).resolve(
+                Mockito.any(),
+                Mockito.anyString(),
+                Mockito.any(),
+                Mockito.any(),
+                Mockito.anyList(),
+                Mockito.any(),
+                Mockito.any(),
+                Mockito.any(),
+                Mockito.any());
+    }
 }

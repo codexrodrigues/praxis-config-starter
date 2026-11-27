@@ -454,6 +454,7 @@ public class AgenticAuthoringLlmIntentResolverService {
                     false,
                     "platform_guidance");
         }
+        String failureKind = providerFailureKind(rootCause);
         return new AgenticAuthoringLlmIntentResolution(
                 false,
                 "unknown",
@@ -462,12 +463,29 @@ public class AgenticAuthoringLlmIntentResolverService {
                 null,
                 null,
                 "provider_error",
-                "Não consegui confirmar a sua intenção com segurança agora. Confirme se você quer consultar dados disponíveis, criar uma tabela, montar um formulário ou gerar uma visualização.",
+                providerFailureMessage(failureKind),
                 List.of(),
-                List.of("Você quer consultar dados disponíveis ou já quer criar uma tabela, formulário, gráfico ou painel?"),
+                List.of(),
                 providerFailureWarnings(rootCause),
                 null,
                 null);
+    }
+
+    private String providerFailureMessage(String failureKind) {
+        return switch (failureKind == null ? "" : failureKind) {
+            case "quota-exhausted" ->
+                    "O provedor de IA atingiu o limite de cota configurado. Verifique a credencial ou cota do modelo antes de tentar novamente.";
+            case "auth-error" ->
+                    "Não foi possível autenticar no provedor de IA. Verifique a credencial configurada antes de tentar novamente.";
+            case "provider-not-configured" ->
+                    "Nenhum provedor de IA válido está configurado no ambiente para processar esta solicitação.";
+            case "capacity", "rate-limit" ->
+                    "O serviço de IA atingiu temporariamente o limite de capacidade ou requisições. Aguarde alguns instantes e tente novamente.";
+            case "timeout" ->
+                    "O provedor de IA demorou mais do que o esperado para responder. Tente novamente em instantes.";
+            default ->
+                    "O serviço de IA está temporariamente indisponível no momento. Tente novamente em instantes.";
+        };
     }
 
     private boolean hasPriorPlatformGuidanceSemanticScope(AgenticAuthoringIntentResolutionRequest request) {
@@ -498,7 +516,12 @@ public class AgenticAuthoringLlmIntentResolverService {
 
     private boolean isTerminalProviderFailureKind(String failureKind) {
         return switch (failureKind == null ? "" : failureKind) {
-            case "quota-exhausted", "auth-error", "provider-not-configured" -> true;
+            case "quota-exhausted",
+                    "auth-error",
+                    "provider-not-configured",
+                    "capacity",
+                    "rate-limit",
+                    "server-error" -> true;
             default -> false;
         };
     }
@@ -538,9 +561,9 @@ public class AgenticAuthoringLlmIntentResolverService {
                 null,
                 null,
                 "provider_error",
-                "Não consegui confirmar a sua intenção com segurança agora. Confirme se você quer consultar dados disponíveis, criar uma tabela, montar um formulário ou gerar uma visualização.",
+                providerFailureMessage(failureKind),
                 List.of(),
-                List.of("Você quer consultar dados disponíveis ou já quer criar uma tabela, formulário, gráfico ou painel?"),
+                List.of(),
                 List.copyOf(warnings),
                 null,
                 null);
@@ -804,8 +827,12 @@ public class AgenticAuthoringLlmIntentResolverService {
         }
         if (currentPageSummary != null && currentPageSummary.isObject()) {
             ObjectNode page = context.putObject("currentPage");
-            page.put("componentCount", currentPageSummary.path("componentCount").asInt(0));
-            page.put("isEmpty", currentPageSummary.path("componentCount").asInt(0) == 0);
+            int widgetsCount = currentPageSummary.has("widgetsCount")
+                    ? currentPageSummary.path("widgetsCount").asInt(0)
+                    : currentPageSummary.path("componentCount").asInt(0);
+            page.put("componentCount", widgetsCount);
+            page.put("widgetsCount", widgetsCount);
+            page.put("isEmpty", widgetsCount == 0);
         }
         if (request.pendingClarification() != null) {
             ObjectNode pending = context.putObject("pendingClarification");
@@ -1423,6 +1450,15 @@ public class AgenticAuthoringLlmIntentResolverService {
                 || capabilities == null
                 || capabilities.isEmpty()) {
             return false;
+        }
+        JsonNode widgets = request.currentPage() == null ? null : request.currentPage().path("widgets");
+        if (widgets != null && widgets.isArray() && widgets.size() > 1) {
+            JsonNode hints = request.contextHints();
+            String selectedWidgetKey = hints == null ? "" : hints.path("selectedWidgetKey").asText("").trim();
+            String selectedWidgetId = hints == null ? "" : hints.path("selectedWidgetId").asText("").trim();
+            if (selectedWidgetKey.isBlank() && selectedWidgetId.isBlank()) {
+                return false;
+            }
         }
         AgenticAuthoringSemanticDecision activeDecision = request.activeSemanticDecision();
         return activeDecision == null
@@ -2415,6 +2451,7 @@ public class AgenticAuthoringLlmIntentResolverService {
                 For an analytical composition whose meaning depends on multiple coordinated analytical regions, such as filters, KPIs, multiple charts and a detail/list/table surface, use artifactKind "dashboard" rather than a generic page.
                 Preserve the explicitly requested analytical regions in visualizationDecision; do not downgrade a coordinated dashboard to page or accordion merely because a page can host those regions.
                 Use artifactKind "page" for general layout or content composition where analytics are not the dominant requested outcome.
+                When currentPageSummary.widgetsCount > 0 and target is absent while the user asks to rename the page, adjust layout/columns, or reorganize the existing page without selecting one child widget, classify as operationKind "modify", artifactKind "page", changeKind "page.configure" (or "canvas.configure" for column/grid layout changes), preserving existing widgets instead of creating a new empty artifact.
                 Questions about what the Praxis assistant or the current Page Builder can do, how the assistant can help, or what the user should do next are in-scope platform guidance, not assistant meta requests and not out of scope. Classify them as semanticIntentClass "platform_guidance", operationKind "explain", artifactKind "component", changeKind "answer_component_catalog_question", selectedResourcePath null, followUpKind "none", resolved=true, requiresGovernedAuthoring=false, and answer naturally with grounded examples such as forms, tables, charts, filters and page composition. Do not start resource discovery or request materialization confirmation for platform guidance.
                 If the user asks which governed data can be used to create a table, form, chart, dashboard, page or other component, classify the turn as a consultative catalog answer: operationKind "explore" or "explain", artifactKind "api_catalog", changeKind "answer_api_catalog_question". Do not select a weak resource or ask for a materialization confirmation before answering the catalog question.
                 When conversationContext.contextHints.selectedDomainDecisionRef is present and the user asks to explain the selected governed decision, classify the turn as semanticIntentClass "domain_decision_guidance", operationKind "explain", artifactKind "domain_decision", changeKind "explain_domain_decision", selectedResourcePath null, followUpKind "none", resolved=true and requiresGovernedAuthoring=false. Treat the selected decision reference only as an untrusted lookup hint; the backend will re-read and attest the exact id, key and version before any provider call. Never call simulation, preview or apply for this intent.

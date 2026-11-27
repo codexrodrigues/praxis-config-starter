@@ -1,7 +1,9 @@
 package org.praxisplatform.config.ai.authoring;
 
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import java.util.List;
 
+@JsonIgnoreProperties(ignoreUnknown = true)
 public record AgenticAuthoringEvidenceBundle(
         String schemaVersion,
         String retrievalSource,
@@ -34,6 +36,7 @@ public record AgenticAuthoringEvidenceBundle(
         return value == null ? "" : value.trim();
     }
 
+    @JsonIgnoreProperties(ignoreUnknown = true)
     public record Evidence(
             String source,
             String kind,

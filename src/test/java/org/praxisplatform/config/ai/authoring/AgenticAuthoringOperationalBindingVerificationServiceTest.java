@@ -786,6 +786,145 @@ class AgenticAuthoringOperationalBindingVerificationServiceTest {
                         .contains("stats-capabilities-verified"));
     }
 
+    @Test
+    void verifiesCapabilitiesWithAuthoritativeResourceKeyItemPendingByIdAndSharedPlatformAction()
+            throws Exception {
+        when(bindingService.resolve("tenant", "dev", "workforce.records", 12))
+                .thenReturn(List.of());
+        when(bindingService.resolve("tenant", "dev", "human-resources.assignments", 12))
+                .thenReturn(List.of());
+        when(capabilitiesService.fetchCapabilitiesResult(
+                "/api/workforce/records", "http://localhost", "tenant", "user", "dev"))
+                .thenReturn(ResourceCapabilitiesFetchResult.success(
+                        objectMapper.readTree("""
+                                {
+                                  "resourceKey": "human-resources.assignments",
+                                  "resourcePath": "/api/workforce/records",
+                                  "operations": {
+                                    "all": {"supported": true, "scope": "COLLECTION", "availability": {"allowed": true}},
+                                    "byId": {
+                                      "supported": true,
+                                      "scope": "ITEM",
+                                      "availability": {
+                                        "allowed": false,
+                                        "reason": "resource-state-not-found",
+                                        "metadata": { "denialCategory": "RESOURCE_STATE_UNAVAILABLE" }
+                                      }
+                                    },
+                                    "filter": {"supported": true, "scope": "COLLECTION", "availability": {"allowed": true}}
+                                  }
+                                }
+                                """),
+                        "http://localhost/api/workforce/records/capabilities"));
+        when(schemaService.fetchSchemaResult(any(), any(), any(), any(), any()))
+                .thenReturn(SchemaFetchResult.success(
+                        objectMapper.readTree("{\"type\":\"object\"}"), "http://localhost/schemas/filtered"));
+        when(actionCatalogService.fetchCatalogResult(
+                "human-resources.assignments", "http://localhost", "tenant", "user", "dev"))
+                .thenReturn(ResourceActionCatalogFetchResult.success(
+                        objectMapper.readTree("""
+                                {
+                                  "resourceKey": "human-resources.assignments",
+                                  "resourcePath": "/api/workforce/records",
+                                  "actions": [
+                                    {
+                                      "id": "approve-record",
+                                      "resourceKey": "human-resources.assignments",
+                                      "scope": "ITEM",
+                                      "operationId": "approveRecord",
+                                      "path": "/api/workforce/records/{id}/actions/approve-record",
+                                      "method": "POST",
+                                      "availability": {
+                                        "allowed": false,
+                                        "reason": "resource-context-required"
+                                      }
+                                    },
+                                    {
+                                      "id": "run-rules-studio-operational-test",
+                                      "resourceKey": "human-resources.assignments",
+                                      "scope": "COLLECTION",
+                                      "operationId": "runRulesStudioOperationalTest",
+                                      "path": "/api/praxis/rules-studio/actions/run-rules-studio-operational-test",
+                                      "method": "POST",
+                                      "availability": { "allowed": true }
+                                    }
+                                  ]
+                                }
+                                """),
+                        "http://localhost/schemas/actions?resource=human-resources.assignments"));
+
+        AgenticAuthoringOperationalBindingVerificationService.VerificationResult result = service.verify(
+                "workforce.records",
+                "/api/workforce/records",
+                "http://localhost",
+                new AiPrincipalContext("tenant", "user", "dev", true));
+
+        assertThat(result.verified()).isTrue();
+        assertThat(result.resourceKey()).isEqualTo("human-resources.assignments");
+        assertThat(result.failureCodes()).isEmpty();
+        assertThat(result.operations())
+                .filteredOn(op -> "byId".equals(op.operationId()))
+                .singleElement()
+                .satisfies(byId -> {
+                    assertThat(byId.resourceKey()).isEqualTo("human-resources.assignments");
+                    assertThat(byId.resourcePath()).isEqualTo("/api/workforce/records");
+                    assertThat(byId.apiPath()).isEqualTo("/api/workforce/records/{id}");
+                    assertThat(byId.scope()).isEqualTo("ITEM");
+                    assertThat(byId.availability().allowed()).isFalse();
+                    assertThat(byId.availability().reason()).isEqualTo("resource-state-not-found");
+                    assertThat(byId.availability().resolution()).isEqualTo("item_capabilities_at_selection");
+                });
+        assertThat(result.operations())
+                .extracting(AgenticAuthoringOperationalBindingVerificationService.OperationProjection::apiPath)
+                .doesNotContain("/api/praxis/rules-studio/actions/run-rules-studio-operational-test");
+    }
+
+    @Test
+    void failsClosedWhenItemScopedCapabilityIsDeniedForPermissionReason() throws Exception {
+        AgenticAuthoringDomainBindingService.BindingProjection byIdBinding =
+                new AgenticAuthoringDomainBindingService.BindingProjection(
+                        "workforce.records.byId",
+                        "api_operation",
+                        "byId",
+                        "workforce.records",
+                        "/api/workforce/records/{id}",
+                        "GET",
+                        "/schemas/filtered?path=/api/workforce/records/{id}&operation=get&schemaType=response",
+                        1.0,
+                        "wf-v1",
+                        List.of("domain-knowledge:evidence-status:active"));
+        when(bindingService.resolve("tenant", "dev", "workforce.records", 12))
+                .thenReturn(List.of(byIdBinding));
+        when(schemaService.fetchSchemaResult(any(), any(), any(), any(), any()))
+                .thenReturn(SchemaFetchResult.success(
+                        objectMapper.readTree("{\"type\":\"object\"}"), "schema-url"));
+        when(capabilitiesService.fetchCapabilitiesResult(any(), any(), any(), any(), any()))
+                .thenReturn(ResourceCapabilitiesFetchResult.success(
+                        objectMapper.readTree("""
+                                {
+                                  "operations": {
+                                    "byId": {
+                                      "supported": true,
+                                      "scope": "ITEM",
+                                      "availability": {
+                                        "allowed": false,
+                                        "reason": "missing-authority"
+                                      }
+                                    }
+                                  }
+                                }
+                                """),
+                        "capabilities-url"));
+
+        AgenticAuthoringOperationalBindingVerificationService.VerificationResult result = service.verify(
+                "workforce.records",
+                "http://localhost",
+                new AiPrincipalContext("tenant", "user", "dev", true));
+
+        assertThat(result.verified()).isFalse();
+        assertThat(result.failureCodes()).contains("operational-binding-operation-unavailable");
+    }
+
     private void stubValidResourceOperation() throws Exception {
         AgenticAuthoringDomainBindingService.BindingProjection binding =
                 new AgenticAuthoringDomainBindingService.BindingProjection(

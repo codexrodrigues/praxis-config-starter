@@ -1,8 +1,10 @@
 package org.praxisplatform.config.ai.authoring;
 
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.databind.JsonNode;
 import java.util.List;
 
+@JsonIgnoreProperties(ignoreUnknown = true)
 public record AgenticAuthoringPlanRequest(
         String userPrompt,
         String provider,
@@ -15,14 +17,15 @@ public record AgenticAuthoringPlanRequest(
         List<AgenticAuthoringConversationMessage> conversationMessages,
         AgenticAuthoringPendingClarification pendingClarification,
         List<AgenticAuthoringAttachmentSummary> attachmentSummaries,
-        JsonNode contextHints
+        JsonNode contextHints,
+        String selectedWidgetKey
 ) {
     public AgenticAuthoringPlanRequest(
             String userPrompt,
             String provider,
             String model,
             String apiKey) {
-        this(userPrompt, provider, model, apiKey, null, null, null, null, null, null, null, null);
+        this(userPrompt, provider, model, apiKey, null, null, null, null, null, null, null, null, null);
     }
 
     public AgenticAuthoringPlanRequest(
@@ -31,7 +34,7 @@ public record AgenticAuthoringPlanRequest(
             String model,
             String apiKey,
             AgenticAuthoringIntentResolutionResult intentResolution) {
-        this(userPrompt, provider, model, apiKey, null, intentResolution, null, null, null, null, null, null);
+        this(userPrompt, provider, model, apiKey, null, intentResolution, null, null, null, null, null, null, null);
     }
 
     public AgenticAuthoringPlanRequest(
@@ -41,7 +44,7 @@ public record AgenticAuthoringPlanRequest(
             String apiKey,
             JsonNode currentPage,
             AgenticAuthoringIntentResolutionResult intentResolution) {
-        this(userPrompt, provider, model, apiKey, currentPage, intentResolution, null, null, null, null, null, null);
+        this(userPrompt, provider, model, apiKey, currentPage, intentResolution, null, null, null, null, null, null, null);
     }
 
     public AgenticAuthoringPlanRequest(
@@ -66,6 +69,7 @@ public record AgenticAuthoringPlanRequest(
                 clientTurnId,
                 conversationMessages,
                 pendingClarification,
+                null,
                 null,
                 null);
     }
@@ -94,6 +98,36 @@ public record AgenticAuthoringPlanRequest(
                 conversationMessages,
                 pendingClarification,
                 attachmentSummaries,
+                null,
+                null);
+    }
+
+    public AgenticAuthoringPlanRequest(
+            String userPrompt,
+            String provider,
+            String model,
+            String apiKey,
+            JsonNode currentPage,
+            AgenticAuthoringIntentResolutionResult intentResolution,
+            String sessionId,
+            String clientTurnId,
+            List<AgenticAuthoringConversationMessage> conversationMessages,
+            AgenticAuthoringPendingClarification pendingClarification,
+            List<AgenticAuthoringAttachmentSummary> attachmentSummaries,
+            JsonNode contextHints) {
+        this(
+                userPrompt,
+                provider,
+                model,
+                apiKey,
+                currentPage,
+                intentResolution,
+                sessionId,
+                clientTurnId,
+                conversationMessages,
+                pendingClarification,
+                attachmentSummaries,
+                contextHints,
                 null);
     }
 }

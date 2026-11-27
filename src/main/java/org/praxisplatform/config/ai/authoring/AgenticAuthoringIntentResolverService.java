@@ -400,7 +400,12 @@ public class AgenticAuthoringIntentResolverService {
         boolean semanticPolicyRefinedVisualProjection = false;
         boolean resourceDiscoveryAuthoringDriftNormalized = false;
         boolean resourceDiscoveryFocusSelectionApplied = false;
+        boolean llmResolvedPageModify = llmIntent != null
+                && llmIntent.resolved()
+                && "modify".equals(valueOrUnknown(llmIntent.operationKind()))
+                && "page".equals(valueOrUnknown(llmIntent.artifactKind()));
         boolean visualProjectionRefinement = !primaryLlmIntentProviderFailure
+                && !llmResolvedPageModify
                 && isVisualProjectionRefinementPrompt(prompt, turn, currentPageSummary);
         boolean currentPageDrilldownRefinement = !primaryLlmIntentProviderFailure
                 && isCurrentPageDrilldownRefinementPrompt(prompt, currentPageSummary);
@@ -1218,6 +1223,23 @@ public class AgenticAuthoringIntentResolverService {
                 artifactKind,
                 changeKind,
                 target);
+        boolean targetlessExistingPageModify = "modify".equals(operationKind)
+                && "page".equals(artifactKind)
+                && (target == null || valueOrDefault(target.widgetKey(), "").isBlank())
+                && request.currentPage() != null
+                && request.currentPage().path("widgets").isArray()
+                && !request.currentPage().path("widgets").isEmpty();
+        if (targetlessExistingPageModify
+                && (llmIntent == null
+                        || valueOrDefault(llmIntent.selectedResourcePath(), "").isBlank()
+                        || isPageLocalStructuralChangeKind(changeKind))) {
+            selectedCandidate = null;
+            candidates = List.of();
+            rankedCandidatesForSelectionReview = List.of();
+            resourceDiscoveryFocusSelectionApplied = false;
+            llmResourceSelectionOverriddenByPromptAlignment = false;
+            llmResourceSelectionOverriddenByGovernedRanking = false;
+        }
         AgenticAuthoringGateResult gate = eligibilityGate.evaluate(
                 operationKind,
                 artifactKind,
@@ -1225,7 +1247,8 @@ public class AgenticAuthoringIntentResolverService {
                 target,
                 selectedCandidate,
                 candidates,
-                isManifestOwnedComponentOperation(request, changeKind, componentCapabilities));
+                isManifestOwnedComponentOperation(request, changeKind, componentCapabilities)
+                        || targetlessExistingPageModify);
         gate = withPromptSpecificGateMessages(gate, rawPrompt, prompt, operationKind, artifactKind, selectedCandidate, turn);
         gate = withSharedRuleAuthoringGate(gate, request, prompt, selectedCandidate, llmRequiresGovernedAuthoring, operationKind);
         gate = withExplicitLocalUiCompositionGate(gate, explicitLocalUiComposition, explicitLocalTargetedComposition);
@@ -1247,11 +1270,12 @@ public class AgenticAuthoringIntentResolverService {
                 componentCapabilities);
         boolean llmAuthoredClarification = llmIntent != null
                 && !"route_required".equals(gate == null ? "" : gate.status())
+                && !unconfirmedAiAuthoredResourceSelection
                 && (!llmIntent.resolved()
-                        || (llmIntent.clarificationQuestions() != null && !llmIntent.clarificationQuestions().isEmpty())
-                        || unconfirmedAiAuthoredResourceSelection);
+                        || (llmIntent.clarificationQuestions() != null && !llmIntent.clarificationQuestions().isEmpty()));
         if ((!hasGovernedClarificationGate(gate) || shouldUseLlmArtifactClarification(gate) || llmAuthoredClarification)
                 && llmIntent != null
+                && !unconfirmedAiAuthoredResourceSelection
                 && (llmIntent.resolved() || llmAuthoredClarification)
                 && llmIntent.assistantMessage() != null
                 && !llmIntent.assistantMessage().isBlank()
@@ -1269,7 +1293,7 @@ public class AgenticAuthoringIntentResolverService {
                     && llmIntent.assistantMessage() != null
                     && !llmIntent.assistantMessage().isBlank()
                     ? llmIntent.assistantMessage()
-                    : "Não consegui confirmar a sua intenção com segurança agora. Confirme se você quer consultar dados disponíveis, criar uma tabela, montar um formulário ou gerar uma visualização.";
+                    : "Não consegui confirmar sua solicitação porque o serviço de IA está temporariamente indisponível no momento. Tente novamente em instantes.";
         }
         if (llmPlatformGuidance
                 && shouldUsePlatformGuidanceMessage(prompt, assistantMessage)) {
@@ -1365,7 +1389,7 @@ public class AgenticAuthoringIntentResolverService {
                 && !contextHintSelectionApplied
                 && !"eligible".equals(gate.status())) {
             quickReplies = llmAuthoredQuickReplies.isEmpty() ? llmIntent.quickReplies() : llmAuthoredQuickReplies;
-            llmAuthoredQuickRepliesUsed = !llmAuthoredQuickReplies.isEmpty();
+            llmAuthoredQuickRepliesUsed = !quickReplies.isEmpty();
         }
         quickReplies = quickReplySupport.canonicalizePresentationAffordanceQuickReplies(request, quickReplies);
         if (quickReplySupport.shouldHideTechnicalAddresses(
@@ -1374,6 +1398,18 @@ public class AgenticAuthoringIntentResolverService {
         }
         boolean clarificationRequired = !questions.isEmpty()
                 || gate != null && "clarification_required".equals(gate.status());
+        if (!primaryLlmIntentProviderFailure
+                && !unresolvedPrimaryLlmIntent
+                && unconfirmedAiAuthoredResourceSelection
+                && !llmAuthoredQuickRepliesUsed
+                && candidates != null
+                && !candidates.isEmpty()) {
+            List<AgenticAuthoringQuickReply> candidateReplies =
+                    quickReplySupport.candidateResourceClarificationQuickReplies(effectivePrompt, candidates);
+            if (!candidateReplies.isEmpty()) {
+                quickReplies = candidateReplies;
+            }
+        }
         boolean clarificationQuickRepliesRecovered = clarificationRequired && quickReplies.isEmpty();
         if (clarificationQuickRepliesRecovered) {
             quickReplies = quickReplySupport.ensureClarificationQuickReplies(
@@ -2476,6 +2512,13 @@ public class AgenticAuthoringIntentResolverService {
             trace.add("skipped:selected-widget-target");
             return null;
         }
+        boolean currentPageHasWidgets = request.currentPage() != null
+                && request.currentPage().path("widgets").isArray()
+                && !request.currentPage().path("widgets").isEmpty();
+        if (currentPageHasWidgets && !detachTargetForReplacement) {
+            trace.add("skipped:non-empty-existing-page");
+            return null;
+        }
         String prompt = normalize(effectivePrompt);
         String artifactKind = materializableResourceDiscoveryArtifactKind(request, "unknown");
         boolean genericDashboardOrientedByPreIntent = "dashboard".equals(artifactKind)
@@ -2636,6 +2679,11 @@ public class AgenticAuthoringIntentResolverService {
                         || resolution.clarificationQuestions().isEmpty()
                 ? List.of(focus.uncertainty())
                 : resolution.clarificationQuestions();
+        boolean hadLlmClarificationQuestions = resolution.clarificationQuestions() != null
+                && !resolution.clarificationQuestions().isEmpty();
+        String safeClarificationAssistantMessage = hadLlmClarificationQuestions
+                ? resolution.assistantMessage()
+                : null;
         return new AgenticAuthoringLlmIntentResolution(
                 false,
                 "unknown",
@@ -2644,7 +2692,7 @@ public class AgenticAuthoringIntentResolverService {
                 null,
                 resolution.resourceSearchQuery(),
                 "none",
-                resolution.assistantMessage(),
+                safeClarificationAssistantMessage,
                 resolution.quickReplies(),
                 questions,
                 List.copyOf(warnings),
@@ -2764,15 +2812,39 @@ public class AgenticAuthoringIntentResolverService {
         if (!isCanonicalResourceIdentity(primaryBusinessEntity) || candidate == null) {
             return false;
         }
+        String normalizedEntity = primaryBusinessEntity.trim().toLowerCase(Locale.ROOT);
         String expectedPath = normalizePath(
-                "/api/" + primaryBusinessEntity.trim().replace('.', '/'));
-        String candidatePath = normalizePath(candidate.resourcePath());
+                "/api/" + normalizedEntity.replace('.', '/'));
+        String candidatePath = normalizePath(candidate.resourcePath()).toLowerCase(Locale.ROOT);
         if (expectedPath.equals(candidatePath)) {
             return true;
         }
         String operation = valueOrDefault(candidate.operation(), candidate.submitMethod());
-        return candidatePath.startsWith(expectedPath + "/")
-                && isReadProjectionOperation(candidate.submitUrl(), operation);
+        if (candidatePath.startsWith(expectedPath + "/")
+                && isReadProjectionOperation(candidate.submitUrl(), operation)) {
+            return true;
+        }
+        boolean governedFocusedMetadataMatch =
+                (hasEvidence(candidate, "domain-discovery-resource-focus")
+                        && !hasEvidence(candidate, "schema-probe-pending"))
+                        || hasEvidence(candidate, "domain-binding")
+                        || hasEvidence(candidate, AgenticAuthoringDomainCatalogCandidateEnhancer.DOMAIN_CATALOG_GROUNDING)
+                        || (hasEvidence(candidate, "llm-resource-focus")
+                                && hasEvidence(candidate, "api-metadata")
+                                && !hasEvidence(candidate, "lexical-fallback")
+                                && !hasEvidence(candidate, "weak-evidence"));
+        if (!governedFocusedMetadataMatch) {
+            return false;
+        }
+        int lastDot = normalizedEntity.lastIndexOf('.');
+        String entitySegment = lastDot >= 0 && lastDot < normalizedEntity.length() - 1
+                ? normalizedEntity.substring(lastDot + 1).trim()
+                : "";
+        int lastSlash = candidatePath.lastIndexOf('/');
+        String candidateTerminal = lastSlash >= 0 && lastSlash < candidatePath.length() - 1
+                ? candidatePath.substring(lastSlash + 1).trim()
+                : candidatePath;
+        return entitySegment.length() >= 3 && entitySegment.equals(candidateTerminal);
     }
 
     private AgenticAuthoringLlmIntentResolution withLlmWarning(
@@ -4237,6 +4309,26 @@ public class AgenticAuthoringIntentResolverService {
             AgenticAuthoringCandidate selectedCandidate,
             List<AgenticAuthoringCandidate> candidates) {
         return apiCatalogGuidanceSupport.apiCatalogAssistantMessage(prompt, selectedCandidate, candidates);
+    }
+
+    private boolean isPageLocalStructuralChangeKind(String changeKind) {
+        String normalized = valueOrDefault(changeKind, "").trim().toLowerCase(java.util.Locale.ROOT);
+        return Set.of(
+                        "page.configure",
+                        "canvas.configure",
+                        "widget.moveresize",
+                        "widget.shell.configure",
+                        "widget.remove",
+                        "state.set",
+                        "composition.link.add",
+                        "composition.link.remove",
+                        "configure_page",
+                        "update_page_layout",
+                        "edit_page_layout",
+                        "rename_page",
+                        "reorder_widgets",
+                        "update_layout")
+                .contains(normalized);
     }
 
     private boolean isApiCatalogQuestion(String operationKind, String artifactKind, String changeKind) {

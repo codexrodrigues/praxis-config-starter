@@ -170,4 +170,41 @@ class AgenticAuthoringCurrentPageAnalyzerTest {
         assertThat(widgetSummary.path("activeTab").path("label").asText()).isEqualTo("Training");
         assertThat(widgetSummary.path("activeTab").path("widgetsCount").asInt()).isZero();
     }
+
+    @Test
+    void doesNotPinMultiWidgetPageWithoutSelectionToEmbeddedFormWidget() {
+        ObjectNode page = objectMapper.createObjectNode();
+        var widgets = page.putArray("widgets");
+        widgets.addObject()
+                .put("key", "records-table-1")
+                .putObject("definition")
+                .put("id", "praxis-table")
+                .putObject("inputs")
+                .put("resourcePath", "/api/human-resources/registros");
+        widgets.addObject()
+                .put("key", "connected-form-2")
+                .putObject("definition")
+                .put("id", "praxis-dynamic-form")
+                .putObject("inputs")
+                .put("resourcePath", "/api/human-resources/registros");
+
+        assertThat(analyzer.resolveTarget(page, null)).isNull();
+
+        AgenticAuthoringTarget explicit = analyzer.resolveTarget(page, "connected-form-2");
+        assertThat(explicit).isNotNull();
+        assertThat(explicit.widgetKey()).isEqualTo("connected-form-2");
+        assertThat(explicit.componentId()).isEqualTo("praxis-dynamic-form");
+
+        ObjectNode singleFormPage = objectMapper.createObjectNode();
+        singleFormPage.putArray("widgets").addObject()
+                .put("key", "solo-form")
+                .putObject("definition")
+                .put("id", "praxis-dynamic-form")
+                .putObject("inputs")
+                .put("resourcePath", "/api/human-resources/registros");
+
+        AgenticAuthoringTarget solo = analyzer.resolveTarget(singleFormPage, null);
+        assertThat(solo).isNotNull();
+        assertThat(solo.widgetKey()).isEqualTo("solo-form");
+    }
 }
