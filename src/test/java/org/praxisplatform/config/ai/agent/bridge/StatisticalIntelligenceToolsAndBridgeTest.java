@@ -18,6 +18,7 @@ import java.util.OptionalLong;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Function;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
@@ -34,8 +35,13 @@ import org.praxisplatform.config.ai.agent.runtime.TurnScopedPiiVault;
 import org.praxisplatform.config.ai.agent.spi.AgentEpistemicEnvelope;
 import org.praxisplatform.config.ai.agent.spi.AgentEntityDescriptor;
 import org.praxisplatform.config.ai.agent.spi.AgentExecutionContext;
+import org.praxisplatform.config.ai.agent.spi.AgentExtensionArtifact;
 import org.praxisplatform.config.ai.agent.spi.AgentResourceExecutionBridge;
+import org.praxisplatform.config.ai.agent.spi.AgentStatisticalAnalysisResult;
+import org.praxisplatform.config.ai.agent.tools.OperationalAgentTool;
+import org.praxisplatform.config.ai.agent.tools.RunResourceCounterfactualSearchTool;
 import org.praxisplatform.config.ai.agent.tools.RunResourceStatisticalInferenceTool;
+import org.praxisplatform.config.ai.agent.tools.RunResourceStochasticSimulationTool;
 import org.praxisplatform.config.ai.agent.tools.ScanResourceAnomaliesTool;
 import org.praxisplatform.config.autoconfig.OperationalAgentAutoConfiguration;
 import org.praxisplatform.config.service.AiCallConfig;
@@ -50,16 +56,37 @@ import org.praxisplatform.intelligence.contracts.anomaly.AnomalyScanSummary;
 import org.praxisplatform.intelligence.contracts.anomaly.AnomalyScope;
 import org.praxisplatform.intelligence.contracts.anomaly.AnomalySeverity;
 import org.praxisplatform.intelligence.contracts.anomaly.DecompositionStepRole;
+import org.praxisplatform.intelligence.contracts.counterfactual.CounterfactualCandidate;
+import org.praxisplatform.intelligence.contracts.counterfactual.CounterfactualDirection;
+import org.praxisplatform.intelligence.contracts.counterfactual.CounterfactualFeasibilityStatus;
+import org.praxisplatform.intelligence.contracts.counterfactual.CounterfactualLeverDelta;
+import org.praxisplatform.intelligence.contracts.counterfactual.CounterfactualRequest;
+import org.praxisplatform.intelligence.contracts.counterfactual.CounterfactualResponse;
 import org.praxisplatform.intelligence.contracts.error.IntelligenceErrorCode;
 import org.praxisplatform.intelligence.contracts.error.IntelligenceExecutionException;
 import org.praxisplatform.intelligence.contracts.epistemic.EpistemicKind;
 import org.praxisplatform.intelligence.contracts.inference.InferenceGroupResult;
 import org.praxisplatform.intelligence.contracts.inference.InferenceResponse;
 import org.praxisplatform.intelligence.contracts.inference.InferenceTestKind;
+import org.praxisplatform.intelligence.contracts.jobs.IntelligenceJobReceipt;
 import org.praxisplatform.intelligence.contracts.modelcard.ModelCardDescriptor;
 import org.praxisplatform.intelligence.contracts.provenance.AnalyticalProvenance;
 import org.praxisplatform.intelligence.contracts.provenance.SuppressionStatus;
+import org.praxisplatform.intelligence.contracts.simulation.AnchorRevalidationStatus;
+import org.praxisplatform.intelligence.contracts.simulation.AnchorScenarioPoint;
+import org.praxisplatform.intelligence.contracts.simulation.FanChartPoint;
+import org.praxisplatform.intelligence.contracts.simulation.StochasticSimulationRequest;
+import org.praxisplatform.intelligence.contracts.simulation.StochasticSimulationResponse;
+import org.praxisplatform.intelligence.contracts.simulation.ThresholdBreachOutcome;
+import org.praxisplatform.intelligence.contracts.simulation.ThresholdDirection;
+import org.praxisplatform.intelligence.contracts.simulation.TornadoSensitivityDriver;
+import org.praxisplatform.intelligence.contracts.spi.AnchorScenarioRevalidator;
+import org.praxisplatform.intelligence.contracts.spi.CounterfactualRuleValidator;
+import org.praxisplatform.intelligence.contracts.spi.CounterfactualSearchOrchestrator;
 import org.praxisplatform.intelligence.contracts.spi.ResourceIntelligenceExecutor;
+import org.praxisplatform.intelligence.contracts.spi.StochasticSimulationOrchestrator;
+import org.springframework.boot.context.annotation.UserConfigurations;
+import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 import org.praxisplatform.uischema.annotation.AiUsagePolicy;
 import org.praxisplatform.uischema.annotation.AiVisibilityMode;
 import org.praxisplatform.uischema.annotation.ApiResource;
@@ -84,11 +111,13 @@ import org.praxisplatform.uischema.stats.StatsSupportMode;
 import org.praxisplatform.uischema.stats.dto.AnomalyScanStatsRequest;
 import org.praxisplatform.uischema.stats.dto.ComparisonStatsRequest;
 import org.praxisplatform.uischema.stats.dto.ComparisonStatsResponse;
+import org.praxisplatform.uischema.stats.dto.CounterfactualStatsRequest;
 import org.praxisplatform.uischema.stats.dto.DistributionStatsRequest;
 import org.praxisplatform.uischema.stats.dto.DistributionStatsResponse;
 import org.praxisplatform.uischema.stats.dto.GroupByStatsRequest;
 import org.praxisplatform.uischema.stats.dto.GroupByStatsResponse;
 import org.praxisplatform.uischema.stats.dto.InferenceStatsRequest;
+import org.praxisplatform.uischema.stats.dto.StochasticSimulationStatsRequest;
 import org.praxisplatform.uischema.stats.dto.TimeSeriesStatsRequest;
 import org.praxisplatform.uischema.stats.dto.TimeSeriesStatsResponse;
 import org.springframework.boot.autoconfigure.AutoConfigurations;
@@ -176,6 +205,8 @@ class StatisticalIntelligenceToolsAndBridgeTest {
     public static class StubPayrollService implements BaseResourceQueryService<PayrollSlipDto, Long, PayrollSlipFilterDto> {
         Function<InferenceStatsRequest<PayrollSlipFilterDto>, InferenceResponse> inferenceHandler;
         Function<AnomalyScanStatsRequest<PayrollSlipFilterDto>, AnomalyScanResponse> anomalyHandler;
+        Function<StochasticSimulationStatsRequest<PayrollSlipFilterDto>, StochasticSimulationResponse> simulationHandler;
+        Function<CounterfactualStatsRequest<PayrollSlipFilterDto>, CounterfactualResponse> counterfactualHandler;
 
         @Override public String getIdFieldName() { return "id"; }
         @Override public Sort getDefaultSort() { return Sort.by("id"); }
@@ -185,6 +216,8 @@ class StatisticalIntelligenceToolsAndBridgeTest {
         @Override public StatsSupportMode getDistributionStatsSupportMode() { return StatsSupportMode.DISABLED; }
         @Override public StatsSupportMode getInferenceStatsSupportMode() { return StatsSupportMode.AUTO; }
         @Override public StatsSupportMode getAnomalyStatsSupportMode() { return StatsSupportMode.AUTO; }
+        @Override public StatsSupportMode getSimulationStatsSupportMode() { return StatsSupportMode.AUTO; }
+        @Override public StatsSupportMode getCounterfactualStatsSupportMode() { return StatsSupportMode.AUTO; }
 
         @Override
         public StatsFieldRegistry getStatsFieldRegistry() {
@@ -222,6 +255,18 @@ class StatisticalIntelligenceToolsAndBridgeTest {
         @Override
         public AnomalyScanResponse anomalyScanStats(AnomalyScanStatsRequest<PayrollSlipFilterDto> request) {
             return anomalyHandler.apply(request);
+        }
+
+        @Override
+        public StochasticSimulationResponse stochasticSimulationStats(
+                StochasticSimulationStatsRequest<PayrollSlipFilterDto> request) {
+            return simulationHandler.apply(request);
+        }
+
+        @Override
+        public CounterfactualResponse counterfactualStats(
+                CounterfactualStatsRequest<PayrollSlipFilterDto> request) {
+            return counterfactualHandler.apply(request);
         }
     }
 
@@ -418,6 +463,8 @@ class StatisticalIntelligenceToolsAndBridgeTest {
                     assertThat(context).hasSingleBean(PraxisOperationalAgentLoop.class);
                     assertThat(context).doesNotHaveBean(RunResourceStatisticalInferenceTool.class);
                     assertThat(context).doesNotHaveBean(ScanResourceAnomaliesTool.class);
+                    assertThat(context).doesNotHaveBean(RunResourceStochasticSimulationTool.class);
+                    assertThat(context).doesNotHaveBean(RunResourceCounterfactualSearchTool.class);
                 });
 
         // 2. With opt-in property expose-when-unavailable=true, tools register in fail-closed mode
@@ -431,6 +478,8 @@ class StatisticalIntelligenceToolsAndBridgeTest {
                     assertThat(context).hasNotFailed();
                     assertThat(context).hasSingleBean(RunResourceStatisticalInferenceTool.class);
                     assertThat(context).hasSingleBean(ScanResourceAnomaliesTool.class);
+                    assertThat(context).hasSingleBean(RunResourceStochasticSimulationTool.class);
+                    assertThat(context).hasSingleBean(RunResourceCounterfactualSearchTool.class);
                 });
 
         // 3. With ResourceIntelligenceExecutor bean active, tools register automatically
@@ -444,6 +493,8 @@ class StatisticalIntelligenceToolsAndBridgeTest {
                     assertThat(context).hasNotFailed();
                     assertThat(context).hasSingleBean(RunResourceStatisticalInferenceTool.class);
                     assertThat(context).hasSingleBean(ScanResourceAnomaliesTool.class);
+                    assertThat(context).hasSingleBean(RunResourceStochasticSimulationTool.class);
+                    assertThat(context).hasSingleBean(RunResourceCounterfactualSearchTool.class);
                 });
 
         // 4. With intelligence classes absent via FilteredClassLoader, auto-config still boots cleanly
@@ -459,6 +510,8 @@ class StatisticalIntelligenceToolsAndBridgeTest {
                     assertThat(context).hasNotFailed();
                     assertThat(context).doesNotHaveBean(RunResourceStatisticalInferenceTool.class);
                     assertThat(context).doesNotHaveBean(ScanResourceAnomaliesTool.class);
+                    assertThat(context).doesNotHaveBean(RunResourceStochasticSimulationTool.class);
+                    assertThat(context).doesNotHaveBean(RunResourceCounterfactualSearchTool.class);
                 });
     }
 
@@ -885,5 +938,640 @@ class StatisticalIntelligenceToolsAndBridgeTest {
                         "workforce.plural-recipe", "restricted-rel-recipe", Map.of(), null, null, null)))
                 .isInstanceOf(SecurityException.class)
                 .hasMessageContaining("broadRestrictedFilter");
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void runResourceStochasticSimulationToolAndBridgeEnforceNonTxCapabilityMaskingAndAnchorDriftDegradation() {
+        StubPayrollService service = new StubPayrollService();
+        PlatformTransactionManager txManager = mock(PlatformTransactionManager.class);
+        MetadataStarterInProcessAgentBridge bridge = new MetadataStarterInProcessAgentBridge(
+                List.of(new StubPayrollController(service)),
+                List.of(ctx -> List.of(new AgentEntityDescriptor(
+                        "workforce.payroll-slips", "workforce.payroll-slips", "/api/workforce/payroll-slips",
+                        "Payroll Slips", "Workforce payroll slips", "payments",
+                        "id", "cohortKey", "cohortKey", List.of("cohortKey"),
+                        null, "cohortKey", null, "/payroll/{id}", "payroll", 100))),
+                List.of(),
+                List.of(),
+                null, null, null,
+                new DefaultMetadataGovernanceAgentAuthorizationBridge(),
+                new DefaultConversionService(),
+                new ObjectMapper().findAndRegisterModules(),
+                txManager);
+
+        AgentExecutionContext ctx = new AgentExecutionContext(
+                UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID(),
+                "tenant-a", "auditor", "prod", "auditor",
+                Set.of("ROLE_READ"), null, null, Map.of(), Map.of());
+
+        var digest = bridge.describeEntitySchema(ctx, "workforce.payroll-slips").orElseThrow();
+        assertThat(digest.statsCapability().simulationMode()).isEqualTo("AUTO");
+        assertThat(digest.statsCapability().counterfactualMode()).isEqualTo("AUTO");
+        org.mockito.Mockito.reset(txManager);
+
+        RunResourceStochasticSimulationTool simTool = new RunResourceStochasticSimulationTool(bridge);
+        assertThat(simTool.safetyClass()).isEqualTo(OperationalAgentTool.AgentToolSafetyClass.SIMULATION);
+
+        AnalyticalProvenance simProv = new AnalyticalProvenance(
+                IntelligenceContractVersion.V1, "praxis-intelligence-python", "0.1.0", "3.12",
+                SHA_LOCK, "WF-SIM-01", "1.0.0", 42L, LocalDate.of(2026, 11, 1),
+                SHA_SNAPSHOT, SHA_ASSUMPTIONS, EpistemicKind.STOCHASTIC_SIMULATION,
+                2000L, 0, "corr-sim", "job-sim", Instant.parse("2026-11-24T00:00:00Z"));
+        ModelCardDescriptor simCard = new ModelCardDescriptor(
+                "WF-SIM-01", "1.0.0", "Stochastic Budget Simulation", "workforce.payroll",
+                "QMC_SOBOL_IMAN_CONOVER", EpistemicKind.STOCHASTIC_SIMULATION,
+                "Calibrated scenario simulation.", List.of("Not deterministic law"),
+                15, List.of("Stationary correlations"), "Human governance review required");
+
+        AtomicBoolean txActiveDuringCall = new AtomicBoolean(true);
+        service.simulationHandler = req -> {
+            txActiveDuringCall.set(TransactionSynchronizationManager.isActualTransactionActive());
+            return new StochasticSimulationResponse(
+                    IntelligenceContractVersion.V1,
+                    simProv,
+                    simCard,
+                    2000,
+                    2,
+                    List.of(
+                            new FanChartPoint(
+                                    1, new BigDecimal("100500.00"), new BigDecimal("2100.00"),
+                                    Map.of(
+                                            "p05", new BigDecimal("96000.00"),
+                                            "p10", new BigDecimal("97500.00"),
+                                            "p25", new BigDecimal("99000.00"),
+                                            "p50", new BigDecimal("100500.00"),
+                                            "p75", new BigDecimal("102000.00"),
+                                            "p90", new BigDecimal("103800.00"),
+                                            "p95", new BigDecimal("105200.00")),
+                                    Map.of()),
+                            new FanChartPoint(
+                                    2, new BigDecimal("102500.00"), new BigDecimal("2400.00"),
+                                    Map.of(
+                                            "p05", new BigDecimal("97000.00"),
+                                            "p10", new BigDecimal("98800.00"),
+                                            "p25", new BigDecimal("100600.00"),
+                                            "p50", new BigDecimal("102500.00"),
+                                            "p75", new BigDecimal("104200.00"),
+                                            "p90", new BigDecimal("106000.00"),
+                                            "p95", new BigDecimal("108000.00")),
+                                    Map.of())),
+                    new BigDecimal("102500.00"),
+                    new BigDecimal("2400.00"),
+                    new BigDecimal("108900.00"),
+                    Map.of("p50", new BigDecimal("102500.00"), "p95", new BigDecimal("108000.00")),
+                    List.of(new ThresholdBreachOutcome(
+                            "cap_warning", ThresholdDirection.UPPER_CAP, "general_fund",
+                            0.18d, 0.16d, 0.20d, new BigDecimal("1200.00"), null)),
+                    List.of(
+                            new TornadoSensitivityDriver(
+                                    "overtimeFactor", 0.35d, new BigDecimal("99000.00"), new BigDecimal("102000.00"),
+                                    new BigDecimal("3000.00"), 2),
+                            new TornadoSensitivityDriver(
+                                    "baseRateFactor", 0.85d, new BigDecimal("96000.00"), new BigDecimal("106000.00"),
+                                    new BigDecimal("10000.00"), 1)),
+                    List.of(new AnchorScenarioPoint(
+                            "P50", 0.50d, 1000, new BigDecimal("100500.00"), Map.of("baseRateFactor", 1.03d),
+                            new BigDecimal("100502.00"), 0.002d, AnchorRevalidationStatus.REVALIDATED_WITHIN_TOLERANCE)),
+                    0,
+                    SuppressionStatus.EXACT_RELEASE);
+        };
+
+        AgentTurnArtifactStore artifacts = new AgentTurnArtifactStore();
+        TurnScopedPiiVault vault = TurnScopedPiiVault.tokenize("Simulate workforce projection");
+        Map<String, Object> simArgs = Map.of(
+                "entityKey", "workforce.payroll-slips",
+                "scenarioCount", 2000,
+                "horizonPeriods", 2,
+                "modelPoints", List.of(Map.of(
+                        "pointKey", "cohort_ops",
+                        "weightCount", 40,
+                        "baseAmount", 2500.0d,
+                        "factorSensitivities", Map.of("baseRateFactor", 1.0d))),
+                "stochasticFactors", List.of(Map.of(
+                        "factorKey", "baseRateFactor",
+                        "distribution", "NORMAL",
+                        "parameters", Map.of("mean", 1.0d, "stdDev", 0.03d))),
+                "thresholds", List.of(Map.of(
+                        "thresholdId", "cap_warning",
+                        "label", "Operating Cap",
+                        "direction", "UPPER_CAP",
+                        "limitValue", 104000.0d)));
+
+        Map<String, Object> simOut = simTool.execute(ctx, vault, artifacts, simArgs);
+        assertThat(txActiveDuringCall.get()).isFalse();
+        verifyNoInteractions(txManager);
+        assertThat(simOut).containsEntry("availabilityState", AgentEpistemicEnvelope.AVAILABILITY_AVAILABLE);
+        assertThat(simOut).containsEntry("allAnchorsWithinTolerance", Boolean.TRUE);
+        assertThat(artifacts.extensionArtifacts()).hasSize(1);
+        AgentExtensionArtifact simArtifact = artifacts.extensionArtifacts().get(0);
+        assertThat(simArtifact.kind()).isEqualTo(AgentExtensionArtifact.KIND_STOCHASTIC_SIMULATION);
+        assertThat(simArtifact.epistemicEnvelope().epistemicKind())
+                .isEqualTo(AgentEpistemicEnvelope.KIND_STOCHASTIC_SIMULATION);
+        List<Map<String, Object>> tornadoOut = (List<Map<String, Object>>) simOut.get("tornadoDrivers");
+        assertThat(tornadoOut).hasSize(2);
+        assertThat(tornadoOut.get(0)).containsEntry("factorKey", "baseRateFactor");
+
+        // Anchor drift exceeded degrades fail-closed
+        service.simulationHandler = req -> new StochasticSimulationResponse(
+                IntelligenceContractVersion.V1,
+                simProv,
+                simCard,
+                2000,
+                2,
+                List.of(
+                        new FanChartPoint(1, new BigDecimal("100500.00"), new BigDecimal("2100.00"),
+                                Map.of("p50", new BigDecimal("100500.00")), Map.of()),
+                        new FanChartPoint(2, new BigDecimal("102500.00"), new BigDecimal("2400.00"),
+                                Map.of("p50", new BigDecimal("102500.00")), Map.of())),
+                new BigDecimal("100500.00"),
+                new BigDecimal("2100.00"),
+                new BigDecimal("106100.00"),
+                Map.of("p50", new BigDecimal("100500.00")),
+                List.of(),
+                List.of(),
+                List.of(new AnchorScenarioPoint(
+                        "P90", 0.90d, 1800, new BigDecimal("104000.00"), Map.of("baseRateFactor", 1.07d),
+                        new BigDecimal("112000.00"), 7.69d, AnchorRevalidationStatus.REVALIDATED_DRIFT_EXCEEDED)),
+                0,
+                SuppressionStatus.EXACT_RELEASE);
+
+        Map<String, Object> driftedOut = simTool.execute(ctx, vault, artifacts, simArgs);
+        assertThat(driftedOut).containsEntry("availabilityState", AgentEpistemicEnvelope.AVAILABILITY_DEGRADED);
+        assertThat(driftedOut).containsEntry("allAnchorsWithinTolerance", Boolean.FALSE);
+        assertThat((List<?>) driftedOut.get("fanChart")).isEmpty();
+
+        // Drift circuit open exception maps to DEGRADED without throwing
+        service.simulationHandler = req -> {
+            throw new IntelligenceExecutionException(
+                    IntelligenceErrorCode.DRIFT_CIRCUIT_OPEN,
+                    "Anchor drift circuit breaker open");
+        };
+        Map<String, Object> circuitOut = simTool.execute(ctx, vault, artifacts, simArgs);
+        assertThat(circuitOut).containsEntry("availabilityState", AgentEpistemicEnvelope.AVAILABILITY_DEGRADED);
+        assertThat(circuitOut).containsEntry("errorCode", "DRIFT_CIRCUIT_OPEN");
+
+        // Blocked DENY column in factorKey must throw SecurityException
+        assertThatThrownBy(() -> simTool.execute(
+                ctx,
+                vault,
+                artifacts,
+                Map.of(
+                        "entityKey", "workforce.payroll-slips",
+                        "stochasticFactors", List.of(Map.of(
+                                "factorKey", "confidentialBonus",
+                                "distribution", "NORMAL",
+                                "parameters", Map.of("mean", 1.0d, "stdDev", 0.1d))))))
+                .isInstanceOf(SecurityException.class)
+                .hasMessageContaining("confidentialBonus");
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void runResourceCounterfactualSearchToolAndBridgeEnforceDoubleRuleValidationFilterNonTxAndGovernance() {
+        StubPayrollService service = new StubPayrollService();
+        PlatformTransactionManager txManager = mock(PlatformTransactionManager.class);
+        MetadataStarterInProcessAgentBridge bridge = new MetadataStarterInProcessAgentBridge(
+                List.of(new StubPayrollController(service)),
+                List.of(ctx -> List.of(new AgentEntityDescriptor(
+                        "workforce.payroll-slips", "workforce.payroll-slips", "/api/workforce/payroll-slips",
+                        "Payroll Slips", "Workforce payroll slips", "payments",
+                        "id", "cohortKey", "cohortKey", List.of("cohortKey"),
+                        null, "cohortKey", null, "/payroll/{id}", "payroll", 100))),
+                List.of(),
+                List.of(),
+                null, null, null,
+                new DefaultMetadataGovernanceAgentAuthorizationBridge(),
+                new DefaultConversionService(),
+                new ObjectMapper().findAndRegisterModules(),
+                txManager);
+
+        AgentExecutionContext ctx = new AgentExecutionContext(
+                UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID(),
+                "tenant-a", "auditor", "prod", "auditor",
+                Set.of("ROLE_READ"), null, null, Map.of(), Map.of());
+
+        RunResourceCounterfactualSearchTool cfTool = new RunResourceCounterfactualSearchTool(bridge);
+        assertThat(cfTool.safetyClass()).isEqualTo(OperationalAgentTool.AgentToolSafetyClass.SIMULATION);
+
+        AnalyticalProvenance cfProv = new AnalyticalProvenance(
+                IntelligenceContractVersion.V1, "praxis-intelligence-python", "0.1.0", "3.12",
+                SHA_LOCK, "WF-CF-01", "1.0.0", 42L, LocalDate.of(2026, 11, 1),
+                SHA_SNAPSHOT, SHA_ASSUMPTIONS, EpistemicKind.OPTIMIZATION_RESULT,
+                120L, 0, "corr-cf", "job-cf", Instant.parse("2026-11-24T00:00:00Z"));
+        ModelCardDescriptor cfCard = new ModelCardDescriptor(
+                "WF-CF-01", "1.0.0", "Counterfactual Recourse", "workforce.payroll",
+                "MILP_RULE_VALIDATED", EpistemicKind.OPTIMIZATION_RESULT,
+                "Advisory recourse search.", List.of("Advisory only; human approval required"),
+                15, List.of("Fixed policy constraints"), "Human review mandatory");
+
+        AtomicBoolean txActiveDuringCall = new AtomicBoolean(true);
+        service.counterfactualHandler = req -> {
+            txActiveDuringCall.set(TransactionSynchronizationManager.isActualTransactionActive());
+            return new CounterfactualResponse(
+                    IntelligenceContractVersion.V1,
+                    cfProv,
+                    cfCard,
+                    new BigDecimal("51.30"),
+                    new BigDecimal("48.50"),
+                    true,
+                    List.of(new CounterfactualCandidate(
+                            "cf-valid-1",
+                            1,
+                            List.of(new CounterfactualLeverDelta(
+                                    "overtimeCapPct", 15.0d, 10.0d, -0.33d, new BigDecimal("-2.90"))),
+                            new BigDecimal("48.40"),
+                            new BigDecimal("-2.90"),
+                            0.42d,
+                            CounterfactualFeasibilityStatus.VALIDATED_BY_RULES_ENGINE,
+                            List.of("Regra deterministica aprovada"))),
+                    2);
+        };
+
+        AgentTurnArtifactStore artifacts = new AgentTurnArtifactStore();
+        TurnScopedPiiVault vault = TurnScopedPiiVault.tokenize("Search counterfactual recourse");
+        Map<String, Object> cfArgs = Map.of(
+                "entityKey", "workforce.payroll-slips",
+                "targetMetricKey", "observedValue",
+                "direction", "DECREASE_TO_TARGET",
+                "baselineValue", 51.30d,
+                "targetValue", 48.50d,
+                "mutableLevers", List.of(Map.of(
+                        "leverKey", "overtimeCapPct",
+                        "leverType", "CONTINUOUS",
+                        "currentValue", 15.0d,
+                        "minValue", 5.0d,
+                        "maxValue", 20.0d,
+                        "linearSensitivity", 0.58d)));
+
+        Map<String, Object> cfOut = cfTool.execute(ctx, vault, artifacts, cfArgs);
+        assertThat(txActiveDuringCall.get()).isFalse();
+        verifyNoInteractions(txManager);
+        assertThat(cfOut).containsEntry("availabilityState", AgentEpistemicEnvelope.AVAILABILITY_AVAILABLE);
+        assertThat(cfOut).containsEntry("advisoryOnly", Boolean.TRUE);
+        assertThat(cfOut).containsEntry("requiresHumanGovernanceApproval", Boolean.TRUE);
+        assertThat(cfOut).containsEntry("validatedCandidateCount", 1);
+        assertThat(cfOut).containsEntry("excludedCandidateCount", 2);
+        assertThat((List<Map<String, Object>>) cfOut.get("candidates")).hasSize(1);
+        assertThat(artifacts.extensionArtifacts()).hasSize(1);
+        assertThat(artifacts.extensionArtifacts().get(0).kind())
+                .isEqualTo(AgentExtensionArtifact.KIND_COUNTERFACTUAL_SEARCH);
+
+        // Unverified candidate leaked into response triggers fail-closed DEGRADED & strips all candidates
+        service.counterfactualHandler = req -> new CounterfactualResponse(
+                IntelligenceContractVersion.V1,
+                cfProv,
+                cfCard,
+                new BigDecimal("51.30"),
+                new BigDecimal("48.50"),
+                true,
+                List.of(
+                        new CounterfactualCandidate(
+                                "cf-valid-ok", 1,
+                                List.of(new CounterfactualLeverDelta(
+                                        "overtimeCapPct", 15.0d, 10.0d, -0.33d, new BigDecimal("-2.90"))),
+                                new BigDecimal("48.40"), new BigDecimal("-2.90"),
+                                0.4d, CounterfactualFeasibilityStatus.VALIDATED_BY_RULES_ENGINE, List.of()),
+                        new CounterfactualCandidate(
+                                "cf-unverified", 2,
+                                List.of(new CounterfactualLeverDelta(
+                                        "overtimeCapPct", 15.0d, 9.0d, -0.40d, new BigDecimal("-3.30"))),
+                                new BigDecimal("48.00"), new BigDecimal("-3.30"),
+                                0.3d, CounterfactualFeasibilityStatus.CANDIDATE_UNVERIFIED, List.of())),
+                1);
+        Map<String, Object> leakedOut = cfTool.execute(ctx, vault, artifacts, cfArgs);
+        assertThat(leakedOut).containsEntry("availabilityState", AgentEpistemicEnvelope.AVAILABILITY_DEGRADED);
+        assertThat(leakedOut).containsEntry("validatedCandidateCount", 0);
+        assertThat((List<?>) leakedOut.get("candidates")).isEmpty();
+
+        // Non-convergent optimizer maps to DEGRADED
+        service.counterfactualHandler = req -> {
+            throw new IntelligenceExecutionException(
+                    IntelligenceErrorCode.NON_CONVERGENT_OPTIMIZER,
+                    "Infeasible lever bounds");
+        };
+        Map<String, Object> nonConvOut = cfTool.execute(ctx, vault, artifacts, cfArgs);
+        assertThat(nonConvOut).containsEntry("availabilityState", AgentEpistemicEnvelope.AVAILABILITY_DEGRADED);
+        assertThat(nonConvOut).containsEntry("errorCode", "NON_CONVERGENT_OPTIMIZER");
+
+        // Engine unavailable maps to ENGINE_UNAVAILABLE
+        service.counterfactualHandler = req -> {
+            throw new IntelligenceExecutionException(
+                    IntelligenceErrorCode.INTELLIGENCE_ENGINE_UNAVAILABLE,
+                    "Python worker down");
+        };
+        Map<String, Object> downOut = cfTool.execute(ctx, vault, artifacts, cfArgs);
+        assertThat(downOut).containsEntry("availabilityState", AgentEpistemicEnvelope.AVAILABILITY_ENGINE_UNAVAILABLE);
+        assertThat(downOut).containsEntry("errorCode", "INTELLIGENCE_ENGINE_UNAVAILABLE");
+
+        // Blocked DENY column in targetMetricKey or mutableLevers throws SecurityException
+        assertThatThrownBy(() -> cfTool.execute(
+                ctx,
+                vault,
+                artifacts,
+                Map.of(
+                        "entityKey", "workforce.payroll-slips",
+                        "targetMetricKey", "confidentialBonus",
+                        "direction", "DECREASE_TO_TARGET",
+                        "baselineValue", 100.0d,
+                        "targetValue", 80.0d,
+                        "mutableLevers", List.of())))
+                .isInstanceOf(SecurityException.class)
+                .hasMessageContaining("confidentialBonus");
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void onda2HardeningCoversSchemasDatasetStampingOrchestratorAutoConfigNestedGovernanceAndLoop() {
+        StubPayrollService service = new StubPayrollService();
+        MetadataStarterInProcessAgentBridge bridge = new MetadataStarterInProcessAgentBridge(
+                List.of(new StubPayrollController(service)),
+                List.of(), List.of(), List.of(),
+                null, null, null,
+                new DefaultMetadataGovernanceAgentAuthorizationBridge(),
+                new DefaultConversionService(),
+                new ObjectMapper().findAndRegisterModules(),
+                null);
+
+        AgentExecutionContext ctx = new AgentExecutionContext(
+                UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID(),
+                "tenant-a", "auditor", "prod", "auditor",
+                Set.of("ROLE_READ"), null, null, Map.of(), Map.of());
+        TurnScopedPiiVault vault = TurnScopedPiiVault.tokenize("Test Onda 2 hardening");
+
+        // 1. Tool declarations omit datasetKey, require stochasticFactors, and publish enum/nested item schemas
+        RunResourceStochasticSimulationTool simTool = new RunResourceStochasticSimulationTool(bridge);
+        Map<String, Object> simProps = (Map<String, Object>) simTool.declaration().parametersJsonSchema().get("properties");
+        assertThat(simProps).doesNotContainKey("datasetKey");
+        assertThat(simTool.declaration().requiredParameters()).containsExactly("entityKey", "stochasticFactors");
+        assertThat((Map<String, Object>) simProps.get("samplingStrategy")).containsKey("enum");
+        Map<String, Object> factorSchema = (Map<String, Object>) ((Map<String, Object>) simProps.get("stochasticFactors")).get("items");
+        assertThat((Map<String, Object>) ((Map<String, Object>) factorSchema.get("properties")).get("distribution")).containsKey("enum");
+
+        RunResourceCounterfactualSearchTool cfTool = new RunResourceCounterfactualSearchTool(bridge);
+        Map<String, Object> cfProps = (Map<String, Object>) cfTool.declaration().parametersJsonSchema().get("properties");
+        assertThat(cfProps).doesNotContainKey("datasetKey");
+        assertThat((Map<String, Object>) cfProps.get("direction")).containsKey("enum");
+        Map<String, Object> leverSchema = (Map<String, Object>) ((Map<String, Object>) cfProps.get("mutableLevers")).get("items");
+        assertThat((Map<String, Object>) ((Map<String, Object>) leverSchema.get("properties")).get("leverType")).containsKey("enum");
+
+        // 2. Malformed numeric/date arguments throw IllegalArgumentException cleanly
+        assertThatThrownBy(() -> simTool.execute(ctx, vault, new AgentTurnArtifactStore(), Map.of(
+                "entityKey", "workforce.payroll-slips",
+                "horizonPeriods", "not-an-int")))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("horizonPeriods");
+        assertThatThrownBy(() -> simTool.execute(ctx, vault, new AgentTurnArtifactStore(), Map.of(
+                "entityKey", "workforce.payroll-slips",
+                "asOfDate", "2026-99-99")))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("asOfDate");
+        assertThatThrownBy(() -> cfTool.execute(ctx, vault, new AgentTurnArtifactStore(), Map.of(
+                "entityKey", "workforce.payroll-slips",
+                "maxCandidates", "bad-int")))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("maxCandidates");
+
+        // 3. Canonical resourceKey is stamped as datasetKey & byFundingSource/realizedFactorValues filter blocked keys
+        AnalyticalProvenance simProv = new AnalyticalProvenance(
+                IntelligenceContractVersion.V1, "praxis-intelligence-python", "0.1.0", "3.12",
+                SHA_LOCK, "WF-SIM-02", "1.0.0", 42L, LocalDate.of(2026, 11, 1),
+                SHA_SNAPSHOT, SHA_ASSUMPTIONS, EpistemicKind.STOCHASTIC_SIMULATION,
+                500L, 0, "corr-h", "job-h", Instant.parse("2026-11-24T00:00:00Z"));
+        ModelCardDescriptor simCard = new ModelCardDescriptor(
+                "WF-SIM-02", "1.0.0", "Sim", "workforce.payroll", "QMC", EpistemicKind.STOCHASTIC_SIMULATION,
+                "Calibrated", List.of("Advisory"), 15, List.of("Assumptions"), "Human approval");
+        AtomicReference<String> seenSimDataset = new AtomicReference<>();
+        service.simulationHandler = req -> {
+            seenSimDataset.set(req.datasetKey());
+            return new StochasticSimulationResponse(
+                    IntelligenceContractVersion.V1, simProv, simCard, 500, 1,
+                    List.of(new FanChartPoint(
+                            1, new BigDecimal("1000.00"), new BigDecimal("50.00"),
+                            Map.of("p50", new BigDecimal("1000.00")),
+                            Map.of("GENERAL_FUND", new BigDecimal("900.00"), "confidentialBonus", new BigDecimal("100.00")))),
+                    new BigDecimal("1000.00"), new BigDecimal("50.00"), new BigDecimal("1100.00"),
+                    Map.of("p50", new BigDecimal("1000.00")),
+                    List.of(new ThresholdBreachOutcome(
+                            "cap_warning", ThresholdDirection.UPPER_CAP, null, 0.12d, 0.09d, 0.15d,
+                            new BigDecimal("40.00"), null)),
+                    List.of(new TornadoSensitivityDriver(
+                            "wageIndex", 0.7d, new BigDecimal("950.00"), new BigDecimal("1050.00"),
+                            new BigDecimal("100.00"), 1)),
+                    List.of(new AnchorScenarioPoint(
+                            "P50", 0.50d, 250, new BigDecimal("1000.00"),
+                            Map.of("wageIndex", 0.04d, "confidentialBonus", 50.0d),
+                            new BigDecimal("1001.00"), 0.001d, AnchorRevalidationStatus.REVALIDATED_WITHIN_TOLERANCE)),
+                    0, SuppressionStatus.EXACT_RELEASE);
+        };
+        AgentStatisticalAnalysisResult spoofedSimRes = bridge.runStochasticSimulation(
+                ctx,
+                new org.praxisplatform.config.ai.agent.spi.AgentStochasticSimulationRequest(
+                        "workforce.payroll-slips", "spoofed.dataset", 500, 1, 42L, null,
+                        null, null,
+                        List.of(Map.of("pointKey", "pt1", "weightCount", 10, "baseAmount", 100.0d, "factorSensitivities", Map.of("wageIndex", 1.0d))),
+                        List.of(Map.of("factorKey", "wageIndex", "distribution", "NORMAL", "parameters", Map.of("mean", 0.04d, "stdDev", 0.01d))),
+                        List.of(),
+                        List.of(Map.of("thresholdId", "cap_warning", "label", "Teto Operacional", "direction", "UPPER_CAP", "limitValue", 1050.0d)),
+                        null, null, null, Map.of()));
+        assertThat(seenSimDataset.get()).isEqualTo("workforce.payroll-slips");
+        List<Map<String, Object>> fanRows = (List<Map<String, Object>>) spoofedSimRes.uiPayload().get("fanChart");
+        Map<String, Object> bySource = (Map<String, Object>) fanRows.get(0).get("byFundingSource");
+        assertThat(bySource).containsKey("GENERAL_FUND").doesNotContainKey("confidentialBonus");
+        List<Map<String, Object>> anchorRows = (List<Map<String, Object>>) spoofedSimRes.uiPayload().get("anchorScenarios");
+        Map<String, Object> realized = (Map<String, Object>) anchorRows.get(0).get("realizedFactorValues");
+        assertThat(realized).containsKey("wageIndex").doesNotContainKey("confidentialBonus");
+        List<Map<String, Object>> thresholdRows = (List<Map<String, Object>>) spoofedSimRes.uiPayload().get("thresholdOutcomes");
+        assertThat(thresholdRows.get(0)).containsEntry("label", "Teto Operacional");
+
+        // INVALID_REQUEST rethrows IllegalArgumentException + INSUFFICIENT_SAMPLE_SIZE maps accurately
+        service.simulationHandler = req -> {
+            throw new IntelligenceExecutionException(IntelligenceErrorCode.INVALID_REQUEST, "Bad sim factor");
+        };
+        assertThatThrownBy(() -> simTool.execute(ctx, vault, new AgentTurnArtifactStore(), Map.of(
+                "entityKey", "workforce.payroll-slips",
+                "stochasticFactors", List.of())))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("Bad sim factor");
+
+        service.simulationHandler = req -> {
+            throw new IntelligenceExecutionException(IntelligenceErrorCode.INSUFFICIENT_SAMPLE_SIZE, "No rows");
+        };
+        Map<String, Object> insuffOut = simTool.execute(ctx, vault, new AgentTurnArtifactStore(), Map.of(
+                "entityKey", "workforce.payroll-slips",
+                "stochasticFactors", List.of(Map.of("factorKey", "wageIndex", "distribution", "NORMAL", "parameters", Map.of("mean", 0.04d, "stdDev", 0.01d)))));
+        assertThat(insuffOut).containsEntry("errorCode", "INSUFFICIENT_SAMPLE_SIZE");
+
+        // Counterfactual ALL_CANDIDATES_REJECTED_BY_RULES & datasetKey override
+        AnalyticalProvenance cfProv = new AnalyticalProvenance(
+                IntelligenceContractVersion.V1, "praxis-intelligence-python", "0.1.0", "3.12",
+                SHA_LOCK, "WF-CF-02", "1.0.0", 42L, LocalDate.of(2026, 11, 1),
+                SHA_SNAPSHOT, SHA_ASSUMPTIONS, EpistemicKind.OPTIMIZATION_RESULT,
+                50L, 0, "corr-cf2", "job-cf2", Instant.parse("2026-11-24T00:00:00Z"));
+        ModelCardDescriptor cfCard = new ModelCardDescriptor(
+                "WF-CF-02", "1.0.0", "CF", "workforce.payroll", "MILP", EpistemicKind.OPTIMIZATION_RESULT,
+                "Recourse", List.of("Advisory"), 15, List.of("Constraints"), "Human approval");
+        AtomicReference<String> seenCfDataset = new AtomicReference<>();
+        service.counterfactualHandler = req -> {
+            seenCfDataset.set(req.datasetKey());
+            return new CounterfactualResponse(
+                    IntelligenceContractVersion.V1, cfProv, cfCard,
+                    new BigDecimal("51.00"), new BigDecimal("48.00"), true, List.of(), 3);
+        };
+        AgentStatisticalAnalysisResult rejectedAllRes = bridge.runCounterfactualSearch(
+                ctx,
+                new org.praxisplatform.config.ai.agent.spi.AgentCounterfactualSearchRequest(
+                        "workforce.payroll-slips", "spoofed.dataset", "observedValue", "DECREASE_TO_TARGET",
+                        new BigDecimal("51.00"), new BigDecimal("48.00"), null,
+                        List.of(Map.of(
+                                "leverKey", "overtimeCapPct",
+                                "leverType", "CONTINUOUS",
+                                "currentValue", 15.0d,
+                                "minValue", 5.0d,
+                                "maxValue", 20.0d)),
+                        5, 1, 42L, null, Map.of()));
+        assertThat(seenCfDataset.get()).isEqualTo("workforce.payroll-slips");
+        assertThat(rejectedAllRes.modelSafePayload()).containsEntry("errorCode", "ALL_CANDIDATES_REJECTED_BY_RULES");
+
+        // 4. Dotted/nested blocked filter keys & nested lever governance checks
+        assertThatThrownBy(() -> bridge.runStochasticSimulation(
+                ctx,
+                new org.praxisplatform.config.ai.agent.spi.AgentStochasticSimulationRequest(
+                        "workforce.payroll-slips", null, null, null, null, null, null, null,
+                        List.of(), List.of(), List.of(), List.of(), null, null, null,
+                        Map.of("nested", Map.of("unit.confidentialBonus", 100)))))
+                .isInstanceOf(SecurityException.class)
+                .hasMessageContaining("confidentialBonus");
+        assertThatThrownBy(() -> bridge.runStochasticSimulation(
+                ctx,
+                new org.praxisplatform.config.ai.agent.spi.AgentStochasticSimulationRequest(
+                        "workforce.payroll-slips", null, null, null, null, null, null, null,
+                        List.of(Map.of("pointKey", "pt1", "segmentLabel", "confidentialBonus", "weightCount", 10, "baseAmount", 100.0d)),
+                        List.of(), List.of(), List.of(), null, null, null, Map.of())))
+                .isInstanceOf(SecurityException.class);
+        assertThatThrownBy(() -> bridge.runCounterfactualSearch(
+                ctx,
+                new org.praxisplatform.config.ai.agent.spi.AgentCounterfactualSearchRequest(
+                        "workforce.payroll-slips", null, "observedValue", "DECREASE_TO_TARGET",
+                        new BigDecimal("51.00"), new BigDecimal("48.00"), null,
+                        List.of(Map.of("leverKey", "roleChoice", "leverType", "CATEGORICAL", "currentValue", "A",
+                                "allowedCategories", List.of("confidentialBonus"))),
+                        5, 1, 42L, null, Map.of())))
+                .isInstanceOf(SecurityException.class);
+
+        // 5. StatisticalToolsEnabledCondition registers tools when only StochasticSimulationOrchestrator or CounterfactualSearchOrchestrator is registered
+        ApplicationContextRunner runner = new ApplicationContextRunner()
+                .withConfiguration(UserConfigurations.of(
+                        OperationalAgentAutoConfiguration.StatisticalIntelligenceToolsConfiguration.class))
+                .withBean(AgentResourceExecutionBridge.class, () -> bridge);
+        runner.run(ctxWithoutStats -> assertThat(ctxWithoutStats).doesNotHaveBean(RunResourceStochasticSimulationTool.class));
+        runner.withBean(StochasticSimulationOrchestrator.class, () -> new StochasticSimulationOrchestrator() {
+            @Override public StochasticSimulationResponse executeStochasticSimulation(
+                    String rk, StochasticSimulationRequest req, AnchorScenarioRevalidator rev) { return null; }
+            @Override public IntelligenceJobReceipt submitStochasticSimulationJob(
+                    String rk, StochasticSimulationRequest req, AnchorScenarioRevalidator rev) { return null; }
+        }).run(ctxSimOrch -> assertThat(ctxSimOrch)
+                .hasSingleBean(RunResourceStochasticSimulationTool.class)
+                .hasSingleBean(RunResourceCounterfactualSearchTool.class));
+        runner.withBean(CounterfactualSearchOrchestrator.class, () -> new CounterfactualSearchOrchestrator() {
+            @Override public CounterfactualResponse executeCounterfactualSearch(
+                    String rk, CounterfactualRequest req, CounterfactualRuleValidator val) { return null; }
+            @Override public IntelligenceJobReceipt submitCounterfactualJob(
+                    String rk, CounterfactualRequest req, CounterfactualRuleValidator val) { return null; }
+        }).run(ctxCfOrch -> assertThat(ctxCfOrch)
+                .hasSingleBean(RunResourceStochasticSimulationTool.class)
+                .hasSingleBean(RunResourceCounterfactualSearchTool.class));
+
+        // 6. PraxisOperationalAgentLoop tailors fallback narrative and estimates count cleanly for Onda 2
+        service.simulationHandler = req -> new StochasticSimulationResponse(
+                IntelligenceContractVersion.V1, simProv, simCard, 500, 1,
+                List.of(new FanChartPoint(1, new BigDecimal("1000.00"), new BigDecimal("50.00"),
+                        Map.of("p50", new BigDecimal("1000.00")), Map.of())),
+                new BigDecimal("1000.00"), new BigDecimal("50.00"), new BigDecimal("1100.00"),
+                Map.of("p50", new BigDecimal("1000.00")), List.of(), List.of(), List.of(),
+                0, SuppressionStatus.EXACT_RELEASE);
+        final int[] simRound = {0};
+        AiToolCallingProvider simProvider = new AiToolCallingProvider() {
+            @Override public String providerId() { return "scripted-sim"; }
+            @Override public boolean hasConfiguredCredentials(AiCallConfig c) { return true; }
+            @Override public AgentModelTurnResponse generateTurn(
+                    org.praxisplatform.config.ai.agent.model.AgentModelTurnRequest request,
+                    org.praxisplatform.config.ai.agent.model.AgentModelStreamListener listener) {
+                if (simRound[0]++ == 0) {
+                    return new AgentModelTurnResponse("scripted-sim", "v1", "",
+                            List.of(new AgentToolCall("call-sim-1", RunResourceStochasticSimulationTool.TOOL_NAME,
+                                    Map.of("entityKey", "workforce.payroll-slips",
+                                            "stochasticFactors", List.of(Map.of(
+                                                    "factorKey", "wageIndex", "distribution", "NORMAL",
+                                                    "parameters", Map.of("mean", 0.04d, "stdDev", 0.01d)))),
+                                    null, null)),
+                            new AgentTokenUsage(50, 10, 60), "tool_calls", "s1", Map.of());
+                }
+                return new AgentModelTurnResponse("scripted-sim", "v1", "", List.of(),
+                        new AgentTokenUsage(60, 10, 70), "stop", "s2", Map.of());
+            }
+        };
+        PraxisOperationalAgentLoop simLoop = new PraxisOperationalAgentLoop(
+                simProvider, List.of(simTool),
+                new OperationalAssistantBlockComposer(new ObjectMapper().findAndRegisterModules(),
+                        List.of(new StatisticalIntelligenceBlockContributor())),
+                4, bridge);
+        PraxisOperationalAgentLoop.AgentTurnOutcome simOutcome = simLoop.execute(
+                ctx, "Simule a folha", null, List.of(),
+                AiCallConfig.builder().provider("scripted-sim").model("v1").build(),
+                PraxisOperationalAgentLoop.TurnProgressObserver.NOOP);
+        assertThat(simOutcome.traces().get(0).itemCount()).isEqualTo(1);
+        assertThat(simOutcome.assistantMessage())
+                .contains("Projeção estocástica consolidada com selo epistêmico e revalidação de âncoras abaixo.");
+
+        service.counterfactualHandler = req -> new CounterfactualResponse(
+                IntelligenceContractVersion.V1, cfProv, cfCard,
+                new BigDecimal("51.00"), new BigDecimal("48.00"), true,
+                List.of(new CounterfactualCandidate(
+                        "cf-loop-1", 1,
+                        List.of(new CounterfactualLeverDelta("overtimeCapPct", 15.0d, 10.0d, -0.33d, new BigDecimal("-3.00"))),
+                        new BigDecimal("48.00"), new BigDecimal("-3.00"), 0.5d,
+                        CounterfactualFeasibilityStatus.VALIDATED_BY_RULES_ENGINE, List.of("OK"))),
+                0);
+        final int[] cfRound = {0};
+        AiToolCallingProvider cfProvider = new AiToolCallingProvider() {
+            @Override public String providerId() { return "scripted-cf"; }
+            @Override public boolean hasConfiguredCredentials(AiCallConfig c) { return true; }
+            @Override public AgentModelTurnResponse generateTurn(
+                    org.praxisplatform.config.ai.agent.model.AgentModelTurnRequest request,
+                    org.praxisplatform.config.ai.agent.model.AgentModelStreamListener listener) {
+                if (cfRound[0]++ == 0) {
+                    return new AgentModelTurnResponse("scripted-cf", "v1", "",
+                            List.of(new AgentToolCall("call-cf-1", RunResourceCounterfactualSearchTool.TOOL_NAME,
+                                    Map.of("entityKey", "workforce.payroll-slips",
+                                            "targetMetricKey", "observedValue",
+                                            "direction", "DECREASE_TO_TARGET",
+                                            "baselineValue", 51.0d,
+                                            "targetValue", 48.0d,
+                                            "mutableLevers", List.of(Map.of(
+                                                    "leverKey", "overtimeCapPct",
+                                                    "leverType", "CONTINUOUS",
+                                                    "currentValue", 15.0d,
+                                                    "minValue", 5.0d,
+                                                    "maxValue", 20.0d))),
+                                    null, null)),
+                            new AgentTokenUsage(50, 10, 60), "tool_calls", "c1", Map.of());
+                }
+                return new AgentModelTurnResponse("scripted-cf", "v1", "", List.of(),
+                        new AgentTokenUsage(60, 10, 70), "stop", "c2", Map.of());
+            }
+        };
+        PraxisOperationalAgentLoop cfLoop = new PraxisOperationalAgentLoop(
+                cfProvider, List.of(cfTool),
+                new OperationalAssistantBlockComposer(new ObjectMapper().findAndRegisterModules(),
+                        List.of(new StatisticalIntelligenceBlockContributor())),
+                4, bridge);
+        PraxisOperationalAgentLoop.AgentTurnOutcome cfOutcome = cfLoop.execute(
+                ctx, "Busque contrafactual", null, List.of(),
+                AiCallConfig.builder().provider("scripted-cf").model("v1").build(),
+                PraxisOperationalAgentLoop.TurnProgressObserver.NOOP);
+        assertThat(cfOutcome.traces().get(0).itemCount()).isEqualTo(1);
+        assertThat(cfOutcome.assistantMessage())
+                .contains("Alternativas contrafactuais validadas pelo motor de regras disponíveis abaixo");
     }
 }

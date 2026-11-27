@@ -273,6 +273,8 @@ public record CompactAgentSchemaDigest(
             String distributionMode,
             String inferenceMode,
             String anomalyMode,
+            String simulationMode,
+            String counterfactualMode,
             List<StatsFieldDigest> fields
     ) {
         public StatsCapabilityDigest(
@@ -281,12 +283,25 @@ public record CompactAgentSchemaDigest(
                 String distributionMode,
                 List<StatsFieldDigest> fields
         ) {
-            this(groupByMode, timeSeriesMode, distributionMode, "DISABLED", "DISABLED", fields);
+            this(groupByMode, timeSeriesMode, distributionMode, "DISABLED", "DISABLED", "DISABLED", "DISABLED", fields);
+        }
+
+        public StatsCapabilityDigest(
+                String groupByMode,
+                String timeSeriesMode,
+                String distributionMode,
+                String inferenceMode,
+                String anomalyMode,
+                List<StatsFieldDigest> fields
+        ) {
+            this(groupByMode, timeSeriesMode, distributionMode, inferenceMode, anomalyMode, "DISABLED", "DISABLED", fields);
         }
 
         public StatsCapabilityDigest {
             inferenceMode = (inferenceMode == null || inferenceMode.isBlank()) ? "DISABLED" : inferenceMode;
             anomalyMode = (anomalyMode == null || anomalyMode.isBlank()) ? "DISABLED" : anomalyMode;
+            simulationMode = (simulationMode == null || simulationMode.isBlank()) ? "DISABLED" : simulationMode;
+            counterfactualMode = (counterfactualMode == null || counterfactualMode.isBlank()) ? "DISABLED" : counterfactualMode;
             fields = fields == null ? List.of() : List.copyOf(fields);
         }
     }

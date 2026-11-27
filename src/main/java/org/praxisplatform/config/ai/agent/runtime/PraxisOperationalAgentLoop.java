@@ -665,6 +665,12 @@ public class PraxisOperationalAgentLoop {
         if (output.get("findings") instanceof List<?> findings) {
             return findings.size();
         }
+        if (output.get("candidates") instanceof List<?> candidates) {
+            return candidates.size();
+        }
+        if (output.get("fanChart") instanceof List<?> fanChart) {
+            return fanChart.size();
+        }
         return output.size();
     }
 
@@ -695,6 +701,12 @@ public class PraxisOperationalAgentLoop {
                                 + OperationalAssistantBlockComposer.maskPiiText(note)
                         : "Execução analítica indisponível ou restrita em modo fail-closed ("
                                 + latest.epistemicEnvelope().availabilityState() + ").";
+            }
+            if (latest != null && AgentExtensionArtifact.KIND_STOCHASTIC_SIMULATION.equals(latest.kind())) {
+                return "Projeção estocástica consolidada com selo epistêmico e revalidação de âncoras abaixo.";
+            }
+            if (latest != null && AgentExtensionArtifact.KIND_COUNTERFACTUAL_SEARCH.equals(latest.kind())) {
+                return "Alternativas contrafactuais validadas pelo motor de regras disponíveis abaixo (caráter consultivo, sujeitas à aprovação humana).";
             }
             return "Análise estatística consolidada com selo epistêmico abaixo.";
         }

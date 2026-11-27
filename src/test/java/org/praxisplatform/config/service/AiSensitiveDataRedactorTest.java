@@ -180,11 +180,22 @@ class AiSensitiveDataRedactorTest {
         ObjectNode payload = objectMapper.createObjectNode();
         payload.put("assistantMessage", "Resumo token=secret-123");
         payload.put("text", "Analise concluida sem segredos.");
+        payload.put("methodologyNote", "Modelo revalidado por auditor@workforce.org");
+        payload.put("failClosedNote", "Circuit breaker triggered by Bearer topsecretvalue");
+        payload.putArray("ruleValidationMessages").add("Contato supervisor@workforce.org aprovado.");
+        payload.put("factorLabel", "Fator token=abc987");
+        payload.put("segmentLabel", "Unidade cpf 123456789012");
 
         JsonNode sanitized = redactor.sanitizeEventPayload(payload);
 
         assertThat(sanitized.path("assistantMessage").asText()).isEqualTo("Resumo token=[REDACTED]");
         assertThat(sanitized.path("text").asText()).isEqualTo("Analise concluida sem segredos.");
+        assertThat(sanitized.path("methodologyNote").asText()).isEqualTo("Modelo revalidado por [REDACTED]");
+        assertThat(sanitized.path("failClosedNote").asText()).contains("Bearer [REDACTED]");
+        assertThat(sanitized.path("ruleValidationMessages").get(0).asText())
+                .isEqualTo("Contato [REDACTED] aprovado.");
+        assertThat(sanitized.path("factorLabel").asText()).isEqualTo("Fator token=[REDACTED]");
+        assertThat(sanitized.path("segmentLabel").asText()).isEqualTo("Unidade cpf [REDACTED]");
     }
 
     @Test

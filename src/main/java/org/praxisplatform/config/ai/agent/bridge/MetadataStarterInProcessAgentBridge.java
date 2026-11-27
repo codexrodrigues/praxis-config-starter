@@ -15,6 +15,7 @@ import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collection;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -63,10 +64,12 @@ import org.praxisplatform.config.ai.agent.spi.AgentProactiveAlert;
 import org.praxisplatform.config.ai.agent.spi.AgentProactiveAlertContributor;
 import org.praxisplatform.config.ai.agent.spi.AgentQueryResult;
 import org.praxisplatform.config.ai.agent.spi.AgentRelatedDataset;
+import org.praxisplatform.config.ai.agent.spi.AgentCounterfactualSearchRequest;
 import org.praxisplatform.config.ai.agent.spi.AgentResourceExecutionBridge;
 import org.praxisplatform.config.ai.agent.spi.AgentSimulationPreview;
 import org.praxisplatform.config.ai.agent.spi.AgentStatisticalAnalysisResult;
 import org.praxisplatform.config.ai.agent.spi.AgentStatisticalInferenceRequest;
+import org.praxisplatform.config.ai.agent.spi.AgentStochasticSimulationRequest;
 import org.praxisplatform.config.ai.agent.spi.AgentStatsAggregationRequest;
 import org.praxisplatform.config.ai.agent.spi.AgentStatsResult;
 import org.praxisplatform.config.ai.agent.spi.AgentStatsResult.AgentStatsBucket;
@@ -693,7 +696,7 @@ public class MetadataStarterInProcessAgentBridge implements AgentResourceExecuti
         }
         if (!isIntelligenceContractsPresent()) {
             return unavailableStatisticalResult(res, "inference",
-                    "Contratos de inteligencia estatistica ausentes no classpath.");
+                    "Contratos de inteligência estatística ausentes no classpath.");
         }
         return runStatisticalInferenceInternal(context, res, request);
     }
@@ -713,9 +716,49 @@ public class MetadataStarterInProcessAgentBridge implements AgentResourceExecuti
         }
         if (!isIntelligenceContractsPresent()) {
             return unavailableStatisticalResult(res, "anomaly-scan",
-                    "Contratos de inteligencia estatistica ausentes no classpath.");
+                    "Contratos de inteligência estatística ausentes no classpath.");
         }
         return scanResourceAnomaliesInternal(context, res, request);
+    }
+
+    @Override
+    public AgentStatisticalAnalysisResult runStochasticSimulation(
+            AgentExecutionContext context,
+            AgentStochasticSimulationRequest request) {
+        if (request == null || !StringUtils.hasText(request.entityKeyOrResourcePath())) {
+            throw new IllegalArgumentException("entityKeyOrResourcePath is required");
+        }
+        RegisteredResource res = findResource(context, request.entityKeyOrResourcePath())
+                .orElseThrow(() -> new IllegalArgumentException(
+                        "Unknown entity/resource: " + request.entityKeyOrResourcePath()));
+        if (!authorizationBridge.canReadResource(context, res.descriptor().resourcePath())) {
+            throw new SecurityException("Access denied to resource: " + res.descriptor().resourcePath());
+        }
+        if (!isIntelligenceContractsPresent() || !isCompassContractsPresent()) {
+            return unavailableStatisticalResult(res, "stochastic-simulation",
+                    "Contratos de inteligência estatística ausentes no classpath.");
+        }
+        return runStochasticSimulationInternal(context, res, request);
+    }
+
+    @Override
+    public AgentStatisticalAnalysisResult runCounterfactualSearch(
+            AgentExecutionContext context,
+            AgentCounterfactualSearchRequest request) {
+        if (request == null || !StringUtils.hasText(request.entityKeyOrResourcePath())) {
+            throw new IllegalArgumentException("entityKeyOrResourcePath is required");
+        }
+        RegisteredResource res = findResource(context, request.entityKeyOrResourcePath())
+                .orElseThrow(() -> new IllegalArgumentException(
+                        "Unknown entity/resource: " + request.entityKeyOrResourcePath()));
+        if (!authorizationBridge.canReadResource(context, res.descriptor().resourcePath())) {
+            throw new SecurityException("Access denied to resource: " + res.descriptor().resourcePath());
+        }
+        if (!isIntelligenceContractsPresent() || !isCompassContractsPresent()) {
+            return unavailableStatisticalResult(res, "counterfactual-search",
+                    "Contratos de inteligência estatística ausentes no classpath.");
+        }
+        return runCounterfactualSearchInternal(context, res, request);
     }
 
     @Override
@@ -4229,22 +4272,82 @@ public class MetadataStarterInProcessAgentBridge implements AgentResourceExecuti
                 request);
     }
 
+    private AgentStatisticalAnalysisResult runStochasticSimulationInternal(
+            AgentExecutionContext context,
+            RegisteredResource res,
+            AgentStochasticSimulationRequest request) {
+        StatsFieldRegistry registry = tryMetadataLookup("statsRegistry:" + res.descriptor().entityKey(),
+                () -> res.service().getStatsFieldRegistry());
+        Set<String> blockedFields = findBlockedStatsFields(
+                context, res, registry != null ? registry : StatsFieldRegistry.empty());
+        enforceNoBlockedFilterKeys(request.filters(), findBlockedFilterFields(res, blockedFields));
+        GenericFilterDTO filterDto = populateFilterDto(res, request.filters());
+        return MetadataStarterStatisticalIntelligenceSupport.runStochasticSimulation(
+                res.service(),
+                filterDto,
+                res.descriptor().entityKey(),
+                res.descriptor().resourceKey(),
+                res.descriptor().resourcePath(),
+                res.descriptor().title(),
+                blockedFields,
+                request);
+    }
+
+    private AgentStatisticalAnalysisResult runCounterfactualSearchInternal(
+            AgentExecutionContext context,
+            RegisteredResource res,
+            AgentCounterfactualSearchRequest request) {
+        StatsFieldRegistry registry = tryMetadataLookup("statsRegistry:" + res.descriptor().entityKey(),
+                () -> res.service().getStatsFieldRegistry());
+        Set<String> blockedFields = findBlockedStatsFields(
+                context, res, registry != null ? registry : StatsFieldRegistry.empty());
+        enforceNoBlockedFilterKeys(request.filters(), findBlockedFilterFields(res, blockedFields));
+        GenericFilterDTO filterDto = populateFilterDto(res, request.filters());
+        return MetadataStarterStatisticalIntelligenceSupport.runCounterfactualSearch(
+                res.service(),
+                filterDto,
+                res.descriptor().entityKey(),
+                res.descriptor().resourceKey(),
+                res.descriptor().resourcePath(),
+                res.descriptor().title(),
+                blockedFields,
+                request);
+    }
+
     private static boolean isIntelligenceContractsPresent() {
         return ClassUtils.isPresent(
                 "org.praxisplatform.intelligence.contracts.epistemic.EpistemicEnvelope",
                 MetadataStarterInProcessAgentBridge.class.getClassLoader());
     }
 
+    private static boolean isCompassContractsPresent() {
+        ClassLoader cl = MetadataStarterInProcessAgentBridge.class.getClassLoader();
+        return ClassUtils.isPresent(
+                "org.praxisplatform.intelligence.contracts.simulation.StochasticSimulationResponse", cl)
+                && ClassUtils.isPresent(
+                "org.praxisplatform.intelligence.contracts.counterfactual.CounterfactualResponse", cl);
+    }
+
     private static AgentStatisticalAnalysisResult unavailableStatisticalResult(
             RegisteredResource res,
             String analysisKind,
             String note) {
-        String rawTitle = firstNonBlank(res.descriptor().title(), res.descriptor().entityKey())
-                + ("anomaly-scan".equals(analysisKind) ? " — Varredura Estatística" : " — Inferência Estatística");
+        String titleSuffix = switch (analysisKind) {
+            case "anomaly-scan" -> " — Varredura Estatística";
+            case "stochastic-simulation" -> " — Simulação Estocástica";
+            case "counterfactual-search" -> " — Análise Contrafactual";
+            default -> " — Inferência Estatística";
+        };
+        String epistemicKind = switch (analysisKind) {
+            case "stochastic-simulation" -> AgentEpistemicEnvelope.KIND_STOCHASTIC_SIMULATION;
+            case "counterfactual-search" -> AgentEpistemicEnvelope.KIND_OPTIMIZATION_RESULT;
+            default -> AgentEpistemicEnvelope.KIND_CALIBRATED_PROBABILITY;
+        };
+        String rawTitle = firstNonBlank(res.descriptor().title(), res.descriptor().entityKey()) + titleSuffix;
         String maskedTitle = OperationalAssistantBlockComposer.maskPiiText(rawTitle);
         String maskedNote = OperationalAssistantBlockComposer.maskPiiText(note);
         AgentEpistemicEnvelope envelope = AgentEpistemicEnvelope.unavailable(
-                AgentEpistemicEnvelope.KIND_CALIBRATED_PROBABILITY,
+                epistemicKind,
                 res.descriptor().resourceKey(),
                 null,
                 maskedNote);
@@ -4270,6 +4373,19 @@ public class MetadataStarterInProcessAgentBridge implements AgentResourceExecuti
         payload.put("failClosedNote", maskedNote);
         payload.put("findings", List.of());
         payload.put("groups", List.of());
+        if ("stochastic-simulation".equals(analysisKind)) {
+            payload.put("advisoryOnly", true);
+            payload.put("fanChart", List.of());
+            payload.put("thresholdOutcomes", List.of());
+            payload.put("tornadoDrivers", List.of());
+            payload.put("anchorScenarios", List.of());
+        } else if ("counterfactual-search".equals(analysisKind)) {
+            payload.put("advisoryOnly", true);
+            payload.put("requiresHumanGovernanceApproval", true);
+            payload.put("validatedCandidateCount", 0);
+            payload.put("excludedCandidateCount", 0);
+            payload.put("candidates", List.of());
+        }
         return new AgentStatisticalAnalysisResult(
                 res.descriptor().entityKey(),
                 res.descriptor().resourceKey(),
@@ -4386,19 +4502,30 @@ public class MetadataStarterInProcessAgentBridge implements AgentResourceExecuti
             RegisteredResource res,
             StatsFieldRegistry registry,
             Set<String> blockedFields) {
-        if (registry == null || registry.isEmpty()) {
-            return null;
-        }
         StatsSupportMode gMode = safeStatsMode(() -> res.service().getGroupByStatsSupportMode());
         StatsSupportMode tsMode = safeStatsMode(() -> res.service().getTimeSeriesStatsSupportMode());
         StatsSupportMode distMode = safeStatsMode(() -> res.service().getDistributionStatsSupportMode());
         StatsSupportMode infMode = safeStatsMode(() -> res.service().getInferenceStatsSupportMode());
         StatsSupportMode anomMode = safeStatsMode(() -> res.service().getAnomalyStatsSupportMode());
+        StatsSupportMode simMode = safeStatsMode(() -> res.service().getSimulationStatsSupportMode());
+        StatsSupportMode cfMode = safeStatsMode(() -> res.service().getCounterfactualStatsSupportMode());
+        boolean hasCompassMode = simMode != StatsSupportMode.DISABLED || cfMode != StatsSupportMode.DISABLED;
+        if (registry == null || registry.isEmpty()) {
+            if (!hasCompassMode) {
+                return null;
+            }
+            return new StatsCapabilityDigest(
+                    gMode.name(),
+                    tsMode.name(),
+                    distMode.name(),
+                    infMode.name(),
+                    anomMode.name(),
+                    simMode.name(),
+                    cfMode.name(),
+                    List.of());
+        }
         org.praxisplatform.uischema.stats.StatsCapability cap =
                 org.praxisplatform.uischema.stats.StatsCapability.from(registry, gMode, tsMode, distMode);
-        if (cap.fields().isEmpty()) {
-            return null;
-        }
         List<StatsFieldDigest> fields = cap.fields().stream()
                 .filter(fc -> !blockedFields.contains(fc.field().toLowerCase(Locale.ROOT)))
                 .map(fc -> new StatsFieldDigest(
@@ -4411,11 +4538,18 @@ public class MetadataStarterInProcessAgentBridge implements AgentResourceExecuti
                         fc.distributionHistogramEligible(),
                         fc.metricFieldEligible()))
                 .toList();
-        if (fields.isEmpty()) {
+        if (fields.isEmpty() && !hasCompassMode) {
             return null;
         }
         return new StatsCapabilityDigest(
-                gMode.name(), tsMode.name(), distMode.name(), infMode.name(), anomMode.name(), fields);
+                gMode.name(),
+                tsMode.name(),
+                distMode.name(),
+                infMode.name(),
+                anomMode.name(),
+                simMode.name(),
+                cfMode.name(),
+                fields);
     }
 
     private static Set<String> findBlockedFilterFields(RegisteredResource res, Set<String> blockedFields) {
@@ -4463,9 +4597,17 @@ public class MetadataStarterInProcessAgentBridge implements AgentResourceExecuti
             return true;
         }
         int lastDotIdx = normalized.lastIndexOf('.');
-        return lastDotIdx >= 0
+        if (lastDotIdx >= 0
                 && lastDotIdx + 1 < normalized.length()
-                && blockedFields.contains(normalized.substring(lastDotIdx + 1));
+                && blockedFields.contains(normalized.substring(lastDotIdx + 1))) {
+            return true;
+        }
+        for (String segment : normalized.split("\\.")) {
+            if (!segment.isBlank() && blockedFields.contains(segment)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static void enforceNoBlockedFilterKeys(
@@ -4474,13 +4616,23 @@ public class MetadataStarterInProcessAgentBridge implements AgentResourceExecuti
         if (filters == null || filters.isEmpty() || blockedFilterKeys == null || blockedFilterKeys.isEmpty()) {
             return;
         }
-        for (Map.Entry<String, Object> entry : filters.entrySet()) {
-            if (entry.getKey() == null) {
-                continue;
+        enforceNoBlockedFilterEntries(filters, blockedFilterKeys);
+    }
+
+    private static void enforceNoBlockedFilterEntries(Object value, Set<String> blockedFilterKeys) {
+        if (value instanceof Map<?, ?> map) {
+            for (Map.Entry<?, ?> entry : map.entrySet()) {
+                if (entry.getKey() != null) {
+                    String trimmed = entry.getKey().toString().trim();
+                    if (!trimmed.isEmpty() && matchesAnyBlockedRelation(trimmed, blockedFilterKeys)) {
+                        throw new SecurityException("Filter field restricted by governance policy: " + trimmed);
+                    }
+                }
+                enforceNoBlockedFilterEntries(entry.getValue(), blockedFilterKeys);
             }
-            String trimmed = entry.getKey().trim();
-            if (!trimmed.isEmpty() && blockedFilterKeys.contains(trimmed.toLowerCase(Locale.ROOT))) {
-                throw new SecurityException("Filter field restricted by governance policy: " + trimmed);
+        } else if (value instanceof Collection<?> items) {
+            for (Object item : items) {
+                enforceNoBlockedFilterEntries(item, blockedFilterKeys);
             }
         }
     }
@@ -4636,8 +4788,13 @@ public class MetadataStarterInProcessAgentBridge implements AgentResourceExecuti
     }
 
     private StatsSupportMode safeStatsMode(Supplier<StatsSupportMode> supplier) {
-        StatsSupportMode mode = tryMetadataLookup("statsMode", supplier);
-        return mode != null ? mode : StatsSupportMode.DISABLED;
+        try {
+            StatsSupportMode mode = tryMetadataLookup("statsMode", supplier);
+            return mode != null ? mode : StatsSupportMode.DISABLED;
+        } catch (LinkageError ex) {
+            log.debug("[AgentBridge] Stats mode lookup unavailable due to linkage error: {}", ex.getMessage());
+            return StatsSupportMode.DISABLED;
+        }
     }
 
     private static StatsFieldDescriptor resolveTargetStatsField(

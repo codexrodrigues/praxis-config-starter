@@ -15,6 +15,8 @@ public record AgentExtensionArtifact(
 ) {
     public static final String KIND_STATISTICAL_INFERENCE = "statistical-inference";
     public static final String KIND_ANOMALY_SCAN = "anomaly-scan";
+    public static final String KIND_STOCHASTIC_SIMULATION = "stochastic-simulation";
+    public static final String KIND_COUNTERFACTUAL_SEARCH = "counterfactual-search";
 
     public AgentExtensionArtifact {
         kind = kind == null ? "" : kind.trim();

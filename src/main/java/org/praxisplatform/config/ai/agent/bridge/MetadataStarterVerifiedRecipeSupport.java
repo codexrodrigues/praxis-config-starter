@@ -498,7 +498,7 @@ final class MetadataStarterVerifiedRecipeSupport {
             case TIMESERIES -> "TIMESERIES";
             case DISTRIBUTION -> "DISTRIBUTION";
             case COMPARISON -> "COMPARISON";
-            case INFERENCE, ANOMALIES -> operation.name();
+            case INFERENCE, ANOMALIES, SIMULATION, COUNTERFACTUAL -> operation.name();
         };
     }
 

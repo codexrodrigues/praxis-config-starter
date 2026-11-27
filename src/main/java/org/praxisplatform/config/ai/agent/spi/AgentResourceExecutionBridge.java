@@ -60,6 +60,18 @@ public interface AgentResourceExecutionBridge {
         throw new UnsupportedOperationException("Varredura de anomalias nao suportada por esta bridge");
     }
 
+    default AgentStatisticalAnalysisResult runStochasticSimulation(
+            AgentExecutionContext context,
+            AgentStochasticSimulationRequest request) {
+        throw new UnsupportedOperationException("Simulacao estocastica nao suportada por esta bridge");
+    }
+
+    default AgentStatisticalAnalysisResult runCounterfactualSearch(
+            AgentExecutionContext context,
+            AgentCounterfactualSearchRequest request) {
+        throw new UnsupportedOperationException("Busca contrafactual nao suportada por esta bridge");
+    }
+
     default List<AgentEvaluatedCalculationMemory> evaluateCalculationMemory(
             AgentExecutionContext context,
             String entityKeyOrResourcePath,
